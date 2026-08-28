@@ -108,6 +108,11 @@ agent's only copy of real work — commit & push, or `-f`). Full example in
 
 ## Keys
 
+`kel.conf` also turns on the mouse (click a pane to focus, drag borders to
+resize, wheel to scroll — text selection then needs Shift+drag), counts windows
+from 1, and labels each pane. **window = a tab, one per agent; pane = a split
+inside a window; group = one tmux session per repo.**
+
 `prefix` is `Ctrl+b`. `prefix k` = a floating menu of the common moves;
 `prefix k` → `?` (or `kel cheat`) shows the full reference.
 
@@ -118,8 +123,9 @@ agent's only copy of real work — commit & push, or `-f`). Full example in
 | `prefix m` | fleet menu — every agent, every group, press a key to jump |
 | `prefix G` / `prefix (` `)` | pick / cycle groups |
 | `prefix k` | command menu (new · jump · split · scroll · rename · close · detach) |
-| `prefix [` | scroll an agent's output (`q` to leave) |
-| `prefix \|` / `-` | split a window (agent + editor); arrows move panes; `z` zoom |
+| `prefix [` | tmux scroll mode for a shell pane (`q` to leave) |
+| mouse wheel / PgUp PgDn | scroll an agent's conversation (kel maps the wheel to PageUp/Down) |
+| `prefix \|` / `-` | split a window (agent + editor); arrows or click to focus; `z` zoom |
 | `prefix d` | detach — agents keep running; `kel` to return |
 
 ## State files

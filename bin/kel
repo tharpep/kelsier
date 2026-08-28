@@ -581,7 +581,8 @@ cmd_status_line() {
 
   local sname; sname="$(sess "$grp")"
   local cur; cur="$(tmux display-message -p '#{window_id}' 2>/dev/null || true)"
-  local out='' st suffix colour
+  local panes; panes="$(tmux list-windows -a -F '#{window_id} #{window_panes}' 2>/dev/null || true)"
+  local out='' suffix colour pc
 
   # this group's windows, in full
   while IFS=$'\t' read -r _ _ idx wid name; do
@@ -592,6 +593,8 @@ cmd_status_line() {
       working) suffix='*'; colour='#[fg=colour111]' ;;
       done)    suffix='!'; colour='#[fg=colour114]' ;;
     esac
+    pc="$(printf '%s\n' "$panes" | awk -v w="$wid" '$1==w{print $2}')"
+    [ "${pc:-1}" -gt 1 ] 2>/dev/null && name="${name}#[fg=colour240]·${pc}#[default]${colour}"
     if [ "$wid" = "$cur" ]; then
       out="$out ${colour}[${idx}:${name}${suffix}]#[default]"
     else
@@ -661,40 +664,47 @@ cat <<'EOF'
   kel keys              prefix = Ctrl+b   (press, release, then the key)
   ─────────────────────────────────────────────────────────────────────────
 
-  MOVE                             SCROLL an agent's output
-    prefix `    next WAITING agent   prefix [    scroll mode
-                (any group)                     ↑↓ PgUp PgDn move
-    prefix 0-9  window N in group                /  search   q  leave
-    prefix n/p  next / prev          prefix ]   paste
-    prefix w    pick a window
-    prefix m    fleet menu (all groups, press to jump)
-    prefix G    pick a group
+  THE MODEL
+    window  = a tab, ONE per agent — shows on the bar as  1:name
+    pane    = a split INSIDE one window (agent | editor) — not on the bar
+    group   = one tmux session per repo — kel/<repo>
 
-  WINDOWS (one per agent)          PANES (split one window)
-    prefix c    blank window          prefix |    split left | right
-    prefix ,    rename                 prefix -    split top / bottom
-    prefix &    close (confirms)      prefix ↑↓←→ move between panes
-                                       prefix z    zoom (toggle)
-                                       prefix x    close pane
+  MOVE
+    prefix `      jump to the next agent WAITING on you — any group
+    prefix 1-9    window (agent) N in this group
+    prefix n / p  next / previous window
+    prefix w      pick a window        prefix m   fleet menu (all groups)
+    prefix G      pick a group         prefix ( ) previous / next group
+
+  SCROLL an agent's conversation
+    mouse wheel                (kel turns this into PageUp/PageDown for you)
+    PgUp / PgDn                Claude Code's own scrollback
+    prefix [                   tmux scroll mode for a plain shell pane
+                               (↑↓ PgUp PgDn, / search, q leave)
+
+  WINDOWS (agents)                 PANES (splits)
+    prefix c   blank window          prefix | / -   split right / down
+    prefix ,   rename                prefix ↑↓←→    focus a pane (or click it)
+    prefix &   close (confirms)      prefix z       zoom a pane (toggle)
+                                     prefix x       close a pane
 
   SESSION / GROUP
-    prefix d          detach — agents keep running, round-trips (safe)
-    prefix ( )        previous / next group
+    prefix d   detach — agents keep running, round-trips (safe)
     (killing a session, not detaching, ENDS its agent processes)
 
   FROM A SHELL
     kel               (re-)enter the workspace (last group)
     kel new <name>    new window + agent   (-w = worktree, --group G)
-    kel ls            list everything, grouped
-    kel go [group]    switch group  ·  kel menu   fleet picker
-    kel kill <name>   close one   ·   kel prune   discard dead records
+    kel ls            list every agent, grouped
+    kel go [group]    switch group   ·   kel menu   fleet picker
+    kel kill <name>   close one      ·   kel prune  discard dead records
     kel restore [-c]  rebuild after a kill / reboot  (-c resumes conversations)
 
-  STATUS BAR   [group] 0:name*  working   1:name?  waiting   2:name!  done
-               [1:name] current window     ⟨+N waiting⟩ in other groups
+  STATUS BAR
+    [group] 1:name*  working   2:name?  waiting   3:name!  done   4:name idle
+    [2:name] current window    2:name·3 = 3 panes   ⟨+N waiting⟩ other groups
 
   prefix ?   tmux's full key list
-  Want mouse scroll / click?  add  set -g mouse on  to ~/.tmux.conf
 
 EOF
 }
