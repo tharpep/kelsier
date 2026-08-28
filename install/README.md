@@ -7,7 +7,7 @@ machine can be brought up by hand today if needed.
 
 | Script | Runs as | Does |
 |---|---|---|
-| `10-system-tools.sh` | root | neovim (tarball), lazygit, yazi, git-delta, gh, win32yank |
+| `10-system-tools.sh` | root | neovim (tarball), lazygit, yazi, git-delta, gh, win32yank, tealdeer |
 | `20-user-tools.sh` | your user | zoxide, fzf, fnm + Node LTS, the `~/.bashrc` env block |
 
 The apt packages (`tmux git build-essential curl wget unzip tar ripgrep fd-find
@@ -21,8 +21,10 @@ bat btop jq tldr` + yazi's preview stack) are installed separately — see
 - git + delta pager config (done once on machine 1)
 - the kelsier hooks + tmux config (v0 — not built yet)
 
-## Known issue
+## Notes
 
-The apt `tldr` (Haskell client) fails its cache update with a binary-parse
-error. Swap for `tealdeer` (`cargo install tealdeer`) or the pip client if it
-keeps misbehaving.
+- `tldr`: apt's Haskell `tldr` and apt's tealdeer 1.6.1 both fail to decompress
+  the pages archive. `10-system-tools.sh` installs the tealdeer 1.9.0 release
+  binary as `tldr`, which works.
+- After install, run `wsl --set-default Ubuntu-24.04` from Windows if
+  `docker-desktop` is still the default distro.

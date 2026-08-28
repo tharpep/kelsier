@@ -9,8 +9,9 @@ Target: **WSL2 Ubuntu**, terminal-only, no GUI. Also the reference for setting
 > **Machine 1 provisioned 2026-08-28** (WSL2 2.6.1, Ubuntu 24.04.4, user
 > `tharpep`): nvim 0.12.5, tmux 3.4, lazygit 0.64.1, yazi 26.8.15, delta 0.19.2,
 > gh 2.98.0, fzf 0.74.3, zoxide 0.10.0, fnm 1.39.0, Node 24.20.0 (LTS),
-> Claude Code 2.1.251. Scripts used: `install/10-system-tools.sh`,
-> `install/20-user-tools.sh`.
+> tealdeer 1.9.0, Claude Code 2.1.251. Scripts used: `install/10-system-tools.sh`,
+> `install/20-user-tools.sh`. Post-setup: `wsl --set-default Ubuntu-24.04`
+> (docker-desktop was default); git identity + delta pager configured.
 
 ---
 
@@ -72,7 +73,7 @@ the Linux filesystem.
 ```
 sudo apt update && sudo apt install -y \
   tmux git build-essential curl wget unzip tar \
-  ripgrep fd-find bat btop jq tldr \
+  ripgrep fd-find bat btop jq \
   ffmpegthumbnailer 7zip poppler-utils imagemagick chafa
 ```
 
@@ -98,6 +99,7 @@ Notes:
 | `gh` | GitHub's apt repo (keyring + source list) | not in default Ubuntu |
 | `git-delta` | GitHub release `.deb` | 24.04's is older; **binary is `delta`, not `git-delta`** — git config must say `delta` |
 | `win32yank` | GitHub release | clipboard paste fallback (see 4), no apt package |
+| `tealdeer` (`tldr`) | GitHub release binary | apt's Haskell `tldr` AND apt's tealdeer 1.6.1 both fail to decompress the pages archive; 1.9.0 binary works |
 
 ### 3c. Node.js — via fnm, not apt
 

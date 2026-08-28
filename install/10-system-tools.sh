@@ -54,4 +54,10 @@ mv -f win32yank.exe /usr/local/bin/
 rm -f win32yank.zip
 echo "win32yank -> $(command -v win32yank.exe)"
 
+say "tealdeer (tldr client)"
+# NOT apt: 24.04's tealdeer 1.6.1 fails to decompress the pages archive.
+curl -fsSL -o /usr/local/bin/tldr https://github.com/tealdeer-rs/tealdeer/releases/latest/download/tealdeer-linux-x86_64-musl
+chmod +x /usr/local/bin/tldr
+/usr/local/bin/tldr --version
+
 say "system tools done"
