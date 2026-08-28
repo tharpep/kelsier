@@ -88,14 +88,21 @@ panes.
 replaces tmux's own window list. `prefix k` is a floating menu of the common
 moves.
 
-### 5a. Planned, not built
+### 5a. Grouping (v0.2, built)
 
-- **v0.2 — grouping by repo.** One `tmux` session per repo when the flat single
-  session overflows. `kel jump` stays global. See `rollout.md`.
-- **v0.3 — the board.** `kel board` as a `display-popup` TUI — a cross-group
-  navigator with filter / scroll / browse. Transient; never occupies a pane.
+One `tmux` session per repo — `kel/<group>`, group = repo basename (or
+`--group`, or `misc`). Inside a group, agents are windows and native nav is
+untouched. Between groups: native `prefix (` / `)`, `prefix G` (session tree),
+`kel go <group>`. **`kel jump` is global** — it crosses groups. The status line
+shows the current group in full plus `⟨+N waiting⟩` for the rest. `kel menu`
+(`prefix m`) is a dynamic `display-menu` of every agent, press a key to jump.
 
-### 5b. Rejected: the two-slot / swap-pane architecture
+### 5b. Planned, not built
+
+- **v0.3 — the board.** `kel board` as a `display-popup` TUI — filter / sort /
+  browse across every group. Gated on `kel menu` outgrowing a flat list.
+
+### 5c. Rejected: the two-slot / swap-pane architecture
 
 An earlier design used one visible window split into two slots, with every agent
 and editor in a hidden holding session swapped into the visible slots via
@@ -120,13 +127,16 @@ Switching is one keystroke — never open-menu, find-row, press-enter.
 
 | Key | Action |
 |---|---|
-| `prefix 0`..`9` / `prefix n` / `prefix p` / `prefix w` | native window nav |
-| `` prefix ` `` | jump to the next window in `waiting` state — cycles, wraps |
-| `prefix k` | floating menu (jump, new, split, scroll, rename, close, detach) |
+| `prefix 0`..`9` / `n` / `p` / `w` | native window nav (within a group) |
+| `` prefix ` `` | jump to the next `waiting` agent in **any** group — cycles, wraps |
+| `prefix m` | fleet menu — every agent, every group, press a key to jump |
+| `prefix G` / `prefix (` `)` | pick / cycle groups |
+| `prefix k` | command menu (new, jump, split, scroll, rename, close, detach) |
 
 The `` ` `` binding is the capability terminal tabs cannot offer: not "go to
-window 3" but "go to whoever is blocked on me." `kel` binds only `` ` `` and
-`k`; native window nav is untouched.
+window 3" but "go to whoever is blocked on me," and it ignores group
+boundaries. `kel` binds `` ` ``, `m`, `G`, `k` and the `|`/`-` split keys;
+native window nav is untouched.
 
 ---
 
@@ -170,9 +180,13 @@ cwd            where the agent runs
 isolation      inplace | worktree
 branch         worktree only
 agent          command run in the window (default: claude)
+group          repo basename (or --group, or misc); tmux session is kel/<group>
 claude_session Claude Code's session id, recorded by the hook — for exact restore
 created_at     timestamp
 ```
+
+Pre-v0.2 records without `group` get one derived from `repo` on the next
+command; their live windows stay in the old flat `kel` session until recreated.
 
 (v0.2 adds a `group` field.)
 
@@ -235,15 +249,17 @@ kel new <name> [-w]        window + agent, inplace or in a git worktree
       [--agent CMD] [--no-agent]
 kel kill <name> [-f]       close the window; remove the worktree; -f overrides
                            the uncommitted / unpushed check
-kel ls [--json]            state · isolation · branch · dirty · path
-kel restore [-c]           rebuild windows after a kill / reboot; -c resumes
-                           each conversation (--resume <id> || --continue)
+kel ls [--json]            every agent, grouped by repo
+kel go [<group>]           switch to a group (no arg: list them)
+kel menu                   floating list of every agent — press a key to jump
+kel restore [-c]           rebuild windows into their groups after a kill / reboot;
+                           -c resumes each conversation (--resume <id> || --continue)
 kel prune [-f]             discard dead session records (and their worktrees)
 kel doctor                 capability probe, cached to doctor.json
 ```
 
-Internal (wired into tmux / Claude Code): `kel status-line`, `kel jump`,
-`kel cheat`, `kel hook <EVENT>`.
+Internal (wired into tmux / Claude Code): `kel status-line [group]`,
+`kel jump`, `kel cheat`, `kel hook <EVENT>`.
 
 `kel kill` on a worktree refuses when there are uncommitted or unpushed changes,
 and shows exactly what's at risk. Deleting an agent's only copy of its work is

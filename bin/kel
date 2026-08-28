@@ -2,63 +2,177 @@
 # kel — a terminal workspace for running several coding agents at once.
 # tmux does the multiplexing; kel does the bookkeeping.
 #
-#   kel                     enter the workspace (attach the `kel` tmux session)
-#   kel new <name>          new window + agent in the current repo (inplace)
-#   kel new <name> -w       ...in a fresh git worktree on branch <name>
-#   kel kill <name>         close the window; remove the worktree if it was one
-#   kel ls [--json]         list sessions with state / isolation / branch / dirty
-#   kel restore [-c]        rebuild windows for sessions whose window is gone
-#                           (-c runs `<agent> --continue` in each to resume)
-#   kel prune [-f]          discard dead session records (and their worktrees)
-#   kel doctor              probe the machine, cache the result
+#   kel                        enter the workspace
+#   kel new <name> [-w]        window + agent, inplace or in a git worktree
+#         [--group G] [--agent CMD] [--no-agent]
+#   kel kill <name> [-f]       close the window; remove the worktree; -f overrides
+#                              the uncommitted / unpushed check
+#   kel ls [--json]            list sessions, grouped by repo
+#   kel go [<group>]           switch to a group (no arg: list groups)
+#   kel menu                   floating list of every agent — press to jump
+#   kel restore [-c]           rebuild windows after a kill / reboot
+#   kel prune [-f]             discard dead session records
+#   kel doctor                 capability probe, cached
 #
 # internal (wired by install.sh):
-#   kel status-line         render tmux status-left
-#   kel jump                jump to the next waiting session   (prefix `)
-#   kel cheat               keybinding popup                   (prefix k)
-#   kel hook <EVENT>        Claude Code state hook
+#   kel status-line [group]    render tmux status-left
+#   kel jump                   jump to the next waiting agent, any group (prefix `)
+#   kel cheat                  keybinding reference
+#   kel hook <EVENT>           Claude Code state hook
 set -uo pipefail
 
-KEL_SESSION="${KEL_SESSION:-kel}"
+KEL_PREFIX="${KEL_SESSION:-kel}"          # tmux sessions are  <prefix>/<group>
 KEL_AGENT="${KEL_AGENT:-claude}"
 STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/kel"
 SESSIONS_DIR="$STATE_DIR/sessions"
 STASH_DIR="$STATE_DIR/.stash"
 DOCTOR_CACHE="$STATE_DIR/doctor.json"
+LAST_GROUP_FILE="$STATE_DIR/last-group"
+SELF="$(command -v kel 2>/dev/null || printf '%s' "$HOME/.local/bin/kel")"
 
 mkdir -p "$STATE_DIR" "$SESSIONS_DIR" "$STASH_DIR"
 
 say()  { printf '\033[1;32mkel\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33mkel\033[0m %s\n' "$*" >&2; }
 die()  { printf '\033[1;31mkel\033[0m %s\n' "$*" >&2; exit 1; }
-
 need() { command -v "$1" >/dev/null 2>&1 || die "missing dependency: $1"; }
 
 # --------------------------------------------------------------------------
-# session metadata: one JSON file per kel-managed session
+# groups & sessions
+# --------------------------------------------------------------------------
+# tmux session name for a group.  The bare prefix is the pre-v0.2 flat session.
+sess() { case "$1" in "$KEL_PREFIX") printf '%s' "$KEL_PREFIX";; *) printf '%s/%s' "$KEL_PREFIX" "$1";; esac; }
+
+slug_ok() { case "$1" in ''|*[!A-Za-z0-9._-]*) return 1;; *) return 0;; esac; }
+git_root() { git rev-parse --show-toplevel 2>/dev/null; }
+in_tmux()  { [ -n "${TMUX:-}" ]; }
+has_remote() { [ -n "$(git -C "$1" remote 2>/dev/null)" ]; }
+
+# derive the group for a new session: --group override, else repo basename, else misc
+group_for_cwd() {
+  local gr; gr="$(git_root 2>/dev/null || true)"
+  if [ -n "$gr" ]; then basename "$gr"; else printf 'misc'; fi
+}
+
+# all kel group names that have a live tmux session
+group_sessions() {
+  tmux list-sessions -F '#{session_name}' 2>/dev/null | awk -v p="$KEL_PREFIX" '
+    $0==p            { print p; next }
+    index($0,p"/")==1 { print substr($0, length(p)+2) }'
+}
+
+# every window in every kel session:  session<TAB>group<TAB>index<TAB>wid<TAB>name
+kel_windows() {
+  tmux list-windows -a -F '#{session_name}	#{window_index}	#{window_id}	#{window_name}' 2>/dev/null \
+  | awk -F'\t' -v p="$KEL_PREFIX" '
+      $1==p || index($1,p"/")==1 {
+        g = ($1==p) ? p : substr($1, length(p)+2)
+        print $1"\t"g"\t"$2"\t"$3"\t"$4
+      }'
+}
+
+# the group the attached client is looking at, or empty if not in a kel session
+current_group() {
+  local s; s="$(tmux display-message -p '#{client_session}' 2>/dev/null || true)"
+  case "$s" in
+    "$KEL_PREFIX")   printf '%s' "$KEL_PREFIX" ;;
+    "$KEL_PREFIX"/*) printf '%s' "${s#"$KEL_PREFIX"/}" ;;
+  esac
+}
+
+set_last_group() { printf '%s' "$1" > "$LAST_GROUP_FILE" 2>/dev/null || true; }
+get_last_group() { cat "$LAST_GROUP_FILE" 2>/dev/null || true; }
+
+state_of() { # wid -> state or empty
+  [ -f "$STATE_DIR/$1.state" ] || return 0
+  local s; read -r s _ < "$STATE_DIR/$1.state" || return 0
+  printf '%s' "$s"
+}
+
+# create the window in its group's session (making the session if needed); prints wid
+open_window() { # name cwd group
+  local name="$1" cwd="$2" group="$3" s; s="$(sess "$group")"
+  if tmux has-session -t "=$s" 2>/dev/null; then
+    tmux new-window -t "=$s" -n "$name" -c "$cwd" -P -F '#{window_id}'
+  else
+    local wid
+    wid="$(tmux new-session -d -s "$s" -n "$name" -c "$cwd" -x 220 -y 50 -P -F '#{window_id}')"
+    # set-option does NOT accept the "=" exact-match prefix; the full name is exact anyway
+    tmux set-option -t "$s" status-left-length 200 2>/dev/null || true
+    tmux set-option -t "$s" status-left \
+      "#[fg=colour245][$group]#[default] #($SELF status-line $group)" 2>/dev/null || true
+    printf '%s' "$wid"
+  fi
+}
+
+# move the caller to a window, switching to its group session
+goto_window() { # wid [group]
+  local wid="$1" group="${2:-}" s=''
+  [ -n "$group" ] && s="$(sess "$group")"
+  if in_tmux; then
+    [ -n "$s" ] && tmux switch-client -t "=$s" 2>/dev/null || true
+    tmux select-window -t "$wid" 2>/dev/null || true
+  elif [ -t 1 ]; then
+    if [ -n "$s" ]; then tmux attach -t "=$s" \; select-window -t "$wid"
+    else tmux attach \; select-window -t "$wid"; fi
+  fi
+  return 0
+}
+
+# --------------------------------------------------------------------------
+# metadata
 # --------------------------------------------------------------------------
 meta_path() { printf '%s/%s.json' "$SESSIONS_DIR" "$1"; }
 
-meta_write() { # name wid repo cwd isolation branch agent
+meta_write() { # name wid repo cwd isolation branch agent group
   jq -n \
     --arg name "$1" --arg wid "$2" --arg repo "$3" --arg cwd "$4" \
-    --arg iso "$5" --arg branch "$6" --arg agent "$7" \
+    --arg iso "$5" --arg branch "$6" --arg agent "$7" --arg group "$8" \
     --arg created "$(date -u +%FT%TZ)" \
     '{name:$name, window_id:$wid, repo:$repo, cwd:$cwd, isolation:$iso,
       branch:(if $branch=="" then null else $branch end),
-      agent:$agent, created_at:$created}' \
+      agent:$agent, group:$group, created_at:$created}' \
     > "$(meta_path "$1")"
 }
 
-slug_ok() { case "$1" in ''|*[!A-Za-z0-9._-]*) return 1;; *) return 0;; esac; }
+# pre-v0.2 records have no .group — derive it from .repo (or misc)
+migrate_meta() {
+  local f repo grp
+  for f in "$SESSIONS_DIR"/*.json; do
+    [ -e "$f" ] || continue
+    jq -e 'has("group")' "$f" >/dev/null 2>&1 && continue
+    repo="$(jq -r '.repo // ""' "$f" 2>/dev/null)"
+    if [ -n "$repo" ]; then grp="$(basename "$repo")"; else grp="misc"; fi
+    jq --arg g "$grp" '.group = $g' "$f" > "$f.m" 2>/dev/null && mv "$f.m" "$f"
+  done
+}
 
-git_root() { git rev-parse --show-toplevel 2>/dev/null; }
+# is a metadata record backed by a live window (same id + name) in any kel session?
+meta_is_live() { # name
+  local meta wid; meta="$(meta_path "$1")"; [ -f "$meta" ] || return 1
+  wid="$(jq -r '.window_id' "$meta")"
+  kel_windows | awk -F'\t' -v w="$wid" -v n="$1" '$4==w && $5==n {found=1} END{exit !found}'
+}
 
-in_tmux() { [ -n "${TMUX:-}" ]; }
+dead_sessions() {
+  local f name
+  for f in "$SESSIONS_DIR"/*.json; do
+    [ -e "$f" ] || continue
+    name="$(basename "$f" .json)"
+    meta_is_live "$name" || printf '%s\n' "$name"
+  done
+}
 
-session_exists() { tmux has-session -t "$KEL_SESSION" 2>/dev/null; }
-
-has_remote() { [ -n "$(git -C "$1" remote 2>/dev/null)" ]; }
+prune_state() {
+  local live f wid
+  live="$(tmux list-windows -a -F '#{window_id}' 2>/dev/null || true)"
+  [ -n "$live" ] || return 0
+  for f in "$STATE_DIR"/*.state; do
+    [ -e "$f" ] || continue
+    wid="$(basename "$f" .state)"
+    printf '%s\n' "$live" | grep -qxF "$wid" || rm -f "$f"
+  done
+}
 
 # 0 (true) if the worktree has uncommitted changes or commits on no remote
 worktree_unsafe() { # cwd
@@ -70,63 +184,16 @@ worktree_unsafe() { # cwd
   return 1
 }
 
-# create the named window in the kel session (making the session if needed);
-# prints the new window id
-open_window() { # name cwd
-  local name="$1" cwd="$2"
-  if session_exists; then
-    tmux new-window -t "$KEL_SESSION" -n "$name" -c "$cwd" -P -F '#{window_id}'
-  else
-    tmux new-session -d -s "$KEL_SESSION" -n "$name" -c "$cwd" -x 220 -y 50 \
-      -P -F '#{window_id}'
-  fi
-}
-
-# window id of a kel-session window by name, or empty
-wid_by_name() {
-  tmux list-windows -t "$KEL_SESSION" -F '#{window_id}	#{window_name}' 2>/dev/null \
-    | awk -F'\t' -v n="$1" '$2==n {print $1; exit}'
-}
-
-# is a metadata record backed by a live window of the same name?
-meta_is_live() { # name
-  local meta wid; meta="$(meta_path "$1")"; [ -f "$meta" ] || return 1
-  wid="$(jq -r '.window_id' "$meta")"
-  tmux list-windows -t "$KEL_SESSION" -F '#{window_id} #{window_name}' 2>/dev/null \
-    | grep -qxF "$wid $1"
-}
-
-# names of metadata records with no live window (killed / crashed / rebooted)
-dead_sessions() {
-  local f name
-  for f in "$SESSIONS_DIR"/*.json; do
-    [ -e "$f" ] || continue
-    name="$(basename "$f" .json)"
-    meta_is_live "$name" || printf '%s\n' "$name"
-  done
-}
-
-# drop *.state files whose window id is no longer live anywhere
-prune_state() {
-  local live f wid
-  live="$(tmux list-windows -a -F '#{window_id}' 2>/dev/null || true)"
-  [ -n "$live" ] || return 0
-  for f in "$STATE_DIR"/*.state; do
-    [ -e "$f" ] || continue
-    wid="$(basename "$f" .state)"    # e.g. @3
-    printf '%s\n' "$live" | grep -qxF "$wid" || rm -f "$f"
-  done
-}
-
 # --------------------------------------------------------------------------
 # kel new
 # --------------------------------------------------------------------------
 cmd_new() {
   need tmux; need jq
-  local name='' worktree=0 agent="$KEL_AGENT" start_agent=1
+  local name='' worktree=0 agent="$KEL_AGENT" start_agent=1 group_override=''
   while [ $# -gt 0 ]; do
     case "$1" in
       -w|--worktree) worktree=1 ;;
+      --group)       shift; group_override="${1:-}"; [ -n "$group_override" ] || die "--group needs a name" ;;
       --agent)       shift; agent="${1:-}"; [ -n "$agent" ] || die "--agent needs a command" ;;
       --no-agent)    start_agent=0 ;;
       -*)            die "kel new: unknown flag $1" ;;
@@ -134,8 +201,9 @@ cmd_new() {
     esac
     shift
   done
-  [ -n "$name" ] || die "usage: kel new <name> [--worktree] [--agent CMD] [--no-agent]"
+  [ -n "$name" ] || die "usage: kel new <name> [-w] [--group G] [--agent CMD] [--no-agent]"
   slug_ok "$name" || die "name must be a slug (A-Z a-z 0-9 . _ -)"
+
   if [ -f "$(meta_path "$name")" ]; then
     if meta_is_live "$name"; then
       die "session '$name' already exists (kel kill $name first)"
@@ -144,8 +212,10 @@ cmd_new() {
     rm -f "$(meta_path "$name")"
   fi
 
-  local repo cwd branch='' isolation='inplace'
+  local repo cwd branch='' isolation='inplace' group
   repo="$(git_root || true)"
+  group="${group_override:-$(group_for_cwd)}"
+  slug_ok "$group" || die "group '$group' is not a slug — pass --group"
 
   if [ "$worktree" = 1 ]; then
     [ -n "$repo" ] || die "--worktree must be run inside a git repo"
@@ -175,25 +245,15 @@ cmd_new() {
   fi
 
   local wid
-  wid="$(open_window "$name" "$cwd")"
+  wid="$(open_window "$name" "$cwd" "$group")"
   [ -n "$wid" ] || die "failed to create tmux window"
 
-  meta_write "$name" "$wid" "$repo" "$cwd" "$isolation" "$branch" "$agent"
+  meta_write "$name" "$wid" "$repo" "$cwd" "$isolation" "$branch" "$agent" "$group"
+  set_last_group "$group"
   [ "$start_agent" = 1 ] && tmux send-keys -t "$wid" "$agent" Enter
 
-  say "new session  $name  ($isolation${branch:+, branch $branch})"
-  goto_window "$wid"
-}
-
-# move the caller to a window in the kel session, however they're attached
-goto_window() { # window-id
-  if in_tmux; then
-    tmux switch-client -t "$KEL_SESSION" 2>/dev/null \
-      && tmux select-window -t "$1" 2>/dev/null
-  elif [ -t 1 ]; then
-    tmux attach -t "$KEL_SESSION" \; select-window -t "$1"
-  fi
-  return 0
+  say "new session  $name  [$group]  ($isolation${branch:+, branch $branch})"
+  goto_window "$wid" "$group"
 }
 
 # --------------------------------------------------------------------------
@@ -221,7 +281,7 @@ cmd_kill() {
     branch="$(jq -r '.branch // ""' "$meta")"
     repo="$(jq -r '.repo // ""' "$meta")"
   else
-    wid="$(wid_by_name "$name")"
+    wid="$(kel_windows | awk -F'\t' -v n="$name" '$5==n {print $4; exit}')"
     [ -n "$wid" ] || die "no session '$name'"
     warn "'$name' is an unmanaged window — closing it, no metadata to clean up"
   fi
@@ -250,7 +310,7 @@ cmd_kill() {
 }
 
 # --------------------------------------------------------------------------
-# kel prune  — discard every dead session record at once
+# kel prune
 # --------------------------------------------------------------------------
 cmd_prune() {
   need tmux; need jq
@@ -285,61 +345,65 @@ cmd_prune() {
 # --------------------------------------------------------------------------
 # kel ls
 # --------------------------------------------------------------------------
-gather_rows() { # emits TSV: idx wid name state iso branch dirty cwd
-  local cur; cur="$(tmux display-message -p -t "$KEL_SESSION" '#{window_id}' 2>/dev/null || true)"
-  local row_meta='' idx wid name state iso branch dirty cwd
+# emits TSV: group idx wid name state iso branch dirty cwd   (idx '-' for dead, '*' suffix = current)
+gather_rows() {
+  local cs cw
+  cs="$(tmux display-message -p '#{client_session}' 2>/dev/null || true)"
+  cw="$(tmux display-message -p '#{window_index}' 2>/dev/null || true)"
+  local grp idx wid name state iso branch dirty cwd meta
 
-  # live windows
-  while IFS=$'\t' read -r idx wid name; do
-    [ -z "${idx:-}" ] && continue
-    state='-'; iso='(unmanaged)'; branch='-'; dirty='-'; cwd=''
-    [ -f "$STATE_DIR/$wid.state" ] && read -r state _ < "$STATE_DIR/$wid.state"
-    row_meta="$SESSIONS_DIR/$name.json"
-    if [ -f "$row_meta" ]; then
-      iso="$(jq -r '.isolation' "$row_meta")"
-      branch="$(jq -r '.branch // "-"' "$row_meta")"
-      cwd="$(jq -r '.cwd // ""' "$row_meta")"
+  while IFS=$'\t' read -r sname grp idx wid name; do
+    [ -z "${wid:-}" ] && continue
+    state="$(state_of "$wid")"; [ -z "$state" ] && state='-'
+    iso='(unmanaged)'; branch='-'; dirty='-'; cwd=''
+    meta="$SESSIONS_DIR/$name.json"
+    if [ -f "$meta" ]; then
+      iso="$(jq -r '.isolation' "$meta")"
+      branch="$(jq -r '.branch // "-"' "$meta")"
+      cwd="$(jq -r '.cwd // ""' "$meta")"
     fi
     if [ -n "$cwd" ] && git -C "$cwd" rev-parse --git-dir >/dev/null 2>&1; then
       dirty="$(git -C "$cwd" status --porcelain 2>/dev/null | grep -c . || true)"
     fi
-    [ "$wid" = "$cur" ] && idx="${idx}*"
-    printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$idx" "$wid" "$name" "$state" "$iso" "$branch" "$dirty" "$cwd"
-  done < <(tmux list-windows -t "$KEL_SESSION" -F '#{window_index}	#{window_id}	#{window_name}' 2>/dev/null)
+    [ "$sname" = "$cs" ] && [ "$idx" = "$cw" ] && idx="${idx}*"
+    printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+      "$grp" "$idx" "$wid" "$name" "$state" "$iso" "$branch" "$dirty" "$cwd"
+  done < <(kel_windows | sort -t$'\t' -k2,2 -k3,3n)
 
-  # metadata records with no live window
   while read -r name; do
     [ -z "$name" ] && continue
-    row_meta="$SESSIONS_DIR/$name.json"
-    iso="$(jq -r '.isolation' "$row_meta")"
-    branch="$(jq -r '.branch // "-"' "$row_meta")"
-    cwd="$(jq -r '.cwd // ""' "$row_meta")"
+    meta="$SESSIONS_DIR/$name.json"
+    grp="$(jq -r '.group // "misc"' "$meta")"
+    iso="$(jq -r '.isolation' "$meta")"
+    branch="$(jq -r '.branch // "-"' "$meta")"
+    cwd="$(jq -r '.cwd // ""' "$meta")"
     dirty='-'
     if [ -n "$cwd" ] && git -C "$cwd" rev-parse --git-dir >/dev/null 2>&1; then
       dirty="$(git -C "$cwd" status --porcelain 2>/dev/null | grep -c . || true)"
     fi
-    printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "-" "" "$name" "dead" "$iso" "$branch" "$dirty" "$cwd"
+    printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+      "$grp" "-" "" "$name" "dead" "$iso" "$branch" "$dirty" "$cwd"
   done < <(dead_sessions)
 }
 
 cmd_ls() {
   need tmux; need jq
   prune_state
-  if ! session_exists && [ -z "$(dead_sessions)" ]; then
-    echo "no kel session — 'kel new <name>' to start one"
+  if [ -z "$(group_sessions)" ] && [ -z "$(dead_sessions)" ]; then
+    echo "no kel sessions — 'kel new <name>' to start one"
     return 0
   fi
 
   if [ "${1:-}" = "--json" ]; then
     printf '['
     local first=1
-    gather_rows | while IFS=$'\t' read -r idx wid name state iso branch dirty cwd; do
+    gather_rows | while IFS=$'\t' read -r grp idx wid name state iso branch dirty cwd; do
       [ "$first" = 1 ] || printf ','
       first=0
-      jq -nc --arg idx "${idx%\*}" --arg wid "$wid" --arg name "$name" \
+      jq -nc --arg grp "$grp" --arg idx "${idx%\*}" --arg wid "$wid" --arg name "$name" \
              --arg state "$state" --arg iso "$iso" --arg branch "$branch" \
              --arg dirty "$dirty" --arg cwd "$cwd" \
-        '{index:($idx|tonumber?), window_id:$wid, name:$name, state:$state,
+        '{group:$grp, index:($idx|tonumber?), window_id:$wid, name:$name, state:$state,
           isolation:$iso, branch:(if $branch=="-" then null else $branch end),
           dirty:($dirty|tonumber?), cwd:$cwd}'
     done
@@ -347,18 +411,76 @@ cmd_ls() {
     return 0
   fi
 
-  printf '%-4s %-16s %-9s %-12s %-14s %5s  %s\n' '#' 'NAME' 'STATE' 'ISOLATION' 'BRANCH' 'DIRTY' 'PATH'
-  local any_dead=0
-  gather_rows | while IFS=$'\t' read -r idx wid name state iso branch dirty cwd; do
-    printf '%-4s %-16s %-9s %-12s %-14s %5s  %s\n' \
-      "$idx" "$name" "$state" "$iso" "$branch" "$dirty" "${cwd/#$HOME/\~}"
-  done
-  [ -n "$(dead_sessions)" ] && echo "  dead = window gone.  kel restore [-c] rebuilds them  ·  kel prune discards them"
+  gather_rows | awk -F'\t' '
+    function pad(s,n){ while(length(s)<n) s=s" "; return s }
+    { rows[NR]=$0 }
+    END {
+      lastg=""
+      for (i=1;i<=NR;i++) {
+        split(rows[i], f, "\t")
+        g=f[1]; idx=f[2]; name=f[4]; st=f[5]; iso=f[6]; br=f[7]; dr=f[8]; cwd=f[9]
+        gsub(ENVIRON["HOME"], "~", cwd)
+        if (g!=lastg) { if (lastg!="") print ""; print g; lastg=g }
+        printf "  %s %s %s %s %s  %s\n",
+          pad(idx,4), pad(name,16), pad(st,8), pad(iso,10), pad(br,12), cwd
+      }
+    }'
+  [ -n "$(dead_sessions)" ] && echo && echo "  dead = window gone.  kel restore [-c] rebuilds  ·  kel prune discards"
   return 0
 }
 
 # --------------------------------------------------------------------------
-# kel restore  — rebuild windows for sessions whose window is gone
+# kel go
+# --------------------------------------------------------------------------
+cmd_go() {
+  need tmux
+  local g="${1:-}"
+  if [ -z "$g" ]; then
+    local gs; gs="$(group_sessions)"
+    [ -n "$gs" ] || { echo "no groups yet"; return 0; }
+    local cur; cur="$(current_group)"
+    printf '%s\n' "$gs" | while read -r x; do
+      [ "$x" = "$cur" ] && printf '* %s\n' "$x" || printf '  %s\n' "$x"
+    done
+    return 0
+  fi
+  local s; s="$(sess "$g")"
+  tmux has-session -t "=$s" 2>/dev/null || die "no group '$g'  (kel go with no arg lists them)"
+  set_last_group "$g"
+  if in_tmux; then tmux switch-client -t "=$s"
+  elif [ -t 1 ]; then tmux attach -t "=$s"
+  fi
+}
+
+# --------------------------------------------------------------------------
+# kel menu   (prefix m)
+# --------------------------------------------------------------------------
+cmd_menu() {
+  need tmux
+  [ -n "${TMUX:-}" ] || die "kel menu runs inside tmux"
+  local keys='123456789abcdefghijklmnopqrstuvwxyz' ki=0 lastg='' n=0
+  local -a args=()
+  while IFS=$'\t' read -r sname grp idx wid name; do
+    [ -z "${wid:-}" ] && continue
+    if [ "$grp" != "$lastg" ]; then args+=( "-$grp" '' '' ); lastg="$grp"; fi
+    local st mark='  '
+    st="$(state_of "$wid")"
+    case "$st" in waiting) mark='?  waiting';; working) mark='*  working';; done) mark='!  done';; esac
+    local k="${keys:$ki:1}"; ki=$((ki+1)); n=$((n+1))
+    local label; printf -v label '  %-16s %s' "$name" "$mark"
+    args+=( "$label" "$k" "switch-client -t \"=$sname\" ; select-window -t $idx" )
+  done < <(kel_windows | sort -t$'\t' -k2,2 -k3,3n)
+
+  [ "$n" -eq 0 ] && { tmux display-message "kel: no agents"; return 0; }
+  args+=( '' )
+  args+=( "next waiting agent" '`' "run-shell '$SELF jump'" )
+  args+=( "new agent here"     N   "command-prompt -p 'name:' 'new-window -c \"#{pane_current_path}\" -n \"%%\" ; send-keys claude Enter'" )
+  # -- stops flag parsing so the "-<group>" disabled headers aren't read as flags
+  tmux display-menu -T "#[align=centre,fg=colour214] kel " -x C -y C -- "${args[@]}"
+}
+
+# --------------------------------------------------------------------------
+# kel restore
 # --------------------------------------------------------------------------
 cmd_restore() {
   need tmux; need jq
@@ -368,31 +490,31 @@ cmd_restore() {
   local names; names="$(dead_sessions)"
   [ -n "$names" ] || { say "nothing to restore"; return 0; }
 
-  local n meta cwd agent cid wid restored=0
+  local n meta cwd agent cid grp wid restored=0 lastgrp=''
   while read -r n; do
     [ -z "$n" ] && continue
     meta="$(meta_path "$n")"
     cwd="$(jq -r '.cwd // ""' "$meta")"
     agent="$(jq -r '.agent // "claude"' "$meta")"
     cid="$(jq -r '.claude_session // ""' "$meta")"
+    grp="$(jq -r '.group // "misc"' "$meta")"
     [ -d "$cwd" ] || { warn "skip $n — its directory is gone ($cwd)"; continue; }
-    wid="$(open_window "$n" "$cwd")"
+    wid="$(open_window "$n" "$cwd" "$grp")"
     [ -n "$wid" ] || { warn "skip $n — couldn't open a window"; continue; }
     jq --arg w "$wid" '.window_id=$w' "$meta" > "$meta.tmp" && mv "$meta.tmp" "$meta"
     if [ "$continue_agent" = 1 ]; then
-      # exact conversation if we recorded its id, else most-recent, else fresh
       if [ -n "$cid" ]; then
         tmux send-keys -t "$wid" "$agent --resume $cid || $agent --continue || $agent" Enter
       else
         tmux send-keys -t "$wid" "$agent --continue || $agent" Enter
       fi
     fi
-    restored=$((restored+1))
+    lastgrp="$grp"; restored=$((restored+1))
   done <<< "$names"
 
   [ "$continue_agent" = 1 ] && say "restored $restored session(s) — agents resuming" \
                             || say "restored $restored session(s) — agents not started"
-  goto_window "$wid"
+  [ -n "$lastgrp" ] && { set_last_group "$lastgrp"; goto_window "$wid" "$lastgrp"; }
 }
 
 # --------------------------------------------------------------------------
@@ -400,7 +522,6 @@ cmd_restore() {
 # --------------------------------------------------------------------------
 cmd_doctor() {
   need jq
-  # probe LABEL CMD...  -> prints "true"/"false" to stdout, "  ✓/✗ label" to stderr
   probe() {
     local label="$1"; shift
     if "$@" >/dev/null 2>&1; then
@@ -410,7 +531,6 @@ cmd_doctor() {
     fi
   }
   echo "kel doctor" >&2
-
   local r_tmux r_ver r_popup r_wt r_jq r_node r_claude r_hooks r_pass
   r_tmux=$(probe   "tmux present"                     command -v tmux)
   r_ver=$(probe    "tmux >= 3.0"                      bash -c 't=$(tmux -V | grep -oE "[0-9]+\.[0-9]+"); [ -n "$t" ] && [ "$(printf "3.0\n%s\n" "$t" | sort -V | head -1)" = "3.0" ]')
@@ -431,8 +551,6 @@ cmd_doctor() {
       hooks_wired:$hooks, allow_passthrough:$pass}' \
     > "$DOCTOR_CACHE"
   printf '  cached -> %s\n' "${DOCTOR_CACHE/#$HOME/\~}" >&2
-
-  # fail only if something load-bearing is missing
   case "$r_tmux$r_ver$r_jq" in *false*) exit 1 ;; esac
 }
 
@@ -441,49 +559,101 @@ cmd_doctor() {
 # --------------------------------------------------------------------------
 cmd_status_line() {
   [ -n "${TMUX:-}" ] || exit 0
-  local cur; cur="$(tmux display-message -p '#{window_id}' 2>/dev/null || true)"
-  local out="#[fg=colour245][kel]#[default]"
-  while read -r wid idx name; do
-    [ -z "$wid" ] && continue
-    local suffix='' colour=''
-    if [ -f "$STATE_DIR/$wid.state" ]; then
-      local state; read -r state _ < "$STATE_DIR/$wid.state" || state=''
-      case "$state" in
-        waiting) suffix='?'; colour='#[fg=colour214,bold]' ;;
-        working) suffix='*'; colour='#[fg=colour111]' ;;
-        done)    suffix='!'; colour='#[fg=colour114]' ;;
-      esac
+  local grp="${1:-}"
+  [ -z "$grp" ] && grp="$(current_group)"
+
+  # not in a kel session: compact global summary
+  if [ -z "$grp" ]; then
+    local total=0 waiting=0 st
+    while IFS=$'\t' read -r _ _ _ wid _; do
+      [ -z "${wid:-}" ] && continue
+      total=$((total+1)); [ "$(state_of "$wid")" = waiting ] && waiting=$((waiting+1))
+    done < <(kel_windows)
+    [ "$total" -eq 0 ] && exit 0
+    if [ "$waiting" -gt 0 ]; then
+      printf '#[fg=colour245][kel]#[default] #[fg=colour214,bold]%d agent%s · %d waiting#[default] ' \
+        "$total" "$([ "$total" -ne 1 ] && echo s)" "$waiting"
+    else
+      printf '#[fg=colour245][kel] %d agents#[default] ' "$total"
     fi
+    exit 0
+  fi
+
+  local sname; sname="$(sess "$grp")"
+  local cur; cur="$(tmux display-message -p '#{window_id}' 2>/dev/null || true)"
+  local out='' st suffix colour
+
+  # this group's windows, in full
+  while IFS=$'\t' read -r _ _ idx wid name; do
+    [ -z "${wid:-}" ] && continue
+    suffix=''; colour=''
+    case "$(state_of "$wid")" in
+      waiting) suffix='?'; colour='#[fg=colour214,bold]' ;;
+      working) suffix='*'; colour='#[fg=colour111]' ;;
+      done)    suffix='!'; colour='#[fg=colour114]' ;;
+    esac
     if [ "$wid" = "$cur" ]; then
       out="$out ${colour}[${idx}:${name}${suffix}]#[default]"
     else
       out="$out ${colour}${idx}:${name}${suffix}#[default]"
     fi
-  done < <(tmux list-windows -F '#{window_id} #{window_index} #{window_name}' 2>/dev/null)
+  done < <(kel_windows | awk -F'\t' -v s="$sname" '$1==s' | sort -t$'\t' -k3,3n)
+
+  # waiting agents in OTHER kel groups
+  local other=0
+  while IFS=$'\t' read -r osn _ _ wid _; do
+    [ -z "${wid:-}" ] && continue
+    [ "$osn" = "$sname" ] && continue
+    [ "$(state_of "$wid")" = waiting ] && other=$((other+1))
+  done < <(kel_windows)
+  [ "$other" -gt 0 ] && out="$out  #[fg=colour214]⟨+${other} waiting⟩#[default]"
+
   printf '%s ' "$out"
 }
 
 # --------------------------------------------------------------------------
-# kel jump   (prefix `)
+# kel jump   (prefix `)   — global, cycles across all groups
 # --------------------------------------------------------------------------
 cmd_jump() {
   [ -n "${TMUX:-}" ] || exit 0
-  local current; current="$(tmux display-message -p '#{window_index}' 2>/dev/null || echo 0)"
-  local waiting=()
-  while read -r wid idx; do
-    [ -z "$wid" ] && continue
-    [ -f "$STATE_DIR/$wid.state" ] || continue
-    local state; read -r state _ < "$STATE_DIR/$wid.state" || continue
-    [ "$state" = waiting ] && waiting+=("$idx")
-  done < <(tmux list-windows -F '#{window_id} #{window_index}' 2>/dev/null)
-  [ "${#waiting[@]}" -eq 0 ] && { tmux display-message "kel: nothing waiting"; exit 0; }
-  local target="${waiting[0]}"
-  for idx in "${waiting[@]}"; do [ "$idx" -gt "$current" ] && { target="$idx"; break; }; done
-  tmux select-window -t "$target"
+  local cs cw
+  cs="$(tmux display-message -p '#{client_session}' 2>/dev/null || true)"
+  cw="$(tmux display-message -p '#{window_index}' 2>/dev/null || echo '')"
+
+  local -a w=()
+  while IFS=$'\t' read -r sname _ idx wid _; do
+    [ -z "${wid:-}" ] && continue
+    [ "$(state_of "$wid")" = waiting ] || continue
+    w+=( "$sname"$'\t'"$idx" )
+  done < <(kel_windows | sort -t$'\t' -k2,2 -k3,3n)
+
+  local n="${#w[@]}"
+  [ "$n" -eq 0 ] && { tmux display-message "kel: nothing waiting"; exit 0; }
+
+  local i pos=-1 es ei
+  for ((i=0; i<n; i++)); do
+    es="${w[$i]%%$'\t'*}"; ei="${w[$i]##*$'\t'}"
+    [ "$es" = "$cs" ] && [ "$ei" = "$cw" ] && { pos=$i; break; }
+  done
+
+  local tgt
+  if [ "$pos" -ge 0 ]; then
+    tgt="${w[$(( (pos + 1) % n ))]}"
+  else
+    tgt="${w[0]}"
+    for ((i=0; i<n; i++)); do
+      es="${w[$i]%%$'\t'*}"; ei="${w[$i]##*$'\t'}"
+      if [ "$es" \> "$cs" ] || { [ "$es" = "$cs" ] && [ -n "$cw" ] && [ "$ei" -gt "$cw" ]; }; then
+        tgt="${w[$i]}"; break
+      fi
+    done
+  fi
+  local ts="${tgt%%$'\t'*}" ti="${tgt##*$'\t'}"
+  tmux switch-client -t "=$ts" \; select-window -t "$ti"
 }
 
 # --------------------------------------------------------------------------
-# kel cheat   (prefix k)
+# kel cheat
 # --------------------------------------------------------------------------
 cmd_cheat() {
 cat <<'EOF'
@@ -493,9 +663,12 @@ cat <<'EOF'
 
   MOVE                             SCROLL an agent's output
     prefix `    next WAITING agent   prefix [    scroll mode
-    prefix 0-9  jump to window N                 ↑↓ PgUp PgDn move
-    prefix n/p  next / prev                      /  search   q  leave
-    prefix w    pick from a list      prefix ]   paste
+                (any group)                     ↑↓ PgUp PgDn move
+    prefix 0-9  window N in group                /  search   q  leave
+    prefix n/p  next / prev          prefix ]   paste
+    prefix w    pick a window
+    prefix m    fleet menu (all groups, press to jump)
+    prefix G    pick a group
 
   WINDOWS (one per agent)          PANES (split one window)
     prefix c    blank window          prefix |    split left | right
@@ -504,29 +677,30 @@ cat <<'EOF'
                                        prefix z    zoom (toggle)
                                        prefix x    close pane
 
-  SESSION
+  SESSION / GROUP
     prefix d          detach — agents keep running, round-trips (safe)
-    prefix $          rename the session
-    (killing the session, not detaching, ENDS the agent processes)
+    prefix ( )        previous / next group
+    (killing a session, not detaching, ENDS its agent processes)
 
   FROM A SHELL
-    kel               (re-)enter the workspace
-    kel new <name>    new window + agent   (-w = git worktree)
-    kel ls            list everything      kel kill <name>   close one
+    kel               (re-)enter the workspace (last group)
+    kel new <name>    new window + agent   (-w = worktree, --group G)
+    kel ls            list everything, grouped
+    kel go [group]    switch group  ·  kel menu   fleet picker
+    kel kill <name>   close one   ·   kel prune   discard dead records
     kel restore [-c]  rebuild after a kill / reboot  (-c resumes conversations)
-    kel prune         discard dead session records
 
-  STATUS BAR   N:name*  working    N:name?  waiting     N:name!  done
-               N:name   idle      [N:name] the window you're on
+  STATUS BAR   [group] 0:name*  working   1:name?  waiting   2:name!  done
+               [1:name] current window     ⟨+N waiting⟩ in other groups
 
-  prefix k   this menu        prefix ?   tmux's full key list
+  prefix ?   tmux's full key list
   Want mouse scroll / click?  add  set -g mouse on  to ~/.tmux.conf
 
 EOF
 }
 
 # --------------------------------------------------------------------------
-# kel hook <EVENT>   (Claude Code state adapter)
+# kel hook <EVENT>
 # --------------------------------------------------------------------------
 cmd_hook() {
   local event="${1:-}"
@@ -554,7 +728,6 @@ cmd_hook() {
   local wid; wid="$(tmux display-message -p -t "$pane" '#{window_id}' 2>/dev/null || true)"
   [ -z "$wid" ] && exit 0
 
-  # link this Claude conversation to the kel session record (for exact restore)
   if [ -n "$sid" ] && [ "$event" != SessionEnd ]; then
     local m
     for m in "$SESSIONS_DIR"/*.json; do
@@ -593,37 +766,45 @@ cmd_attach() {
   need tmux
   prune_state
   if in_tmux; then cmd_ls; return; fi
-  if session_exists; then
-    tmux attach -t "$KEL_SESSION"
+
+  local groups; groups="$(group_sessions)"
+  if [ -n "$groups" ]; then
+    local last target; last="$(get_last_group)"
+    if [ -n "$last" ] && printf '%s\n' "$groups" | grep -qxF "$last"; then
+      target="$last"
+    else
+      target="$(printf '%s\n' "$groups" | head -1)"
+    fi
+    exec tmux attach -t "=$(sess "$target")"
   elif [ -n "$(dead_sessions)" ]; then
     warn "no live workspace, but these sessions can be rebuilt:"
     cmd_ls
     echo "  kel restore [-c]  rebuild them   ·   kel prune  discard them"
   else
-    say "starting a fresh workspace — 'kel new <name>' to add an agent"
-    tmux new-session -s "$KEL_SESSION" -c "$HOME"
+    say "fresh workspace — 'kel new <name>' to add an agent"
+    exec tmux new-session -s "$(sess misc)" -c "$HOME"
   fi
 }
 
-usage() {
-  awk 'NR>1 && /^#/ {sub(/^# ?/,""); print; next} NR>1 {exit}' "$0"
-}
+usage() { awk 'NR>1 && /^#/ {sub(/^# ?/,""); print; next} NR>1 {exit}' "$0"; }
 
 # --------------------------------------------------------------------------
 main() {
   local cmd="${1:-}"; [ $# -gt 0 ] && shift
   case "$cmd" in
-    new)          cmd_new "$@" ;;
-    kill)         cmd_kill "$@" ;;
-    ls|list)      cmd_ls "$@" ;;
-    restore)      cmd_restore "$@" ;;
-    prune)        cmd_prune "$@" ;;
+    hook)         cmd_hook "$@" ;;                 # hot path — skip migrate
+    new)          migrate_meta; cmd_new "$@" ;;
+    kill)         migrate_meta; cmd_kill "$@" ;;
+    ls|list)      migrate_meta; cmd_ls "$@" ;;
+    go)           migrate_meta; cmd_go "$@" ;;
+    menu)         migrate_meta; cmd_menu "$@" ;;
+    restore)      migrate_meta; cmd_restore "$@" ;;
+    prune)        migrate_meta; cmd_prune "$@" ;;
     doctor)       cmd_doctor "$@" ;;
-    status-line)  cmd_status_line ;;
+    status-line)  cmd_status_line "$@" ;;
     jump)         cmd_jump ;;
     cheat)        cmd_cheat ;;
-    hook)         cmd_hook "$@" ;;
-    ''|attach)    cmd_attach ;;
+    ''|attach)    migrate_meta; cmd_attach ;;
     -h|--help|help) usage ;;
     *) die "unknown command: $cmd  (try: kel --help)" ;;
   esac

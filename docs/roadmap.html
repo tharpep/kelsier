@@ -467,9 +467,10 @@
       earned its place in daily use.
     </p>
     <p class="standfirst" style="font-size:0.9rem;">
-      <strong>Status &middot; 2026-08-28:</strong> v0 and v0.1 are shipped and in use
-      (v0.2&rsquo;s worktree setup hook folded into v0.1). Authoritative build order and
-      test plan live in <code>docs/rollout.md</code>; this page is the visual companion.
+      <strong>Status &middot; 2026-08-28:</strong> v0, v0.1, and v0.2 are shipped and in
+      use. Next is the v0.3 board, gated on <code>kel menu</code> outgrowing a flat
+      list. Authoritative build order and test plan live in
+      <code>docs/rollout.md</code>; this page is the visual companion.
     </p>
     <dl class="legend">
       <div class="l-wait"><b>?</b>waiting on you</div>
@@ -555,20 +556,15 @@
       </li>
 
       <!-- STAGE 2 -->
-      <li class="stage now">
-        <div class="node" aria-hidden="true">2</div>
+      <li class="stage done">
+        <div class="node" aria-hidden="true">&#10003;</div>
         <div class="stage-main">
-          <p class="stage-tag">Stage 2 &nbsp;<span class="ver">v0.2 &middot; grouping + a selectable menu</span><span class="badge next">next</span></p>
+          <p class="stage-tag">Stage 2 &nbsp;<span class="ver">v0.2 &middot; grouping + a selectable menu</span><span class="badge shipped">shipped</span></p>
           <h2>Give the fleet structure &mdash; and the first select-and-see surface</h2>
           <p class="stance">One tmux session per repo, plus <code>kel menu</code>: a dynamic list of every agent, press a key to jump. Commands stay primary.</p>
 
           <div class="field">
-            <span class="k">Gate &mdash; the pain that unlocks it</span>
-            <p>10+ agents across 2+ repos in a normal week, or you keep losing which window belongs to which project, or the status line is too wide to read. <strong>Not before</strong> &mdash; if you top out at ~5&ndash;6 agents in one repo at a time, grouping is dead weight.</p>
-          </div>
-
-          <div class="field">
-            <span class="k">Ships</span>
+            <span class="k">Shipped</span>
             <ul>
               <li>one tmux session per repo; <code>kel new</code> targets the session for wherever it was run (<code>--group</code> to override)</li>
               <li><code>kel jump</code> goes <em>global</em> &mdash; next <span class="mono">waiting</span> agent in any group, switching sessions</li>
@@ -598,10 +594,10 @@
       </li>
 
       <!-- STAGE 3 -->
-      <li class="stage">
+      <li class="stage now">
         <div class="node" aria-hidden="true">3</div>
         <div class="stage-main">
-          <p class="stage-tag">Stage 3 &nbsp;<span class="ver">v0.3 &middot; the board</span></p>
+          <p class="stage-tag">Stage 3 &nbsp;<span class="ver">v0.3 &middot; the board</span><span class="badge next">next</span></p>
           <h2>Give the fleet a real surface &mdash; the cross-group navigator</h2>
           <p class="stance">A transient popup, not a pane. Opens over the current window, dismissed with a key.</p>
 

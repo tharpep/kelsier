@@ -38,7 +38,12 @@ does pass tmux context to hook subprocesses.
 
 **Testing before v0.2:** see the checklist at the bottom of this file.
 
-## v0.2 — grouping by repo + a selectable fleet menu
+## v0.2 — grouping by repo + a selectable fleet menu  ·  **done**
+
+> **Shipped.** One tmux session per repo (`kel/<group>`); `kel jump` global;
+> status line = current group + `⟨+N waiting⟩`; `kel go`, `kel menu`
+> (`prefix m`), `prefix G`; `group` metadata field + auto-migration from the
+> flat session. `kel restore` rebuilds into groups.
 
 **Trigger:** the flat `kel` session overflows — routinely running agents across
 several repos at once, so the status line is cramped, `prefix 1-9` runs out, and

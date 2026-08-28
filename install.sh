@@ -28,7 +28,7 @@ chmod +x "$KEL"
 ln -sf "$KEL" "$BIN_DIR/kel"
 # remove pre-v0.1 loose scripts
 rm -f "$BIN_DIR/kel-status" "$BIN_DIR/kel-jump" "$BIN_DIR/kel-cheat"
-echo "  kel  (subcommands: new kill ls restore prune doctor status-line jump cheat hook)"
+echo "  kel  (new kill ls go menu restore prune doctor status-line jump cheat hook)"
 
 say "tmux config"
 if [ -f "$HOME/.config/tmux/tmux.conf" ]; then
@@ -75,8 +75,8 @@ cat <<EOF
 
   Use:
     kel                 enter the workspace
-    kel new <name>      new window + agent   (add -w for a git worktree)
-    kel ls              list sessions
-    kel kill <name>     close a session
-    kel doctor          check the machine
+    kel new <name>      new window + agent   (-w = git worktree, --group G)
+    kel ls              list every agent, grouped by repo
+    kel go [group]      switch group   ·   kel menu   fleet picker
+    kel kill <name>     close one      ·   kel doctor   check the machine
 EOF
