@@ -26,6 +26,7 @@ kel kill <name>        close the window; remove the worktree if it was one
 kel kill <name> -f     ...even with uncommitted / unpushed work
 kel ls [--json]        list sessions: state · isolation · branch · dirty · path
 kel restore [-c]       rebuild windows after a kill / reboot (-c resumes agents)
+kel prune [-f]         discard dead session records (and their worktrees)
 kel doctor             probe the machine, cache to ~/.local/state/kel/doctor.json
 ```
 
@@ -43,8 +44,10 @@ detach).
 reboot) ends the agent processes. `kel ls` then shows those sessions as `dead`
 with their dirs and branches intact; `kel restore` rebuilds the windows, and
 `kel restore -c` also runs `<agent> --continue` in each so Claude Code resumes
-the prior conversation. `kel new <name>` reclaims a `dead` record; `kel kill
-<name>` discards it (still honouring the worktree-safety check).
+the prior conversation. `kel new <name>` reclaims a `dead` record; `kel kill <name>` discards one, or
+`kel prune` clears them all at once (both honour the worktree-safety check;
+`kel prune -f` overrides). `kel restore -c` runs `<agent> --continue || <agent>`,
+so a session with no prior conversation still comes back with a fresh agent.
 
 ## The model
 

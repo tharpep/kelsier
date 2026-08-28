@@ -9,6 +9,7 @@
 #   kel ls [--json]         list sessions with state / isolation / branch / dirty
 #   kel restore [-c]        rebuild windows for sessions whose window is gone
 #                           (-c runs `<agent> --continue` in each to resume)
+#   kel prune [-f]          discard dead session records (and their worktrees)
 #   kel doctor              probe the machine, cache the result
 #
 # internal (wired by install.sh):
@@ -58,6 +59,16 @@ in_tmux() { [ -n "${TMUX:-}" ]; }
 session_exists() { tmux has-session -t "$KEL_SESSION" 2>/dev/null; }
 
 has_remote() { [ -n "$(git -C "$1" remote 2>/dev/null)" ]; }
+
+# 0 (true) if the worktree has uncommitted changes or commits on no remote
+worktree_unsafe() { # cwd
+  [ -d "$1" ] || return 1
+  [ -n "$(git -C "$1" status --porcelain 2>/dev/null || true)" ] && return 0
+  if has_remote "$1"; then
+    [ -n "$(git -C "$1" log --oneline HEAD --not --remotes 2>/dev/null || true)" ] && return 0
+  fi
+  return 1
+}
 
 # create the named window in the kel session (making the session if needed);
 # prints the new window id
@@ -215,20 +226,13 @@ cmd_kill() {
     warn "'$name' is an unmanaged window — closing it, no metadata to clean up"
   fi
 
-  if [ "$iso" = "worktree" ] && [ "$force" != 1 ] && [ -d "$cwd" ]; then
-    local dirty='' unpushed=''
-    dirty="$(git -C "$cwd" status --porcelain 2>/dev/null || true)"
-    # only meaningful if there's somewhere to push: commits on this branch
-    # that aren't reachable from any remote-tracking branch
-    if has_remote "$cwd"; then
-      unpushed="$(git -C "$cwd" log --oneline HEAD --not --remotes 2>/dev/null || true)"
-    fi
-    if [ -n "$dirty" ] || [ -n "$unpushed" ]; then
-      warn "refusing to kill '$name' — the worktree has work that isn't safe to lose:"
-      [ -n "$dirty" ]    && { echo "  uncommitted changes:" >&2; git -C "$cwd" status --short | sed 's/^/    /' >&2; }
-      [ -n "$unpushed" ] && { echo "  commits not on any remote:" >&2; echo "$unpushed" | sed 's/^/    /' >&2; }
-      die "commit & push, or run: kel kill $name --force"
-    fi
+  if [ "$iso" = "worktree" ] && [ "$force" != 1 ] && worktree_unsafe "$cwd"; then
+    warn "refusing to kill '$name' — the worktree has work that isn't safe to lose:"
+    local d; d="$(git -C "$cwd" status --short 2>/dev/null || true)"
+    [ -n "$d" ] && { echo "  uncommitted changes:" >&2; echo "$d" | sed 's/^/    /' >&2; }
+    local u; has_remote "$cwd" && u="$(git -C "$cwd" log --oneline HEAD --not --remotes 2>/dev/null || true)"
+    [ -n "${u:-}" ] && { echo "  commits not on any remote:" >&2; echo "$u" | sed 's/^/    /' >&2; }
+    die "commit & push, or run: kel kill $name --force"
   fi
 
   [ -n "$wid" ] && tmux kill-window -t "$wid" 2>/dev/null || true
@@ -243,6 +247,39 @@ cmd_kill() {
 
   rm -f "$meta" "$STATE_DIR/$wid.state"
   say "killed $name"
+}
+
+# --------------------------------------------------------------------------
+# kel prune  — discard every dead session record at once
+# --------------------------------------------------------------------------
+cmd_prune() {
+  need tmux; need jq
+  local force=0
+  case "${1:-}" in -f|--force) force=1 ;; '') ;; *) die "kel prune: unknown arg $1" ;; esac
+
+  local names; names="$(dead_sessions)"
+  [ -n "$names" ] || { say "no dead sessions"; return 0; }
+
+  local n meta iso cwd repo removed=0 kept=0
+  while read -r n; do
+    [ -z "$n" ] && continue
+    meta="$(meta_path "$n")"
+    iso="$(jq -r '.isolation' "$meta")"
+    cwd="$(jq -r '.cwd // ""' "$meta")"
+    repo="$(jq -r '.repo // ""' "$meta")"
+    if [ "$iso" = worktree ] && [ "$force" != 1 ] && worktree_unsafe "$cwd"; then
+      warn "kept '$n' — worktree has unsaved work  (kel kill $n -f)"
+      kept=$((kept + 1)); continue
+    fi
+    if [ "$iso" = worktree ] && [ -n "$repo" ] && [ -d "$cwd" ]; then
+      git -C "$repo" worktree remove ${force:+--force} "$cwd" 2>/dev/null \
+        || warn "left worktree $cwd (remove by hand)"
+    fi
+    rm -f "$meta"
+    removed=$((removed + 1))
+  done <<< "$names"
+
+  say "pruned $removed dead session(s)$([ "$kept" -gt 0 ] && printf ', kept %s' "$kept")"
 }
 
 # --------------------------------------------------------------------------
@@ -316,7 +353,7 @@ cmd_ls() {
     printf '%-4s %-16s %-9s %-12s %-14s %5s  %s\n' \
       "$idx" "$name" "$state" "$iso" "$branch" "$dirty" "${cwd/#$HOME/\~}"
   done
-  [ -n "$(dead_sessions)" ] && echo "  ('dead' = window gone; 'kel restore' to rebuild, 'kel kill <name>' to discard)"
+  [ -n "$(dead_sessions)" ] && echo "  dead = window gone.  kel restore [-c] rebuilds them  ·  kel prune discards them"
   return 0
 }
 
@@ -342,7 +379,8 @@ cmd_restore() {
     [ -n "$wid" ] || { warn "skip $n — couldn't open a window"; continue; }
     jq --arg w "$wid" '.window_id=$w' "$meta" > "$meta.tmp" && mv "$meta.tmp" "$meta"
     if [ "$continue_agent" = 1 ]; then
-      tmux send-keys -t "$wid" "$agent --continue" Enter
+      # resume the prior conversation if there is one, else a fresh agent
+      tmux send-keys -t "$wid" "$agent --continue || $agent" Enter
     fi
     restored=$((restored+1))
   done <<< "$names"
@@ -445,45 +483,39 @@ cmd_jump() {
 cmd_cheat() {
 cat <<'EOF'
 
-  kel — keys                                    prefix = Ctrl+b
-  ────────────────────────────────────────────────────────────────
-  Press prefix (Ctrl+b), let go, then the key.
+  kel keys              prefix = Ctrl+b   (press, release, then the key)
+  ─────────────────────────────────────────────────────────────────────────
 
-  WINDOWS   — each window is one agent
-    prefix c            new blank window
-    kel new <name>      new window + agent (from any shell)
-    prefix 0 .. 9       jump to window N
-    prefix n / p        next / previous window
-    prefix w            choose a window from a list
-    prefix `            jump to the next agent WAITING on you
-    prefix ,            rename window
-    prefix &            close the window (asks to confirm)
+  MOVE                             SCROLL an agent's output
+    prefix `    next WAITING agent   prefix [    scroll mode
+    prefix 0-9  jump to window N                 ↑↓ PgUp PgDn move
+    prefix n/p  next / prev                      /  search   q  leave
+    prefix w    pick from a list      prefix ]   paste
 
-  SCROLLING an agent's output
-    prefix [            enter scroll mode  (↑↓ PageUp PageDn, / search, q quit)
-    prefix ]            paste
-
-  PANES     — split one window (agent + editor, agent + tests)
-    prefix %  /  "      split left|right  /  top/bottom
-    prefix ← → ↑ ↓      move between panes
-    prefix z            zoom pane (toggle fullscreen)
-    prefix x            close pane
+  WINDOWS (one per agent)          PANES (split one window)
+    prefix c    blank window          prefix |    split left | right
+    prefix ,    rename                 prefix -    split top / bottom
+    prefix &    close (confirms)      prefix ↑↓←→ move between panes
+                                       prefix z    zoom (toggle)
+                                       prefix x    close pane
 
   SESSION
-    prefix d            detach — every agent keeps running (safe, round-trips)
-    kel                 (from a shell) re-enter the workspace
-    kel restore [-c]    after a kill/reboot: rebuild the windows (-c resumes agents)
-    prefix $            rename the session
+    prefix d          detach — agents keep running, round-trips (safe)
+    prefix $          rename the session
+    (killing the session, not detaching, ENDS the agent processes)
 
-    NB: killing the session (not detaching) kills the agent processes.
+  FROM A SHELL
+    kel               (re-)enter the workspace
+    kel new <name>    new window + agent   (-w = git worktree)
+    kel ls            list everything      kel kill <name>   close one
+    kel restore [-c]  rebuild after a kill / reboot  (-c resumes conversations)
+    kel prune         discard dead session records
 
-  STATUS BAR
-    N:name*  working    N:name?  waiting on you
-    N:name!  done       N:name   idle       [N:name] current window
+  STATUS BAR   N:name*  working    N:name?  waiting     N:name!  done
+               N:name   idle      [N:name] the window you're on
 
-  prefix ?   tmux's own full key list       prefix k   this cheatsheet
-
-  Want mouse scroll + click-to-select? add  set -g mouse on  to ~/.tmux.conf
+  prefix k   this menu        prefix ?   tmux's full key list
+  Want mouse scroll / click?  add  set -g mouse on  to ~/.tmux.conf
 
 EOF
 }
@@ -549,7 +581,7 @@ cmd_attach() {
   elif [ -n "$(dead_sessions)" ]; then
     warn "no live workspace, but these sessions can be rebuilt:"
     cmd_ls
-    echo "  run: kel restore   (add -c to resume the agents)"
+    echo "  kel restore [-c]  rebuild them   ·   kel prune  discard them"
   else
     say "starting a fresh workspace — 'kel new <name>' to add an agent"
     tmux new-session -s "$KEL_SESSION" -c "$HOME"
@@ -568,6 +600,7 @@ main() {
     kill)         cmd_kill "$@" ;;
     ls|list)      cmd_ls "$@" ;;
     restore)      cmd_restore "$@" ;;
+    prune)        cmd_prune "$@" ;;
     doctor)       cmd_doctor "$@" ;;
     status-line)  cmd_status_line ;;
     jump)         cmd_jump ;;
