@@ -10,13 +10,15 @@
 #   kel ls [--json]            list sessions, grouped by repo
 #   kel go [<group>]           switch to a group (no arg: list groups)
 #   kel menu                   floating list of every agent — press to jump
-#   kel restore [-c]           rebuild windows after a kill / reboot
+#   kel restore [-c] [-s]      rebuild the workspace after a kill / reboot
+#                              (-c resume conversations, -s force the snapshot)
 #   kel prune [-f]             discard dead session records
 #   kel doctor                 capability probe, cached
 #
 # internal (wired by install.sh):
 #   kel status-line [group]    render tmux status-left
 #   kel jump                   jump to the next waiting agent, any group (prefix `)
+#   kel snapshot               save the workspace shape (hooks call this)
 #   kel cheat                  keybinding reference
 #   kel hook <EVENT>           Claude Code state hook
 set -uo pipefail
@@ -28,7 +30,10 @@ SESSIONS_DIR="$STATE_DIR/sessions"
 STASH_DIR="$STATE_DIR/.stash"
 DOCTOR_CACHE="$STATE_DIR/doctor.json"
 LAST_GROUP_FILE="$STATE_DIR/last-group"
+SNAPSHOT="$STATE_DIR/snapshot.json"
 SELF="$(command -v kel 2>/dev/null || printf '%s' "$HOME/.local/bin/kel")"
+# commands worth re-running per pane on restore (agents handled separately)
+KEL_RESTORE_CMDS="${KEL_RESTORE_CMDS:-nvim vim hx nano lazygit lazydocker htop btop k9s}"
 
 mkdir -p "$STATE_DIR" "$SESSIONS_DIR" "$STASH_DIR"
 
@@ -254,6 +259,7 @@ cmd_new() {
 
   say "new session  $name  [$group]  ($isolation${branch:+, branch $branch})"
   goto_window "$wid" "$group"
+  snapshot
 }
 
 # --------------------------------------------------------------------------
@@ -307,6 +313,7 @@ cmd_kill() {
 
   rm -f "$meta" "$STATE_DIR/$wid.state"
   say "killed $name"
+  snapshot
 }
 
 # --------------------------------------------------------------------------
@@ -345,12 +352,12 @@ cmd_prune() {
 # --------------------------------------------------------------------------
 # kel ls
 # --------------------------------------------------------------------------
-# emits TSV: group idx wid name state iso branch dirty cwd   (idx '-' for dead, '*' suffix = current)
+# emits TSV: group idx wid name state iso branch dirty panes cwd   ('*' on idx = current)
 gather_rows() {
   local cs cw
   cs="$(tmux display-message -p '#{client_session}' 2>/dev/null || true)"
   cw="$(tmux display-message -p '#{window_index}' 2>/dev/null || true)"
-  local grp idx wid name state iso branch dirty cwd meta
+  local grp idx wid name state iso branch dirty panes cwd meta
 
   while IFS=$'\t' read -r sname grp idx wid name; do
     [ -z "${wid:-}" ] && continue
@@ -365,9 +372,10 @@ gather_rows() {
     if [ -n "$cwd" ] && git -C "$cwd" rev-parse --git-dir >/dev/null 2>&1; then
       dirty="$(git -C "$cwd" status --porcelain 2>/dev/null | grep -c . || true)"
     fi
+    panes="$(tmux list-panes -t "$wid" -F '#{pane_current_command}' 2>/dev/null | paste -sd'|' -)"
     [ "$sname" = "$cs" ] && [ "$idx" = "$cw" ] && idx="${idx}*"
-    printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
-      "$grp" "$idx" "$wid" "$name" "$state" "$iso" "$branch" "$dirty" "$cwd"
+    printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+      "$grp" "$idx" "$wid" "$name" "$state" "$iso" "$branch" "$dirty" "${panes:--}" "$cwd"
   done < <(kel_windows | sort -t$'\t' -k2,2 -k3,3n)
 
   while read -r name; do
@@ -381,8 +389,8 @@ gather_rows() {
     if [ -n "$cwd" ] && git -C "$cwd" rev-parse --git-dir >/dev/null 2>&1; then
       dirty="$(git -C "$cwd" status --porcelain 2>/dev/null | grep -c . || true)"
     fi
-    printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
-      "$grp" "-" "" "$name" "dead" "$iso" "$branch" "$dirty" "$cwd"
+    printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+      "$grp" "-" "" "$name" "dead" "$iso" "$branch" "$dirty" "-" "$cwd"
   done < <(dead_sessions)
 }
 
@@ -397,15 +405,16 @@ cmd_ls() {
   if [ "${1:-}" = "--json" ]; then
     printf '['
     local first=1
-    gather_rows | while IFS=$'\t' read -r grp idx wid name state iso branch dirty cwd; do
+    gather_rows | while IFS=$'\t' read -r grp idx wid name state iso branch dirty panes cwd; do
       [ "$first" = 1 ] || printf ','
       first=0
       jq -nc --arg grp "$grp" --arg idx "${idx%\*}" --arg wid "$wid" --arg name "$name" \
              --arg state "$state" --arg iso "$iso" --arg branch "$branch" \
-             --arg dirty "$dirty" --arg cwd "$cwd" \
+             --arg dirty "$dirty" --arg panes "$panes" --arg cwd "$cwd" \
         '{group:$grp, index:($idx|tonumber?), window_id:$wid, name:$name, state:$state,
           isolation:$iso, branch:(if $branch=="-" then null else $branch end),
-          dirty:($dirty|tonumber?), cwd:$cwd}'
+          dirty:($dirty|tonumber?),
+          panes:(if $panes=="-" then null else ($panes|split("|")) end), cwd:$cwd}'
     done
     printf ']\n'
     return 0
@@ -418,11 +427,14 @@ cmd_ls() {
       lastg=""
       for (i=1;i<=NR;i++) {
         split(rows[i], f, "\t")
-        g=f[1]; idx=f[2]; name=f[4]; st=f[5]; iso=f[6]; br=f[7]; dr=f[8]; cwd=f[9]
+        g=f[1]; idx=f[2]; name=f[4]; st=f[5]; iso=f[6]; br=f[7]; pn=f[9]; cwd=f[10]
         gsub(ENVIRON["HOME"], "~", cwd)
+        # show pane commands only when the window is split
+        disp = name
+        if (pn != "-" && index(pn, "|")) disp = name " (" pn ")"
         if (g!=lastg) { if (lastg!="") print ""; print g; lastg=g }
         printf "  %s %s %s %s %s  %s\n",
-          pad(idx,4), pad(name,16), pad(st,8), pad(iso,10), pad(br,12), cwd
+          pad(idx,4), pad(disp,24), pad(st,8), pad(iso,10), pad(br,12), cwd
       }
     }'
   [ -n "$(dead_sessions)" ] && echo && echo "  dead = window gone.  kel restore [-c] rebuilds  ·  kel prune discards"
@@ -446,7 +458,7 @@ cmd_go() {
   fi
   local s; s="$(sess "$g")"
   tmux has-session -t "=$s" 2>/dev/null || die "no group '$g'  (kel go with no arg lists them)"
-  set_last_group "$g"
+  set_last_group "$g"; snapshot
   if in_tmux; then tmux switch-client -t "=$s"
   elif [ -t 1 ]; then tmux attach -t "=$s"
   fi
@@ -482,10 +494,122 @@ cmd_menu() {
 # --------------------------------------------------------------------------
 # kel restore
 # --------------------------------------------------------------------------
+agent_resume_cmd() { # agent cid  -> the shell string to resume/start an agent
+  if [ -n "$2" ]; then printf '%s --resume %s || %s --continue || %s' "$1" "$2" "$1" "$1"
+  else printf '%s --continue || %s' "$1" "$1"; fi
+}
+
+# --------------------------------------------------------------------------
+# kel snapshot  — save the whole workspace shape (groups/windows/panes)
+# --------------------------------------------------------------------------
+snapshot() {   # silent; called by hooks and state-changing commands
+  command -v tmux >/dev/null 2>&1 && command -v jq >/dev/null 2>&1 || return 0
+  group_sessions | grep -q . || return 0
+  local snap g s
+  snap="$(jq -n --arg t "$(date -u +%FT%TZ)" --arg lg "$(current_group)" \
+               --arg lw "$(tmux display-message -p '#{window_name}' 2>/dev/null || true)" \
+               '{saved_at:$t, last_group:$lg, last_window:$lw, groups:{}}')"
+  while read -r g; do
+    [ -z "$g" ] && continue
+    s="$(sess "$g")"
+    local wins='[]' widx wname wlayout
+    while IFS=$'\t' read -r widx wname wlayout; do
+      [ -z "$widx" ] && continue
+      local panes='[]' pcwd pcmd
+      while IFS=$'\t' read -r pcwd pcmd; do
+        panes="$(printf '%s' "$panes" | jq --arg c "$pcwd" --arg m "$pcmd" '.+[{cwd:$c,cmd:$m}]')"
+      done < <(tmux list-panes -t "$s:$widx" -F '#{pane_current_path}	#{pane_current_command}' 2>/dev/null)
+      wins="$(printf '%s' "$wins" | jq --arg n "$wname" --arg l "$wlayout" --argjson p "$panes" \
+              '.+[{name:$n,layout:$l,panes:$p}]')"
+    done < <(tmux list-windows -t "$s" -F '#{window_index}	#{window_name}	#{window_layout}' 2>/dev/null)
+    snap="$(printf '%s' "$snap" | jq --arg g "$g" --argjson w "$wins" '.groups[$g]=$w')"
+  done < <(group_sessions)
+  local tmp; tmp="$(mktemp "$STATE_DIR/.snap.XXXXXX" 2>/dev/null)" || return 0
+  printf '%s' "$snap" > "$tmp" && mv -f "$tmp" "$SNAPSHOT"
+}
+
+cmd_snapshot() { need tmux; need jq; snapshot; say "snapshot -> ${SNAPSHOT/#$HOME/\~}"; }
+
+# rebuild the workspace from snapshot.json (windows, splits, layout, agents)
+restore_from_snapshot() {   # [-c]
+  need tmux; need jq
+  [ -f "$SNAPSHOT" ] || { warn "no snapshot to restore"; return 1; }
+  local cont=0; [ "${1:-}" = "-c" ] && cont=1
+  local lg lw first_wid='' dest_wid=''
+  lg="$(jq -r '.last_group // ""' "$SNAPSHOT")"
+  lw="$(jq -r '.last_window // ""' "$SNAPSHOT")"
+
+  local g wi nw
+  while read -r g; do
+    [ -z "$g" ] && continue
+    nw="$(jq -r --arg g "$g" '.groups[$g] | length' "$SNAPSHOT")"
+    for ((wi=0; wi<nw; wi++)); do
+      local wname wlayout np
+      wname="$(jq -r   --arg g "$g" --argjson i "$wi" '.groups[$g][$i].name'          "$SNAPSHOT")"
+      wlayout="$(jq -r --arg g "$g" --argjson i "$wi" '.groups[$g][$i].layout // ""'  "$SNAPSHOT")"
+      np="$(jq -r      --arg g "$g" --argjson i "$wi" '.groups[$g][$i].panes | length' "$SNAPSHOT")"
+
+      # already live? leave it
+      kel_windows | awk -F'\t' -v s="$(sess "$g")" -v n="$wname" '$1==s&&$5==n{f=1}END{exit !f}' && continue
+
+      local p0; p0="$(jq -r --arg g "$g" --argjson i "$wi" '.groups[$g][$i].panes[0].cwd // ""' "$SNAPSHOT")"
+      [ -d "$p0" ] || p0="$HOME"
+      local wid; wid="$(open_window "$wname" "$p0" "$g")"
+      [ -n "$wid" ] || continue
+      [ -z "$first_wid" ] && first_wid="$wid"
+
+      local -a pids; pids=( "$(tmux list-panes -t "$wid" -F '#{pane_id}' | head -1)" )
+      local pj pc
+      for ((pj=1; pj<np; pj++)); do
+        pc="$(jq -r --arg g "$g" --argjson i "$wi" --argjson j "$pj" '.groups[$g][$i].panes[$j].cwd // ""' "$SNAPSHOT")"
+        [ -d "$pc" ] || pc="$HOME"
+        pids+=( "$(tmux split-window -t "$wid" -c "$pc" -P -F '#{pane_id}')" )
+      done
+      [ -n "$wlayout" ] && tmux select-layout -t "$wid" "$wlayout" 2>/dev/null || true
+
+      local meta; meta="$(meta_path "$wname")"
+      if [ -f "$meta" ]; then
+        jq --arg w "$wid" '.window_id=$w' "$meta" > "$meta.t" && mv "$meta.t" "$meta"
+        if [ "$cont" = 1 ]; then
+          tmux send-keys -t "${pids[0]}" \
+            "$(agent_resume_cmd "$(jq -r '.agent // "claude"' "$meta")" "$(jq -r '.claude_session // ""' "$meta")")" Enter
+        fi
+      fi
+      for ((pj=1; pj<np; pj++)); do
+        pc="$(jq -r --arg g "$g" --argjson i "$wi" --argjson j "$pj" '.groups[$g][$i].panes[$j].cmd // ""' "$SNAPSHOT")"
+        case " $KEL_RESTORE_CMDS " in *" $pc "*) tmux send-keys -t "${pids[$pj]}" "$pc" Enter ;; esac
+      done
+
+      [ "$g" = "$lg" ] && [ "$wname" = "$lw" ] && dest_wid="$wid"
+    done
+  done < <(jq -r '.groups | keys[]' "$SNAPSHOT")
+
+  [ -n "$lg" ] && set_last_group "$lg"
+  local dest="${dest_wid:-$first_wid}"
+  [ -n "$dest" ] && goto_window "$dest" "$lg"
+  say "workspace restored from snapshot"
+}
+
+# --------------------------------------------------------------------------
+# kel restore
+# --------------------------------------------------------------------------
 cmd_restore() {
   need tmux; need jq
-  local continue_agent=0
-  case "${1:-}" in --continue|-c) continue_agent=1 ;; '') ;; *) die "kel restore: unknown arg $1" ;; esac
+  local continue_agent=0 use_snap=auto
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --continue|-c)  continue_agent=1 ;;
+      --snapshot|-s)  use_snap=yes ;;
+      --no-snapshot)  use_snap=no ;;
+      *) die "kel restore: unknown arg $1" ;;
+    esac
+    shift
+  done
+
+  if [ "$use_snap" = yes ] || { [ "$use_snap" = auto ] && [ -f "$SNAPSHOT" ] && [ -z "$(group_sessions)" ]; }; then
+    restore_from_snapshot "$([ "$continue_agent" = 1 ] && printf -- -c)"
+    return
+  fi
 
   local names; names="$(dead_sessions)"
   [ -n "$names" ] || { say "nothing to restore"; return 0; }
@@ -502,19 +626,14 @@ cmd_restore() {
     wid="$(open_window "$n" "$cwd" "$grp")"
     [ -n "$wid" ] || { warn "skip $n — couldn't open a window"; continue; }
     jq --arg w "$wid" '.window_id=$w' "$meta" > "$meta.tmp" && mv "$meta.tmp" "$meta"
-    if [ "$continue_agent" = 1 ]; then
-      if [ -n "$cid" ]; then
-        tmux send-keys -t "$wid" "$agent --resume $cid || $agent --continue || $agent" Enter
-      else
-        tmux send-keys -t "$wid" "$agent --continue || $agent" Enter
-      fi
-    fi
+    [ "$continue_agent" = 1 ] && tmux send-keys -t "$wid" "$(agent_resume_cmd "$agent" "$cid")" Enter
     lastgrp="$grp"; restored=$((restored+1))
   done <<< "$names"
 
   [ "$continue_agent" = 1 ] && say "restored $restored session(s) — agents resuming" \
                             || say "restored $restored session(s) — agents not started"
   [ -n "$lastgrp" ] && { set_last_group "$lastgrp"; goto_window "$wid" "$lastgrp"; }
+  snapshot
 }
 
 # --------------------------------------------------------------------------
@@ -689,8 +808,10 @@ cat <<'EOF'
                                      prefix x       close a pane
 
   SESSION / GROUP
-    prefix d   detach — agents keep running, round-trips (safe)
-    (killing a session, not detaching, ENDS its agent processes)
+    prefix d   detach — agents keep running; kel to return (safe, this is "exit")
+    prefix D   detach + snapshot the workspace
+    (killing a session, not detaching, ENDS its agent processes — but after a
+     reboot, `kel` offers to rebuild everything from the snapshot)
 
   FROM A SHELL
     kel               (re-)enter the workspace (last group)
@@ -786,6 +907,23 @@ cmd_attach() {
       target="$(printf '%s\n' "$groups" | head -1)"
     fi
     exec tmux attach -t "=$(sess "$target")"
+
+  elif [ -f "$SNAPSHOT" ]; then
+    # server died (reboot / crash) but the workspace was snapshotted
+    local ng na
+    ng="$(jq -r '.groups | length' "$SNAPSHOT" 2>/dev/null || echo '?')"
+    na="$(jq -r '[.groups[][].name] | length' "$SNAPSHOT" 2>/dev/null || echo '?')"
+    if [ -t 0 ] && [ -t 1 ]; then
+      printf '\033[1;33mkel\033[0m rebuild your workspace? %s group(s), %s window(s)  [Y/n] ' "$ng" "$na"
+      local ans=''; read -r ans || ans=n
+      case "$ans" in
+        n|N|no) say "ok — 'kel restore' when you're ready" ;;
+        *)      restore_from_snapshot -c ;;
+      esac
+    else
+      say "workspace snapshot found ($ng groups, $na windows) — 'kel restore' to rebuild"
+    fi
+
   elif [ -n "$(dead_sessions)" ]; then
     warn "no live workspace, but these sessions can be rebuilt:"
     cmd_ls
@@ -810,6 +948,7 @@ main() {
     menu)         migrate_meta; cmd_menu "$@" ;;
     restore)      migrate_meta; cmd_restore "$@" ;;
     prune)        migrate_meta; cmd_prune "$@" ;;
+    snapshot)     cmd_snapshot ;;
     doctor)       cmd_doctor "$@" ;;
     status-line)  cmd_status_line "$@" ;;
     jump)         cmd_jump ;;

@@ -252,14 +252,22 @@ kel kill <name> [-f]       close the window; remove the worktree; -f overrides
 kel ls [--json]            every agent, grouped by repo
 kel go [<group>]           switch to a group (no arg: list them)
 kel menu                   floating list of every agent — press a key to jump
-kel restore [-c]           rebuild windows into their groups after a kill / reboot;
-                           -c resumes each conversation (--resume <id> || --continue)
+kel restore [-c] [-s]      rebuild the workspace after a kill / reboot — groups,
+                           windows, splits, agents; -c resume conversations,
+                           -s force the snapshot
 kel prune [-f]             discard dead session records (and their worktrees)
 kel doctor                 capability probe, cached to doctor.json
 ```
 
 Internal (wired into tmux / Claude Code): `kel status-line [group]`,
-`kel jump`, `kel cheat`, `kel hook <EVENT>`.
+`kel jump`, `kel snapshot`, `kel cheat`, `kel hook <EVENT>`.
+
+**Workspace snapshot.** `kel snapshot` (fired by a `client-detached` /
+`after-split-window` tmux hook and by state-changing commands) writes the full
+shape — groups, windows, pane layouts, per-pane cwd — to `snapshot.json`. On a
+dead server `kel` offers `restore_from_snapshot`: recreate everything, re-split
+panes, `select-layout` the saved geometry, resume agents by session id,
+re-run allowlisted pane commands.
 
 `kel kill` on a worktree refuses when there are uncommitted or unpushed changes,
 and shows exactly what's at risk. Deleting an agent's only copy of its work is

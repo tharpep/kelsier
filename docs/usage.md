@@ -28,7 +28,8 @@ kel kill <name> -f     ...even with uncommitted / unpushed work
 kel ls [--json]        list every agent, grouped by repo
 kel go [<group>]       switch to a group  (no arg: list the groups)
 kel menu               floating list of every agent — press a key to jump
-kel restore [-c]       rebuild windows after a kill / reboot (-c resumes agents)
+kel restore [-c] [-s]  rebuild the workspace after a kill / reboot
+                       (-c resume conversations; -s force the snapshot)
 kel prune [-f]         discard dead session records (and their worktrees)
 kel doctor             probe the machine, cache to ~/.local/state/kel/doctor.json
 ```
@@ -74,17 +75,27 @@ window. State is keyed by window id, so two windows may even share a name.
 **`prefix d` detaches** — the session and every agent keep running; `kel`
 reattaches you. Round-trips perfectly; agents survive a full tmux detach.
 
-**Killing** a session (`prefix &` on its last window, `tmux kill-session`, a
-reboot) ends its agent processes. After that:
+**Killing** a session (`prefix &` on its last window, `tmux kill-session`)
+ends its agent processes. `kel ls` then shows it as `dead`; `kel new` reclaims
+the record, `kel kill` / `kel prune` discard it.
 
-- `kel ls` shows those sessions as `dead`, dirs and branches intact
-- `kel restore` rebuilds the windows **into their groups**; `kel restore -c`
-  also resumes each conversation — the hook records Claude's session id per
-  kel-session, so it runs `<agent> --resume <id>`, falling back to `--continue`
-  (the most recent for that dir) then a fresh agent
-- `kel new <name>` reclaims a `dead` record; `kel kill <name>` discards one;
-  `kel prune` discards them all at once (both keep any worktree with unsaved
-  work unless `-f`)
+**A reboot / crash** takes down everything. kel snapshots the whole workspace —
+every group, window, pane layout, and per-pane directory — on detach and
+whenever the shape changes (`~/.local/state/kel/snapshot.json`). The next time
+you run `kel` it offers to rebuild it:
+
+```
+kel rebuild your workspace? 3 group(s), 9 window(s)  [Y/n]
+```
+
+Yes → every group, window, and split comes back in place, agents resumed
+(`--resume <session-id>`), your editor / lazygit panes re-launched. `kel
+restore` does the same non-interactively; `kel restore -s` forces the snapshot
+even if some sessions are still live.
+
+**`prefix D`** is the deliberate "leave kel" — detaches *and* snapshots. Plain
+`prefix d` also detaches (agents keep running either way); `kel` brings you back
+to your last group.
 
 ## Isolation
 
@@ -141,6 +152,17 @@ inside a window; group = one tmux session per repo.**
 
 Events → states: `SessionStart`→idle, `UserPromptSubmit`→working,
 `Notification`→waiting, `Stop`→done, `SessionEnd`→cleared.
+
+## Known limits
+
+- **Two agents side by side in one window.** It works — both run fine — but
+  kel's state tracking is per *window*, so the status bar shows one state for
+  the pair and `kel jump` treats them as one. `kel ls` shows
+  `auth (claude|claude)` so at least it's visible. One agent per window is the
+  model; genuine first-class side-by-side agents would need state keyed by pane.
+- **Restored panes run a fresh shell** unless the command was an agent or on
+  the `KEL_RESTORE_CMDS` allowlist (nvim, lazygit, htop, …). Set
+  `KEL_RESTORE_CMDS` to extend it.
 
 ## Migrating from the flat session (pre-v0.2)
 
