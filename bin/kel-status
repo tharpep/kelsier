@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+# kel — render the tmux status-left fleet line.
+#
+#   [kel] 1:auth-fix? 2:rate-limit* 3:docs! 4:sazed
+#
+#   ?  waiting on you    *  working    !  done    (bare)  idle / unknown
+#
+# Called by tmux via  set -g status-left "#($HOME/.local/bin/kel-status)".
+# Re-runs on the status interval and on every `tmux refresh-client -S`.
+set -uo pipefail
+
+STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/kel"
+[ -n "${TMUX:-}" ] || exit 0
+
+out="#[fg=colour245][kel]#[default]"
+while read -r idx name; do
+  [ -z "$idx" ] && continue
+  suffix="" ; colour=""
+  f="$STATE_DIR/$name.state"
+  if [ -f "$f" ]; then
+    read -r state _ < "$f" || state=""
+    case "$state" in
+      waiting) suffix="?" ; colour="#[fg=colour214,bold]" ;;
+      working) suffix="*" ; colour="#[fg=colour111]" ;;
+      done)    suffix="!" ; colour="#[fg=colour114]" ;;
+      *)       suffix=""  ; colour="" ;;
+    esac
+  fi
+  out="$out ${colour}${idx}:${name}${suffix}#[default]"
+done < <(tmux list-windows -F '#{window_index} #{window_name}' 2>/dev/null)
+
+printf '%s ' "$out"
