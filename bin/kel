@@ -7,6 +7,8 @@
 #   kel new <name> -w       ...in a fresh git worktree on branch <name>
 #   kel kill <name>         close the window; remove the worktree if it was one
 #   kel ls [--json]         list sessions with state / isolation / branch / dirty
+#   kel restore [-c]        rebuild windows for sessions whose window is gone
+#                           (-c runs `<agent> --continue` in each to resume)
 #   kel doctor              probe the machine, cache the result
 #
 # internal (wired by install.sh):
@@ -75,6 +77,36 @@ wid_by_name() {
     | awk -F'\t' -v n="$1" '$2==n {print $1; exit}'
 }
 
+# is a metadata record backed by a live window of the same name?
+meta_is_live() { # name
+  local meta wid; meta="$(meta_path "$1")"; [ -f "$meta" ] || return 1
+  wid="$(jq -r '.window_id' "$meta")"
+  tmux list-windows -t "$KEL_SESSION" -F '#{window_id} #{window_name}' 2>/dev/null \
+    | grep -qxF "$wid $1"
+}
+
+# names of metadata records with no live window (killed / crashed / rebooted)
+dead_sessions() {
+  local f name
+  for f in "$SESSIONS_DIR"/*.json; do
+    [ -e "$f" ] || continue
+    name="$(basename "$f" .json)"
+    meta_is_live "$name" || printf '%s\n' "$name"
+  done
+}
+
+# drop *.state files whose window id is no longer live anywhere
+prune_state() {
+  local live f wid
+  live="$(tmux list-windows -a -F '#{window_id}' 2>/dev/null || true)"
+  [ -n "$live" ] || return 0
+  for f in "$STATE_DIR"/*.state; do
+    [ -e "$f" ] || continue
+    wid="$(basename "$f" .state)"    # e.g. @3
+    printf '%s\n' "$live" | grep -qxF "$wid" || rm -f "$f"
+  done
+}
+
 # --------------------------------------------------------------------------
 # kel new
 # --------------------------------------------------------------------------
@@ -93,7 +125,13 @@ cmd_new() {
   done
   [ -n "$name" ] || die "usage: kel new <name> [--worktree] [--agent CMD] [--no-agent]"
   slug_ok "$name" || die "name must be a slug (A-Z a-z 0-9 . _ -)"
-  [ -f "$(meta_path "$name")" ] && die "session '$name' already exists (kel kill $name first)"
+  if [ -f "$(meta_path "$name")" ]; then
+    if meta_is_live "$name"; then
+      die "session '$name' already exists (kel kill $name first)"
+    fi
+    warn "reclaiming the record for '$name' (its window is gone)"
+    rm -f "$(meta_path "$name")"
+  fi
 
   local repo cwd branch='' isolation='inplace'
   repo="$(git_root || true)"
@@ -101,18 +139,24 @@ cmd_new() {
   if [ "$worktree" = 1 ]; then
     [ -n "$repo" ] || die "--worktree must be run inside a git repo"
     branch="$name"
+    isolation='worktree'
     local wt_root="${KEL_WORKTREES:-$(dirname "$repo")/.kel-worktrees}"
     mkdir -p "$wt_root"
     cwd="$wt_root/$(basename "$repo")-$name"
-    [ -e "$cwd" ] && die "worktree path already exists: $cwd"
-    say "creating worktree  $cwd  (branch $branch)"
-    git -C "$repo" worktree add -b "$branch" "$cwd" >/dev/null \
-      || die "git worktree add failed"
-    isolation='worktree'
-    if [ -x "$repo/.kel/setup" ]; then
-      say "running .kel/setup"
-      if ! ( cd "$cwd" && KEL_REPO="$repo" KEL_WORKTREE="$cwd" "$repo/.kel/setup" ); then
-        warn ".kel/setup exited non-zero — the worktree may be incomplete"
+    if git -C "$repo" worktree list --porcelain 2>/dev/null | grep -qxF "worktree $cwd"; then
+      say "reusing existing worktree  $cwd"
+    elif [ -e "$cwd" ]; then
+      die "path exists but isn't a registered worktree: $cwd"
+    else
+      say "creating worktree  $cwd  (branch $branch)"
+      git -C "$repo" worktree add -b "$branch" "$cwd" >/dev/null \
+        || git -C "$repo" worktree add "$cwd" "$branch" >/dev/null \
+        || die "git worktree add failed"
+      if [ -x "$repo/.kel/setup" ]; then
+        say "running .kel/setup"
+        if ! ( cd "$cwd" && KEL_REPO="$repo" KEL_WORKTREE="$cwd" "$repo/.kel/setup" ); then
+          warn ".kel/setup exited non-zero — the worktree may be incomplete"
+        fi
       fi
     fi
   else
@@ -127,11 +171,18 @@ cmd_new() {
   [ "$start_agent" = 1 ] && tmux send-keys -t "$wid" "$agent" Enter
 
   say "new session  $name  ($isolation${branch:+, branch $branch})"
+  goto_window "$wid"
+}
+
+# move the caller to a window in the kel session, however they're attached
+goto_window() { # window-id
   if in_tmux; then
-    tmux switch-client -t "$KEL_SESSION" \; select-window -t "$wid"
-  else
-    tmux attach -t "$KEL_SESSION" \; select-window -t "$wid"
+    tmux switch-client -t "$KEL_SESSION" 2>/dev/null \
+      && tmux select-window -t "$1" 2>/dev/null
+  elif [ -t 1 ]; then
+    tmux attach -t "$KEL_SESSION" \; select-window -t "$1"
   fi
+  return 0
 }
 
 # --------------------------------------------------------------------------
@@ -199,29 +250,48 @@ cmd_kill() {
 # --------------------------------------------------------------------------
 gather_rows() { # emits TSV: idx wid name state iso branch dirty cwd
   local cur; cur="$(tmux display-message -p -t "$KEL_SESSION" '#{window_id}' 2>/dev/null || true)"
-  tmux list-windows -t "$KEL_SESSION" -F '#{window_index}	#{window_id}	#{window_name}' 2>/dev/null \
-  | while IFS=$'\t' read -r idx wid name; do
-      local state='-' iso='?' branch='-' dirty='-' cwd=''
-      [ -f "$STATE_DIR/$wid.state" ] && read -r state _ < "$STATE_DIR/$wid.state"
-      local meta="$SESSIONS_DIR/$name.json"
-      if [ -f "$meta" ]; then
-        iso="$(jq -r '.isolation' "$meta")"
-        branch="$(jq -r '.branch // "-"' "$meta")"
-        cwd="$(jq -r '.cwd // ""' "$meta")"
-      else
-        iso='(unmanaged)'
-      fi
-      if [ -n "$cwd" ] && git -C "$cwd" rev-parse --git-dir >/dev/null 2>&1; then
-        dirty="$(git -C "$cwd" status --porcelain 2>/dev/null | grep -c . || true)"
-      fi
-      [ "$wid" = "$cur" ] && idx="${idx}*"
-      printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$idx" "$wid" "$name" "$state" "$iso" "$branch" "$dirty" "$cwd"
-    done
+  local row_meta='' idx wid name state iso branch dirty cwd
+
+  # live windows
+  while IFS=$'\t' read -r idx wid name; do
+    [ -z "${idx:-}" ] && continue
+    state='-'; iso='(unmanaged)'; branch='-'; dirty='-'; cwd=''
+    [ -f "$STATE_DIR/$wid.state" ] && read -r state _ < "$STATE_DIR/$wid.state"
+    row_meta="$SESSIONS_DIR/$name.json"
+    if [ -f "$row_meta" ]; then
+      iso="$(jq -r '.isolation' "$row_meta")"
+      branch="$(jq -r '.branch // "-"' "$row_meta")"
+      cwd="$(jq -r '.cwd // ""' "$row_meta")"
+    fi
+    if [ -n "$cwd" ] && git -C "$cwd" rev-parse --git-dir >/dev/null 2>&1; then
+      dirty="$(git -C "$cwd" status --porcelain 2>/dev/null | grep -c . || true)"
+    fi
+    [ "$wid" = "$cur" ] && idx="${idx}*"
+    printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$idx" "$wid" "$name" "$state" "$iso" "$branch" "$dirty" "$cwd"
+  done < <(tmux list-windows -t "$KEL_SESSION" -F '#{window_index}	#{window_id}	#{window_name}' 2>/dev/null)
+
+  # metadata records with no live window
+  while read -r name; do
+    [ -z "$name" ] && continue
+    row_meta="$SESSIONS_DIR/$name.json"
+    iso="$(jq -r '.isolation' "$row_meta")"
+    branch="$(jq -r '.branch // "-"' "$row_meta")"
+    cwd="$(jq -r '.cwd // ""' "$row_meta")"
+    dirty='-'
+    if [ -n "$cwd" ] && git -C "$cwd" rev-parse --git-dir >/dev/null 2>&1; then
+      dirty="$(git -C "$cwd" status --porcelain 2>/dev/null | grep -c . || true)"
+    fi
+    printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "-" "" "$name" "dead" "$iso" "$branch" "$dirty" "$cwd"
+  done < <(dead_sessions)
 }
 
 cmd_ls() {
   need tmux; need jq
-  session_exists || { echo "no kel session — 'kel new <name>' to start one"; return 0; }
+  prune_state
+  if ! session_exists && [ -z "$(dead_sessions)" ]; then
+    echo "no kel session — 'kel new <name>' to start one"
+    return 0
+  fi
 
   if [ "${1:-}" = "--json" ]; then
     printf '['
@@ -241,10 +311,45 @@ cmd_ls() {
   fi
 
   printf '%-4s %-16s %-9s %-12s %-14s %5s  %s\n' '#' 'NAME' 'STATE' 'ISOLATION' 'BRANCH' 'DIRTY' 'PATH'
+  local any_dead=0
   gather_rows | while IFS=$'\t' read -r idx wid name state iso branch dirty cwd; do
     printf '%-4s %-16s %-9s %-12s %-14s %5s  %s\n' \
       "$idx" "$name" "$state" "$iso" "$branch" "$dirty" "${cwd/#$HOME/\~}"
   done
+  [ -n "$(dead_sessions)" ] && echo "  ('dead' = window gone; 'kel restore' to rebuild, 'kel kill <name>' to discard)"
+  return 0
+}
+
+# --------------------------------------------------------------------------
+# kel restore  — rebuild windows for sessions whose window is gone
+# --------------------------------------------------------------------------
+cmd_restore() {
+  need tmux; need jq
+  local continue_agent=0
+  case "${1:-}" in --continue|-c) continue_agent=1 ;; '') ;; *) die "kel restore: unknown arg $1" ;; esac
+
+  local names; names="$(dead_sessions)"
+  [ -n "$names" ] || { say "nothing to restore"; return 0; }
+
+  local n meta cwd agent wid restored=0
+  while read -r n; do
+    [ -z "$n" ] && continue
+    meta="$(meta_path "$n")"
+    cwd="$(jq -r '.cwd // ""' "$meta")"
+    agent="$(jq -r '.agent // "claude"' "$meta")"
+    [ -d "$cwd" ] || { warn "skip $n — its directory is gone ($cwd)"; continue; }
+    wid="$(open_window "$n" "$cwd")"
+    [ -n "$wid" ] || { warn "skip $n — couldn't open a window"; continue; }
+    jq --arg w "$wid" '.window_id=$w' "$meta" > "$meta.tmp" && mv "$meta.tmp" "$meta"
+    if [ "$continue_agent" = 1 ]; then
+      tmux send-keys -t "$wid" "$agent --continue" Enter
+    fi
+    restored=$((restored+1))
+  done <<< "$names"
+
+  [ "$continue_agent" = 1 ] && say "restored $restored session(s) — agents resuming" \
+                            || say "restored $restored session(s) — agents not started"
+  goto_window "$wid"
 }
 
 # --------------------------------------------------------------------------
@@ -365,9 +470,12 @@ cat <<'EOF'
     prefix x            close pane
 
   SESSION
-    prefix d            detach — every agent keeps running
+    prefix d            detach — every agent keeps running (safe, round-trips)
     kel                 (from a shell) re-enter the workspace
+    kel restore [-c]    after a kill/reboot: rebuild the windows (-c resumes agents)
     prefix $            rename the session
+
+    NB: killing the session (not detaching) kills the agent processes.
 
   STATUS BAR
     N:name*  working    N:name?  waiting on you
@@ -434,8 +542,14 @@ cmd_hook() {
 # --------------------------------------------------------------------------
 cmd_attach() {
   need tmux
+  prune_state
   if in_tmux; then cmd_ls; return; fi
-  if session_exists; then tmux attach -t "$KEL_SESSION"
+  if session_exists; then
+    tmux attach -t "$KEL_SESSION"
+  elif [ -n "$(dead_sessions)" ]; then
+    warn "no live workspace, but these sessions can be rebuilt:"
+    cmd_ls
+    echo "  run: kel restore   (add -c to resume the agents)"
   else
     say "starting a fresh workspace — 'kel new <name>' to add an agent"
     tmux new-session -s "$KEL_SESSION" -c "$HOME"
@@ -453,6 +567,7 @@ main() {
     new)          cmd_new "$@" ;;
     kill)         cmd_kill "$@" ;;
     ls|list)      cmd_ls "$@" ;;
+    restore)      cmd_restore "$@" ;;
     doctor)       cmd_doctor "$@" ;;
     status-line)  cmd_status_line ;;
     jump)         cmd_jump ;;

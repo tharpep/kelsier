@@ -25,11 +25,26 @@ kel new <name> --agent CMD     run CMD instead of `claude`
 kel kill <name>        close the window; remove the worktree if it was one
 kel kill <name> -f     ...even with uncommitted / unpushed work
 kel ls [--json]        list sessions: state · isolation · branch · dirty · path
+kel restore [-c]       rebuild windows after a kill / reboot (-c resumes agents)
 kel doctor             probe the machine, cache to ~/.local/state/kel/doctor.json
 ```
 
 Internal (wired into tmux / Claude Code, you won't call these):
 `kel status-line`, `kel jump`, `kel cheat`, `kel hook <EVENT>`.
+
+## Detach vs kill
+
+`prefix d` **detaches** — the session and every agent keep running; `kel`
+reattaches you exactly where you were. This is the "close the terminal, come
+back tomorrow" path, and it round-trips perfectly (agents survive a full tmux
+detach).
+
+**Killing** the session (`prefix &` on the last window, `tmux kill-session`, a
+reboot) ends the agent processes. `kel ls` then shows those sessions as `dead`
+with their dirs and branches intact; `kel restore` rebuilds the windows, and
+`kel restore -c` also runs `<agent> --continue` in each so Claude Code resumes
+the prior conversation. `kel new <name>` reclaims a `dead` record; `kel kill
+<name>` discards it (still honouring the worktree-safety check).
 
 ## The model
 
