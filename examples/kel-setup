@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+# .kel/setup — runs once in a fresh `kel new --worktree` checkout.
+#
+# Copy this to  <your-repo>/.kel/setup  and make it executable.
+# A fresh worktree has none of your untracked files: no node_modules, no .venv,
+# no .env, no build cache. This script puts them back.
+#
+# env:  $KEL_REPO      the origin repository
+#       $KEL_WORKTREE  this new worktree (== $PWD)
+#
+# RULE: only create gitignored paths. Anything git would report as a change
+# makes `kel kill` refuse to remove the worktree.
+set -euo pipefail
+
+# secrets / local config the repo doesn't track
+for f in .env .env.local; do
+  [ -f "$KEL_REPO/$f" ] && cp "$KEL_REPO/$f" "$f"
+done
+
+# dependencies — pick what your project uses
+if [ -f package-lock.json ]; then
+  npm ci
+elif [ -f pnpm-lock.yaml ]; then
+  pnpm install --frozen-lockfile
+elif [ -f uv.lock ]; then
+  uv sync
+elif [ -f poetry.lock ]; then
+  poetry install
+fi
+
+echo "worktree ready: $KEL_WORKTREE"

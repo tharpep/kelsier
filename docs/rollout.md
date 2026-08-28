@@ -59,8 +59,8 @@ is the proto-`kel new`; `kel new` in v0.1 just removes the need to spell it out.
 
 | Add | Trigger — the pain that justifies it |
 |---|---|
-| `kel new` / `kel kill` | tired of hand-rolling `git worktree add` + `tmux new-window` + `cd` every time |
-| `.kel/setup` hook | worktree sessions are unusable because they have no `node_modules` / `.venv` |
+| ~~`kel new` / `kel kill`~~ **done** | consolidated the loose scripts into one `kel` command; `new`/`kill`/`ls`/`doctor`; `--worktree` runs `.kel/setup` |
+| ~~`.kel/setup` hook~~ **done** | folded into v0.1 — `kel new -w` runs it after creating the worktree |
 | `kel doctor` | a machine behaved differently and you want the probe cached instead of rediscovered |
 | Bubble Tea board (popup) | still losing track *despite* the status line — i.e. routinely >6 sessions, need filter / scroll / browse |
 | Go rewrite of `kel-status` / `kel-jump` | the shell scripts became too slow or too hairy to maintain |
