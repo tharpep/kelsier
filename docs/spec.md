@@ -92,7 +92,7 @@ moves.
 
 One `tmux` session per repo — `kel/<group>`, group = repo basename (or
 `--group`, or `misc`). Inside a group, agents are windows and native nav is
-untouched. Between groups: native `prefix (` / `)`, `prefix G` (session tree),
+untouched. Between groups: native `prefix (` / `)`, `prefix G` (group tree),
 `kel go <group>`. **`kel jump` is global** — it crosses groups. The status line
 shows the current group in full plus `⟨+N waiting⟩` for the rest. `kel menu`
 (`prefix m`) is a dynamic `display-menu` of every agent, press a key to jump.
@@ -164,10 +164,10 @@ grouping trigger (§5a).
 
 ---
 
-## 8. Session model
+## 8. The agent record
 
-A session is one `tmux` window and one working directory. kel-managed sessions
-get a metadata file; hand-made windows (`prefix c`, or the menu's "new agent")
+An agent is one `tmux` window and one working directory. kel-managed agents
+get a metadata record; hand-made windows (`prefix c`, or the menu's "new agent")
 are tracked for state but have no metadata and show as `(unmanaged)`.
 
 `~/.local/state/kel/sessions/<name>.json`:
@@ -251,11 +251,12 @@ kel kill <name> [-f]       close the window; remove the worktree; -f overrides
                            the uncommitted / unpushed check
 kel ls [--json]            every agent, grouped by repo
 kel go [<group>]           switch to a group (no arg: list them)
+kel move [<group>]         relocate the current window to another group
 kel menu                   floating list of every agent — press a key to jump
 kel restore [-c] [-s]      rebuild the workspace after a kill / reboot — groups,
                            windows, splits, agents; -c resume conversations,
                            -s force the snapshot
-kel prune [-f]             discard dead session records (and their worktrees)
+kel prune [-f]             discard dead agent records (and their worktrees)
 kel doctor                 capability probe, cached to doctor.json
 ```
 

@@ -40,7 +40,9 @@ does pass tmux context to hook subprocesses.
 
 ## v0.2 — grouping by repo + a selectable fleet menu  ·  **done**
 
-> **v0.2.1** added: mouse on + smart wheel-scroll (PageUp/Dn to full-screen
+> **v0.2.1** added: `kel move` (relocate a window to another group), `KEL_GROUP`
+> (one flat group), the session→agent/group rename, all-lowercase keys, plus:
+> mouse on + smart wheel-scroll (PageUp/Dn to full-screen
 > TUIs), 1-indexed windows, pane labels, pane commands in `kel ls`, and
 > **workspace snapshot / restore** — `kel` rebuilds every group, window, and
 > split (agents resumed) after a reboot; `prefix D` = detach + snapshot.

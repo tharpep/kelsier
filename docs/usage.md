@@ -27,10 +27,11 @@ kel kill <name>        close the window; remove the worktree if it was one
 kel kill <name> -f     ...even with uncommitted / unpushed work
 kel ls [--json]        list every agent, grouped by repo
 kel go [<group>]       switch to a group  (no arg: list the groups)
+kel move [<group>]     put THIS window in another group (cd there first, then kel move)
 kel menu               floating list of every agent — press a key to jump
 kel restore [-c] [-s]  rebuild the workspace after a kill / reboot
                        (-c resume conversations; -s force the snapshot)
-kel prune [-f]         discard dead session records (and their worktrees)
+kel prune [-f]         discard dead agent records (and their worktrees)
 kel doctor             probe the machine, cache to ~/.local/state/kel/doctor.json
 ```
 
@@ -45,7 +46,7 @@ Env knobs: `KEL_GROUP` (force every `kel new` into one group — see below),
 ## The model — groups
 
 **A group is a tmux session.** `kel/api` — the group *is* `api`, there's no
-separate layer; the `group` field in the metadata just records which session a
+separate layer; the `group` field in the metadata just records which one a
 window belongs to.
 
 **By default a group is a repo.** `kel new` reads `$PWD` *at that moment*,
@@ -57,6 +58,11 @@ That's the only moment the group is chosen — kel never watches your `cd`.
 now every `kel new` lands in `kel/work` no matter the repo, so `prefix 1-9`
 reaches every agent like plain tabs. `kel new x --group foo` still peels one
 off into its own group when you want that.
+
+**Relocating a window** — `cd` to another repo in a shell pane, run `kel move`;
+the window (agent and all) hops into that repo's group and you follow it,
+nothing restarts. `kel move <group>` for an explicit target. A hand-made
+`prefix c` window gets adopted into kel this way too.
 
 **window vs pane vs group:**
 - `kel new <name>` → a new **window** (tab) = a new agent. The kel way to add one.
@@ -70,8 +76,8 @@ off into its own group when you want that.
 - The status bar shows only the current group's windows, plus `⟨+N waiting⟩`
   for agents blocked elsewhere. Inside a group: native `prefix 1-9` / `n` / `p`
   / `w`.
-- Between groups: native `prefix (` / `)` cycle, `prefix G` session tree, or
-  `kel go <group>`.
+- Between groups: native `prefix (` / `)` cycle, `prefix g` group tree,
+  `kel go <group>`, or the `prefix m` fleet menu.
 - `` prefix ` `` (jump to next **waiting** agent) is **global** — it crosses
   group boundaries. That's the point of it: go to whoever's blocked, not to a
   specific group.
@@ -95,10 +101,10 @@ window. State is keyed by window id, so two windows may even share a name.
 
 ## Detach vs kill
 
-**`prefix d` detaches** — the session and every agent keep running; `kel`
+**`prefix d` detaches** — the group and every agent keep running; `kel`
 reattaches you. Round-trips perfectly; agents survive a full tmux detach.
 
-**Killing** a session (`prefix &` on its last window, `tmux kill-session`)
+**Killing** a group (`prefix &` on its last window, `tmux kill-session`)
 ends its agent processes. `kel ls` then shows it as `dead`; `kel new` reclaims
 the record, `kel kill` / `kel prune` discard it.
 
@@ -167,7 +173,7 @@ inside a window; group = one tmux session per repo.**
 `~/.local/state/kel/`
 - `<window-id>.state` — `<state> <epoch>`, written by the hooks, pruned when the
   window is gone
-- `sessions/<name>.json` — metadata for kel-managed sessions (incl. `group`)
+- `sessions/<name>.json` — one record per kel-managed agent (incl. `group`)
 - `last-group` — the group `kel` bare reattaches to
 - `.stash/<claude-session-id>` — pane id from SessionStart, for hooks that don't
   inherit `$TMUX_PANE`
