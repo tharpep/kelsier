@@ -53,8 +53,10 @@ git_root() { git rev-parse --show-toplevel 2>/dev/null; }
 in_tmux()  { [ -n "${TMUX:-}" ]; }
 has_remote() { [ -n "$(git -C "$1" remote 2>/dev/null)" ]; }
 
-# derive the group for a new session: --group override, else repo basename, else misc
+# derive the group for a new session:
+#   --group flag  >  $KEL_GROUP (force everything into one group)  >  repo basename  >  misc
 group_for_cwd() {
+  [ -n "${KEL_GROUP:-}" ] && { printf '%s' "$KEL_GROUP"; return; }
   local gr; gr="$(git_root 2>/dev/null || true)"
   if [ -n "$gr" ]; then basename "$gr"; else printf 'misc'; fi
 }
@@ -808,10 +810,14 @@ cat <<'EOF'
                                      prefix x       close a pane
 
   SESSION / GROUP
-    prefix d   detach — agents keep running; kel to return (safe, this is "exit")
-    prefix D   detach + snapshot the workspace
-    (killing a session, not detaching, ENDS its agent processes — but after a
-     reboot, `kel` offers to rebuild everything from the snapshot)
+    prefix d   detach — "exit kel". Agents keep running; snapshot is saved;
+               `kel` brings you back to your last group.
+    (killing a session, not detaching, ENDS its agents — but after a reboot
+     `kel` offers to rebuild everything from the snapshot)
+
+  ONE flat workspace instead of a session per repo?
+    export KEL_GROUP=work   in ~/.bashrc  —  every `kel new` lands in kel/work,
+    so `prefix 1-9` reaches every agent.  `kel new x --group foo` still splits.
 
   FROM A SHELL
     kel               (re-)enter the workspace (last group)

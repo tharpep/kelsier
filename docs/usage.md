@@ -37,14 +37,32 @@ kel doctor             probe the machine, cache to ~/.local/state/kel/doctor.jso
 Internal (wired into tmux / Claude Code, you won't call these):
 `kel status-line [group]`, `kel jump`, `kel cheat`, `kel hook <EVENT>`.
 
-Env knobs: `KEL_SESSION` (session-name prefix, default `kel`), `KEL_AGENT`
-(default `claude`), `KEL_WORKTREES` (default `<repo>/../.kel-worktrees`).
+Env knobs: `KEL_GROUP` (force every `kel new` into one group — see below),
+`KEL_SESSION` (session-name prefix, default `kel`), `KEL_AGENT` (default
+`claude`), `KEL_WORKTREES` (default `<repo>/../.kel-worktrees`),
+`KEL_RESTORE_CMDS` (pane commands to re-run on restore).
 
 ## The model — groups
 
-**One tmux session per repo.** `kel new` reads where you ran it: `~/code/api`
-→ group `api` → tmux session `kel/api`. `--group G` overrides;
+**A group is a tmux session.** `kel/api` — the group *is* `api`, there's no
+separate layer; the `group` field in the metadata just records which session a
+window belongs to.
+
+**By default a group is a repo.** `kel new` reads where you ran it:
+`~/code/api` → group `api` → session `kel/api`. `--group G` overrides;
 non-repo agents fall into `misc`.
+
+**Want one flat workspace instead?** `export KEL_GROUP=work` in `~/.bashrc` —
+now every `kel new` lands in `kel/work` no matter the repo, so `prefix 1-9`
+reaches every agent like plain tabs. `kel new x --group foo` still peels one
+off into its own group when you want that.
+
+**window vs pane vs group:**
+- `kel new <name>` → a new **window** (tab) = a new agent. The kel way to add one.
+- `prefix | / -` → a new **pane** (split) inside a window — for *your* stuff
+  (editor, shell, tests), not agents. kel tracks state per window, so a
+  second agent belongs in its own window.
+- a **group** is created on demand — `kel new x --group new` makes the session.
 
 - Inside a group, agents are windows — native `prefix 0-9` / `n` / `p` / `w`.
 - Between groups: native `prefix (` / `)` cycle, `prefix G` session tree, or
