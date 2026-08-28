@@ -17,9 +17,9 @@ which branch it's on, and which one is blocked waiting on you.
 ## The approach
 
 `kel` does not wrap the agent. `tmux` allocates a PTY and the agent owns it
-completely — Claude Code inside a `kel`-managed window is byte-identical to
-Claude Code in a bare terminal: same TUI, same keybindings, same MCP, same
-hooks. `kel` only tracks state, renders a fleet view, and gives you one
+completely — Claude Code inside a `kel` window is byte-identical to Claude Code
+in a bare terminal: same TUI, same keybindings, same MCP, same hooks. `kel`
+only tracks state, renders a fleet view on the status bar, and gives you one
 keystroke to jump to whichever agent is blocked on you.
 
 **The bet:** the valuable part is the bookkeeping, not the interface.
@@ -32,8 +32,8 @@ Explicit, because each is a thing this project will be tempted into.
   Never manages context.
 - **Not a terminal.** Uses whatever emulator you have.
 - **Not a multiplexer.** `tmux` exists and is thirty years old.
-- **Not a file manager.** `yazi` exists. The panel can *launch* it; it will
-  never reimplement it.
+- **Not a file manager.** `yazi` exists and is better than anything this would
+  build. It will never be reimplemented here.
 - **Not a daemon.** State lives on disk and in `tmux`; nothing runs in the
   background but `tmux` itself.
 - **Not cloud-anything.** Fully local, no telemetry, no account.
@@ -42,12 +42,21 @@ Explicit, because each is a thing this project will be tempted into.
 
 ## Status
 
-Pre-v0. See `docs/spec.md` for the design and `docs/rollout.md` for what gets
-built in what order. The short version: v0 is shell scripts and `tmux` config,
-no Go binary, and it exists to answer one question — does an always-visible
-state line plus jump-to-blocked actually fix the sprawl?
+**v0.1** — working and in daily use. One `kel` command:
+
+```
+kel                enter the workspace          kel ls        list sessions
+kel new <name>     new window + agent           kel kill <name>
+kel new <name> -w  ...in a git worktree         kel restore   rebuild after a kill
+```
+
+Plus a state-aware status line and `` prefix ` `` to jump to the next blocked
+agent. Shell + `tmux` config, no binary yet.
+
+`docs/usage.md` is the reference · `docs/rollout.md` is the build order ·
+`docs/spec.md` is the design.
 
 ## Substrate
 
 Linux, via `tmux`. On Windows that means WSL2 (native Windows PowerShell has no
-`tmux` and nothing with `swap-pane` semantics). Setup in `docs/setup.md`.
+`tmux`). Setup and toolchain in `docs/setup.md`.

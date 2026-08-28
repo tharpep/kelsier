@@ -186,6 +186,26 @@
   }
   :root[data-theme="dark"] .stage.now .node,
   :root:not([data-theme="light"]) .stage.now .node { color: #17130a; }
+  .stage.done .node {
+    background: var(--done);
+    border-color: var(--done);
+    color: #fff;
+    font-size: 0.9rem;
+  }
+  .badge {
+    display: inline-block;
+    font-family: "JetBrains Mono", monospace;
+    font-size: 0.6rem;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    padding: 0.12em 0.5em;
+    border-radius: 3px;
+    vertical-align: 0.15em;
+    margin-left: 0.5rem;
+  }
+  .badge.shipped { background: var(--done); color: #fff; }
+  .badge.next    { background: var(--accent); color: #fff; }
 
   .stage-main { grid-column: 2; min-width: 0; padding-top: 0.05rem; }
 
@@ -444,7 +464,12 @@
       The constraint is <strong>&ldquo;will I actually adopt this,&rdquo;</strong> not
       &ldquo;can it be built.&rdquo; So every stage ships the smallest thing that answers
       a real question, and nothing above a line gets built until the stage below it has
-      earned its place in daily use. If v0 doesn&rsquo;t stick, none of the rest happens.
+      earned its place in daily use.
+    </p>
+    <p class="standfirst" style="font-size:0.9rem;">
+      <strong>Status &middot; 2026-08-28:</strong> v0 and v0.1 are shipped and in use
+      (v0.2&rsquo;s worktree setup hook folded into v0.1). Authoritative build order and
+      test plan live in <code>docs/rollout.md</code>; this page is the visual companion.
     </p>
     <dl class="legend">
       <div class="l-wait"><b>?</b>waiting on you</div>
@@ -458,32 +483,22 @@
     <ol class="timeline">
 
       <!-- STAGE 0 -->
-      <li class="stage now">
-        <div class="node" aria-hidden="true">0</div>
+      <li class="stage done">
+        <div class="node" aria-hidden="true">&#10003;</div>
         <div class="stage-main">
-          <p class="stage-tag">Stage 0 &nbsp;<span class="ver">v0 &middot; premise test</span></p>
+          <p class="stage-tag">Stage 0 &nbsp;<span class="ver">v0 &middot; premise test</span><span class="badge shipped">shipped</span></p>
           <h2>Prove the idea before building it</h2>
-          <p class="stance">Shell scripts and tmux config. No binary. This exists to test one thing.</p>
+          <p class="stance">Shell + tmux config, no binary. Verified end-to-end with real Claude Code.</p>
 
           <div class="field">
-            <span class="k">Ships</span>
+            <span class="k">Shipped</span>
             <ul>
-              <li><code>kel-status</code> &mdash; a shell script that renders the <code>status-left</code> fleet line</li>
-              <li><code>kel-jump</code> &mdash; <code>prefix&nbsp;`</code> jumps to the next session in <span class="mono">waiting</span></li>
-              <li>3 Claude Code hooks write <code>&lt;state&gt; &lt;epoch&gt;</code> atomically; <code>SessionStart</code> stashes the window id</li>
-              <li><code>install.sh</code> merges the hooks into <code>settings.json</code> with <code>jq</code>, without clobbering MCP servers</li>
-              <li>sessions are native tmux windows, made by hand</li>
+              <li>a state-aware <code>status-left</code> fleet line, current window bracketed, tmux&rsquo;s own list hidden</li>
+              <li><code>prefix&nbsp;`</code> jumps to the next window in <span class="mono">waiting</span> &mdash; cycles, wraps</li>
+              <li>5 Claude Code hooks write <code>&lt;state&gt; &lt;epoch&gt;</code> keyed by window id; pane resolved via <code>$TMUX_PANE</code> &rarr; SessionStart stash &rarr; cwd match</li>
+              <li><code>install.sh</code> merges the hooks into <code>settings.json</code> with <code>jq</code> &mdash; preserves MCP servers and other hooks</li>
+              <li><code>prefix&nbsp;k</code> floating command menu</li>
             </ul>
-          </div>
-
-          <div class="field">
-            <span class="k">Gate to start</span>
-            <p>None &mdash; this is the entry point.</p>
-          </div>
-
-          <div class="field">
-            <span class="k">Still manual</span>
-            <p>Creating windows, adding worktrees, <code>cd</code>-ing into repos.</p>
           </div>
 
           <figure class="term">
@@ -492,98 +507,82 @@
   <span class="dim">&#9679; reading auth/middleware.ts &hellip;</span>
   <span class="dim">&#9679; I need your permission to edit 3 files</span>
 <span class="rule">&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;</span>
-[kel] 1:auth-fix<span class="s-wait">?</span>  2:rate-limit<span class="s-work">*</span>  3:docs<span class="s-done">!</span>  4:sazed</code></pre>
+[kel] 0:auth-fix<span class="s-wait">?</span>  [1:rate-limit<span class="s-work">*</span>]  2:docs<span class="s-done">!</span>  3:sazed</code></pre>
           </figure>
 
-          <p class="gain"><span class="k">Unlocks</span>See which agent is blocked without switching windows &mdash; and jump to it in one key.</p>
+          <p class="gain"><span class="k">Unlocked</span>See which agent is blocked without switching windows &mdash; and jump to it in one key.</p>
         </div>
       </li>
 
       <!-- STAGE 1 -->
-      <li class="stage">
-        <div class="node" aria-hidden="true">1</div>
+      <li class="stage done">
+        <div class="node" aria-hidden="true">&#10003;</div>
         <div class="stage-main">
-          <p class="stage-tag">Stage 1 &nbsp;<span class="ver">v0.1 &middot; session lifecycle</span></p>
+          <p class="stage-tag">Stage 1 &nbsp;<span class="ver">v0.1 &middot; session lifecycle</span><span class="badge shipped">shipped</span></p>
           <h2>Automate the parts of v0 you got tired of typing</h2>
-          <p class="stance">The first shell scripts become real subcommands.</p>
+          <p class="stance">The loose scripts consolidate into one <code>kel</code> command.</p>
 
           <div class="field">
-            <span class="k">Gate &mdash; the pain that unlocks it</span>
-            <p>You&rsquo;re hand-rolling <code>git worktree add</code> + <code>tmux new-window</code> + <code>cd</code> several times a day.</p>
-          </div>
-
-          <div class="field">
-            <span class="k">Ships</span>
+            <span class="k">Shipped</span>
             <ul>
-              <li><code>kel new &lt;name&gt;</code> &middot; <code>kel new &lt;name&gt; --worktree</code> &middot; <code>kel kill &lt;name&gt;</code></li>
-              <li><code>kel ls [--json]</code></li>
-              <li><code>kel kill</code> refuses on uncommitted or unpushed worktree changes, and says why</li>
-              <li><code>kel doctor</code> &mdash; capability probe, cached per machine</li>
+              <li><code>kel new &lt;name&gt; [-w]</code> &mdash; window + agent, inplace or in a git worktree; a worktree runs the repo&rsquo;s <code>.kel/setup</code> (this was v0.2, folded in)</li>
+              <li><code>kel kill &lt;name&gt;</code> &mdash; removes the worktree; refuses on uncommitted / unpushed work unless <code>-f</code>, and shows what&rsquo;s at risk</li>
+              <li><code>kel ls [--json]</code> &middot; <code>kel doctor</code> (cached)</li>
+              <li><code>kel restore [-c]</code> rebuilds windows after a kill / reboot; <code>-c</code> resumes each conversation by its recorded session id</li>
+              <li><code>kel prune</code> discards dead session records; one tmux session <code>kel</code>, <code>kel new</code> works from any shell</li>
             </ul>
           </div>
 
           <figure class="term">
-            <figcaption class="term-bar">kel new</figcaption>
-<pre class="term-body"><code>~/code/api-gateway $ kel new rate-limit --worktree
-  <span class="ok">&#10003;</span> worktree   ~/code/.wt/rate-limit
-  <span class="ok">&#10003;</span> branch     rate-limit
-  <span class="ok">&#10003;</span> tmux       @5  &rarr;  window 2:rate-limit
-  <span class="ok">&#10003;</span> agent      claude  (running)</code></pre>
+            <figcaption class="term-bar">kel new -w</figcaption>
+<pre class="term-body"><code>~/code/api-gateway $ kel new rate-limit -w
+<span class="ok">kel</span> creating worktree  ../.kel-worktrees/api-gateway-rate-limit  (branch rate-limit)
+<span class="ok">kel</span> running .kel/setup
+<span class="ok">kel</span> new session  rate-limit  (worktree, branch rate-limit)</code></pre>
           </figure>
           <figure class="term">
             <figcaption class="term-bar">kel ls</figcaption>
 <pre class="term-body"><code>~/code $ kel ls
-NAME         STATE     ISO       BRANCH      DIRTY
-auth-fix     <span class="s-wait">waiting</span>   inplace   &mdash;              2
-rate-limit   <span class="s-work">working</span>   worktree  rate-limit      0
-docs         <span class="s-done">done</span>      inplace   &mdash;              1
-sazed        <span class="s-idle">idle</span>      inplace   &mdash;              0</code></pre>
+#    NAME         STATE     ISOLATION    BRANCH        DIRTY  PATH
+0    auth-fix     <span class="s-wait">waiting</span>   inplace      &mdash;                 2  ~/code/api-gateway
+1*   rate-limit   <span class="s-work">working</span>   worktree     rate-limit         0  ~/code/.kel-worktrees/&hellip;
+2    docs         <span class="s-done">done</span>      inplace      &mdash;                 1  ~/code/api-gateway
+-    sazed        <span class="s-idle">dead</span>      inplace      &mdash;                 0  ~/code/sazed</code></pre>
           </figure>
 
-          <p class="gain"><span class="k">Unlocks</span>One command spins up a named session in the right place; one command tears it down without eating uncommitted work.</p>
+          <p class="gain"><span class="k">Unlocked</span>One command spins up a named session in the right place; one tears it down without eating uncommitted work; a kill or reboot is recoverable.</p>
         </div>
       </li>
 
       <!-- STAGE 2 -->
-      <li class="stage">
+      <li class="stage now">
         <div class="node" aria-hidden="true">2</div>
         <div class="stage-main">
-          <p class="stage-tag">Stage 2 &nbsp;<span class="ver">v0.2 &middot; worktrees for real</span></p>
-          <h2>Make parallel work on one repo actually usable</h2>
-          <p class="stance">A fresh worktree with no dependencies installed is worthless. Fix that, and prove kel isn&rsquo;t Claude-Code-only.</p>
+          <p class="stage-tag">Stage 2 &nbsp;<span class="ver">v0.2 &middot; grouping by repo</span><span class="badge next">next</span></p>
+          <h2>Give the fleet structure &mdash; only once the flat list overflows</h2>
+          <p class="stance">One tmux session per repo. The grouping unit is the repo, which kel already records.</p>
 
           <div class="field">
             <span class="k">Gate &mdash; the pain that unlocks it</span>
-            <p>Worktree sessions are dead on arrival: no <code>node_modules</code>, no <code>.venv</code>, no <code>.env</code>, no build cache.</p>
+            <p>10+ agents across 2+ repos in a normal week, or you keep losing which window belongs to which project, or the status line is too wide to read. <strong>Not before</strong> &mdash; if you top out at ~5&ndash;6 agents in one repo at a time, grouping is dead weight.</p>
           </div>
 
           <div class="field">
             <span class="k">Ships</span>
             <ul>
-              <li><code>.kel/setup</code> &mdash; per-repo executable, runs in the new worktree with <code>$KEL_REPO</code></li>
-              <li>a second agent adapter (a non&ndash;Claude-Code agent) to prove the adapter boundary is real</li>
-              <li>agents with no hook system fall back to <span class="mono">unknown</span> + the pane&rsquo;s last output line</li>
+              <li>one tmux session per repo, named after it; <code>kel new</code> targets the session for wherever it was run (<code>--group</code> to override)</li>
+              <li><code>kel jump</code> goes <em>global</em> &mdash; next <span class="mono">waiting</span> agent in any group, switching sessions</li>
+              <li>two-level status line: current group in full, other groups compact and only when they want attention</li>
+              <li><code>kel go &lt;group&gt;</code>; <code>kel ls</code> groups with headers; a <code>group</code> field in the metadata</li>
             </ul>
           </div>
 
           <figure class="term">
-            <figcaption class="term-bar">kel new &middot; provisioning</figcaption>
-<pre class="term-body"><code>~/code/api-gateway $ kel new billing --worktree
-  <span class="ok">&#10003;</span> worktree created
-  <span class="s-work">&#9656;</span> .kel/setup
-      npm ci  &hellip;&hellip;&hellip;&hellip;&hellip;  <span class="ok">ok</span>  (14.2s)
-      cp ../.env .env  &hellip;  <span class="ok">ok</span>
-  <span class="ok">&#10003;</span> agent started in a ready worktree</code></pre>
-          </figure>
-          <figure class="term">
-            <figcaption class="term-bar">kel ls &middot; mixed adapters</figcaption>
-<pre class="term-body"><code>~/code $ kel ls
-NAME         STATE      ADAPTER
-billing      <span class="s-work">working</span>    claude-code
-scratch      <span class="s-idle">unknown</span>    generic  <span class="dim">&middot; "waiting for input &hellip;"</span></code></pre>
+            <figcaption class="term-bar">two-level status line</figcaption>
+<pre class="term-body"><code>[api-gateway] 0:auth-fix<span class="s-wait">?</span> [1:rate-limit<span class="s-work">*</span>] 2:docs   <span class="dim">&middot;</span>   coppermind<span class="s-wait">&#10216;1?&#10217;</span></code></pre>
           </figure>
 
-          <p class="gain"><span class="k">Unlocks</span><code>kel new --worktree</code> gives you a checkout you can work in immediately &mdash; and kel can track agents it has no hooks for.</p>
+          <p class="gain"><span class="k">Unlocks</span>Managing agents across several projects at once without the status line turning to mush &mdash; and native <code>prefix 1&ndash;9</code> stays meaningful inside a group.</p>
         </div>
       </li>
 
@@ -592,19 +591,19 @@ scratch      <span class="s-idle">unknown</span>    generic  <span class="dim">&
         <div class="node" aria-hidden="true">3</div>
         <div class="stage-main">
           <p class="stage-tag">Stage 3 &nbsp;<span class="ver">v0.3 &middot; the board</span></p>
-          <h2>Give the fleet a real surface &mdash; only once the status line stops fitting</h2>
+          <h2>Give the fleet a real surface &mdash; the cross-group navigator</h2>
           <p class="stance">A transient popup, not a pane. Opens over the current window, dismissed with a key.</p>
 
           <div class="field">
             <span class="k">Gate &mdash; the pain that unlocks it</span>
-            <p>Routinely more than ~6 sessions. The status line is truncating and you need filter / scroll / browse.</p>
+            <p>Still losing track <em>despite</em> v0.2 grouping &mdash; you want to filter / scroll / browse across every group at once.</p>
           </div>
 
           <div class="field">
             <span class="k">Ships</span>
             <ul>
               <li><code>kel board</code> as a <code>display-popup</code> TUI (shell TUI, or Bubble Tea if it needs the structure)</li>
-              <li>filter, jump, new, kill &mdash; from the board</li>
+              <li>filter, jump, new, kill &mdash; across groups, from the board</li>
               <li>the board never occupies a pane and never needs to survive a switch</li>
             </ul>
           </div>
@@ -644,7 +643,7 @@ scratch      <span class="s-idle">unknown</span>    generic  <span class="dim">&
           <div class="field">
             <span class="k">Ships</span>
             <ul>
-              <li>one static binary replacing <code>kel-status</code> / <code>kel-jump</code> / <code>kel board</code></li>
+              <li>one static binary replacing the shell <code>kel</code> and its board</li>
               <li><code>~/.config/kel/config.toml</code> + per-repo <code>.kel/config.toml</code></li>
               <li>a README that leads with the layout and the jump key; MIT license</li>
             </ul>
@@ -653,12 +652,12 @@ scratch      <span class="s-idle">unknown</span>    generic  <span class="dim">&
           <figure class="term">
             <figcaption class="term-bar">kel doctor</figcaption>
 <pre class="term-body"><code>~ $ kel doctor
-  tmux 3.4  &hellip;&hellip;&hellip;&hellip;&hellip;&hellip;&hellip;&hellip;&hellip;&hellip;&hellip;&hellip;  <span class="ok">ok</span>
-  $TMUX_PANE reaches hooks  &hellip;&hellip;  <span class="ok">ok</span>
-  display-popup  &hellip;&hellip;&hellip;&hellip;&hellip;&hellip;&hellip;&hellip;  <span class="ok">ok</span>
-  node on PATH  &hellip;&hellip;&hellip;&hellip;&hellip;&hellip;&hellip;&hellip;&hellip;  <span class="ok">ok</span>   <span class="dim">v22.11 (fnm)</span>
-  git worktree flags  &hellip;&hellip;&hellip;&hellip;&hellip;  <span class="ok">ok</span>
-  <span class="dim">&rarr; cached  ~/.config/kel/doctor.json</span></code></pre>
+kel doctor
+  <span class="ok">&#10003;</span> tmux present          <span class="ok">&#10003;</span> git worktree available
+  <span class="ok">&#10003;</span> tmux &gt;= 3.0           <span class="ok">&#10003;</span> node on PATH
+  <span class="ok">&#10003;</span> display-popup         <span class="ok">&#10003;</span> claude on PATH
+  <span class="ok">&#10003;</span> jq present            <span class="ok">&#10003;</span> kel hooks wired
+  <span class="dim">cached &rarr; ~/.local/state/kel/doctor.json</span></code></pre>
           </figure>
 
           <p class="gain"><span class="k">Unlocks</span><code>git clone &amp;&amp; ./install.sh</code> on any machine &mdash; and a public repo, if you decide you want one.</p>
@@ -672,9 +671,10 @@ scratch      <span class="s-idle">unknown</span>    generic  <span class="dim">&
       <h2>Parking lot</h2>
       <p class="lead">Named in the spec as candidates. None are committed, none block anything, and each ships only if a specific daily pain calls for it &mdash; the same rule as every stage above.</p>
       <ul class="parking-list">
-        <li><span class="name">ops panel</span><span class="why">a diff / test-output mode in the right slot, if hand-review needs more than <code>lazygit</code> in its own window</span></li>
+        <li><span class="name">ops pane</span><span class="why">a diff / test-output pane, if hand-review needs more than <code>lazygit</code> in its own window</span></li>
         <li><span class="name">session templates</span><span class="why">name + agent + isolation + initial prompt saved as a reusable shape</span></li>
         <li><span class="name">PR status</span><span class="why">CI / review state on the board row</span></li>
+        <li><span class="name">second agent adapter</span><span class="why">a non&ndash;Claude-Code agent, to prove the adapter boundary is real</span></li>
         <li><span class="name">attach</span><span class="why">adopt a session that was started outside kel</span></li>
       </ul>
     </section>
@@ -711,12 +711,12 @@ scratch      <span class="s-idle">unknown</span>    generic  <span class="dim">&
         <li>the holding session&rsquo;s pane geometry desyncs on every terminal resize; the next swap-in janks.</li>
         <li><code>prefix 1</code>&ndash;<code>9</code> collides with native tmux window switching &mdash; a muscle-memory tax everywhere else, forever.</li>
         <li>three panel modes fighting over one slot means you can&rsquo;t see the board while editing.</li>
-        <li>the status line breaks past ~6 sessions anyway &mdash; which is exactly when the popup board earns its place.</li>
+        <li>the status line breaks past ~6 windows anyway &mdash; which is what v0.2 grouping and then the v0.3 board are for.</li>
       </ul>
     </section>
   </main>
 
   <footer>
-    <p>Order is the contract. Each stage is gated on the one below it proving itself in daily use. If v0 doesn&rsquo;t stick &mdash; if the status line becomes noise you ignore, or the hooks misfire enough that you stop trusting the state &mdash; <strong>nothing above it gets built, and that&rsquo;s the point.</strong></p>
+    <p>Order is the contract. Each stage is gated on the one below it proving itself in daily use &mdash; if the status line becomes noise you ignore, or the hooks misfire enough that you stop trusting the state, <strong>nothing above it gets built, and that&rsquo;s the point.</strong> v0 and v0.1 cleared that bar; v0.2 waits for the flat list to actually overflow. Current status and the full test plan: <code>docs/rollout.md</code>.</p>
   </footer>
 </div>

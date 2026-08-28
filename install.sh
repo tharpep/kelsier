@@ -28,7 +28,7 @@ chmod +x "$KEL"
 ln -sf "$KEL" "$BIN_DIR/kel"
 # remove pre-v0.1 loose scripts
 rm -f "$BIN_DIR/kel-status" "$BIN_DIR/kel-jump" "$BIN_DIR/kel-cheat"
-echo "  kel  (subcommands: new kill ls doctor status-line jump cheat hook)"
+echo "  kel  (subcommands: new kill ls restore prune doctor status-line jump cheat hook)"
 
 say "tmux config"
 if [ -f "$HOME/.config/tmux/tmux.conf" ]; then

@@ -18,7 +18,7 @@ tmux kill-server        # then reopen; restart any running Claude sessions
 
 ```
 kel                    enter the workspace  (attach the `kel` tmux session)
-kel new <name>         new window + agent in the current repo   (isolation: inplace)
+kel new <name>         new window + agent in the current repo   (inplace)
 kel new <name> -w      ...in a fresh git worktree on a new branch <name>
 kel new <name> --no-agent      just make the window, don't start the agent
 kel new <name> --agent CMD     run CMD instead of `claude`
@@ -33,31 +33,37 @@ kel doctor             probe the machine, cache to ~/.local/state/kel/doctor.jso
 Internal (wired into tmux / Claude Code, you won't call these):
 `kel status-line`, `kel jump`, `kel cheat`, `kel hook <EVENT>`.
 
+Env knobs: `KEL_SESSION` (default `kel`), `KEL_AGENT` (default `claude`),
+`KEL_WORKTREES` (default `<repo>/../.kel-worktrees`).
+
 ## Detach vs kill
 
-`prefix d` **detaches** — the session and every agent keep running; `kel`
-reattaches you exactly where you were. This is the "close the terminal, come
-back tomorrow" path, and it round-trips perfectly (agents survive a full tmux
-detach).
+**`prefix d` detaches** — the session and every agent keep running; `kel`
+reattaches you exactly where you were. The "close the terminal, come back
+tomorrow" path. Round-trips perfectly; agents survive a full tmux detach.
 
 **Killing** the session (`prefix &` on the last window, `tmux kill-session`, a
-reboot) ends the agent processes. `kel ls` then shows those sessions as `dead`
-with their dirs and branches intact; `kel restore` rebuilds the windows, and
-`kel restore -c` also runs `<agent> --continue` in each so Claude Code resumes
-the prior conversation. `kel new <name>` reclaims a `dead` record; `kel kill <name>` discards one, or
-`kel prune` clears them all at once (both honour the worktree-safety check;
-`kel prune -f` overrides). `kel restore -c` resumes each conversation exactly: the hook records Claude's session id per kel-session, so restore runs `<agent> --resume <id>`, falling back to `--continue` (the most recent for that directory) and then a fresh agent. `kel new` from a shell is the full thing; the `prefix k` menu's "new agent here" is a quick native window + agent in the current directory (unmanaged, no worktree).
+reboot) ends the agent processes. After that:
+
+- `kel ls` shows those sessions as `dead`, dirs and branches intact
+- `kel restore` rebuilds the windows; `kel restore -c` also resumes each
+  conversation — the hook records Claude's session id per kel-session, so it
+  runs `<agent> --resume <id>`, falling back to `--continue` (the most recent
+  for that dir) then a fresh agent
+- `kel new <name>` reclaims a `dead` record; `kel kill <name>` discards one;
+  `kel prune` discards them all at once (both keep any worktree with unsaved
+  work unless `-f`)
 
 ## The model
 
 - **One tmux session, `kel`.** Every agent is a window in it. `kel new` adds a
-  window there from anywhere — a plain shell or inside tmux.
-- **Window name = session name.** State is keyed by window *id* underneath, so
-  two windows can even share a name, but name them (`kel new` does, or
-  `prefix ,`) so the status bar reads.
-- **`kel-managed` vs unmanaged.** Windows you make by hand (`prefix c`) still get
-  state tracking and show in `kel ls` as `(unmanaged)` — they just have no
-  metadata, so `kel kill` on them only closes the window.
+  window there from any shell.
+- **State is keyed by window id**, so two windows can even share a name — but
+  name them (`kel new` does, `prefix ,` otherwise) so the status bar reads.
+- **Managed vs unmanaged.** `kel new` writes a metadata record. Windows you make
+  by hand (`prefix c`, or the `prefix k` menu's "new agent here") are still
+  state-tracked and appear in `kel ls` as `(unmanaged)` — `kel kill` on them
+  just closes the window.
 
 ## Isolation
 
@@ -65,8 +71,8 @@ the prior conversation. `kel new <name>` reclaims a `dead` record; `kel kill <na
 tasks.
 
 `--worktree` — a linked git worktree on a new branch, so two agents can work the
-same repo without colliding. After creating it, kel runs the repo's
-**`.kel/setup`** if present:
+same repo without colliding. kel then runs the repo's **`.kel/setup`** if
+present:
 
 ```
 .kel/setup      # executable, runs in the new worktree
@@ -75,39 +81,33 @@ same repo without colliding. After creating it, kel runs the repo's
 
 Use it to install deps / copy `.env` / warm caches. **It must only create
 gitignored paths** — anything it leaves that git would report as a change makes
-`kel kill` refuse to remove the worktree (which is the point: kel never deletes
-an agent's only copy of real work — commit & push, or `--force`).
-
-Example `.kel/setup` for a Node project:
-
-```bash
-#!/usr/bin/env bash
-set -e
-cp "$KEL_REPO/.env" .env 2>/dev/null || true
-npm ci
-```
+`kel kill` refuse to remove the worktree (the point: kel never deletes an
+agent's only copy of real work — commit & push, or `-f`). Full example in
+`examples/kel-setup`.
 
 ## Keys
 
-`prefix` is `Ctrl+b`. Full list: `prefix k` (or `kel cheat`).
+`prefix` is `Ctrl+b`. `prefix k` opens a floating menu of the common moves;
+`prefix k` → `?` (or `kel cheat` from a shell) shows the full reference.
 
 | | |
 |---|---|
 | `prefix 0..9` / `n` / `p` / `w` | move between agents |
 | `` prefix ` `` | jump to the next agent **waiting** on you |
-| `prefix c` | blank window · `prefix ,` rename · `prefix &` close |
+| `prefix k` | the command menu (new · jump · split · scroll · rename · close · detach) |
 | `prefix [` | scroll an agent's output (`q` to leave) |
-| `prefix %` `"` | split a window (agent + editor) · arrows move · `z` zoom |
-| `prefix d` | detach — agents keep running · `kel` to return |
+| `prefix \|` / `-` | split a window (agent + editor); arrows move panes; `z` zoom |
+| `prefix d` | detach — agents keep running; `kel` to return |
 
-## State
+## State files
 
 `~/.local/state/kel/`
-- `<window-id>.state` — `<state> <epoch>`, written by the hooks
+- `<window-id>.state` — `<state> <epoch>`, written by the hooks, pruned when the
+  window is gone
 - `sessions/<name>.json` — metadata for kel-managed sessions
 - `.stash/<claude-session-id>` — pane id from SessionStart, for hooks that don't
   inherit `$TMUX_PANE`
 - `doctor.json` — last `kel doctor` result
 
-Events → states: `UserPromptSubmit`→working, `Notification`→waiting,
-`Stop`→done, `SessionStart`→idle, `SessionEnd`→cleared.
+Events → states: `SessionStart`→idle, `UserPromptSubmit`→working,
+`Notification`→waiting, `Stop`→done, `SessionEnd`→cleared.
