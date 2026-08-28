@@ -10,6 +10,8 @@ The `spec.md` section numbers are not a build order. This file is.
 
 ## v0 — no Go, just shell + tmux config
 
+> **Status: built 2026-08-28** (`5b40b5d`). All mechanics unit-tested against an isolated tmux server. Not yet verified against a real authenticated Claude Code session — the one open question is whether Claude Code passes `$TMUX_PANE` to hook subprocesses; tiers 2 (stash) and 3 (cwd match) in `hooks/kel-hook.sh` are the fallback. See `docs/v0.md`.
+
 **Question it answers:** does an always-visible state line plus jump-to-blocked
 actually fix the sprawl?
 
@@ -20,9 +22,8 @@ actually fix the sprawl?
 - Three Claude Code hooks (`UserPromptSubmit` / `Notification` / `Stop`), each
   writes `<state> <epoch>` atomically to the session's state file and runs
   `tmux refresh-client -S`.
-- `SessionStart` hook stashes `#{window_id}` so the state hooks know which
-  window to touch. (First: verify whether `$TMUX_PANE` is already inherited —
-  if so, the stash is redundant.)
+- `hooks/kel-hook.sh` resolves the pane 3 ways: `$TMUX_PANE` from the env, the
+  `SessionStart` stash, or the lone tmux pane whose cwd matches the payload.
 - Sessions are native `tmux` windows made by hand. Window name = session name.
 - `tmux/kel.conf` — the `status-left` line and the `` prefix ` `` binding,
   sourced from `~/.tmux.conf`.
