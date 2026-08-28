@@ -6,13 +6,16 @@
 # Claude Code passes the hook payload as JSON on stdin.
 #
 # Job: resolve which tmux window this Claude session lives in, then write
-# "<state> <epoch>" to ~/.local/state/kel/<window-name>.state and nudge tmux
-# to redraw its status line now instead of on the 15s interval.
+# "<state> <epoch>" to ~/.local/state/kel/<window-id>.state and nudge tmux to
+# redraw its status line now instead of on the interval.
+#
+# Keyed by window id (@3), not window name: names collide (tmux auto-names
+# every window running `claude` as "claude"). Ids are unique and stable.
 #
 # Pane resolution, in order:
-#   1. $TMUX_PANE in the hook's environment          (ideal — inherited from the pane)
+#   1. $TMUX_PANE in the hook's environment       (ideal — inherited from the pane)
 #   2. the value stashed by this session's SessionStart hook
-#   3. the one tmux pane whose current path == the hook payload's cwd
+#   3. the single tmux pane whose current path == the payload's cwd
 #
 # Never fails the hook: any missing context -> exit 0 quietly.
 set -uo pipefail
@@ -51,9 +54,8 @@ fi
 
 [ -z "$pane" ] && exit 0
 
-# window name == session name (v0: sessions are hand-made tmux windows)
-name="$(tmux display-message -p -t "$pane" '#{window_name}' 2>/dev/null || true)"
-[ -z "$name" ] && exit 0
+wid="$(tmux display-message -p -t "$pane" '#{window_id}' 2>/dev/null || true)"
+[ -z "$wid" ] && exit 0
 
 case "$event" in
   SessionStart)     state="idle" ;;
@@ -61,7 +63,7 @@ case "$event" in
   Notification)     state="waiting" ;;
   Stop)             state="done" ;;
   SessionEnd)
-    rm -f "$STATE_DIR/$name.state"
+    rm -f "$STATE_DIR/$wid.state"
     [ -n "$sid" ] && rm -f "$STASH_DIR/$sid"
     tmux refresh-client -S 2>/dev/null || true
     exit 0 ;;
@@ -69,9 +71,9 @@ case "$event" in
 esac
 
 # atomic write (temp in same dir, then rename)
-tmp="$(mktemp "$STATE_DIR/.${name}.XXXXXX" 2>/dev/null)" || exit 0
+tmp="$(mktemp "$STATE_DIR/.${wid#@}.XXXXXX" 2>/dev/null)" || exit 0
 printf '%s %s\n' "$state" "$(date +%s)" > "$tmp"
-mv -f "$tmp" "$STATE_DIR/$name.state"
+mv -f "$tmp" "$STATE_DIR/$wid.state"
 
 tmux refresh-client -S 2>/dev/null || true
 exit 0

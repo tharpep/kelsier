@@ -25,10 +25,11 @@ say "directories"
 mkdir -p "$BIN_DIR" "$STATE_DIR" "$STATE_DIR/.stash"
 
 say "scripts -> $BIN_DIR"
-chmod +x "$KEL_DIR"/bin/kel-status "$KEL_DIR"/bin/kel-jump "$KEL_DIR"/hooks/kel-hook.sh
+chmod +x "$KEL_DIR"/bin/kel-status "$KEL_DIR"/bin/kel-jump "$KEL_DIR"/bin/kel-cheat "$KEL_DIR"/hooks/kel-hook.sh
 ln -sf "$KEL_DIR/bin/kel-status" "$BIN_DIR/kel-status"
 ln -sf "$KEL_DIR/bin/kel-jump"   "$BIN_DIR/kel-jump"
-echo "  kel-status, kel-jump"
+ln -sf "$KEL_DIR/bin/kel-cheat"  "$BIN_DIR/kel-cheat"
+echo "  kel-status, kel-jump, kel-cheat"
 
 say "tmux config"
 if [ -f "$HOME/.config/tmux/tmux.conf" ]; then

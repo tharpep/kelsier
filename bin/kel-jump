@@ -2,8 +2,8 @@
 # kel — jump to the next session in `waiting` state.
 #
 # Bound to `prefix ` ` in tmux/kel.conf. Cycles: from the current window,
-# selects the next waiting window by index, wrapping around. This is the one
-# move terminal tabs can't offer — "go to whoever is blocked on me."
+# selects the next waiting window by index, wrapping around. "Go to whoever is
+# blocked on me" — the move terminal tabs can't offer.
 set -uo pipefail
 
 STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/kel"
@@ -12,13 +12,13 @@ STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/kel"
 current="$(tmux display-message -p '#{window_index}' 2>/dev/null || echo 0)"
 
 waiting=()
-while read -r idx name; do
-  [ -z "$idx" ] && continue
-  f="$STATE_DIR/$name.state"
+while read -r wid idx; do
+  [ -z "$wid" ] && continue
+  f="$STATE_DIR/$wid.state"
   [ -f "$f" ] || continue
   read -r state _ < "$f" || continue
   [ "$state" = "waiting" ] && waiting+=("$idx")
-done < <(tmux list-windows -F '#{window_index} #{window_name}' 2>/dev/null)
+done < <(tmux list-windows -F '#{window_id} #{window_index}' 2>/dev/null)
 
 if [ "${#waiting[@]}" -eq 0 ]; then
   tmux display-message "kel: nothing waiting"

@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+# kel — keybinding cheatsheet. Shown by `prefix k` via display-popup.
+cat <<'EOF'
+
+  kel — keys                         prefix = Ctrl+b
+
+  prefix 0..9      jump to window N
+  prefix n / p     next / previous window
+  prefix `         jump to next agent WAITING on you
+  prefix c         new window  (start another agent)
+  prefix ,         rename window  → the name on the status bar
+  prefix w         pick a window from a list
+  prefix d         detach — agents keep running (tmux attach to return)
+  prefix k         this cheatsheet
+
+  status bar        N:name*  working     N:name?  waiting on you
+                    N:name!  done        N:name   idle
+                    [ N:name ]           the window you're on
+
+  one window, two panes  (agent + editor)
+  prefix %         split into left | right
+  prefix "         split into top / bottom
+  prefix ← → ↑ ↓   move between panes
+  prefix z         zoom the current pane (toggle fullscreen)
+  prefix x         kill the current pane
+
+  prefix ?         tmux's own full key list
+
+  press any key to close
+EOF
+# wait for a keypress so the popup doesn't vanish immediately
+read -rsn1 2>/dev/null || true
