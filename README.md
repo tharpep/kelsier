@@ -42,16 +42,17 @@ Explicit, because each is a thing this project will be tempted into.
 
 ## Status
 
-**v0.1** — working and in daily use. One `kel` command:
+**v0.2** — working and in daily use. One `kel` command:
 
 ```
-kel                enter the workspace          kel ls        list sessions
-kel new <name>     new window + agent           kel kill <name>
-kel new <name> -w  ...in a git worktree         kel restore   rebuild after a kill
+kel                enter the workspace          kel ls        every agent, grouped
+kel new <name>     new window + agent           kel go [G]     switch group
+kel new <name> -w  ...in a git worktree         kel menu      fleet picker
+kel kill <name>    close one                    kel restore   rebuild after a kill
 ```
 
-Plus a state-aware status line and `` prefix ` `` to jump to the next blocked
-agent. Shell + `tmux` config, no binary yet.
+One tmux session per repo, a state-aware status line, and `` prefix ` `` to jump
+to the next blocked agent in *any* group. Shell + `tmux` config, no binary yet.
 
 `docs/usage.md` is the reference · `docs/rollout.md` is the build order ·
 `docs/spec.md` is the design.
