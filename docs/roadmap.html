@@ -558,9 +558,9 @@
       <li class="stage now">
         <div class="node" aria-hidden="true">2</div>
         <div class="stage-main">
-          <p class="stage-tag">Stage 2 &nbsp;<span class="ver">v0.2 &middot; grouping by repo</span><span class="badge next">next</span></p>
-          <h2>Give the fleet structure &mdash; only once the flat list overflows</h2>
-          <p class="stance">One tmux session per repo. The grouping unit is the repo, which kel already records.</p>
+          <p class="stage-tag">Stage 2 &nbsp;<span class="ver">v0.2 &middot; grouping + a selectable menu</span><span class="badge next">next</span></p>
+          <h2>Give the fleet structure &mdash; and the first select-and-see surface</h2>
+          <p class="stance">One tmux session per repo, plus <code>kel menu</code>: a dynamic list of every agent, press a key to jump. Commands stay primary.</p>
 
           <div class="field">
             <span class="k">Gate &mdash; the pain that unlocks it</span>
@@ -570,19 +570,30 @@
           <div class="field">
             <span class="k">Ships</span>
             <ul>
-              <li>one tmux session per repo, named after it; <code>kel new</code> targets the session for wherever it was run (<code>--group</code> to override)</li>
+              <li>one tmux session per repo; <code>kel new</code> targets the session for wherever it was run (<code>--group</code> to override)</li>
               <li><code>kel jump</code> goes <em>global</em> &mdash; next <span class="mono">waiting</span> agent in any group, switching sessions</li>
-              <li>two-level status line: current group in full, other groups compact and only when they want attention</li>
-              <li><code>kel go &lt;group&gt;</code>; <code>kel ls</code> groups with headers; a <code>group</code> field in the metadata</li>
+              <li><code>kel menu</code> (+ a <code>prefix</code> key) &mdash; a dynamic <code>display-menu</code> of every agent with its state; press to jump</li>
+              <li>status line, minimal: current group in full, others collapsed to <span class="mono">&#10216;+N waiting&#10217;</span></li>
+              <li><code>kel go &lt;group&gt;</code>, <code>prefix G</code>; <code>kel ls</code> grouped; a <code>group</code> field in the metadata</li>
             </ul>
           </div>
 
           <figure class="term">
-            <figcaption class="term-bar">two-level status line</figcaption>
-<pre class="term-body"><code>[api-gateway] 0:auth-fix<span class="s-wait">?</span> [1:rate-limit<span class="s-work">*</span>] 2:docs   <span class="dim">&middot;</span>   coppermind<span class="s-wait">&#10216;1?&#10217;</span></code></pre>
+            <figcaption class="term-bar">status line &middot; option A</figcaption>
+<pre class="term-body"><code>[api-gateway] 0:auth-fix<span class="s-wait">?</span> [1:rate-limit<span class="s-work">*</span>] 2:docs   <span class="dim">&#10216;+2 waiting&#10217;</span></code></pre>
+          </figure>
+          <figure class="term">
+            <figcaption class="term-bar">kel menu</figcaption>
+<pre class="term-body"><code> api-gateway
+   1  auth-fix        <span class="s-wait">?</span>
+   2  rate-limit      <span class="s-work">*</span>
+ coppermind
+   3  sazed           <span class="s-done">!</span>
+ &#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;
+   n  new agent      <span class="dim">&#96;</span>  next waiting</code></pre>
           </figure>
 
-          <p class="gain"><span class="k">Unlocks</span>Managing agents across several projects at once without the status line turning to mush &mdash; and native <code>prefix 1&ndash;9</code> stays meaningful inside a group.</p>
+          <p class="gain"><span class="k">Unlocks</span>Managing agents across several projects without the status line turning to mush &mdash; and a floating list you can eyeball and pick from, not just commands.</p>
         </div>
       </li>
 

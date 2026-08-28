@@ -38,7 +38,7 @@ does pass tmux context to hook subprocesses.
 
 **Testing before v0.2:** see the checklist at the bottom of this file.
 
-## v0.2 — grouping by repo
+## v0.2 — grouping by repo + a selectable fleet menu
 
 **Trigger:** the flat `kel` session overflows — routinely running agents across
 several repos at once, so the status line is cramped, `prefix 1-9` runs out, and
@@ -46,9 +46,17 @@ unrelated projects share one list. **Do not build until flat use actually hits
 this** (see the v0.1 test plan — the specific signal is "10+ agents across 2+
 repos in a normal week" or "I keep losing which window is which project").
 
-**Design.** The grouping unit is the repo. One tmux session per repo, named
-after it; `kel new` targets the session for wherever it was run (`--group <g>`
-to override, `~`-rooted sessions fall into `misc`).
+Two things land together: sessions grouped by repo, and the first
+*select-and-see* surface beyond commands (`kel menu`). Commands stay the primary
+path; the menu and, later, the board are faster surfaces onto the same ops.
+
+### Grouping
+
+The grouping unit is the repo. One tmux session per repo, named after it;
+`kel new` targets the session for wherever it was run (`--group <g>` to
+override, `~`-rooted agents fall into `misc`). Group *switching* is mostly
+native tmux (`prefix s` tree, `prefix (` / `)` cycle) — kel only adds the
+state-aware pieces.
 
 ```
 session "api-gateway"   auth-fix?   rate-limit*   docs
@@ -57,25 +65,76 @@ session "infra"         tf-upgrade
 ```
 
 - **`kel jump` goes global** — next `waiting` agent in *any* group, switching
-  sessions if needed. It must ignore group boundaries; that's the point of it.
-- **Status line, two-level** — current group in full, other groups compact and
-  only when they want attention:
-  `[api-gateway] 0:auth-fix? [1:rate-limit*] 2:docs · coppermind⟨1?⟩`
-- `kel ls` groups with headers; `kel restore` puts sessions back in their groups
-- `kel` bare → last group, or a picker if ambiguous
-- new: `kel go <group>`, maybe `prefix G` for a state-aware group jump
-- session metadata gains a `group` field
+  sessions if needed. Stable cycle order (group name, then window index).
+- **Status line — option A (minimal).** Current group in full; every other group
+  collapses to one badge:
+  `[api-gateway] 0:auth-fix? [1:rate-limit*] 2:docs   ⟨+2 waiting⟩`
+  You don't need to know *which* group — `` prefix ` `` takes you there. (Option
+  B, per-group badges, only if you later miss knowing which project is blocked.)
+- `kel ls` grows group headers; `kel restore` / `kel prune` operate across all
+  groups; `kel` bare lands in the last-used group (tracked in a
+  `last-group` state file).
+- `kel go <group>` — new; `switch-client` to that group, shell-completion on
+  group names.
+- session metadata gains a `group` field.
+- **Migration:** existing flat-session records get `group` from their `repo`
+  basename on first v0.2 run; live windows stay where they are until killed /
+  recreated. No forced move — the old `kel` group empties over a few days.
 
-Within a group, nothing changes — native `prefix 0-9` / `n` / `p`.
+### `kel menu` — the selectable fleet view
 
-Cost ~100–150 lines; the fiddly part is keeping the two-level status line
-legible. This replaces the old "chrome-tab-groups inside one session" idea —
-real tmux sessions do the same job without a bookkeeping layer to invent.
+`kel menu` (and a `prefix` binding, e.g. `prefix m`) generates a **dynamic**
+`tmux display-menu`: a floating list of every agent across every group, each
+showing its state, press a key to jump there.
+
+```
+ ┌ kel ───────────────────┐
+ │ api-gateway            │
+ │  1  auth-fix       ?   │
+ │  2  rate-limit     *   │
+ │ coppermind            │
+ │  3  sazed         !   │
+ │  4  atium-check       │
+ │ ─────────────────────  │
+ │  n  new agent here    │
+ │  `  next waiting      │
+ └───────────────────────┘
+```
+
+Native tmux, ~30–40 lines to build the menu string. No scroll, single-key
+items — good to ~15–20 agents. Past that (or when you want filter / sort /
+browse) is the v0.3 board.
+
+`prefix G` → native `choose-tree -Zs` for a plain group picker; a state-aware
+group menu can come later if the plain one isn't enough.
+
+### Build order
+
+1. `group` field + `kel new` targeting group sessions
+2. `kel jump` cross-session
+3. `kel ls` grouped
+4. `kel restore` / `kel prune` across groups
+5. `kel go` + `prefix G`
+6. `kel menu` (dynamic display-menu)
+7. two-level status line (option A) — last, it's the fiddliest
+8. metadata auto-migration
+
+~180–230 lines net. No new dependencies. Fiddliest parts: the status-line
+width handling and the `kel jump` cycle order.
+
+### Risks
+
+- **Session name collision** — two repos both named `api`. `--group` override +
+  document; rare enough.
+- **Status-line clutter** — option A sidesteps it; if even that feels noisy,
+  drop to just the current group's windows and rely on `` ` `` for cross-group.
+- **The flat→grouped transition** — a few days of a `kel` group alongside real
+  groups until the old one empties.
 
 ## v0.3 — the board (popup)
 
-**Trigger:** still losing track *despite* v0.2 — you want filter / scroll /
-browse across everything at once.
+**Trigger:** `kel menu` stops being enough — more than ~20 agents, or you want
+filter / sort / browse across everything at once.
 
 - `kel board` as a `display-popup` TUI (shell TUI, or Bubble Tea if it needs the
   structure) — the cross-group navigator, filter, jump, new, kill
