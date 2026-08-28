@@ -1,0 +1,722 @@
+<title>kelsier build order</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500;700;800&display=swap">
+
+<style>
+  :root {
+    --bg:            #e7e8eb;
+    --surface:       #f1f2f4;
+    --raised:        #fbfbfc;
+    --text:          #1b1e24;
+    --text-muted:    #5b616c;
+    --border:        #d4d7dd;
+    --border-strong: #b7bcc4;
+    --accent:        #a96a12;
+    --accent-line:   #c98f34;
+    --wait:          #a5620d;
+    --work:          #2f6cab;
+    --done:          #3c8760;
+    --idle:          #868b95;
+
+    /* the terminal screen keeps one world in both themes — it's a screen */
+    --screen-bg:     #16181d;
+    --screen-panel:  #1b1e25;
+    --screen-text:   #c9ccd3;
+    --screen-dim:    #767c87;
+    --screen-border: #2b2f39;
+    --screen-wait:   #e0a33e;
+    --screen-work:   #6ba6e0;
+    --screen-done:   #64bb8d;
+    --screen-idle:   #6c727c;
+
+    --measure: 63ch;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg:            #131519;
+      --surface:       #191c22;
+      --raised:        #21252d;
+      --text:          #e3e5ea;
+      --text-muted:    #9096a1;
+      --border:        #2b303a;
+      --border-strong: #3b414d;
+      --accent:        #d99a3c;
+      --accent-line:   #6a5324;
+      --wait:          #d99a3c;
+      --work:          #6ba6e0;
+      --done:          #64bb8d;
+      --idle:          #7f858f;
+    }
+  }
+
+  :root[data-theme="dark"] {
+    --bg:            #131519;
+    --surface:       #191c22;
+    --raised:        #21252d;
+    --text:          #e3e5ea;
+    --text-muted:    #9096a1;
+    --border:        #2b303a;
+    --border-strong: #3b414d;
+    --accent:        #d99a3c;
+    --accent-line:   #6a5324;
+    --wait:          #d99a3c;
+    --work:          #6ba6e0;
+    --done:          #64bb8d;
+    --idle:          #7f858f;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: "IBM Plex Sans", system-ui, -apple-system, sans-serif;
+    font-size: 16px;
+    line-height: 1.62;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .wrap {
+    max-width: 880px;
+    margin: 0 auto;
+    padding: clamp(2.5rem, 6vw, 5rem) clamp(1.1rem, 5vw, 2.75rem) 6rem;
+  }
+
+  /* ---- header ---- */
+  .page-head { border-bottom: 1px solid var(--border); padding-bottom: 2.25rem; }
+
+  .eyebrow {
+    font-family: "JetBrains Mono", monospace;
+    font-size: 0.72rem;
+    font-weight: 500;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin: 0 0 1.1rem;
+  }
+
+  h1 {
+    font-family: "JetBrains Mono", monospace;
+    font-weight: 800;
+    font-size: clamp(1.65rem, 4.5vw, 2.15rem);
+    line-height: 1.15;
+    letter-spacing: -0.02em;
+    text-wrap: balance;
+    margin: 0 0 1.1rem;
+  }
+
+  .standfirst {
+    max-width: var(--measure);
+    color: var(--text-muted);
+    margin: 0 0 1.9rem;
+  }
+  .standfirst strong { color: var(--text); font-weight: 600; }
+
+  .legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem 1.5rem;
+    margin: 0;
+    font-family: "JetBrains Mono", monospace;
+    font-size: 0.8rem;
+  }
+  .legend div { color: var(--text-muted); }
+  .legend b {
+    display: inline-block;
+    width: 1.1ch;
+    text-align: center;
+    font-weight: 700;
+    margin-right: 0.55ch;
+  }
+  .legend .l-wait b { color: var(--wait); }
+  .legend .l-work b { color: var(--work); }
+  .legend .l-done b { color: var(--done); }
+  .legend .l-idle b { color: var(--idle); }
+
+  /* ---- timeline ---- */
+  .timeline {
+    list-style: none;
+    margin: 3.25rem 0 0;
+    padding: 0;
+    position: relative;
+  }
+  .timeline::before {
+    content: "";
+    position: absolute;
+    left: 12px;
+    top: 6px;
+    bottom: 6px;
+    width: 2px;
+    background: var(--border-strong);
+  }
+
+  .stage {
+    position: relative;
+    display: grid;
+    grid-template-columns: 3rem 1fr;
+    column-gap: clamp(0.75rem, 3vw, 1.5rem);
+    padding-bottom: 3.25rem;
+  }
+  .stage:last-child { padding-bottom: 0; }
+
+  .node {
+    grid-column: 1;
+    width: 26px;
+    height: 26px;
+    border-radius: 50%;
+    background: var(--bg);
+    border: 2px solid var(--border-strong);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: "JetBrains Mono", monospace;
+    font-size: 0.78rem;
+    font-weight: 700;
+    color: var(--text-muted);
+    position: relative;
+    z-index: 1;
+  }
+  .stage.now .node {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #fff;
+  }
+  :root[data-theme="dark"] .stage.now .node,
+  :root:not([data-theme="light"]) .stage.now .node { color: #17130a; }
+
+  .stage-main { grid-column: 2; min-width: 0; padding-top: 0.05rem; }
+
+  .stage-tag {
+    font-family: "JetBrains Mono", monospace;
+    font-size: 0.74rem;
+    font-weight: 500;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin: 0 0 0.4rem;
+  }
+  .stage-tag .ver { color: var(--text-muted); }
+
+  h2 {
+    font-family: "JetBrains Mono", monospace;
+    font-weight: 700;
+    font-size: 1.16rem;
+    letter-spacing: -0.01em;
+    margin: 0 0 0.7rem;
+    text-wrap: balance;
+  }
+
+  .stance {
+    font-style: italic;
+    color: var(--text);
+    max-width: var(--measure);
+    margin: 0 0 1.35rem;
+    padding-left: 0.9rem;
+    border-left: 2px solid var(--accent-line);
+  }
+
+  .field { margin: 0 0 1.15rem; max-width: var(--measure); }
+  .field > .k {
+    font-family: "JetBrains Mono", monospace;
+    font-size: 0.68rem;
+    font-weight: 500;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    display: block;
+    margin-bottom: 0.4rem;
+  }
+  .field ul { margin: 0; padding-left: 1.15rem; }
+  .field li { margin: 0.25rem 0; }
+  .field li::marker { color: var(--accent); }
+  .field p { margin: 0; }
+
+  code, .mono {
+    font-family: "JetBrains Mono", monospace;
+    font-size: 0.88em;
+  }
+  .stage-main p code, .field code, .aux code {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    padding: 0.05em 0.38em;
+    font-size: 0.82em;
+  }
+
+  .gain {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-left: 2px solid var(--done);
+    border-radius: 3px;
+    padding: 0.7rem 0.95rem;
+    margin: 1.35rem 0 0;
+    max-width: var(--measure);
+    font-size: 0.95rem;
+  }
+  .gain .k {
+    font-family: "JetBrains Mono", monospace;
+    font-size: 0.66rem;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--done);
+    display: block;
+    margin-bottom: 0.25rem;
+  }
+
+  /* ---- terminal mockups ---- */
+  .term {
+    margin: 1.5rem 0 0;
+    border: 1px solid var(--screen-border);
+    border-radius: 5px;
+    overflow: hidden;
+    background: var(--screen-bg);
+    box-shadow: 0 1px 2px rgba(0,0,0,0.16), 0 8px 24px -12px rgba(0,0,0,0.3);
+  }
+  .term-bar {
+    font-family: "JetBrains Mono", monospace;
+    font-size: 0.68rem;
+    letter-spacing: 0.13em;
+    text-transform: uppercase;
+    color: var(--screen-dim);
+    background: var(--screen-panel);
+    border-bottom: 1px solid var(--screen-border);
+    padding: 0.5rem 0.9rem;
+  }
+  .term-body {
+    margin: 0;
+    padding: 0.95rem 1rem;
+    overflow-x: auto;
+    font-family: "JetBrains Mono", monospace;
+    font-size: 0.78rem;
+    line-height: 1.72;
+    color: var(--screen-text);
+    tab-size: 2;
+  }
+  .term-body .dim  { color: var(--screen-dim); }
+  .term-body .s-wait { color: var(--screen-wait); font-weight: 700; }
+  .term-body .s-work { color: var(--screen-work); font-weight: 700; }
+  .term-body .s-done { color: var(--screen-done); font-weight: 700; }
+  .term-body .s-idle { color: var(--screen-idle); }
+  .term-body .ok   { color: var(--screen-done); }
+  .term-body .rule { color: var(--screen-border); }
+  .term + .term { margin-top: 0.6rem; }
+
+  /* ---- aux sections ---- */
+  .aux {
+    margin-top: 3.5rem;
+    padding-top: 2.5rem;
+    border-top: 1px solid var(--border);
+  }
+  .aux h2 { font-size: 1.16rem; margin-bottom: 0.4rem; }
+  .aux .lead { color: var(--text-muted); max-width: var(--measure); margin: 0 0 1.6rem; }
+
+  .parking-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    gap: 0.6rem;
+  }
+  .parking-list li {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 0.75rem;
+    align-items: baseline;
+    padding: 0.75rem 0.95rem;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    max-width: var(--measure);
+  }
+  .parking-list .name {
+    font-family: "JetBrains Mono", monospace;
+    font-size: 0.82rem;
+    font-weight: 600;
+    color: var(--text);
+  }
+  .parking-list .why { color: var(--text-muted); font-size: 0.92rem; }
+
+  /* ---- cut diagram ---- */
+  .cut-diagram {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1rem;
+    margin: 0 0 1.9rem;
+  }
+  @media (max-width: 620px) { .cut-diagram { grid-template-columns: 1fr; } }
+
+  .schema {
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 1rem;
+    background: var(--surface);
+  }
+  .schema.rejected { opacity: 0.82; }
+  .schema .schema-k {
+    font-family: "JetBrains Mono", monospace;
+    font-size: 0.68rem;
+    letter-spacing: 0.13em;
+    text-transform: uppercase;
+    margin: 0 0 0.85rem;
+  }
+  .schema.rejected .schema-k { color: var(--text-muted); }
+  .schema.shipping .schema-k { color: var(--done); }
+
+  .blocks { display: flex; flex-wrap: wrap; gap: 0.3rem; align-items: center; }
+  .blk {
+    font-family: "JetBrains Mono", monospace;
+    font-size: 0.66rem;
+    padding: 0.3rem 0.5rem;
+    border: 1px solid var(--border-strong);
+    border-radius: 3px;
+    color: var(--text-muted);
+    background: var(--raised);
+    white-space: nowrap;
+  }
+  .blk.live { color: var(--text); border-color: var(--accent-line); }
+  .blk.slot { border-style: dashed; }
+  .arrow {
+    font-family: "JetBrains Mono", monospace;
+    font-size: 0.66rem;
+    color: var(--text-muted);
+    padding: 0 0.15rem;
+  }
+  .schema .row + .row { margin-top: 0.7rem; }
+  .schema .cap {
+    margin: 0.85rem 0 0;
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    line-height: 1.5;
+  }
+  .popup-float {
+    margin-top: 0.5rem;
+    margin-left: 1.4rem;
+    border: 1px solid var(--accent-line);
+    border-radius: 3px;
+    padding: 0.3rem 0.5rem;
+    font-family: "JetBrains Mono", monospace;
+    font-size: 0.66rem;
+    color: var(--text);
+    background: var(--raised);
+    display: inline-block;
+  }
+
+  .why-cut { margin: 0; padding-left: 1.15rem; max-width: var(--measure); }
+  .why-cut li { margin: 0.4rem 0; }
+  .why-cut li::marker { color: var(--wait); }
+
+  /* ---- footer ---- */
+  footer {
+    margin-top: 4rem;
+    padding-top: 2rem;
+    border-top: 1px solid var(--border);
+    color: var(--text-muted);
+    font-size: 0.95rem;
+    max-width: var(--measure);
+  }
+  footer strong { color: var(--text); font-weight: 600; }
+
+  a { color: var(--accent); text-underline-offset: 2px; }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 2px; }
+
+  @media (prefers-reduced-motion: no-preference) {
+    .stage { animation: rise 0.5s cubic-bezier(0.22, 1, 0.36, 1) both; }
+    .stage:nth-child(1) { animation-delay: 0.04s; }
+    .stage:nth-child(2) { animation-delay: 0.10s; }
+    .stage:nth-child(3) { animation-delay: 0.16s; }
+    .stage:nth-child(4) { animation-delay: 0.22s; }
+    .stage:nth-child(5) { animation-delay: 0.28s; }
+    @keyframes rise {
+      from { opacity: 0; transform: translateY(9px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+  }
+</style>
+
+<div class="wrap">
+  <header class="page-head">
+    <p class="eyebrow">kelsier &middot; kel</p>
+    <h1>Five stages, each gated on the last</h1>
+    <p class="standfirst">
+      The constraint is <strong>&ldquo;will I actually adopt this,&rdquo;</strong> not
+      &ldquo;can it be built.&rdquo; So every stage ships the smallest thing that answers
+      a real question, and nothing above a line gets built until the stage below it has
+      earned its place in daily use. If v0 doesn&rsquo;t stick, none of the rest happens.
+    </p>
+    <dl class="legend">
+      <div class="l-wait"><b>?</b>waiting on you</div>
+      <div class="l-work"><b>*</b>working</div>
+      <div class="l-done"><b>!</b>done</div>
+      <div class="l-idle"><b>&middot;</b>idle</div>
+    </dl>
+  </header>
+
+  <main>
+    <ol class="timeline">
+
+      <!-- STAGE 0 -->
+      <li class="stage now">
+        <div class="node" aria-hidden="true">0</div>
+        <div class="stage-main">
+          <p class="stage-tag">Stage 0 &nbsp;<span class="ver">v0 &middot; premise test</span></p>
+          <h2>Prove the idea before building it</h2>
+          <p class="stance">Shell scripts and tmux config. No binary. This exists to test one thing.</p>
+
+          <div class="field">
+            <span class="k">Ships</span>
+            <ul>
+              <li><code>kel-status</code> &mdash; a shell script that renders the <code>status-left</code> fleet line</li>
+              <li><code>kel-jump</code> &mdash; <code>prefix&nbsp;`</code> jumps to the next session in <span class="mono">waiting</span></li>
+              <li>3 Claude Code hooks write <code>&lt;state&gt; &lt;epoch&gt;</code> atomically; <code>SessionStart</code> stashes the window id</li>
+              <li><code>install.sh</code> merges the hooks into <code>settings.json</code> with <code>jq</code>, without clobbering MCP servers</li>
+              <li>sessions are native tmux windows, made by hand</li>
+            </ul>
+          </div>
+
+          <div class="field">
+            <span class="k">Gate to start</span>
+            <p>None &mdash; this is the entry point.</p>
+          </div>
+
+          <div class="field">
+            <span class="k">Still manual</span>
+            <p>Creating windows, adding worktrees, <code>cd</code>-ing into repos.</p>
+          </div>
+
+          <figure class="term">
+            <figcaption class="term-bar">tmux &middot; status line</figcaption>
+<pre class="term-body"><code>~/code/api-gateway $ claude
+  <span class="dim">&#9679; reading auth/middleware.ts &hellip;</span>
+  <span class="dim">&#9679; I need your permission to edit 3 files</span>
+<span class="rule">&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;</span>
+[kel] 1:auth-fix<span class="s-wait">?</span>  2:rate-limit<span class="s-work">*</span>  3:docs<span class="s-done">!</span>  4:sazed</code></pre>
+          </figure>
+
+          <p class="gain"><span class="k">Unlocks</span>See which agent is blocked without switching windows &mdash; and jump to it in one key.</p>
+        </div>
+      </li>
+
+      <!-- STAGE 1 -->
+      <li class="stage">
+        <div class="node" aria-hidden="true">1</div>
+        <div class="stage-main">
+          <p class="stage-tag">Stage 1 &nbsp;<span class="ver">v0.1 &middot; session lifecycle</span></p>
+          <h2>Automate the parts of v0 you got tired of typing</h2>
+          <p class="stance">The first shell scripts become real subcommands.</p>
+
+          <div class="field">
+            <span class="k">Gate &mdash; the pain that unlocks it</span>
+            <p>You&rsquo;re hand-rolling <code>git worktree add</code> + <code>tmux new-window</code> + <code>cd</code> several times a day.</p>
+          </div>
+
+          <div class="field">
+            <span class="k">Ships</span>
+            <ul>
+              <li><code>kel new &lt;name&gt;</code> &middot; <code>kel new &lt;name&gt; --worktree</code> &middot; <code>kel kill &lt;name&gt;</code></li>
+              <li><code>kel ls [--json]</code></li>
+              <li><code>kel kill</code> refuses on uncommitted or unpushed worktree changes, and says why</li>
+              <li><code>kel doctor</code> &mdash; capability probe, cached per machine</li>
+            </ul>
+          </div>
+
+          <figure class="term">
+            <figcaption class="term-bar">kel new</figcaption>
+<pre class="term-body"><code>~/code/api-gateway $ kel new rate-limit --worktree
+  <span class="ok">&#10003;</span> worktree   ~/code/.wt/rate-limit
+  <span class="ok">&#10003;</span> branch     rate-limit
+  <span class="ok">&#10003;</span> tmux       @5  &rarr;  window 2:rate-limit
+  <span class="ok">&#10003;</span> agent      claude  (running)</code></pre>
+          </figure>
+          <figure class="term">
+            <figcaption class="term-bar">kel ls</figcaption>
+<pre class="term-body"><code>~/code $ kel ls
+NAME         STATE     ISO       BRANCH      DIRTY
+auth-fix     <span class="s-wait">waiting</span>   inplace   &mdash;              2
+rate-limit   <span class="s-work">working</span>   worktree  rate-limit      0
+docs         <span class="s-done">done</span>      inplace   &mdash;              1
+sazed        <span class="s-idle">idle</span>      inplace   &mdash;              0</code></pre>
+          </figure>
+
+          <p class="gain"><span class="k">Unlocks</span>One command spins up a named session in the right place; one command tears it down without eating uncommitted work.</p>
+        </div>
+      </li>
+
+      <!-- STAGE 2 -->
+      <li class="stage">
+        <div class="node" aria-hidden="true">2</div>
+        <div class="stage-main">
+          <p class="stage-tag">Stage 2 &nbsp;<span class="ver">v0.2 &middot; worktrees for real</span></p>
+          <h2>Make parallel work on one repo actually usable</h2>
+          <p class="stance">A fresh worktree with no dependencies installed is worthless. Fix that, and prove kel isn&rsquo;t Claude-Code-only.</p>
+
+          <div class="field">
+            <span class="k">Gate &mdash; the pain that unlocks it</span>
+            <p>Worktree sessions are dead on arrival: no <code>node_modules</code>, no <code>.venv</code>, no <code>.env</code>, no build cache.</p>
+          </div>
+
+          <div class="field">
+            <span class="k">Ships</span>
+            <ul>
+              <li><code>.kel/setup</code> &mdash; per-repo executable, runs in the new worktree with <code>$KEL_REPO</code></li>
+              <li>a second agent adapter (a non&ndash;Claude-Code agent) to prove the adapter boundary is real</li>
+              <li>agents with no hook system fall back to <span class="mono">unknown</span> + the pane&rsquo;s last output line</li>
+            </ul>
+          </div>
+
+          <figure class="term">
+            <figcaption class="term-bar">kel new &middot; provisioning</figcaption>
+<pre class="term-body"><code>~/code/api-gateway $ kel new billing --worktree
+  <span class="ok">&#10003;</span> worktree created
+  <span class="s-work">&#9656;</span> .kel/setup
+      npm ci  &hellip;&hellip;&hellip;&hellip;&hellip;  <span class="ok">ok</span>  (14.2s)
+      cp ../.env .env  &hellip;  <span class="ok">ok</span>
+  <span class="ok">&#10003;</span> agent started in a ready worktree</code></pre>
+          </figure>
+          <figure class="term">
+            <figcaption class="term-bar">kel ls &middot; mixed adapters</figcaption>
+<pre class="term-body"><code>~/code $ kel ls
+NAME         STATE      ADAPTER
+billing      <span class="s-work">working</span>    claude-code
+scratch      <span class="s-idle">unknown</span>    generic  <span class="dim">&middot; "waiting for input &hellip;"</span></code></pre>
+          </figure>
+
+          <p class="gain"><span class="k">Unlocks</span><code>kel new --worktree</code> gives you a checkout you can work in immediately &mdash; and kel can track agents it has no hooks for.</p>
+        </div>
+      </li>
+
+      <!-- STAGE 3 -->
+      <li class="stage">
+        <div class="node" aria-hidden="true">3</div>
+        <div class="stage-main">
+          <p class="stage-tag">Stage 3 &nbsp;<span class="ver">v0.3 &middot; the board</span></p>
+          <h2>Give the fleet a real surface &mdash; only once the status line stops fitting</h2>
+          <p class="stance">A transient popup, not a pane. Opens over the current window, dismissed with a key.</p>
+
+          <div class="field">
+            <span class="k">Gate &mdash; the pain that unlocks it</span>
+            <p>Routinely more than ~6 sessions. The status line is truncating and you need filter / scroll / browse.</p>
+          </div>
+
+          <div class="field">
+            <span class="k">Ships</span>
+            <ul>
+              <li><code>kel board</code> as a <code>display-popup</code> TUI (shell TUI, or Bubble Tea if it needs the structure)</li>
+              <li>filter, jump, new, kill &mdash; from the board</li>
+              <li>the board never occupies a pane and never needs to survive a switch</li>
+            </ul>
+          </div>
+
+          <figure class="term">
+            <figcaption class="term-bar">display-popup &middot; kel board</figcaption>
+<pre class="term-body"><code>&#9484; kel board &#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472; 6 live &#9488;
+&#9474;                                          &#9474;
+&#9474;  <span class="s-wait">&#9679;</span>  1  auth-fix     <span class="s-wait">waiting</span>  inplace  <span class="dim">~/api</span>  &#9474;
+&#9474;  <span class="s-work">&#9680;</span>  2  rate-limit   <span class="s-work">working</span>  wt       <span class="dim">~/wt</span>   &#9474;
+&#9474;  <span class="s-done">&#9675;</span>  3  docs         <span class="s-done">done</span>     inplace  <span class="dim">~/api</span>  &#9474;
+&#9474;  <span class="s-idle">&middot;</span>  4  sazed        <span class="s-idle">idle</span>     inplace  <span class="dim">~/saz</span>  &#9474;
+&#9474;  <span class="s-work">&#9680;</span>  5  billing      <span class="s-work">working</span>  wt       <span class="dim">~/wt</span>   &#9474;
+&#9474;  <span class="s-wait">&#9679;</span>  6  cache-layer  <span class="s-wait">waiting</span>  wt       <span class="dim">~/wt</span>   &#9474;
+&#9474;                                          &#9474;
+&#9474;  <span class="dim">/ filter   &#9166; go   n new   k kill   ` waiting</span> &#9474;
+&#9492;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9496;</code></pre>
+          </figure>
+
+          <p class="gain"><span class="k">Unlocks</span>Managing 10+ sessions without the status line turning to mush.</p>
+        </div>
+      </li>
+
+      <!-- STAGE 4 -->
+      <li class="stage">
+        <div class="node" aria-hidden="true">4</div>
+        <div class="stage-main">
+          <p class="stage-tag">Stage 4 &nbsp;<span class="ver">v1.0 &middot; consolidation</span></p>
+          <h2>Turn the pile of scripts into one thing you install anywhere</h2>
+          <p class="stance">Go + Bubble Tea, single static binary. Only worth it once the scripts are load-bearing.</p>
+
+          <div class="field">
+            <span class="k">Gate &mdash; the pain that unlocks it</span>
+            <p>The shell scripts got slow or hairy &mdash; or you want it on a second machine cleanly &mdash; or it&rsquo;s ready to show people.</p>
+          </div>
+
+          <div class="field">
+            <span class="k">Ships</span>
+            <ul>
+              <li>one static binary replacing <code>kel-status</code> / <code>kel-jump</code> / <code>kel board</code></li>
+              <li><code>~/.config/kel/config.toml</code> + per-repo <code>.kel/config.toml</code></li>
+              <li>a README that leads with the layout and the jump key; MIT license</li>
+            </ul>
+          </div>
+
+          <figure class="term">
+            <figcaption class="term-bar">kel doctor</figcaption>
+<pre class="term-body"><code>~ $ kel doctor
+  tmux 3.4  &hellip;&hellip;&hellip;&hellip;&hellip;&hellip;&hellip;&hellip;&hellip;&hellip;&hellip;&hellip;  <span class="ok">ok</span>
+  $TMUX_PANE reaches hooks  &hellip;&hellip;  <span class="ok">ok</span>
+  display-popup  &hellip;&hellip;&hellip;&hellip;&hellip;&hellip;&hellip;&hellip;  <span class="ok">ok</span>
+  node on PATH  &hellip;&hellip;&hellip;&hellip;&hellip;&hellip;&hellip;&hellip;&hellip;  <span class="ok">ok</span>   <span class="dim">v22.11 (fnm)</span>
+  git worktree flags  &hellip;&hellip;&hellip;&hellip;&hellip;  <span class="ok">ok</span>
+  <span class="dim">&rarr; cached  ~/.config/kel/doctor.json</span></code></pre>
+          </figure>
+
+          <p class="gain"><span class="k">Unlocks</span><code>git clone &amp;&amp; ./install.sh</code> on any machine &mdash; and a public repo, if you decide you want one.</p>
+        </div>
+      </li>
+
+    </ol>
+
+    <!-- PARKING LOT -->
+    <section class="aux">
+      <h2>Parking lot</h2>
+      <p class="lead">Named in the spec as candidates. None are committed, none block anything, and each ships only if a specific daily pain calls for it &mdash; the same rule as every stage above.</p>
+      <ul class="parking-list">
+        <li><span class="name">ops panel</span><span class="why">a diff / test-output mode in the right slot, if hand-review needs more than <code>lazygit</code> in its own window</span></li>
+        <li><span class="name">session templates</span><span class="why">name + agent + isolation + initial prompt saved as a reusable shape</span></li>
+        <li><span class="name">PR status</span><span class="why">CI / review state on the board row</span></li>
+        <li><span class="name">attach</span><span class="why">adopt a session that was started outside kel</span></li>
+      </ul>
+    </section>
+
+    <!-- CUT -->
+    <section class="aux">
+      <h2>Cut &mdash; the two-slot / swap-pane architecture</h2>
+      <p class="lead">One visible window split in two, every agent and editor living in a hidden holding session, swapped into the visible slots with <code>swap-pane</code>. Recorded here so the idea has a written answer and doesn&rsquo;t get re-proposed.</p>
+
+      <div class="cut-diagram">
+        <div class="schema rejected">
+          <p class="schema-k">Rejected</p>
+          <div class="row blocks">
+            <span class="blk">agent</span><span class="blk">agent</span><span class="blk">agent</span><span class="blk">nvim</span>
+          </div>
+          <div class="row"><span class="arrow">&darr;&nbsp; swap-pane &nbsp;&darr;</span></div>
+          <div class="row blocks">
+            <span class="blk slot">left slot</span><span class="blk slot">right slot</span>
+          </div>
+          <p class="cap">Hidden holding session on top; two visible slots below. Every switch moves a pane.</p>
+        </div>
+        <div class="schema shipping">
+          <p class="schema-k">Shipping instead</p>
+          <div class="row blocks">
+            <span class="blk live">1 auth-fix</span><span class="blk live">2 rate-limit</span><span class="blk live">3 docs</span>
+          </div>
+          <div class="row"><span class="popup-float">kel board &nbsp;(popup, on demand)</span></div>
+          <p class="cap">Native tmux windows. The board is a transient popup over whichever window you&rsquo;re in.</p>
+        </div>
+      </div>
+
+      <ul class="why-cut">
+        <li><code>swap-pane</code> is the hardest thing in the design and gives <em>less</em> flexibility than native windows &mdash; no real side-by-side comparison.</li>
+        <li>the holding session&rsquo;s pane geometry desyncs on every terminal resize; the next swap-in janks.</li>
+        <li><code>prefix 1</code>&ndash;<code>9</code> collides with native tmux window switching &mdash; a muscle-memory tax everywhere else, forever.</li>
+        <li>three panel modes fighting over one slot means you can&rsquo;t see the board while editing.</li>
+        <li>the status line breaks past ~6 sessions anyway &mdash; which is exactly when the popup board earns its place.</li>
+      </ul>
+    </section>
+  </main>
+
+  <footer>
+    <p>Order is the contract. Each stage is gated on the one below it proving itself in daily use. If v0 doesn&rsquo;t stick &mdash; if the status line becomes noise you ignore, or the hooks misfire enough that you stop trusting the state &mdash; <strong>nothing above it gets built, and that&rsquo;s the point.</strong></p>
+  </footer>
+</div>

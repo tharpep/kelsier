@@ -1,0 +1,10 @@
+# local machine state — never committed
+*.state
+/state/
+
+# editor / OS cruft
+*.swp
+.DS_Store
+
+# OneDrive placeholder junk if this ever lives under a synced folder
+desktop.ini
