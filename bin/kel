@@ -368,19 +368,24 @@ cmd_restore() {
   local names; names="$(dead_sessions)"
   [ -n "$names" ] || { say "nothing to restore"; return 0; }
 
-  local n meta cwd agent wid restored=0
+  local n meta cwd agent cid wid restored=0
   while read -r n; do
     [ -z "$n" ] && continue
     meta="$(meta_path "$n")"
     cwd="$(jq -r '.cwd // ""' "$meta")"
     agent="$(jq -r '.agent // "claude"' "$meta")"
+    cid="$(jq -r '.claude_session // ""' "$meta")"
     [ -d "$cwd" ] || { warn "skip $n — its directory is gone ($cwd)"; continue; }
     wid="$(open_window "$n" "$cwd")"
     [ -n "$wid" ] || { warn "skip $n — couldn't open a window"; continue; }
     jq --arg w "$wid" '.window_id=$w' "$meta" > "$meta.tmp" && mv "$meta.tmp" "$meta"
     if [ "$continue_agent" = 1 ]; then
-      # resume the prior conversation if there is one, else a fresh agent
-      tmux send-keys -t "$wid" "$agent --continue || $agent" Enter
+      # exact conversation if we recorded its id, else most-recent, else fresh
+      if [ -n "$cid" ]; then
+        tmux send-keys -t "$wid" "$agent --resume $cid || $agent --continue || $agent" Enter
+      else
+        tmux send-keys -t "$wid" "$agent --continue || $agent" Enter
+      fi
     fi
     restored=$((restored+1))
   done <<< "$names"
@@ -548,6 +553,18 @@ cmd_hook() {
 
   local wid; wid="$(tmux display-message -p -t "$pane" '#{window_id}' 2>/dev/null || true)"
   [ -z "$wid" ] && exit 0
+
+  # link this Claude conversation to the kel session record (for exact restore)
+  if [ -n "$sid" ] && [ "$event" != SessionEnd ]; then
+    local m
+    for m in "$SESSIONS_DIR"/*.json; do
+      [ -e "$m" ] || continue
+      [ "$(jq -r '.window_id' "$m" 2>/dev/null)" = "$wid" ] || continue
+      [ "$(jq -r '.claude_session // ""' "$m" 2>/dev/null)" = "$sid" ] && break
+      jq --arg s "$sid" '.claude_session=$s' "$m" > "$m.t" 2>/dev/null && mv "$m.t" "$m"
+      break
+    done
+  fi
 
   local state
   case "$event" in

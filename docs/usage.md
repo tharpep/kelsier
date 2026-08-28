@@ -46,8 +46,7 @@ with their dirs and branches intact; `kel restore` rebuilds the windows, and
 `kel restore -c` also runs `<agent> --continue` in each so Claude Code resumes
 the prior conversation. `kel new <name>` reclaims a `dead` record; `kel kill <name>` discards one, or
 `kel prune` clears them all at once (both honour the worktree-safety check;
-`kel prune -f` overrides). `kel restore -c` runs `<agent> --continue || <agent>`,
-so a session with no prior conversation still comes back with a fresh agent.
+`kel prune -f` overrides). `kel restore -c` resumes each conversation exactly: the hook records Claude's session id per kel-session, so restore runs `<agent> --resume <id>`, falling back to `--continue` (the most recent for that directory) and then a fresh agent. `kel new` from a shell is the full thing; the `prefix k` menu's "new agent here" is a quick native window + agent in the current directory (unmanaged, no worktree).
 
 ## The model
 
