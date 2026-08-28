@@ -1,0 +1,4 @@
+# kelsier ships shell scripts and tmux config that run on Linux.
+# Force LF everywhere so a checkout on Windows doesn't break them with CRLF.
+* text=auto eol=lf
+*.sh  text eol=lf
