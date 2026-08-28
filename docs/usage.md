@@ -48,9 +48,10 @@ Env knobs: `KEL_GROUP` (force every `kel new` into one group — see below),
 separate layer; the `group` field in the metadata just records which session a
 window belongs to.
 
-**By default a group is a repo.** `kel new` reads where you ran it:
-`~/code/api` → group `api` → session `kel/api`. `--group G` overrides;
-non-repo agents fall into `misc`.
+**By default a group is a repo.** `kel new` reads `$PWD` *at that moment*,
+walks up to the git root, and uses its basename: `~/code/api` → group `api` →
+session `kel/api`. `--group G` overrides; non-repo agents fall into `misc`.
+That's the only moment the group is chosen — kel never watches your `cd`.
 
 **Want one flat workspace instead?** `export KEL_GROUP=work` in `~/.bashrc` —
 now every `kel new` lands in `kel/work` no matter the repo, so `prefix 1-9`
@@ -62,9 +63,13 @@ off into its own group when you want that.
 - `prefix | / -` → a new **pane** (split) inside a window — for *your* stuff
   (editor, shell, tests), not agents. kel tracks state per window, so a
   second agent belongs in its own window.
-- a **group** is created on demand — `kel new x --group new` makes the session.
+- a **group** is decided when you run `kel new` — from your directory's git
+  root (or `--group` / `KEL_GROUP`), once. kel does not watch `cd`; a window
+  never changes group on its own.
 
-- Inside a group, agents are windows — native `prefix 0-9` / `n` / `p` / `w`.
+- The status bar shows only the current group's windows, plus `⟨+N waiting⟩`
+  for agents blocked elsewhere. Inside a group: native `prefix 1-9` / `n` / `p`
+  / `w`.
 - Between groups: native `prefix (` / `)` cycle, `prefix G` session tree, or
   `kel go <group>`.
 - `` prefix ` `` (jump to next **waiting** agent) is **global** — it crosses
