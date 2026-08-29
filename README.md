@@ -64,3 +64,7 @@ primer. Shell + `tmux` config, no binary yet.
 
 Linux, via `tmux`. On Windows that means WSL2 (native Windows PowerShell has no
 `tmux`). Setup and toolchain in `docs/setup.md`.
+
+**macOS is intended but not yet supported.** The script is bash-3.2-clean, but
+three GNU coreutils assumptions fail silently on BSD userland — `rollout.md`
+§ v0.5 lists them. Don't run it on a Mac until those land.

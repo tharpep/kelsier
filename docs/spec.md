@@ -66,6 +66,16 @@ viewer.
 Windows PowerShell has no `tmux`. Setup, toolchain, and WSL2 gotchas are in
 `setup.md`.
 
+kel targets three machines: a Linux desktop, WSL2, and a **MacBook**. macOS is
+not yet supported — the script avoids bash 4+ features, but a handful of GNU
+coreutils assumptions take a wrong branch silently under BSD userland
+(`rollout.md` § v0.5). **Containers are not the answer** to that: kel drives the
+*host's* tmux server — the one you attach to — and spawns agents that edit the
+host's repos with the host's `claude` credentials. A container has its own
+PID and PTY namespaces, and on macOS it is a Linux VM besides, so its tmux
+could never be your tmux. Portability here is a shell-correctness problem, and
+for the Go half a cross-compilation one.
+
 Everything `kel` is is text: one shell script (`bin/kel`), a `tmux` config
 fragment (`tmux/kel.conf`), and an installer (`install.sh`). That is a dotfiles
 repo. A second machine is: provision the toolchain (`install/`), `git clone`,

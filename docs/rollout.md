@@ -282,6 +282,22 @@ v0.4.1 just warmed up; nothing new to look at.
   false positive that makes people switch notifications off for good. On WSL2
   the ladder is bell → `display-message` → OSC 9 → `powershell.exe` toast.
 - **#4** informative `⟨+N waiting⟩` badge.
+- **macOS portability** — added to this card because it blocks a machine that
+  is already in use. `bin/kel` uses no bash 4+ features, so the language is
+  fine (macOS ships bash 3.2); three GNU coreutils assumptions are not, and all
+  three fail *silently*:
+  - `prune_state`'s `sed 's/\.\(state\|ctx\)$//'` — `\|` is a GNU BRE
+    extension, so on BSD sed the extension is never stripped and **live state
+    files are deleted on every `kel ls`**
+  - `snapshot`'s `stat -c %Y` (BSD is `stat -f %m`) — falls back to `0`, so the
+    `.restoring` lock always reads stale and **the restore protection added in
+    v0.4.1 is disabled**
+  - `cmd_doctor`'s `sort -V` — absent from BSD sort, so the `tmux >= 3.0` probe
+    misreports
+
+  Taking a wrong branch quietly is the worst failure mode for a tool whose
+  value is being trustworthy (invariant 3 in `CLAUDE.md`). `install/` is
+  apt-only and is a separate, larger job — not in this card.
 
 ## v0.6 — one place to look  ·  *Go enters here*
 
@@ -325,9 +341,17 @@ go/            Go source
 - **the on-disk format is the contract**, not the language: `sessions/<group>/<name>.json`,
   `<wid>.state`, `<wid>.ctx`, `snapshot.json`. Either implementation must read
   and write them identically, so any command can be either one on any day.
-- **bash stays the fallback, permanently, until v1.0 says otherwise.** One of
-  the three machines this runs on is a work laptop; `git clone && ./install.sh`
-  has to keep working where a Go toolchain can't be installed.
+- **bash stays the fallback, permanently, until v1.0 says otherwise** — but
+  *not* for the portability reason first given here. That argument was that a
+  work laptop might not get a Go toolchain; the work laptop is a **MacBook**,
+  and Go cross-compiles to it (`GOOS=darwin GOARCH=arm64`) from the Linux
+  desktop, so it needs no toolchain at all. The honest position is the
+  inverse: **Go is the more portable half.** Its stdlib behaves identically on
+  Linux and macOS, while bash's value depends on which `sed` and `stat` are
+  installed — see the v0.5 card. The real reasons to keep bash are no build
+  step, edit-in-place on a tool you bend weekly, and having a second
+  implementation to differential-test against. Those are enough; portability is
+  not one of them, and if anything macOS is an argument for moving *sooner*.
 - **the bash implementation is the test oracle.** Differential-test Go against
   it — same state dir, same JSON — on top of the existing 28-case suite. This
   is the specific answer to "a rewrite re-earns every bug you just fixed."
