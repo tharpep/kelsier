@@ -224,7 +224,7 @@ tmux session per repo.**
   **without interrupting it** — no `/context`, no reading the transcript. The
   bar shows `·NN%` only from `KEL_CTX_WARN` (default 70) up; `kel ls`, `--json`
   and the board preview always show it. Pruned with the window.
-- `<window-id>.state` — `<state> <epoch>`, written by the hooks, pruned when the
+- `<window-id>.state` — `<state> <epoch> <note>`, written by the hooks, pruned when the
   window is gone
 - `sessions/<group>/<name>.json` — one record per kel-managed agent. Keyed by
   group *and* name, so two repos can both have a `docs` agent; disambiguate on

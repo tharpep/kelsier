@@ -235,9 +235,25 @@ each calling `kel hook <EVENT>` with the payload on stdin):
 |---|---|
 | `SessionStart` | `idle` |
 | `UserPromptSubmit` | `working` |
-| `Notification` | `waiting` |
+| `Notification` | depends on `notification_type` — see below |
 | `Stop` | `done` |
 | `SessionEnd` | state file removed |
+
+`Notification` is not one event. Its payload carries a `notification_type`, and
+mapping every value to `waiting` made `` prefix ` `` jump to agents that were
+idling or already finished:
+
+| `notification_type` | state |
+|---|---|
+| `permission_prompt`, `agent_needs_input`, `elicitation_*dialog` | `waiting` |
+| `agent_completed` | `done` |
+| `quota_auto_resume_*` | `throttled` — waiting on quota, not on you |
+| `idle_prompt`, `auth_success`, `elicitation_complete/response` | no change |
+| anything added later | `waiting` (safe default) |
+
+`notification_text` is kept as the third field of the state file and shown in
+the board preview, so "why is this blocked" does not need a pane scrape.
+`kel jump` matches `waiting` only — a throttled agent resumes itself.
 
 Hooks run with no controlling terminal but can run `tmux` commands (the client
 talks to the server socket). `kel hook` resolves which window it's in, in order:
