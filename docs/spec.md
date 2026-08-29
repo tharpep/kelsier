@@ -180,7 +180,7 @@ has no metadata and shows as `(unmanaged)` (every "new agent" menu item routes
 through `kel new`, so those are managed). Adopt a `prefix c` window with
 `kel move`.
 
-`~/.local/state/kel/sessions/<name>.json`:
+`~/.local/state/kel/sessions/<group>/<name>.json`:
 
 ```
 name           slug, the tmux window name
@@ -195,8 +195,15 @@ claude_session Claude Code's session id, recorded by the hook — for exact rest
 created_at     timestamp
 ```
 
+Records are keyed by **group and name**, not name alone — two repos may each
+have an agent called `docs`. A bare `kel kill docs` resolves to the group you
+are standing in, then to a unique match anywhere; when the name exists in
+several groups it lists them and asks for `kel kill <group>/<name>`.
+
 Pre-v0.2 records without `group` get one derived from `repo` on the next
-command; their live windows stay in the old flat `kel` session until recreated.
+command; records written flat into `sessions/` by v0.4 and earlier are filed
+under `sessions/<group>/` on the next command. Their live windows stay in the
+old flat `kel` session until recreated.
 
 (v0.2 adds a `group` field.)
 
@@ -288,7 +295,10 @@ helpers `kel _board_rows` / `_board_preview` / `_board_jump` / `_board_kill` /
 
 **Workspace snapshot.** `kel snapshot` (fired by a `client-detached` /
 `after-split-window` tmux hook and by state-changing commands) writes the full
-shape — groups, windows, pane layouts, per-pane cwd — to `snapshot.json`. On a
+shape — groups, windows, pane layouts, per-pane cwd — to `snapshot.json` (the
+previous generation is kept as `snapshot.json.prev`). A restore holds a
+`.restoring` lockfile so the `after-split-window` / `pane-exited` hooks it
+trips can't write the half-rebuilt workspace over the file it is reading. On a
 dead server `kel` offers `restore_from_snapshot`: recreate everything, re-split
 panes, `select-layout` the saved geometry, resume agents by session id,
 re-run allowlisted pane commands.

@@ -36,6 +36,7 @@ STASH_DIR="$STATE_DIR/.stash"
 DOCTOR_CACHE="$STATE_DIR/doctor.json"
 LAST_GROUP_FILE="$STATE_DIR/last-group"
 SNAPSHOT="$STATE_DIR/snapshot.json"
+RESTORE_LOCK="$STATE_DIR/.restoring"
 SELF="$(command -v kel 2>/dev/null || printf '%s' "$HOME/.local/bin/kel")"
 # commands worth re-running per pane on restore (agents handled separately)
 KEL_RESTORE_CMDS="${KEL_RESTORE_CMDS:-nvim vim hx nano lazygit lazydocker htop btop k9s}"
@@ -151,9 +152,59 @@ goto_window() { # wid [group]
 # --------------------------------------------------------------------------
 # metadata
 # --------------------------------------------------------------------------
-meta_path() { printf '%s/%s.json' "$SESSIONS_DIR" "$1"; }
+# Records live at $SESSIONS_DIR/<group>/<name>.json — keyed by group *and*
+# name, so two repos can each have an agent called "docs".
+meta_path() { printf '%s/%s/%s.json' "$SESSIONS_DIR" "$1" "$2"; }   # group name
+
+# every record on disk, as  group<TAB>name<TAB>path
+all_metas() {
+  local d g f nm
+  for d in "$SESSIONS_DIR"/*/; do
+    [ -d "$d" ] || continue
+    g="$(basename "$d")"
+    for f in "$d"*.json; do
+      [ -e "$f" ] || continue
+      nm="$(basename "$f" .json)"
+      printf '%s\t%s\t%s\n' "$g" "$nm" "$f"
+    done
+  done
+}
+
+# the record owning a tmux window id, as  group<TAB>name<TAB>path
+meta_by_wid() { # wid
+  local g nm f
+  while IFS=$'\t' read -r g nm f; do
+    [ "$(jq -r '.window_id // ""' "$f" 2>/dev/null)" = "$1" ] || continue
+    printf '%s\t%s\t%s\n' "$g" "$nm" "$f"; return 0
+  done < <(all_metas)
+  return 1
+}
+
+# resolve a user-typed agent to  group<TAB>name<TAB>path.
+# accepts "name" or "group/name".  A bare name prefers the group you are
+# standing in, then a unique match anywhere; exit 2 (candidates on stderr) when
+# the same name exists in several groups.
+resolve_agent() { # name [preferred-group]
+  local want="$1" pref="${2:-}" g nm f hits
+  case "$want" in
+    */*) g="${want%%/*}"; nm="${want##*/}"; f="$(meta_path "$g" "$nm")"
+         [ -f "$f" ] || return 1
+         printf '%s\t%s\t%s\n' "$g" "$nm" "$f"; return 0 ;;
+  esac
+  [ -z "$pref" ] && pref="$(current_group)"
+  if [ -n "$pref" ] && [ -f "$(meta_path "$pref" "$want")" ]; then
+    printf '%s\t%s\t%s\n' "$pref" "$want" "$(meta_path "$pref" "$want")"; return 0
+  fi
+  hits="$(all_metas | awk -F'\t' -v n="$want" '$2==n')"
+  case "$(printf '%s' "$hits" | grep -c .)" in
+    0) return 1 ;;
+    1) printf '%s\n' "$hits"; return 0 ;;
+    *) printf '%s' "$hits" | awk -F'\t' '{printf "  %s/%s\n", $1, $2}' >&2; return 2 ;;
+  esac
+}
 
 meta_write() { # name wid repo cwd isolation branch agent group
+  mkdir -p "$SESSIONS_DIR/$8"
   jq -n \
     --arg name "$1" --arg wid "$2" --arg repo "$3" --arg cwd "$4" \
     --arg iso "$5" --arg branch "$6" --arg agent "$7" --arg group "$8" \
@@ -161,35 +212,47 @@ meta_write() { # name wid repo cwd isolation branch agent group
     '{name:$name, window_id:$wid, repo:$repo, cwd:$cwd, isolation:$iso,
       branch:(if $branch=="" then null else $branch end),
       agent:$agent, group:$group, created_at:$created}' \
-    > "$(meta_path "$1")"
+    > "$(meta_path "$8" "$1")"
 }
 
-# pre-v0.2 records have no .group — derive it from .repo (or misc)
+# pre-v0.2 records have no .group (derive it from .repo); pre-v0.4.1 records
+# sit flat in sessions/ (file them under sessions/<group>/).
 migrate_meta() {
-  local f repo grp
+  local f nm repo grp dest
   for f in "$SESSIONS_DIR"/*.json; do
     [ -e "$f" ] || continue
-    jq -e 'has("group")' "$f" >/dev/null 2>&1 && continue
-    repo="$(jq -r '.repo // ""' "$f" 2>/dev/null)"
-    if [ -n "$repo" ]; then grp="$(basename "$repo")"; else grp="misc"; fi
-    jq --arg g "$grp" '.group = $g' "$f" > "$f.m" 2>/dev/null && mv "$f.m" "$f"
+    nm="$(basename "$f" .json)"
+    grp="$(jq -r '.group // ""' "$f" 2>/dev/null)"
+    if [ -z "$grp" ] || [ "$grp" = null ]; then
+      repo="$(jq -r '.repo // ""' "$f" 2>/dev/null)"
+      if [ -n "$repo" ]; then grp="$(basename "$repo")"; else grp="misc"; fi
+      jq --arg g "$grp" '.group = $g' "$f" > "$f.m" 2>/dev/null && mv "$f.m" "$f"
+    fi
+    slug_ok "$grp" || grp=misc
+    mkdir -p "$SESSIONS_DIR/$grp"
+    dest="$(meta_path "$grp" "$nm")"
+    if [ -e "$dest" ]; then
+      warn "two records for '$grp/$nm' — keeping the newer"
+      if [ "$f" -nt "$dest" ]; then mv -f "$f" "$dest"; else rm -f "$f"; fi
+    else
+      mv -f "$f" "$dest"
+    fi
   done
 }
 
 # is a metadata record backed by a live window (same id + name) in any kel session?
-meta_is_live() { # name
-  local meta wid; meta="$(meta_path "$1")"; [ -f "$meta" ] || return 1
-  wid="$(jq -r '.window_id' "$meta")"
-  kel_windows | awk -F'\t' -v w="$wid" -v n="$1" '$4==w && $5==n {found=1} END{exit !found}'
+meta_is_live() { # path name
+  local wid; [ -f "$1" ] || return 1
+  wid="$(jq -r '.window_id' "$1")"
+  kel_windows | awk -F'\t' -v w="$wid" -v n="$2" '$4==w && $5==n {found=1} END{exit !found}'
 }
 
+# records with no live window, as  group<TAB>name<TAB>path
 dead_sessions() {
-  local f name
-  for f in "$SESSIONS_DIR"/*.json; do
-    [ -e "$f" ] || continue
-    name="$(basename "$f" .json)"
-    meta_is_live "$name" || printf '%s\n' "$name"
-  done
+  local g nm f
+  while IFS=$'\t' read -r g nm f; do
+    meta_is_live "$f" "$nm" || printf '%s\t%s\t%s\n' "$g" "$nm" "$f"
+  done < <(all_metas)
 }
 
 prune_state() {
@@ -233,18 +296,19 @@ cmd_new() {
   [ -n "$name" ] || die "usage: kel new <name> [-w] [--group G] [--agent CMD] [--no-agent]"
   slug_ok "$name" || die "name must be a slug (A-Z a-z 0-9 . _ -)"
 
-  if [ -f "$(meta_path "$name")" ]; then
-    if meta_is_live "$name"; then
-      die "agent '$name' already exists (kel kill $name first)"
-    fi
-    warn "reclaiming the record for '$name' (its window is gone)"
-    rm -f "$(meta_path "$name")"
-  fi
-
   local repo cwd branch='' isolation='inplace' group
   repo="$(git_root || true)"
   group="${group_override:-$(group_for_cwd)}"
   slug_ok "$group" || die "group '$group' is not a slug — pass --group"
+
+  # names only have to be unique within their group
+  if [ -f "$(meta_path "$group" "$name")" ]; then
+    if meta_is_live "$(meta_path "$group" "$name")" "$name"; then
+      die "agent '$group/$name' already exists (kel kill $group/$name first)"
+    fi
+    warn "reclaiming the record for '$group/$name' (its window is gone)"
+    rm -f "$(meta_path "$group" "$name")"
+  fi
   [ -z "$group_override" ] && [ -z "${KEL_GROUP:-}" ] && [ -z "$repo" ] && \
     warn "no git repo here → group 'misc'  (use --group NAME to name it)"
 
@@ -305,20 +369,22 @@ cmd_kill() {
   [ -n "$name" ] || die "usage: kel kill <name> [--force]"
   local orig_name="$name"
 
-  local meta wid iso='inplace' cwd='' branch='' repo=''
-  meta="$(meta_path "$name")"
-  if [ ! -f "$meta" ]; then
-    # no <name>.json — the window may have been renamed since `kel new`.
-    # find the record whose window_id is the window currently named $name.
-    local bw m; bw="$(kel_windows | awk -F'\t' -v n="$name" '$5==n {print $4; exit}')"
+  local meta='' wid iso='inplace' cwd='' branch='' repo='' group=''
+  local bare="${orig_name##*/}" rr rc=0
+  rr="$(resolve_agent "$name")" || rc=$?
+  [ "$rc" = 2 ] && die "'$name' is ambiguous — say which: kel kill <group>/<name>"
+  if [ -n "$rr" ]; then
+    IFS=$'\t' read -r group name meta <<< "$rr"
+  else
+    # no record under that name — the window may have been renamed since
+    # `kel new`.  Find the record owning the window currently named $bare.
+    local bw; bw="$(kel_windows | awk -F'\t' -v n="$bare" '$5==n {print $4; exit}')"
     if [ -n "$bw" ]; then
-      for m in "$SESSIONS_DIR"/*.json; do
-        [ -e "$m" ] || continue
-        [ "$(jq -r '.window_id' "$m" 2>/dev/null)" = "$bw" ] && { meta="$m"; break; }
-      done
+      rr="$(meta_by_wid "$bw" || true)"
+      [ -n "$rr" ] && IFS=$'\t' read -r group name meta <<< "$rr"
     fi
   fi
-  if [ -f "$meta" ]; then
+  if [ -n "$meta" ] && [ -f "$meta" ]; then
     wid="$(jq -r '.window_id' "$meta")"
     iso="$(jq -r '.isolation' "$meta")"
     cwd="$(jq -r '.cwd // ""' "$meta")"
@@ -326,8 +392,9 @@ cmd_kill() {
     repo="$(jq -r '.repo // ""' "$meta")"
     name="$(jq -r '.name // empty' "$meta")"; name="${name:-$orig_name}"
   else
-    wid="$(kel_windows | awk -F'\t' -v n="$orig_name" '$5==n {print $4; exit}')"
+    wid="$(kel_windows | awk -F'\t' -v n="$bare" '$5==n {print $4; exit}')"
     [ -n "$wid" ] || die "no agent '$orig_name'"
+    name="$bare"
     warn "'$name' is an unmanaged window — closing it, no metadata to clean up"
   fi
 
@@ -360,24 +427,30 @@ cmd_kill() {
 # --------------------------------------------------------------------------
 # rename a specific window by id + move its metadata record along with it
 rename_agent() { # wid new
-  local wid="$1" new="$2" old
+  local wid="$1" new="$2" old grp='' sn
   old="$(tmux display-message -p -t "$wid" '#{window_name}' 2>/dev/null)"
   [ -n "$old" ] || { warn "kel rename: window $wid is gone"; return 1; }
   [ "$old" = "$new" ] && return 0
-  [ -f "$(meta_path "$new")" ] && { warn "an agent named '$new' already exists"; return 1; }
+  sn="$(tmux display-message -p -t "$wid" '#{session_name}' 2>/dev/null || true)"
+  case "$sn" in
+    "$KEL_PREFIX")   grp="$KEL_PREFIX" ;;
+    "$KEL_PREFIX"/*) grp="${sn#"$KEL_PREFIX"/}" ;;
+  esac
+  [ -n "$grp" ] && [ -f "$(meta_path "$grp" "$new")" ] && \
+    { warn "an agent named '$new' already exists in [$grp]"; return 1; }
 
   tmux rename-window -t "$wid" "$new"
 
   # move the metadata record if this is a managed agent (by name, or by window id)
-  local om="$(meta_path "$old")" m
-  if [ ! -f "$om" ]; then
-    for m in "$SESSIONS_DIR"/*.json; do
-      [ -e "$m" ] || continue
-      [ "$(jq -r '.window_id' "$m" 2>/dev/null)" = "$wid" ] && { om="$m"; break; }
-    done
+  local om='' rr
+  [ -n "$grp" ] && [ -f "$(meta_path "$grp" "$old")" ] && om="$(meta_path "$grp" "$old")"
+  if [ -z "$om" ]; then
+    rr="$(meta_by_wid "$wid" || true)"
+    [ -n "$rr" ] && { grp="${rr%%$'\t'*}"; om="${rr##*$'\t'}"; }
   fi
-  if [ -f "$om" ]; then
-    jq --arg n "$new" '.name=$n' "$om" > "$(meta_path "$new")" && rm -f "$om"
+  if [ -n "$om" ] && [ -f "$om" ]; then
+    mkdir -p "$SESSIONS_DIR/$grp"
+    jq --arg n "$new" '.name=$n' "$om" > "$(meta_path "$grp" "$new")" && rm -f "$om"
   fi
   say "renamed '$old' -> '$new'"
   snapshot
@@ -403,15 +476,14 @@ cmd_prune() {
   local names; names="$(dead_sessions)"
   [ -n "$names" ] || { say "no dead agents"; return 0; }
 
-  local n meta iso cwd repo removed=0 kept=0
-  while read -r n; do
+  local g n meta iso cwd repo removed=0 kept=0
+  while IFS=$'\t' read -r g n meta; do
     [ -z "$n" ] && continue
-    meta="$(meta_path "$n")"
     iso="$(jq -r '.isolation' "$meta")"
     cwd="$(jq -r '.cwd // ""' "$meta")"
     repo="$(jq -r '.repo // ""' "$meta")"
     if [ "$iso" = worktree ] && [ "$force" != 1 ] && worktree_unsafe "$cwd"; then
-      warn "kept '$n' — worktree has unsaved work  (kel kill $n -f)"
+      warn "kept '$g/$n' — worktree has unsaved work  (kel kill $g/$n -f)"
       kept=$((kept + 1)); continue
     fi
     if [ "$iso" = worktree ] && [ -n "$repo" ] && [ -d "$cwd" ]; then
@@ -439,7 +511,7 @@ gather_rows() {
     [ -z "${wid:-}" ] && continue
     state="$(effective_state "$wid")"; [ -z "$state" ] && state='-'
     iso='(unmanaged)'; branch='-'; dirty='-'; cwd=''
-    meta="$SESSIONS_DIR/$name.json"
+    meta="$(meta_path "$grp" "$name")"
     if [ -f "$meta" ]; then
       iso="$(jq -r '.isolation' "$meta")"
       branch="$(jq -r '.branch // "-"' "$meta")"
@@ -454,10 +526,8 @@ gather_rows() {
       "$grp" "$idx" "$wid" "$name" "$state" "$iso" "$branch" "$dirty" "${panes:--}" "$cwd"
   done < <(kel_windows | sort -t$'\t' -k2,2 -k3,3n)
 
-  while read -r name; do
+  while IFS=$'\t' read -r grp name meta; do
     [ -z "$name" ] && continue
-    meta="$SESSIONS_DIR/$name.json"
-    grp="$(jq -r '.group // "misc"' "$meta")"
     iso="$(jq -r '.isolation' "$meta")"
     branch="$(jq -r '.branch // "-"' "$meta")"
     cwd="$(jq -r '.cwd // ""' "$meta")"
@@ -566,9 +636,11 @@ cmd_move() {
   fi
   slug_ok "$target" || die "group '$target' isn't a slug"
   [ "$target" = "$cur_group" ] && { say "already in group '$cur_group'"; return 0; }
+  [ -f "$(meta_path "$target" "$wname")" ] && \
+    die "[$target] already has an agent called '$wname' — kel rename it first"
 
   # warn if we're moving a worktree agent away from its repo's group
-  local mv_meta; mv_meta="$(meta_path "$wname")"
+  local mv_meta; mv_meta="$(meta_path "$cur_group" "$wname")"
   if [ -f "$mv_meta" ] && [ "$(jq -r '.isolation' "$mv_meta")" = worktree ]; then
     local mr; mr="$(basename "$(jq -r '.repo // ""' "$mv_meta")")"
     [ -n "$mr" ] && [ "$mr" != "$target" ] && \
@@ -586,9 +658,10 @@ cmd_move() {
     tmux move-window -s "$cur_wid" -t "$dst:"
   fi
 
-  local meta; meta="$(meta_path "$wname")"
+  local meta; meta="$(meta_path "$cur_group" "$wname")"
   if [ -f "$meta" ]; then
-    jq --arg g "$target" '.group=$g' "$meta" > "$meta.t" && mv "$meta.t" "$meta"
+    mkdir -p "$SESSIONS_DIR/$target"
+    jq --arg g "$target" '.group=$g' "$meta" > "$(meta_path "$target" "$wname")" && rm -f "$meta"
   else
     local repo; repo="$(cd "$pcwd" 2>/dev/null && git rev-parse --show-toplevel 2>/dev/null || true)"
     meta_write "$wname" "$cur_wid" "$repo" "$pcwd" "inplace" "" "$KEL_AGENT" "$target"
@@ -628,7 +701,7 @@ cmd_board_rows() {
 }
 
 cmd_board_preview() {   # name group
-  local name="$1" group="$2" meta; meta="$(meta_path "$name")"
+  local name="$1" group="$2" meta; meta="$(meta_path "$group" "$name")"
   if [ -f "$meta" ]; then
     jq -r '"group      \(.group)
 agent      \(.agent)
@@ -658,11 +731,11 @@ cmd_board_jump() {   # wid group
 }
 
 # ctrl-k wrapper: confirm before killing (in-place agents get no other friction)
-cmd_board_kill() {   # name
-  [ -n "${1:-}" ] || return 0
-  printf 'kill %s? [y/N] ' "$1" > /dev/tty
+cmd_board_kill() {   # group name
+  [ -n "${2:-}" ] || return 0
+  printf 'kill %s/%s? [y/N] ' "$1" "$2" > /dev/tty
   local a=''; read -r a < /dev/tty || a=n
-  case "$a" in y|Y|yes) "$SELF" kill "$1" ;; *) : ;; esac
+  case "$a" in y|Y|yes) "$SELF" kill "$1/$2" ;; *) : ;; esac
 }
 
 # tab in the board: a labelled action menu for the highlighted agent.
@@ -681,7 +754,7 @@ cmd_board_actions() {   # wid name group cwd
     "rename it"                  r  "command-prompt -p 'new name:' { run-shell \"$SELF _board_rename '$wid' %%\" }" \
     "go to its group"           g  "run-shell \"$SELF go '$group'\"" \
     "" \
-    "kill it"                   k  "run-shell \"$SELF _board_kill '$name'\""
+    "kill it"                   k  "run-shell \"$SELF _board_kill '$group' '$name'\""
 }
 
 cmd_board_rename() {   # wid new
@@ -705,7 +778,7 @@ cmd_board() {
     --bind "tab:become($SELF _board_actions {6} {2} {1} {5})" \
     --bind "ctrl-g:become($SELF go {1})" \
     --bind "ctrl-r:reload($SELF _board_rows)" \
-    --bind "ctrl-k:execute($SELF _board_kill {2})+reload($SELF _board_rows)" \
+    --bind "ctrl-k:execute($SELF _board_kill {1} {2})+reload($SELF _board_rows)" \
     --bind "ctrl-n:become(tmux command-prompt -p 'new agent:' \"run-shell \\\"cd {5} && $SELF new %%\\\"\")" \
     --color 'footer:italic,border:8' \
     >/dev/null 2>&1 || true
@@ -726,6 +799,15 @@ agent_resume_cmd() { # agent cid  -> the shell string to resume/start an agent
 # kel snapshot  — save the whole workspace shape (groups/windows/panes)
 # --------------------------------------------------------------------------
 snapshot() {   # silent; called by hooks and state-changing commands
+  # A restore owns snapshot.json while it runs (see restore_from_snapshot).
+  # This has to be a lockfile, not an env var: the tmux hooks that call us
+  # spawn a fresh `kel` from the server, which inherits nothing.  A lock left
+  # behind by a killed restore goes stale after five minutes.
+  if [ -e "$RESTORE_LOCK" ]; then
+    local lock_age=$(( $(date +%s) - $(stat -c %Y "$RESTORE_LOCK" 2>/dev/null || echo 0) ))
+    [ "$lock_age" -lt 300 ] && return 0
+    rm -f "$RESTORE_LOCK"
+  fi
   command -v tmux >/dev/null 2>&1 && command -v jq >/dev/null 2>&1 || return 0
   group_sessions | grep -q . || return 0
   local snap g s
@@ -748,6 +830,7 @@ snapshot() {   # silent; called by hooks and state-changing commands
     snap="$(printf '%s' "$snap" | jq --arg g "$g" --argjson w "$wins" '.groups[$g]=$w')"
   done < <(group_sessions)
   local tmp; tmp="$(mktemp "$STATE_DIR/.snap.XXXXXX" 2>/dev/null)" || return 0
+  [ -f "$SNAPSHOT" ] && cp -f "$SNAPSHOT" "$SNAPSHOT.prev" 2>/dev/null
   printf '%s' "$snap" > "$tmp" && mv -f "$tmp" "$SNAPSHOT"
 }
 
@@ -758,6 +841,19 @@ restore_from_snapshot() {   # [-c]
   need tmux; need jq
   [ -f "$SNAPSHOT" ] || { warn "no snapshot to restore"; return 1; }
   local cont=0; [ "${1:-}" = "-c" ] && cont=1
+
+  # Rebuilding the workspace fires tmux's own after-split-window / pane-exited
+  # hooks, which run `kel snapshot` in the background — that would write the
+  # half-rebuilt workspace over snapshot.json while we are still reading it,
+  # truncating the restore and destroying the record of everything not yet
+  # rebuilt.  Hold the lock so those writes stand down, and read from a private
+  # copy so nothing can move underneath us either way.
+  local src="$SNAPSHOT"
+  : > "$RESTORE_LOCK"
+  local SNAPSHOT
+  SNAPSHOT="$(mktemp "$STATE_DIR/.snapin.XXXXXX" 2>/dev/null)" \
+    || { rm -f "$RESTORE_LOCK"; warn "no scratch space to restore from"; return 1; }
+  cp -f "$src" "$SNAPSHOT"
   local lg lw first_wid='' dest_wid=''
   lg="$(jq -r '.last_group // ""' "$SNAPSHOT")"
   lw="$(jq -r '.last_window // ""' "$SNAPSHOT")"
@@ -790,7 +886,7 @@ restore_from_snapshot() {   # [-c]
       done
       [ -n "$wlayout" ] && tmux select-layout -t "$wid" "$wlayout" 2>/dev/null || true
 
-      local meta; meta="$(meta_path "$wname")"
+      local meta; meta="$(meta_path "$g" "$wname")"
       if [ -f "$meta" ]; then
         jq --arg w "$wid" '.window_id=$w' "$meta" > "$meta.t" && mv "$meta.t" "$meta"
         if [ "$cont" = 1 ]; then
@@ -810,6 +906,9 @@ restore_from_snapshot() {   # [-c]
   [ -n "$lg" ] && set_last_group "$lg"
   local dest="${dest_wid:-$first_wid}"
   [ -n "$dest" ] && goto_window "$dest" "$lg"
+
+  rm -f "$SNAPSHOT" "$RESTORE_LOCK"
+  snapshot                     # release the lock, then record what we rebuilt
   say "workspace restored from snapshot"
 }
 
@@ -838,13 +937,11 @@ cmd_restore() {
   [ -n "$names" ] || { say "nothing to restore"; return 0; }
 
   local n meta cwd agent cid grp wid restored=0 lastgrp=''
-  while read -r n; do
+  while IFS=$'\t' read -r grp n meta; do
     [ -z "$n" ] && continue
-    meta="$(meta_path "$n")"
     cwd="$(jq -r '.cwd // ""' "$meta")"
     agent="$(jq -r '.agent // "claude"' "$meta")"
     cid="$(jq -r '.claude_session // ""' "$meta")"
-    grp="$(jq -r '.group // "misc"' "$meta")"
     [ -d "$cwd" ] || { warn "skip $n — its directory is gone ($cwd)"; continue; }
     wid="$(open_window "$n" "$cwd" "$grp")"
     [ -n "$wid" ] || { warn "skip $n — couldn't open a window"; continue; }
@@ -1102,7 +1199,7 @@ cmd_hook() {
 
   if [ -n "$sid" ] && [ "$event" != SessionEnd ]; then
     local m
-    for m in "$SESSIONS_DIR"/*.json; do
+    for m in "$SESSIONS_DIR"/*/*.json; do
       [ -e "$m" ] || continue
       [ "$(jq -r '.window_id' "$m" 2>/dev/null)" = "$wid" ] || continue
       [ "$(jq -r '.claude_session // ""' "$m" 2>/dev/null)" = "$sid" ] && break

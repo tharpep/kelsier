@@ -25,7 +25,8 @@ _kel() {
     kill)
       case "$cur" in
         -*) COMPREPLY=( $(compgen -W "-f" -- "$cur") ) ;;
-        *)  COMPREPLY=( $(compgen -W "$(_kel_names '.[].name')" -- "$cur") ) ;;
+        *)  # bare names, plus group/name for the ones that repeat across groups
+            COMPREPLY=( $(compgen -W "$(_kel_names '.[].name, "\(.group)/\(.name)"')" -- "$cur") ) ;;
       esac
       ;;
     go|move)

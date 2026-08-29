@@ -33,7 +33,7 @@ _kel() {
     kill)
       _alternative \
         'flags:flag:(-f)' \
-        "agents:agent:($(_kel_names '.[].name'))"
+        "agents:agent:($(_kel_names '.[].name, "\(.group)/\(.name)"'))"
       ;;
     go|move)
       compadd -- $(_kel_names '.[].group')

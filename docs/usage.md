@@ -144,7 +144,8 @@ the record, `kel kill` / `kel prune` discard it.
 
 **A reboot / crash** takes down everything. kel snapshots the whole workspace —
 every group, window, pane layout, and per-pane directory — on detach and
-whenever the shape changes (`~/.local/state/kel/snapshot.json`). The next time
+whenever the shape changes (`~/.local/state/kel/snapshot.json`, with one
+generation kept as `snapshot.json.prev`). The next time
 you run `kel` it offers to rebuild it:
 
 ```
@@ -218,7 +219,9 @@ tmux session per repo.**
 `~/.local/state/kel/`
 - `<window-id>.state` — `<state> <epoch>`, written by the hooks, pruned when the
   window is gone
-- `sessions/<name>.json` — one record per kel-managed agent (incl. `group`)
+- `sessions/<group>/<name>.json` — one record per kel-managed agent. Keyed by
+  group *and* name, so two repos can both have a `docs` agent; disambiguate on
+  the command line with `kel kill <group>/<name>`.
 - `last-group` — the group `kel` bare reattaches to
 - `.stash/<claude-session-id>` — pane id from SessionStart, for hooks that don't
   inherit `$TMUX_PANE`
