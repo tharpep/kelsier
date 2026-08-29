@@ -29,6 +29,7 @@ kel ls [--json]        list every agent, grouped by repo
 kel go [<group>]       switch to a group  (no arg: list the groups)
 kel move [<group>]     put THIS window in another group (cd there first, then kel move)
 kel menu               floating list of every agent — press a key to jump
+kel board              fzf browser: filter, preview, jump / new / kill
 kel restore [-c] [-s]  rebuild the workspace after a kill / reboot
                        (-c resume conversations; -s force the snapshot)
 kel prune [-f]         discard dead agent records (and their worktrees)
@@ -36,7 +37,8 @@ kel doctor             probe the machine, cache to ~/.local/state/kel/doctor.jso
 ```
 
 Internal (wired into tmux / Claude Code, you won't call these):
-`kel status-line [group]`, `kel jump`, `kel cheat`, `kel hook <EVENT>`.
+`kel status-line [group]`, `kel jump`, `kel snapshot`, `kel cheat`,
+`kel hook <EVENT>`, `kel _board_*`.
 
 Env knobs: `KEL_GROUP` (force every `kel new` into one group — see below),
 `KEL_SESSION` (session-name prefix, default `kel`), `KEL_AGENT` (default
@@ -160,7 +162,8 @@ inside a window; group = one tmux session per repo.**
 |---|---|
 | `prefix 0..9` / `n` / `p` / `w` | move between agents in the group |
 | `` prefix ` `` | jump to the next agent **waiting** on you — any group |
-| `prefix m` | fleet menu — every agent, every group, press a key to jump |
+| `prefix m` | fleet menu — quick jump, every agent, press a key |
+| `prefix b` | the board — fuzzy filter + preview; enter jump, ^n new, ^k kill |
 | `prefix G` / `prefix (` `)` | pick / cycle groups |
 | `prefix k` | command menu (new · jump · split · scroll · rename · close · detach) |
 | `prefix [` | tmux scroll mode for a shell pane (`q` to leave) |

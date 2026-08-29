@@ -143,7 +143,12 @@ width handling and the `kel jump` cycle order.
 - **The flat→grouped transition** — a few days of a `kel` group alongside real
   groups until the old one empties.
 
-## v0.3 — the board (popup)
+## v0.3 — the board (popup)  ·  **done**
+
+> **Shipped** on `fzf` (not a hand-rolled TUI or Bubble Tea). `kel board` /
+> `prefix b`: a `display-popup` with fuzzy filter, a preview pane (metadata +
+> recent output + git status), and binds — enter jump, ctrl-n new, ctrl-k kill,
+> ctrl-g go-to-group, ctrl-r refresh. ~50 lines.
 
 **Trigger:** `kel menu` stops being enough — more than ~20 agents, or you want
 filter / sort / browse across everything at once.

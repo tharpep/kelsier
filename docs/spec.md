@@ -97,10 +97,13 @@ untouched. Between groups: native `prefix (` / `)`, `prefix G` (group tree),
 shows the current group in full plus `⟨+N waiting⟩` for the rest. `kel menu`
 (`prefix m`) is a dynamic `display-menu` of every agent, press a key to jump.
 
-### 5b. Planned, not built
+### 5b. The board (v0.3, built)
 
-- **v0.3 — the board.** `kel board` as a `display-popup` TUI — filter / sort /
-  browse across every group. Gated on `kel menu` outgrowing a flat list.
+`kel board` / `prefix b` — a `display-popup` running `fzf` over every live
+agent: fuzzy filter, a preview pane (metadata, recent pane output, git status),
+and binds for enter (jump), ctrl-n (new), ctrl-k (kill), ctrl-g (go to group),
+ctrl-r (refresh). `prefix m` stays as the zero-latency quick jump; the board is
+for filtering and acting.
 
 ### 5c. Rejected: the two-slot / swap-pane architecture
 
@@ -253,6 +256,7 @@ kel ls [--json]            every agent, grouped by repo
 kel go [<group>]           switch to a group (no arg: list them)
 kel move [<group>]         relocate the current window to another group
 kel menu                   floating list of every agent — press a key to jump
+kel board                  fzf browser — filter, preview, jump / new / kill  (prefix b)
 kel restore [-c] [-s]      rebuild the workspace after a kill / reboot — groups,
                            windows, splits, agents; -c resume conversations,
                            -s force the snapshot
