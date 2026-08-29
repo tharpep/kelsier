@@ -610,7 +610,7 @@ cmd_ls() {
         cs = (cost=="-" || cost=="" || cost+0==0) ? "" : sprintf("  $%.2f", cost)
         if (g!=lastg) { if (lastg!="") print ""; print g; lastg=g }
         printf "  %s %s %s %s %s %s  %s%s\n",
-          pad(idx,4), pad(disp,24), pad(st,8), pad(cx,5), pad(iso,10), pad(br,12), cwd, cs
+          pad(idx,4), pad(disp,24), pad(st,10), pad(cx,5), pad(iso,10), pad(br,12), cwd, cs
       }
     }'
   [ -n "$(dead_sessions)" ] && echo && echo "  dead = window gone.  kel restore [-c] rebuilds  ·  kel prune discards"
