@@ -637,14 +637,14 @@
           <div class="field">
             <span class="k">Shipped</span>
             <ul>
-              <li><strong>One navigator.</strong> The board opens three ways &mdash; <kbd>Ctrl+Space</kbd> (no prefix), <code>prefix b</code>, <code>prefix m</code>. The old quick-jump <code>display-menu</code> is retired; <code>kel menu</code> is a one-release alias. <code>prefix k</code> is now a &ldquo;new to kel?&rdquo; primer menu.</li>
-              <li><strong>Trust bugs fixed.</strong> <code>kel rename</code> (+ <code>prefix ,</code>) keeps the metadata record in sync; both menu &ldquo;new agent&rdquo; paths route through <code>kel new</code>; the board&rsquo;s <kbd>^k</kbd> always confirms and <kbd>^n</kbd> uses tmux&rsquo;s prompt; a crashed agent reads as <span class="mono">dead</span> / <code>x</code> instead of stuck on <span class="mono">working</span>.</li>
+              <li><strong>One navigator, then one job per key.</strong> A second review pass (Gemini 3.1 Pro) caught the board&rsquo;s key legend truncating in the popup and its actions being invisible chords. Final shape: <kbd>Ctrl+Space</kbd> / <code>prefix b</code> = <em>find</em> an agent (compact footer; <kbd>enter</kbd> jumps, <kbd>tab</kbd> opens a labelled menu &mdash; jump / new here / rename / go to group / kill). <code>prefix m</code> = <em>manage</em> the agent you&rsquo;re on. <code>prefix k</code> = the &ldquo;new to kel?&rdquo; primer. <code>``</code> = jump to whoever&rsquo;s waiting. The old quick-jump <code>display-menu</code> is retired.</li>
+              <li><strong>Trust bugs fixed.</strong> <code>kel rename</code> (+ <code>prefix ,</code>) keeps the metadata record in sync; both menu &ldquo;new agent&rdquo; paths route through <code>kel new</code>; the board&rsquo;s kill always confirms; a crashed agent reads as <span class="mono">dead</span> / <code>x</code> instead of stuck on <span class="mono">working</span>.</li>
               <li><strong>Learnability.</strong> first-run prints the three keys that matter; bash + zsh completion (agent names for <code>kill</code>, groups for <code>go</code>/<code>move</code>); Shift+drag copy tip surfaced in <code>kel cheat</code>.</li>
               <li><strong>Group model.</strong> non-repo <code>kel new</code>/<code>move</code> warn about the <span class="mono">misc</span> fallback; <code>kel move</code> warns on a worktree/group mismatch; monorepo split documented.</li>
             </ul>
           </div>
 
-          <p class="gain"><span class="k">Unlocked</span>One thing to learn (the board), one chord to reach it, and fumbling a key no longer desyncs state.</p>
+          <p class="gain"><span class="k">Unlocked</span>Four keys, four jobs: waiting / find / manage / learn. Fumbling one no longer desyncs state.</p>
         </div>
       </li>
 
