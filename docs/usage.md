@@ -30,8 +30,9 @@ kel ls [--json]        list every agent, grouped by repo
 kel go [<group>]       switch to a group  (no arg: list the groups)
 kel move [<group>]     put THIS window in another group (cd there first, then kel move)
 kel rename <newname>   rename THIS window and keep its metadata record in sync
-kel board              the fleet browser — fuzzy filter, preview, jump / new / kill
-                       (Ctrl+Space, or prefix b / prefix m)
+kel board              the fleet browser — fuzzy filter + preview  (Ctrl+Space
+                       or prefix b).  enter jumps; tab = act on the highlighted
+                       agent (jump / new here / rename / go to group / kill)
 kel restore [-c] [-s]  rebuild the workspace after a kill / reboot
                        (-c resume conversations; -s force the snapshot)
 kel prune [-f]         discard dead agent records (and their worktrees)
@@ -97,7 +98,8 @@ nothing restarts. `kel move <group>` for an explicit target. A hand-made
   for agents blocked elsewhere. Inside a group: native `prefix 1-9` / `n` / `p`
   / `w`.
 - Between groups: native `prefix (` / `)` cycle, `prefix g` group tree,
-  `kel go <group>`, or the board (`Ctrl+Space`) → `enter` on any row.
+  `kel go <group>`, or the board (`Ctrl+Space`) → `enter` (jump) / `tab` → "go
+  to its group".
 - `` prefix ` `` (jump to next **waiting** agent) is **global** — it crosses
   group boundaries. That's the point of it: go to whoever's blocked, not to a
   specific group.
@@ -185,20 +187,26 @@ mouse mode owns a plain drag), counts windows from 1, and labels each pane.
 **window = a tab, one per agent; pane = a split inside a window; group = one
 tmux session per repo.**
 
-`prefix` is `Ctrl+b`. The board is the one navigator — `Ctrl+Space` (no prefix)
-opens it, and so do `prefix b` and `prefix m`. `prefix k` is the "new to kel?"
-menu of common moves; `prefix k` → `?` (or `kel cheat`) shows the full
-reference.
+`prefix` is `Ctrl+b`. Four keys carry the whole tool:
+
+- **`` prefix ` ``** — jump to whoever's waiting on you (any group)
+- **`Ctrl+Space`** (or `prefix b`) — the board: *find* an agent. `enter` jumps
+  to it; `tab` opens a labelled menu to *act* on it (jump / new here / rename /
+  go to its group / kill)
+- **`prefix m`** — *manage* the agent you're on: rename / move to a group /
+  new sibling / kill
+- **`prefix k`** — "new to kel/tmux?" primer of the common moves; `prefix k`
+  → `?` (or `kel cheat`) shows the full reference
 
 | | |
 |---|---|
-| `Ctrl+Space` (no prefix) | the board — every agent; filter, preview, enter jump, ^n new, ^k kill, ^g group |
-| `prefix b` / `prefix m` | also open the board |
+| `Ctrl+Space` / `prefix b` | the board — filter, preview; `enter` jump, `tab` act |
+| `prefix m` | manage this agent — rename / move / new sibling / kill |
 | `prefix 0..9` / `n` / `p` / `w` | move between agents in the group |
 | `` prefix ` `` | jump to the next agent **waiting** on you — any group |
 | `prefix g` / `prefix (` `)` | pick / cycle groups |
 | `prefix ,` | rename this window (routes through `kel rename`) |
-| `prefix k` | "new to kel?" menu (new · browse · split · scroll · rename · close · detach · show me around) |
+| `prefix k` | "new to kel?" primer (new · browse · split · scroll · rename · close · detach · show me around) |
 | `prefix [` | tmux scroll mode for a shell pane (`q` to leave) |
 | mouse wheel / PgUp PgDn | scroll an agent's conversation (kel maps the wheel to PageUp/Down) |
 | `prefix \|` / `-` | split a window (agent + editor); arrows or click to focus; `z` zoom |

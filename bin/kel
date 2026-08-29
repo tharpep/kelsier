@@ -14,7 +14,7 @@
 #                              (no arg: the group for the current directory)
 #   kel rename <newname>       rename the current window (keeps metadata in sync)
 #   kel board                  fzf fleet browser — filter / preview / act
-#                              (Ctrl+Space, or prefix b / m)
+#                              (Ctrl+Space or prefix b; enter jumps, tab = actions)
 #   kel restore [-c] [-s]      rebuild the workspace after a kill / reboot
 #                              (-c resume conversations, -s force the snapshot)
 #   kel prune [-f]             discard dead agent records
@@ -358,17 +358,13 @@ cmd_kill() {
 # --------------------------------------------------------------------------
 # kel rename <newname>  — rename the current window and keep metadata in sync
 # --------------------------------------------------------------------------
-cmd_rename() {
-  need tmux; need jq
-  [ -n "${TMUX:-}" ] || die "kel rename: run this from inside kel"
-  local new="${1:-}"
-  [ -n "$new" ] || die "usage: kel rename <newname>"
-  slug_ok "$new" || die "name must be a slug (A-Z a-z 0-9 . _ -)"
-
-  local wid old; wid="$(tmux display-message -p '#{window_id}')"
-  old="$(tmux display-message -p '#{window_name}')"
+# rename a specific window by id + move its metadata record along with it
+rename_agent() { # wid new
+  local wid="$1" new="$2" old
+  old="$(tmux display-message -p -t "$wid" '#{window_name}' 2>/dev/null)"
+  [ -n "$old" ] || { warn "kel rename: window $wid is gone"; return 1; }
   [ "$old" = "$new" ] && return 0
-  [ -f "$(meta_path "$new")" ] && die "an agent named '$new' already exists"
+  [ -f "$(meta_path "$new")" ] && { warn "an agent named '$new' already exists"; return 1; }
 
   tmux rename-window -t "$wid" "$new"
 
@@ -385,6 +381,15 @@ cmd_rename() {
   fi
   say "renamed '$old' -> '$new'"
   snapshot
+}
+
+cmd_rename() {
+  need tmux; need jq
+  [ -n "${TMUX:-}" ] || die "kel rename: run this from inside kel"
+  local new="${1:-}"
+  [ -n "$new" ] || die "usage: kel rename <newname>"
+  slug_ok "$new" || die "name must be a slug (A-Z a-z 0-9 . _ -)"
+  rename_agent "$(tmux display-message -p '#{window_id}')" "$new"
 }
 
 # --------------------------------------------------------------------------
@@ -660,6 +665,31 @@ cmd_board_kill() {   # name
   case "$a" in y|Y|yes) "$SELF" kill "$1" ;; *) : ;; esac
 }
 
+# tab in the board: a labelled action menu for the highlighted agent.
+# (the board closes behind it, same as pressing enter to jump)
+# display-menu needs an explicit -c client here — invoked via fzf `become`, not
+# from a key binding, tmux can't resolve the "current" client on its own.
+cmd_board_actions() {   # wid name group cwd
+  need tmux
+  local wid="$1" name="$2" group="$3" cwd="$4" cl sn
+  sn="$(tmux display-message -p -t "${TMUX_PANE:-}" '#{session_name}' 2>/dev/null || true)"
+  cl="$(tmux list-clients ${sn:+-t "$sn"} -F '#{client_name}' 2>/dev/null | head -1)"
+  [ -n "$cl" ] || cl="$(tmux list-clients -F '#{client_name}' 2>/dev/null | head -1)"
+  tmux display-menu ${cl:+-c $cl} -x C -y C -T " $name " -- \
+    "jump to it"                j  "run-shell \"$SELF _board_jump '$wid' '$group'\"" \
+    "new agent in its folder"   n  "command-prompt -p 'name:' { run-shell \"cd '$cwd' && $SELF new %%\" }" \
+    "rename it"                  r  "command-prompt -p 'new name:' { run-shell \"$SELF _board_rename '$wid' %%\" }" \
+    "go to its group"           g  "run-shell \"$SELF go '$group'\"" \
+    "" \
+    "kill it"                   k  "run-shell \"$SELF _board_kill '$name'\""
+}
+
+cmd_board_rename() {   # wid new
+  need tmux; need jq
+  slug_ok "${2:-}" || { warn "name must be a slug (A-Z a-z 0-9 . _ -)"; return 1; }
+  rename_agent "$1" "$2"
+}
+
 cmd_board() {
   need tmux; need fzf; need jq
   [ -n "${TMUX:-}" ] || die "kel board runs inside tmux"
@@ -668,16 +698,16 @@ cmd_board() {
   cmd_board_rows | SHELL=/bin/bash fzf \
     --ansi --delimiter '\t' --with-nth '1,2,3,4' --nth '1,2' \
     --layout reverse --info inline --height '100%' \
-    --header $'Ctrl+Space / prefix b reopens  —  enter jump  ^n new  ^k kill  ^g group  ^r refresh  esc close' \
-    --header-first \
+    --footer 'enter jump  ·  tab actions' \
     --preview "$SELF _board_preview {2} {1}" \
-    --preview-window 'right,48%,wrap,border-left' \
+    --preview-window 'right,45%,wrap,border-left' \
     --bind "enter:become($SELF _board_jump {6} {1})" \
+    --bind "tab:become($SELF _board_actions {6} {2} {1} {5})" \
     --bind "ctrl-g:become($SELF go {1})" \
     --bind "ctrl-r:reload($SELF _board_rows)" \
     --bind "ctrl-k:execute($SELF _board_kill {2})+reload($SELF _board_rows)" \
     --bind "ctrl-n:become(tmux command-prompt -p 'new agent:' \"run-shell \\\"cd {5} && $SELF new %%\\\"\")" \
-    --color 'header:italic,border:8' \
+    --color 'footer:italic,border:8' \
     >/dev/null 2>&1 || true
 }
 
@@ -985,12 +1015,16 @@ cat <<'EOF'
     copy text: hold SHIFT while you drag (mouse mode owns a plain drag)
 
   MOVE AROUND
-    Ctrl+Space    the board — every agent, filter / preview / act  (no prefix!)
+    Ctrl+Space    the board — find any agent; enter jumps, TAB = act on it
+    (prefix b)    the same board
     prefix `      jump to the next agent WAITING on you — any group
     prefix 1-9    window (agent) N in this group
     prefix n / p  next / previous window        prefix w   pick a window
     prefix g      pick a group                  prefix ( ) prev / next group
-    prefix b / m  also open the board
+
+  ACT ON AN AGENT
+    prefix m      manage THIS agent — rename / move / kill / new sibling
+    (in the board) TAB on any row — the same menu, for that agent
 
   SCROLL an agent's conversation
     mouse wheel                (kel turns this into PageUp/PageDown for you)
@@ -1020,7 +1054,7 @@ cat <<'EOF'
                        `claude` for a dir. Elsewhere: your last group.
     kel new <name>     new window + agent   (-w = worktree, --group G)
     kel ls             list every agent, grouped
-    kel board          fzf browser: filter, preview, ^n new, ^k kill
+    kel board          fzf browser: filter, preview; enter jumps, tab acts
     kel go [group]     switch group
     kel move [group]   put THIS window in another group (cd first, then kel move)
     kel rename <new>   rename this window, keep metadata in sync
@@ -1105,7 +1139,8 @@ quickstart() {
 
   kel new <name>     start an agent in the current repo
   prefix `           jump to whichever agent is waiting on you
-  Ctrl+Space         the board — see and act on every agent
+  Ctrl+Space         the board — find any agent (enter jumps, tab acts)
+  prefix m           manage the agent you're on — rename / move / kill
   prefix k           new to tmux? the "what can I do here" menu
 
 EOF
@@ -1206,6 +1241,8 @@ main() {
     _board_preview)  cmd_board_preview "$@" ;;
     _board_jump)     cmd_board_jump "$@" ;;
     _board_kill)     cmd_board_kill "$@" ;;
+    _board_actions)  cmd_board_actions "$@" ;;
+    _board_rename)   migrate_meta; cmd_board_rename "$@" ;;
     restore)      migrate_meta; cmd_restore "$@" ;;
     prune)        migrate_meta; cmd_prune "$@" ;;
     snapshot)     cmd_snapshot ;;

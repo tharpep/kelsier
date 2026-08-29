@@ -166,6 +166,14 @@ filter / sort / browse across everything at once.
   and `prefix m`. The old `display-menu` quick-jump is retired; `kel menu` is a
   one-release alias for `kel board`. `prefix k` is reframed as a "new to kel?"
   menu (tmux primitives + "browse agents" + "show me around").
+  **Follow-up (post-review, second Gemini pass):** the board's single-line key
+  legend truncated inside the popup and its actions were invisible chords. Fixed:
+  a compact `--footer` (`enter jump · tab actions`), and **`tab`** opens a
+  labelled `tmux display-menu` on the highlighted agent (jump / new here / rename
+  / go to group / kill). `prefix m` is repointed from "open the board" to
+  "**manage** the agent you're on" (rename / move / new sibling / kill). Key
+  story is now one job per key: `` ` `` waiting · `Ctrl+Space`/`b` find ·
+  `m` manage · `k` primer.
 - **Bugs.** `kel rename <new>` (+ `prefix ,`) renames a window *and* its
   metadata record — a bare `rename-window` used to desync it so `kel kill`
   couldn't clean up; `kel kill` now also finds a record by window id as a

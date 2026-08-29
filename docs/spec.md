@@ -99,12 +99,14 @@ shows the current group in full plus `⟨+N waiting⟩` for the rest.
 ### 5b. The board (v0.3, built; navigator in v0.4)
 
 `kel board` — a `display-popup` running `fzf` over every agent: fuzzy filter, a
-preview pane (metadata, recent pane output, git status), and binds for enter
-(jump), ctrl-n (new — routes through `kel new`), ctrl-k (kill, always confirms),
-ctrl-g (go to group), ctrl-r (refresh). Since v0.4 it is *the* navigator, opened
-three ways: **`Ctrl+Space`** (no prefix), `prefix b`, `prefix m`. The old
-`display-menu` quick-jump is retired; `kel menu` is a one-release alias for
-`kel board`.
+preview pane (metadata, recent pane output, git status). `enter` jumps to the
+highlighted agent; **`tab`** opens a labelled `tmux display-menu` acting on it
+(jump / new agent in its dir / rename / go to its group / kill) — the discoverable
+counterpart to the hidden accelerators `ctrl-n` / `ctrl-k` / `ctrl-g` / `ctrl-r`,
+which stay bound. Opened by **`Ctrl+Space`** (no prefix) or `prefix b`. Since the
+`tab` menu is invoked through fzf `become` rather than a key binding, its
+`display-menu` needs an explicit `-c <client>`. The old `display-menu`
+quick-jump is retired; `kel menu` is a one-release alias for `kel board`.
 
 ### 5c. Rejected: the two-slot / swap-pane architecture
 
@@ -133,15 +135,16 @@ Switching is one keystroke — never open-menu, find-row, press-enter.
 |---|---|
 | `prefix 0`..`9` / `n` / `p` / `w` | native window nav (within a group) |
 | `` prefix ` `` | jump to the next `waiting` agent in **any** group — cycles, wraps |
-| `Ctrl+Space` (no prefix) | the board — filter / preview / act; also `prefix b`, `prefix m` |
+| `Ctrl+Space` / `prefix b` | the board — find an agent (`enter` jump, `tab` act) |
+| `prefix m` | manage the current agent (rename / move / new sibling / kill) |
 | `prefix g` / `prefix (` `)` | pick / cycle groups |
 | `prefix ,` | rename this window (routes through `kel rename`) |
-| `prefix k` | "new to kel?" menu (new, browse, split, scroll, rename, close, detach, show me around) |
+| `prefix k` | "new to kel?" primer (new, browse, split, scroll, rename, close, detach, show me around) |
 
 The `` ` `` binding is the capability terminal tabs cannot offer: not "go to
 window 3" but "go to whoever is blocked on me," and it ignores group
-boundaries. `kel` binds `` ` ``, `m`, `G`, `k` and the `|`/`-` split keys;
-native window nav is untouched.
+boundaries. `kel` binds `` ` ``, `b`, `m`, `g`, `k`, `,`, `Ctrl+Space` and the
+`|`/`-` split keys; native window nav is untouched.
 
 ---
 
@@ -266,8 +269,8 @@ kel ls [--json]            every agent, grouped by repo
 kel go [<group>]           switch to a group (no arg: list them)
 kel move [<group>]         relocate the current window to another group
 kel rename <newname>       rename the current window, keep the record in sync
-kel board                  the fleet browser — filter, preview, jump / new / kill
-                           (Ctrl+Space, or prefix b / prefix m)
+kel board                  the fleet browser — filter, preview  (Ctrl+Space or
+                           prefix b); enter jumps, tab acts on the highlighted agent
 kel restore [-c] [-s]      rebuild the workspace after a kill / reboot — groups,
                            windows, splits, agents; -c resume conversations,
                            -s force the snapshot
