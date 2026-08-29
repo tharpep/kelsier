@@ -1121,26 +1121,22 @@ cmd_attach() {
 
   local groups; groups="$(group_sessions)"
 
-  # dir-aware entry, the way `claude` keys off the current directory:
-  # in a repo (or with KEL_GROUP set), `kel` goes to that group — attach it if
-  # it's live, otherwise start an agent there.
+  # dir target, the way `claude` keys off the current directory:
+  # KEL_GROUP, else the repo we're standing in.
   local want=''
   if [ -n "${KEL_GROUP:-}" ]; then want="$KEL_GROUP"
   elif git_root >/dev/null 2>&1; then want="$(basename "$(git_root)")"
   fi
-  if [ -n "$want" ] && slug_ok "$want"; then
-    if printf '%s\n' "$groups" | grep -qxF "$want"; then
-      set_last_group "$want"
-      exec tmux attach -t "=$(sess "$want")"
-    fi
-    # not live yet — but if the server is down with a snapshot, rebuild wins
-    if [ -z "$groups" ] && [ -f "$SNAPSHOT" ]; then :; else
-      say "no agent for '$want' yet — starting one"
-      exec "$SELF" new "$want"
-    fi
+  slug_ok "$want" || want=''
+
+  # 1. dir-aware attach — this repo's group is already live
+  if [ -n "$want" ] && printf '%s\n' "$groups" | grep -qxF "$want"; then
+    set_last_group "$want"
+    exec tmux attach -t "=$(sess "$want")"
   fi
 
-  if [ -n "$groups" ]; then
+  # 2. live workspace, not in a repo — attach the last group you used
+  if [ -n "$groups" ] && [ -z "$want" ]; then
     local last target; last="$(get_last_group)"
     if [ -n "$last" ] && printf '%s\n' "$groups" | grep -qxF "$last"; then
       target="$last"
@@ -1148,9 +1144,18 @@ cmd_attach() {
       target="$(printf '%s\n' "$groups" | head -1)"
     fi
     exec tmux attach -t "=$(sess "$target")"
+  fi
 
-  elif [ -f "$SNAPSHOT" ]; then
-    # server died (reboot / crash) but the workspace was snapshotted
+  # 3. live workspace, in a repo with no group of its own yet — start its agent
+  if [ -n "$groups" ] && [ -n "$want" ]; then
+    say "no agent for '$want' yet — starting one"
+    exec "$SELF" new "$want"
+  fi
+
+  # --- no live groups below this point ---
+
+  # 4. server down but the workspace was snapshotted — offer to rebuild it
+  if [ -f "$SNAPSHOT" ]; then
     local ng na
     ng="$(jq -r '.groups | length' "$SNAPSHOT" 2>/dev/null || echo '?')"
     na="$(jq -r '[.groups[][].name] | length' "$SNAPSHOT" 2>/dev/null || echo '?')"
@@ -1158,22 +1163,29 @@ cmd_attach() {
       printf '\033[1;33mkel\033[0m rebuild your workspace? %s group(s), %s window(s)  [Y/n] ' "$ng" "$na"
       local ans=''; read -r ans || ans=n
       case "$ans" in
-        n|N|no) say "ok — 'kel restore' when you're ready" ;;
-        *)      restore_from_snapshot -c ;;
+        n|N|no) say "ok — starting fresh here; 'kel restore' brings the old one back" ;;
+        *)      restore_from_snapshot -c; return ;;
       esac
+      # declined — fall through to a fresh start instead of dead-ending
     else
       say "workspace snapshot found ($ng groups, $na windows) — 'kel restore' to rebuild"
+      return
     fi
-
   elif [ -n "$(dead_sessions)" ]; then
     warn "no live workspace, but these agents can be rebuilt:"
     cmd_ls
     echo "  kel restore [-c]  rebuild them   ·   kel prune  discard them"
-  else
-    say "welcome to kel."
-    quickstart
-    exec tmux new-session -s "$(sess misc)" -c "$HOME"
+    return
   fi
+
+  # 5. fresh start — dir-aware if we're in a repo
+  if [ -n "$want" ]; then
+    say "starting an agent for '$want'"
+    exec "$SELF" new "$want"
+  fi
+  say "welcome to kel."
+  quickstart
+  exec tmux new-session -s "$(sess misc)" -c "$HOME"
 }
 
 usage() { awk 'NR>1 && /^#/ {sub(/^# ?/,""); print; next} NR>1 {exit}' "$0"; }
