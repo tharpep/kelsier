@@ -17,6 +17,7 @@ _kel() {
     'rename:rename the current window (keeps metadata in sync)'
     'board:fzf fleet browser'
     'restore:rebuild the workspace after a kill / reboot'
+    'restart:relaunch a crashed agent in its existing window'
     'prune:discard dead agent records'
     'doctor:capability probe'
     'cheat:keybinding reference'
@@ -46,6 +47,10 @@ _kel() {
       esac
       ;;
     restore) compadd -- -c -s ;;
+    restart)
+      _alternative 'flags:flag:(-f)' \
+        "agents:agent:($(_kel_names '.[].name, "\(.group)/\(.name)"'))"
+      ;;
     prune)   compadd -- -f ;;
     ls)      compadd -- --json ;;
   esac

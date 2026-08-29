@@ -203,6 +203,41 @@ hook "$P" UserPromptSubmit
 tmux send-keys -t "$P" C-c 2>/dev/null; sleep 0.6
 ok "a crashed agent reads dead, not working"        '[ "$(state_of a)" = dead ]'
 
+section "compaction counter (#15)"
+reset
+K api-gw new a --agent 'sleep 9999' >/dev/null 2>&1
+P="$(tmux list-panes -t '=keltest/api-gw:1' -F '#{pane_id}')"
+M="$SESSIONS/api-gw/a.json"
+hook "$P" UserPromptSubmit
+hook "$P" PreCompact
+ok "PreCompact starts the count at 1"       '[ "$(jq -r ".compactions // 0" "$M")" = 1 ]'
+ok "  ...and leaves state alone (mid-turn)" '[ "$(state_of a)" = working ]'
+hook "$P" PreCompact; hook "$P" PreCompact
+ok "  ...and accumulates"                   '[ "$(jq -r .compactions "$M")" = 3 ]'
+ok "PostCompact does not double-count"      'hook "$P" PostCompact; [ "$(jq -r .compactions "$M")" = 3 ]'
+ok "--json exposes it"                      '[ "$("$KEL" ls --json | jq -r ".[0].compactions")" = 3 ]'
+ok "the board preview shows it"             '[[ "$("$KEL" _board_preview a api-gw)" == *"compacted  3"* ]]'
+
+section "restart-in-place (#13)"
+reset
+K api-gw new a --agent 'sleep 9999' >/dev/null 2>&1
+W0="$(tmux list-windows -a -F '#{window_id}' | head -1)"
+M="$SESSIONS/api-gw/a.json"
+P="$(tmux list-panes -t "$W0" -F '#{pane_id}')"
+hook "$P" UserPromptSubmit
+before="$(jq -Sc 'del(.compactions)' "$M")"
+out="$("$KEL" restart api-gw/a 2>&1)"
+ok "refuses while a process is alive"       '[[ "$out" == *"live process"* ]]'
+ok "  ...even though state says working"    '[ "$(state_of a)" = working ]'
+tmux send-keys -t "$P" C-c 2>/dev/null; sleep 0.8
+ok "  ...the agent now reads dead"          '[ "$(state_of a)" = dead ]'
+"$KEL" restart api-gw/a >/dev/null 2>&1; sleep 0.5
+ok "restart reuses the SAME window"         '[ "$(tmux list-windows -a -F "#{window_id}" | head -1)" = "$W0" ]'
+ok "  ...creates no extra window"           '[ "$(wins)" = 1 ]'
+ok "  ...creates no worktree"               '[ ! -d "$WORK/repos/.kel-worktrees" ]'
+ok "  ...leaves the record otherwise as-is" '[ "$(jq -Sc "del(.compactions)" "$M")" = "$before" ]'
+ok "an unknown name is refused"             '! "$KEL" restart nope-not-here >/dev/null 2>&1'
+
 # ---------------------------------------------------------------- statusline
 section "statusline records context without a live agent"
 reset

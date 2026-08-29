@@ -17,6 +17,7 @@
 #                              (Ctrl+Space or prefix b; enter jumps, tab = actions)
 #   kel restore [-c] [-s]      rebuild the workspace after a kill / reboot
 #                              (-c resume conversations, -s force the snapshot)
+#   kel restart [name] [-f]    relaunch a crashed agent in its existing window
 #   kel prune [-f]             discard dead agent records
 #   kel doctor                 capability probe, cached
 #
@@ -515,7 +516,7 @@ gather_rows() {
   local cs cw
   cs="$(tmux display-message -p '#{client_session}' 2>/dev/null || true)"
   cw="$(tmux display-message -p '#{window_index}' 2>/dev/null || true)"
-  local grp idx wid name state iso branch dirty panes cwd meta ctx cost
+  local grp idx wid name state iso branch dirty panes cwd meta ctx cost cmpc
 
   while IFS=$'\t' read -r sname grp idx wid name; do
     [ -z "${wid:-}" ] && continue
@@ -533,9 +534,10 @@ gather_rows() {
     panes="$(tmux list-panes -t "$wid" -F '#{pane_current_command}' 2>/dev/null | paste -sd'|' -)"
     [ "$sname" = "$cs" ] && [ "$idx" = "$cw" ] && idx="${idx}*"
     ctx="$(ctx_field "$wid" 1)"; cost="$(ctx_field "$wid" 2)"
-    printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+    cmpc='-'; [ -f "$meta" ] && cmpc="$(jq -r '.compactions // "-"' "$meta")"
+    printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
       "$grp" "$idx" "$wid" "$name" "$state" "$iso" "$branch" "$dirty" "${panes:--}" "$cwd" \
-      "${ctx:--}" "${cost:--}"
+      "${ctx:--}" "${cost:--}" "$cmpc"
   done < <(kel_windows | sort -t$'\t' -k2,2 -k3,3n)
 
   while IFS=$'\t' read -r grp name meta; do
@@ -547,8 +549,9 @@ gather_rows() {
     if [ -n "$cwd" ] && git -C "$cwd" rev-parse --git-dir >/dev/null 2>&1; then
       dirty="$(git -C "$cwd" status --porcelain 2>/dev/null | grep -c . || true)"
     fi
-    printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
-      "$grp" "-" "" "$name" "dead" "$iso" "$branch" "$dirty" "-" "$cwd" "-" "-"
+    printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+      "$grp" "-" "" "$name" "dead" "$iso" "$branch" "$dirty" "-" "$cwd" "-" "-" \
+      "$(jq -r '.compactions // "-"' "$meta" 2>/dev/null)"
   done < <(dead_sessions)
 }
 
@@ -563,18 +566,19 @@ cmd_ls() {
   if [ "${1:-}" = "--json" ]; then
     printf '['
     local first=1
-    gather_rows | while IFS=$'\t' read -r grp idx wid name state iso branch dirty panes cwd ctx cost; do
+    gather_rows | while IFS=$'\t' read -r grp idx wid name state iso branch dirty panes cwd ctx cost cmpc; do
       [ "$first" = 1 ] || printf ','
       first=0
       jq -nc --arg grp "$grp" --arg idx "${idx%\*}" --arg wid "$wid" --arg name "$name" \
              --arg state "$state" --arg iso "$iso" --arg branch "$branch" \
              --arg dirty "$dirty" --arg panes "$panes" --arg cwd "$cwd" \
-             --arg ctx "$ctx" --arg cost "$cost" \
+             --arg ctx "$ctx" --arg cost "$cost" --arg cmpc "$cmpc" \
         '{group:$grp, index:(($idx|tonumber?) // null), window_id:$wid, name:$name, state:$state,
           isolation:$iso, branch:(if $branch=="-" then null else $branch end),
           dirty:(($dirty|tonumber?) // null),
           panes:(if $panes=="-" then null else ($panes|split("|")) end), cwd:$cwd,
-          context_pct:(($ctx|tonumber?) // null), cost_usd:(($cost|tonumber?) // null)}'
+          context_pct:(($ctx|tonumber?) // null), cost_usd:(($cost|tonumber?) // null),
+          compactions:(($cmpc|tonumber?) // null)}'
     done
     printf ']\n'
     return 0
@@ -742,6 +746,10 @@ created    \(.created_at)"' "$meta"
     case "${c_sz:-}" in ''|*[!0-9]*) c_sz=0 ;; esac
     printf 'context    %s%% of %sk  (%s tokens used)\n' "${c_pct:-0}" "$(( c_sz / 1000 ))" "${c_in:-0}"
     printf 'cost       $%.2f%s\n' "$c_cost" "${c_model:+   ·  $c_model}" 2>/dev/null
+  fi
+  if [ -f "$meta" ]; then
+    local c_cmp; c_cmp="$(jq -r '.compactions // 0' "$meta" 2>/dev/null)"
+    [ "${c_cmp:-0}" -gt 0 ] 2>/dev/null && printf 'compacted  %s time(s)\n' "$c_cmp"
   fi
   if [ -n "$wid" ]; then
     printf '\n\033[2m── recent ──\033[0m\n'
@@ -1010,6 +1018,67 @@ cmd_restore() {
 }
 
 # --------------------------------------------------------------------------
+# kel restart [name] [-f]  — relaunch a crashed agent in its existing window
+# --------------------------------------------------------------------------
+# v0.4 made a crashed agent visible (`dead`) but gave no way out of it short of
+# a workspace-wide `kel restore`.  This is the exit: same window, same worktree,
+# same branch, same conversation — nothing else touched.
+cmd_restart() {
+  need tmux; need jq
+  local name='' force=0
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      -f|--force) force=1 ;;
+      -*)         die "kel restart: unknown flag $1" ;;
+      *)          name="$1" ;;
+    esac
+    shift
+  done
+
+  local group meta wid rr rc=0
+  if [ -z "$name" ]; then
+    [ -n "${TMUX:-}" ] || die "usage: kel restart <name>   (or run it from inside the agent's window)"
+    wid="$(tmux display-message -p '#{window_id}' 2>/dev/null)"
+    rr="$(meta_by_wid "$wid" || true)"
+    [ -n "$rr" ] || die "this window isn't a managed agent"
+    IFS=$'\t' read -r group name meta <<< "$rr"
+  else
+    rr="$(resolve_agent "$name")" || rc=$?
+    [ "$rc" = 2 ] && die "'$name' is ambiguous — say which: kel restart <group>/<name>"
+    [ -n "$rr" ] || die "no agent '$name'"
+    IFS=$'\t' read -r group name meta <<< "$rr"
+    wid="$(jq -r '.window_id' "$meta")"
+  fi
+
+  tmux list-windows -a -F '#{window_id}' 2>/dev/null | grep -qxF "$wid" \
+    || die "'$group/$name' has no live window — 'kel restore' rebuilds it"
+
+  # Relaunching a live agent would leave two of them fighting over one pane.
+  # Ask the pane, not the state file: a freshly-started agent has no .state
+  # yet, and trusting that would double-launch it.  Same shell list as
+  # effective_state's dead check.
+  local st alive=0
+  st="$(effective_state "$wid")"
+  tmux list-panes -t "$wid" -F '#{pane_current_command}' 2>/dev/null \
+    | grep -qvxE 'bash|zsh|fish|sh|dash|tmux' && alive=1
+  if [ "$alive" = 1 ] && [ "$force" != 1 ]; then
+    die "'$group/$name' still has a live process (state: ${st:-unknown}) — kel restart $name -f to relaunch anyway"
+  fi
+
+  local agent cid pane
+  agent="$(jq -r '.agent // "claude"' "$meta")"
+  cid="$(jq -r '.claude_session // ""' "$meta")"
+  pane="$(tmux list-panes -t "$wid" -F '#{pane_id}' 2>/dev/null | head -1)"
+  [ -n "$pane" ] || die "'$group/$name' has no pane to restart in"
+
+  # drop the stale reading; the relaunched agent's SessionStart sets it again
+  rm -f "$STATE_DIR/$wid.state" "$STATE_DIR/$wid.ctx"
+  tmux send-keys -t "$pane" "$(agent_resume_cmd "$agent" "$cid")" Enter
+  tmux refresh-client -S 2>/dev/null || true
+  say "restarting $group/$name${cid:+  (resuming $cid)}"
+}
+
+# --------------------------------------------------------------------------
 # kel doctor
 # --------------------------------------------------------------------------
 cmd_doctor() {
@@ -1219,6 +1288,7 @@ cat <<'EOF'
     kel move [group]   put THIS window in another group (cd first, then kel move)
     kel rename <new>   rename this window, keep metadata in sync
     kel kill <name>    close one      ·   kel prune  discard dead records
+    kel restart [name] relaunch THIS agent after a crash (same window/worktree)
     kel restore [-c]   rebuild after a kill / reboot  (-c resumes conversations)
 
   STATUS BAR
@@ -1406,6 +1476,22 @@ cmd_hook() {
         *)                    state=waiting ;;
       esac ;;
     Stop)             state=done ;;
+    PreCompact)
+      # Compaction happens mid-turn: the agent is still working, so do NOT
+      # touch .state.  Just count it.  "This one has been squeezed three
+      # times" is the signal context% cannot give you, because context% drops
+      # back down after every compaction and looks healthy again.
+      local rr mp
+      rr="$(meta_by_wid "$wid" || true)"
+      if [ -n "$rr" ]; then
+        mp="${rr##*$'\t'}"
+        jq '.compactions = ((.compactions // 0) + 1)' "$mp" > "$mp.t" 2>/dev/null \
+          && mv -f "$mp.t" "$mp"
+      fi
+      exit 0 ;;
+    PostCompact)
+      tmux refresh-client -S 2>/dev/null || true
+      exit 0 ;;
     SessionEnd)
       rm -f "$STATE_DIR/$wid.state" "$STATE_DIR/$wid.ctx"
       [ -n "$sid" ] && rm -f "$STASH_DIR/$sid"
@@ -1533,6 +1619,7 @@ main() {
     _board_actions)  cmd_board_actions "$@" ;;
     _board_rename)   migrate_meta; cmd_board_rename "$@" ;;
     restore)      migrate_meta; cmd_restore "$@" ;;
+    restart)      migrate_meta; cmd_restart "$@" ;;
     prune)        migrate_meta; cmd_prune "$@" ;;
     snapshot)     cmd_snapshot ;;
     doctor)       cmd_doctor "$@" ;;

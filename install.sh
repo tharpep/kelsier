@@ -87,8 +87,10 @@ jq --arg k "$KEL" '
   | .hooks.Notification     = wire("Notification")
   | .hooks.Stop             = wire("Stop")
   | .hooks.SessionEnd       = wire("SessionEnd")
+  | .hooks.PreCompact       = wire("PreCompact")
+  | .hooks.PostCompact      = wire("PostCompact")
 ' "$SETTINGS" > "$tmp" && mv "$tmp" "$SETTINGS"
-echo "  wired: SessionStart UserPromptSubmit Notification Stop SessionEnd"
+echo "  wired: SessionStart UserPromptSubmit Notification Stop SessionEnd PreCompact PostCompact"
 
 say "Claude Code statusLine -> $SETTINGS"
 # kel's statusLine reports this agent's context window / cost, and records them
