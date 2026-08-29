@@ -263,25 +263,39 @@ the write is gated on a non-zero `context_window_size`.
 (kel still maps every notification to `waiting`, including `idle_prompt`),
 compaction counters, and the permission hooks.
 
-## v0.5 — tell the truth, and tell me out of band
+## v0.5 — tell the truth, and tell me out of band  ·  **done**
 
 **Theme:** signal, not surfaces. Everything here is hook/state work in the layer
 v0.4.1 just warmed up; nothing new to look at.
 
 - ~~**#14** notification fidelity~~ — **done** (`84f7329`). `Notification` maps to
   what it means; `throttled` is a real state; `kel jump` stopped lying.
-- **#15** compaction counter — `PreCompact` / `PostCompact`, `compactions: N` in
-  the record. Catches what context % can't: an agent repeatedly squeezed back
-  down. Take `SessionStart`'s matcher values while in there.
-- **#13** restart-in-place — moved up from Tier 3 deliberately. v0.4 shipped
-  `dead` detection, so an agent can now be *diagnosed* as crashed with no way to
-  *fix* it short of a workspace-wide `kel restore`. A state with no exit is
-  worse than no state. ~15 LOC and it completes something already shipped.
-- **#1** fleet notifications — the missing half of v0, and unblocked by #14:
-  notifying on the old `waiting` would have paged you for `idle_prompt`, the
-  false positive that makes people switch notifications off for good. On WSL2
-  the ladder is bell → `display-message` → OSC 9 → `powershell.exe` toast.
-- **#4** informative `⟨+N waiting⟩` badge.
+- ~~**#15** compaction counter~~ — **done**. `PreCompact` increments
+  `compactions` on the record and deliberately leaves `.state` alone
+  (compaction is mid-turn; the agent is still working). Catches what context %
+  can't — context % drops back down after each compaction and looks healthy
+  again. In the board preview and `--json`, not on the bar.
+  The `SessionStart` matcher sub-item was **dropped**: the documented payload
+  has no field naming the trigger, and matchers select which hook entry runs
+  rather than appearing in the payload. Achievable with a matcher-scoped entry
+  in `settings.json` if it ever matters; guessing at a field name was the
+  alternative, and that is how you get a silent wrong branch.
+- ~~**#13** restart-in-place~~ — **done**. `kel restart [name] [-f]`, also on
+  `prefix m`. Same window, worktree, branch and conversation. The liveness
+  guard asks the *pane*, not the state file: the first cut used
+  `effective_state` and would have double-launched a freshly-started agent,
+  which has no `.state` yet.
+- ~~**#1** fleet notifications~~ — **done**. Hook-driven, never polled. Two
+  gates: only on a *transition into* a notifying state, and only when you are
+  not already looking (window active **and** a client attached). `KEL_NOTIFY`
+  picks the states. Delivery is one `notify()` function — `tmux
+  display-message` plus a backgrounded `$KEL_NOTIFY_CMD`; no platform
+  detection, recipes in `setup.md`, and that function is the seam if that
+  changes. Backgrounding avoids `setsid`, which macOS lacks.
+- ~~**#4** informative badge~~ — **done**. `⟨api·1 infra·1⟩`, capped at three
+  groups then `+N`. `kel jump` now also reports where it landed and for how
+  long. `humanize_secs` was written here because v0.6's `kel top` FOR column
+  needs it too.
 - **macOS portability** — added to this card because it blocks a machine that
   is already in use. `bin/kel` uses no bash 4+ features, so the language is
   fine (macOS ships bash 3.2); three GNU coreutils assumptions are not, and all
@@ -298,6 +312,16 @@ v0.4.1 just warmed up; nothing new to look at.
   Taking a wrong branch quietly is the worst failure mode for a tool whose
   value is being trustworthy (invariant 3 in `CLAUDE.md`). `install/` is
   apt-only and is a separate, larger job — not in this card.
+
+  **Done.** All three are now dependency-free rather than swapped for a BSD
+  spelling. A fourth turned up while fixing them: a unix socket path caps
+  around 104 chars and macOS sets `$TMPDIR` to a long `/var/folders/...` path,
+  so the test suite's `TMUX_TMPDIR` now lives directly under `/tmp`.
+- **CI** — `.github/workflows/ci.yml` runs syntax + the suite on
+  `ubuntu-latest` and `macos-latest`, plus `/bin/bash -n bin/kel` on macOS
+  against the stock 3.2. This is what stops the GNU-isms coming back; fixing
+  them by hand was the one-off. Deliberately no shellcheck yet — a red build
+  should mean exactly one thing.
 
 ## v0.6 — one place to look  ·  *Go enters here*
 

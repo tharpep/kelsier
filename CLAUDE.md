@@ -114,14 +114,18 @@ hook). `kel jump` matches `waiting` only.
 
 ```sh
 bash -n bin/kel && bash -n install.sh      # syntax
-test/kel-test.sh                            # 28 cases, ~40s
+test/kel-test.sh                            # 75 cases, ~60s
 ```
 
-The suite runs fully isolated — it overrides `XDG_STATE_HOME` and
-`KEL_SESSION=keltest`, builds throwaway git repos, and uses `sleep 9999` as a
-fake agent so no real Claude Code session is started. It kills its own tmux
-server on the way out. **It will not touch your real workspace or state**, and
-neither should any test you add.
+CI (`.github/workflows/ci.yml`) runs exactly this on `ubuntu-latest` and
+`macos-latest` on every push, plus `/bin/bash -n bin/kel` on macOS to catch
+bash-4 syntax against the stock 3.2.
+
+The suite runs fully isolated on three axes and **will not touch your real
+workspace**: its own `TMUX_TMPDIR` (so its `tmux kill-server` cannot reach the
+default socket — it once killed a live workspace), its own `XDG_STATE_HOME`,
+and `KEL_SESSION=keltest`. Agents are faked with `sleep 9999`, so nothing
+reaches an API. Any test you add must keep all three.
 
 Run it before every commit. It covers: cross-group name collisions, ambiguous
 `kill` resolution, rename/move scoping, legacy record migration, three
@@ -156,28 +160,38 @@ bugs in this repo were invisible to inspection and obvious on the first run.
 
 ---
 
-## Portability — known broken on macOS
+## Portability
 
-The author runs kel on a Linux desktop, WSL2, and a **MacBook**. macOS is
-currently unsupported and the failures are silent, not loud. `bin/kel` uses no
-bash 4+ features (macOS ships bash 3.2), so the language is fine — the problems
-are GNU coreutils assumptions:
+kel runs on a Linux desktop, WSL2, and a **MacBook**. The three GNU coreutils
+assumptions that used to break macOS *silently* are fixed, and CI now runs the
+whole suite on `macos-latest` so they cannot come back. `bin/kel` uses no bash
+4+ features either (macOS ships bash 3.2, and CI checks against it explicitly).
 
-| where | problem | consequence on macOS |
-|---|---|---|
-| `bin/kel` `prune_state` | `sed 's/\.\(state\|ctx\)$//'` — `\|` is a GNU BRE extension | extension not stripped, so **live state files are deleted** on every `kel ls` |
-| `bin/kel` `snapshot` | `stat -c %Y` is GNU; BSD is `stat -f %m` | falls back to `0`, so the `.restoring` lock is **always judged stale** and invariant 2 is silently disabled |
-| `bin/kel` `cmd_doctor` | `sort -V` is not in BSD sort | the `tmux >= 3.0` probe misreports |
-| `install/10-system-tools.sh` | apt/dpkg throughout | provisioning does not run at all |
+**When writing new shell here, assume BSD userland.** The fixed cases are the
+pattern to follow — each was solved by removing the dependency, not by swapping
+a GNU flag for a BSD one:
 
-None of these error out — they take a wrong branch quietly, which is the worst
-failure mode for a tool whose value is being trustworthy. Fix the three in
-`bin/kel` before running it on the Mac. **Do not solve this with containers**:
-kel drives the *host's* tmux server and spawns agents that edit the host's
-repos with the host's `claude` auth; a container has its own PID/PTY namespace,
-and on macOS it is a Linux VM besides. Cross-compilation is the answer for Go
-(`GOOS=darwin GOARCH=arm64`), and plain POSIX-compatible shell is the answer
-for bash.
+| don't | do |
+|---|---|
+| `sed 's/\.\(a\|b\)$//'` (`\|` is a GNU BRE extension) | parameter expansion: `${v%.a}` / `${v%.b}` |
+| `stat -c %Y` (BSD is `-f %m`) | have the writer record the epoch in the file |
+| `sort -V` (absent from BSD sort) | compare `${v%%.*}` / `${v#*.}` arithmetically |
+| `setsid` (absent on macOS) | `( cmd & )` |
+| `script -qfc CMD file` (BSD wants `script -q file CMD`) | avoid; don't put it in tests |
+
+`install/` is still apt-only — provisioning a Mac is a separate, larger job and
+is not scheduled.
+
+**Do not solve portability with containers.** kel drives the *host's* tmux
+server and spawns agents that edit the host's repos with the host's `claude`
+auth; a container has its own PID/PTY namespaces, and on macOS it is a Linux VM
+besides, so its tmux could never be the one you attach to. Cross-compilation is
+the answer for Go (`GOOS=darwin GOARCH=arm64`), POSIX-clean shell for bash.
+
+One trap that is not about coreutils: a unix socket path caps around 104
+characters, and macOS sets `$TMPDIR` to a long `/var/folders/...` path. That is
+why `test/kel-test.sh` puts its `TMUX_TMPDIR` directly under `/tmp` rather than
+under its own work dir.
 
 ---
 
@@ -202,9 +216,11 @@ for bash.
 
 ## Where things stand
 
-v0.4.1 shipped. Next is **v0.5** (`rollout.md`): `#15` compaction counter,
-`#13` restart-in-place, `#1` fleet notifications, `#4` informative badge — all
-hook/state work in bash. **Go enters at v0.6** as a strangler fig on `main`
+**v0.5 is complete** — `#14` notification fidelity, `#15` compaction counter,
+`#13` restart-in-place, `#1` fleet notifications, `#4` per-group badge, plus
+the macOS portability fixes and CI. Next is **v0.6** (`rollout.md`):
+`kel _fleet --json`, then `#2` `kel top`, then `#5` peek.
+**Go enters at v0.6** as a strangler fig on `main`
 (`kel _fleet --json` first, then `kel top` in Bubble Tea **v2**), with bash
 retained as the fallback and as the differential-test oracle. `rollout.md`
 § v0.6 has the rules; follow them rather than re-deriving the strategy.

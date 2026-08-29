@@ -163,6 +163,43 @@ still works but adds ~20–50ms of Windows-interop latency per operation, and
 
 ---
 
+## 5b. Desktop notifications (optional)
+
+`kel` always flashes a `tmux display-message` when an agent starts waiting on
+you and you are looking elsewhere. To get a notification that reaches you
+outside the terminal, point `KEL_NOTIFY_CMD` at a script taking **title** and
+**body**. kel runs it in the background, so a slow toast never stalls the hook.
+
+kel deliberately ships no platform detection — one env var is easier to reason
+about than three silent code paths.
+
+**WSL2.** There is no desktop session, so `notify-send` is a dead end;
+`powershell.exe` is on `PATH` and is the way out:
+
+```sh
+# ~/.local/bin/kel-toast    (chmod +x)
+#!/bin/sh
+powershell.exe -NoProfile -Command \
+  "New-BurntToastNotification -Text '$1','$2'" >/dev/null 2>&1
+# needs:  Install-Module -Name BurntToast -Scope CurrentUser
+```
+
+**macOS.**
+
+```sh
+#!/bin/sh
+osascript -e "display notification \"$2\" with title \"$1\""
+```
+
+**Linux desktop.** `notify-send "$1" "$2"`.
+
+Then:
+
+```sh
+export KEL_NOTIFY_CMD="$HOME/.local/bin/kel-toast"
+export KEL_NOTIFY="waiting"        # or "waiting dead"
+```
+
 ## 6. Second machine
 
 1. `wsl --install -d Ubuntu-24.04`, set user.

@@ -26,7 +26,7 @@ rollout wins.
 
 | release | entries |
 |---|---|
-| v0.5 | ~~#14~~ done · #15 · **#13** · #1 · #4 |
+| ~~v0.5~~ **done** | ~~#14~~ · ~~#15~~ · ~~#13~~ · ~~#1~~ · ~~#4~~ · macOS fixes · CI |
 | v0.6 | `_fleet --json` · #2 (folds #3, #7) · #5  — *Go starts here* |
 | v0.7 | #6 · #8 · #12 |
 | v0.8 | #11 · config file (un-parked below) |
@@ -52,7 +52,7 @@ stock tmux). Everything else is a subcommand or a board action.
 durations, last output, git state, merge-readiness — lives in `kel top` (#2),
 not the bar. The one concession on the bar is #4.
 
-### 14. Notification fidelity — stop crying wolf  ·  `[fits — correctness]`
+### 14. Notification fidelity — stop crying wolf  ·  `[fits — correctness]`  ·  **shipped v0.5**
 
 `kel hook` maps **every** `Notification` to `waiting`. The payload carries a
 `notification_type`, and only some of its values mean "blocked on you":
@@ -75,7 +75,7 @@ bar glyph `~`, sorted below `waiting` in `kel top`.
 **Gate:** none. This is a `case` on a field already being parsed. Do it first.
 ~10 LOC.
 
-### 15. Compaction counter  ·  `[fits]`
+### 15. Compaction counter  ·  `[fits]`  ·  **shipped v0.5**
 
 `PreCompact` / `PostCompact` are two more hook events, same shape as the five
 already wired. Count them per agent (`compactions: N` in the record). "This one
@@ -89,7 +89,7 @@ Also worth taking while in there: `SessionStart` has matcher values
 
 **Gate:** none. Two hook lines + a jq increment. ~10 LOC.
 
-### 16. Precise blocked-state via permission hooks  ·  `[fits]`
+### 16. Precise blocked-state via permission hooks  ·  `[fits]`  ·  *still open*
 
 `PermissionRequest` and `PermissionDenied` are dedicated events. They are a
 sharper signal than `Notification`+`permission_prompt` — a request is
@@ -100,7 +100,7 @@ Fold in only after #14 — #14 is the correctness fix, this is the refinement.
 
 **Gate:** after #14, if `Notification` still feels imprecise in daily use.
 
-### 1. Fleet notifications  ·  `[fits]`
+### 1. Fleet notifications  ·  `[fits]`  ·  **shipped v0.5**
 
 The status line is the only passive surface. In another app, another workspace,
 or with tmux detached, "who needs you" reaches you nowhere — and `` prefix ` ``
@@ -183,7 +183,7 @@ on the status bar (see the principle above).
 
 **Gate:** ships with #2.
 
-### 4. Informative "+N waiting" badge  ·  `[fits]`
+### 4. Informative "+N waiting" badge  ·  `[fits]`  ·  **shipped v0.5**
 
 `⟨+2 waiting⟩` tells you someone's blocked, not who or where. Expand to
 `⟨api·1 infra·1⟩`, or have `` prefix ` `` print `→ api/auth-fix (waiting 4m)` as
@@ -369,7 +369,7 @@ group, for monorepos that don't split cleanly on git root.
 
 **Gate:** when the monorepo fallback is a daily annoyance — not before.
 
-### 13. Restart-in-place  ·  `[fits]`  ·  **promoted to v0.5**
+### 13. Restart-in-place  ·  `[fits]`  ·  **shipped v0.5**
 
 > Moved out of Tier 3 order. v0.4 shipped `dead` detection, so kel can now
 > *diagnose* a crashed agent with no way to *fix* it short of a workspace-wide

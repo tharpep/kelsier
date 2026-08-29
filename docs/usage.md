@@ -35,6 +35,8 @@ kel rename <newname>   rename THIS window and keep its metadata record in sync
 kel board              the fleet browser — fuzzy filter + preview  (Ctrl+Space
                        or prefix b).  enter jumps; tab = act on the highlighted
                        agent (jump / new here / rename / go to group / kill)
+kel restart [name]     relaunch a crashed agent in its existing window (-f to
+                       force while something is still running there)
 kel restore [-c] [-s]  rebuild the workspace after a kill / reboot
                        (-c resume conversations; -s force the snapshot)
 kel prune [-f]         discard dead agent records (and their worktrees)
@@ -53,7 +55,12 @@ Internal (wired into tmux / Claude Code, you won't call these):
 `kel kill <TAB>` completes agent names; `kel go <TAB>` / `kel move <TAB>`
 complete group names.
 
-Env knobs: `KEL_GROUP` (force every `kel new` into one group — see below),
+Env knobs: `KEL_NOTIFY` (states worth interrupting you for, default `waiting`;
+e.g. `"waiting dead"`), `KEL_NOTIFY_CMD` (a command taking title + body — see
+`setup.md`; kel always does a `tmux display-message` regardless),
+`KEL_CTX_WARN` (context % at which the bar starts showing it, default `70`),
+`KEL_BOARD_W` / `KEL_BOARD_H` (board popup size),
+`KEL_GROUP` (force every `kel new` into one group — see below),
 `KEL_SESSION` (session-name prefix, default `kel`), `KEL_AGENT` (default
 `claude`), `KEL_WORKTREES` (default `<repo>/../.kel-worktrees`),
 `KEL_RESTORE_CMDS` (pane commands to re-run on restore).

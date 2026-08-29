@@ -248,6 +248,8 @@ each calling `kel hook <EVENT>` with the payload on stdin):
 | `Notification` | depends on `notification_type` — see below |
 | `Stop` | `done` |
 | `SessionEnd` | state file removed |
+| `PreCompact` | no state change — increments `compactions` on the record |
+| `PostCompact` | no state change — just redraws the bar |
 
 `Notification` is not one event. Its payload carries a `notification_type`, and
 mapping every value to `waiting` made `` prefix ` `` jump to agents that were
@@ -311,6 +313,27 @@ is one `jq`, one atomic write, and a `refresh-client -S` **only** when the
 displayed integer changes. Writes are gated on a non-zero `context_window_size`
 so a malformed payload cannot blank a good record.
 
+### 9b. Notifications (v0.5)
+
+The status line is a *pull* surface — it only helps while you are looking at
+it. `kel hook` also pushes: when an agent **transitions into** a state listed
+in `KEL_NOTIFY` (default `waiting`) and you are **not looking at that window**,
+kel notifies.
+
+Both conditions matter. Without the transition test, every repeat hook of the
+same state re-notifies; without the focus test, kel interrupts you about the
+window you are already reading. "Looking at it" means the window is active
+**and** its session has a client attached — a detached workspace always
+notifies, because nobody is looking.
+
+Delivery lives in one function: `tmux display-message` always, plus
+`$KEL_NOTIFY_CMD "<title>" "<body>"` backgrounded if set. kel ships no platform
+detection; `setup.md` has recipes. That single function is the seam if it ever
+should.
+
+It is **hook-driven, never polled** — a poller would be a background daemon
+(§2).
+
 **Agent-agnostic.** State detection is a per-agent adapter. An agent with no
 hook system would fall back to `unknown` and the last output line. Not built —
 Claude Code is the only adapter so far. Note that context/cost is a *second*
@@ -334,6 +357,9 @@ kel move [<group>]         relocate the current window to another group
 kel rename <newname>       rename the current window, keep the record in sync
 kel board                  the fleet browser — filter, preview  (Ctrl+Space or
                            prefix b); enter jumps, tab acts on the highlighted agent
+kel restart [name] [-f]    relaunch a crashed agent in its existing window —
+                           same worktree, same branch, same conversation.
+                           Refuses while a process is alive; -f overrides
 kel restore [-c] [-s]      rebuild the workspace after a kill / reboot — groups,
                            windows, splits, agents; -c resume conversations,
                            -s force the snapshot
