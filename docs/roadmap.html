@@ -467,9 +467,9 @@
       earned its place in daily use.
     </p>
     <p class="standfirst" style="font-size:0.9rem;">
-      <strong>Status &middot; 2026-08-28:</strong> v0, v0.1, and v0.2 are shipped and in
-      use. Next is the v0.3 board, gated on <code>kel menu</code> outgrowing a flat
-      list. Authoritative build order and test plan live in
+      <strong>Status &middot; 2026-08-29:</strong> v0 through v0.3 are shipped and in
+      use. Only v1.0 (the Go rewrite) remains, and it's optional &mdash; decided after
+      living with the shell version. Authoritative build order and test plan live in
       <code>docs/rollout.md</code>; this page is the visual companion.
     </p>
     <dl class="legend">
@@ -594,53 +594,45 @@
       </li>
 
       <!-- STAGE 3 -->
-      <li class="stage now">
-        <div class="node" aria-hidden="true">3</div>
+      <li class="stage done">
+        <div class="node" aria-hidden="true">&#10003;</div>
         <div class="stage-main">
-          <p class="stage-tag">Stage 3 &nbsp;<span class="ver">v0.3 &middot; the board</span><span class="badge next">next</span></p>
+          <p class="stage-tag">Stage 3 &nbsp;<span class="ver">v0.3 &middot; the board</span><span class="badge shipped">shipped</span></p>
           <h2>Give the fleet a real surface &mdash; the cross-group navigator</h2>
-          <p class="stance">A transient popup, not a pane. Opens over the current window, dismissed with a key.</p>
+          <p class="stance">A transient <code>display-popup</code> running <code>fzf</code> &mdash; not a hand-rolled TUI. ~50 lines.</p>
 
           <div class="field">
-            <span class="k">Gate &mdash; the pain that unlocks it</span>
-            <p>Still losing track <em>despite</em> v0.2 grouping &mdash; you want to filter / scroll / browse across every group at once.</p>
-          </div>
-
-          <div class="field">
-            <span class="k">Ships</span>
+            <span class="k">Shipped</span>
             <ul>
-              <li><code>kel board</code> as a <code>display-popup</code> TUI (shell TUI, or Bubble Tea if it needs the structure)</li>
-              <li>filter, jump, new, kill &mdash; across groups, from the board</li>
-              <li>the board never occupies a pane and never needs to survive a switch</li>
+              <li><code>kel board</code> / <code>prefix b</code> &mdash; <code>fzf</code> over every live agent, fuzzy filter on group + name</li>
+              <li>preview pane: metadata + recent pane output + <code>git status</code></li>
+              <li>binds: <kbd>enter</kbd> jump, <kbd>^n</kbd> new, <kbd>^k</kbd> kill, <kbd>^g</kbd> go to group, <kbd>^r</kbd> refresh</li>
+              <li><code>prefix m</code> stays as the zero-latency quick jump; the board is for filtering + acting</li>
             </ul>
           </div>
 
           <figure class="term">
-            <figcaption class="term-bar">display-popup &middot; kel board</figcaption>
-<pre class="term-body"><code>&#9484; kel board &#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472; 6 live &#9488;
-&#9474;                                          &#9474;
-&#9474;  <span class="s-wait">&#9679;</span>  1  auth-fix     <span class="s-wait">waiting</span>  inplace  <span class="dim">~/api</span>  &#9474;
-&#9474;  <span class="s-work">&#9680;</span>  2  rate-limit   <span class="s-work">working</span>  wt       <span class="dim">~/wt</span>   &#9474;
-&#9474;  <span class="s-done">&#9675;</span>  3  docs         <span class="s-done">done</span>     inplace  <span class="dim">~/api</span>  &#9474;
-&#9474;  <span class="s-idle">&middot;</span>  4  sazed        <span class="s-idle">idle</span>     inplace  <span class="dim">~/saz</span>  &#9474;
-&#9474;  <span class="s-work">&#9680;</span>  5  billing      <span class="s-work">working</span>  wt       <span class="dim">~/wt</span>   &#9474;
-&#9474;  <span class="s-wait">&#9679;</span>  6  cache-layer  <span class="s-wait">waiting</span>  wt       <span class="dim">~/wt</span>   &#9474;
-&#9474;                                          &#9474;
-&#9474;  <span class="dim">/ filter   &#9166; go   n new   k kill   ` waiting</span> &#9474;
-&#9492;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9496;</code></pre>
+            <figcaption class="term-bar">prefix b &middot; kel board</figcaption>
+<pre class="term-body"><code>  enter jump  ^n new  ^k kill  ^g group      &#9474; group      api
+&#8250; dep&#9608;                              1/9     &#9474; agent      claude
+  api    auth-fix     <span class="s-wait">waiting</span>  2 dirty     &#9474; isolation  worktree
+&#9608; api    rate-limit   <span class="s-work">working</span>            &#9474; directory  ~/api
+  web    frontend     <span class="s-done">done</span>               &#9474;
+  web    api-client   <span class="s-idle">idle</span>               &#9474; <span class="dim">&#9472;&#9472; recent &#9472;&#9472;</span>
+  infra  tf-upgrade   <span class="s-work">working</span>            &#9474; <span class="dim">&#9679; applying changes&hellip;</span></code></pre>
           </figure>
 
-          <p class="gain"><span class="k">Unlocks</span>Managing 10+ sessions without the status line turning to mush.</p>
+          <p class="gain"><span class="k">Unlocked</span>Filter, preview, and act on any agent across every group from one popup.</p>
         </div>
       </li>
 
       <!-- STAGE 4 -->
-      <li class="stage">
+      <li class="stage now">
         <div class="node" aria-hidden="true">4</div>
         <div class="stage-main">
-          <p class="stage-tag">Stage 4 &nbsp;<span class="ver">v1.0 &middot; consolidation</span></p>
+          <p class="stage-tag">Stage 4 &nbsp;<span class="ver">v1.0 &middot; consolidation</span><span class="badge next">maybe</span></p>
           <h2>Turn the pile of scripts into one thing you install anywhere</h2>
-          <p class="stance">Go + Bubble Tea, single static binary. Only worth it once the scripts are load-bearing.</p>
+          <p class="stance">Go + Bubble Tea, single static binary. Adds no features &mdash; decided after living with the shell version.</p>
 
           <div class="field">
             <span class="k">Gate &mdash; the pain that unlocks it</span>
