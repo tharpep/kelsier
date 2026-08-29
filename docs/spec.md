@@ -256,7 +256,8 @@ Claude Code is the only adapter so far.
 ## 10. Commands
 
 ```
-kel                        enter the workspace (attach the `kel` tmux session)
+kel                        dir-aware entry (like `claude`): in a repo, attach
+                           that group or start its agent; else the last group
 kel new <name> [-w]        window + agent, inplace or in a git worktree
       [--agent CMD] [--no-agent]
 kel kill <name> [-f]       close the window; remove the worktree; -f overrides

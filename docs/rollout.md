@@ -176,6 +176,11 @@ filter / sort / browse across everything at once.
   that matter. Shell completion for bash + zsh (`install.sh` wires it) —
   subcommands, agent names for `kill`, group names for `go` / `move`. The
   copy-text tip (Shift+drag) moved up into `kel cheat`'s model section.
+- **Dir-aware `kel`.** Bare `kel` now keys off the current directory the way
+  `claude` does: inside a repo it attaches that repo's group, or starts an agent
+  for it if nothing's running there. `KEL_GROUP` overrides; outside a repo it
+  still falls back to the last-used group; the reboot snapshot-rebuild prompt
+  still wins.
 - **Group model.** `kel new` / `kel move` outside a repo now warn about the
   `misc` fallback. `kel move` warns when relocating a worktree agent to a
   mismatched group (cosmetic only). Monorepo guidance documented in `usage.md`;

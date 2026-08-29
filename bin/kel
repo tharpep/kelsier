@@ -2,7 +2,8 @@
 # kel — a terminal workspace for running several coding agents at once.
 # tmux does the multiplexing; kel does the bookkeeping.
 #
-#   kel                        enter the workspace
+#   kel                        enter the workspace — in a repo, go to (or start)
+#                              that repo's agent, like `claude` for a directory
 #   kel new <name> [-w]        window + agent, inplace or in a git worktree
 #         [--group G] [--agent CMD] [--no-agent]
 #   kel kill <name> [-f]       close the window; remove the worktree; -f overrides
@@ -1015,7 +1016,8 @@ cat <<'EOF'
     so `prefix 1-9` reaches every agent.  `kel new x --group foo` still splits.
 
   FROM A SHELL
-    kel                (re-)enter the workspace (last group)
+    kel                in a repo: go to (or start) that repo's agent, like
+                       `claude` for a dir. Elsewhere: your last group.
     kel new <name>     new window + agent   (-w = worktree, --group G)
     kel ls             list every agent, grouped
     kel board          fzf browser: filter, preview, ^n new, ^k kill
@@ -1118,6 +1120,26 @@ cmd_attach() {
   fi
 
   local groups; groups="$(group_sessions)"
+
+  # dir-aware entry, the way `claude` keys off the current directory:
+  # in a repo (or with KEL_GROUP set), `kel` goes to that group — attach it if
+  # it's live, otherwise start an agent there.
+  local want=''
+  if [ -n "${KEL_GROUP:-}" ]; then want="$KEL_GROUP"
+  elif git_root >/dev/null 2>&1; then want="$(basename "$(git_root)")"
+  fi
+  if [ -n "$want" ] && slug_ok "$want"; then
+    if printf '%s\n' "$groups" | grep -qxF "$want"; then
+      set_last_group "$want"
+      exec tmux attach -t "=$(sess "$want")"
+    fi
+    # not live yet — but if the server is down with a snapshot, rebuild wins
+    if [ -z "$groups" ] && [ -f "$SNAPSHOT" ]; then :; else
+      say "no agent for '$want' yet — starting one"
+      exec "$SELF" new "$want"
+    fi
+  fi
+
   if [ -n "$groups" ]; then
     local last target; last="$(get_last_group)"
     if [ -n "$last" ] && printf '%s\n' "$groups" | grep -qxF "$last"; then

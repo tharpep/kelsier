@@ -17,7 +17,8 @@ tmux kill-server        # then reopen; restart any running Claude sessions
 ## Commands
 
 ```
-kel                    enter the workspace (attach the last group you used)
+kel                    in a repo: go to (or start) that repo's agent, the way
+                       `claude` keys off the directory. Elsewhere: your last group.
 kel new <name>         new window + agent in the current repo   (inplace)
 kel new <name> -w      ...in a fresh git worktree on a new branch <name>
 kel new <name> --group G       put it in group G instead of the repo's
@@ -100,7 +101,11 @@ nothing restarts. `kel move <group>` for an explicit target. A hand-made
 - `` prefix ` `` (jump to next **waiting** agent) is **global** — it crosses
   group boundaries. That's the point of it: go to whoever's blocked, not to a
   specific group.
-- `kel` (bare, from a shell) drops you back in the last group you used.
+- `kel` (bare, from a shell) is **directory-aware**, like `claude`: run inside a
+  repo, it attaches that repo's group — or, if nothing is running there yet,
+  starts an agent for it (`kel new <repo>`) and drops you in. `KEL_GROUP`
+  overrides the target. Run it outside any repo and it falls back to your last
+  group. (After a reboot the snapshot-rebuild prompt still takes priority.)
 
 **Status line.** The group you're in, in full, plus a badge for the rest:
 
