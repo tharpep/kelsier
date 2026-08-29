@@ -3,7 +3,8 @@
 #
 #   - symlinks bin/kel into ~/.local/bin
 #   - makes ~/.tmux.conf source tmux/kel.conf
-#   - merges the 5 state hooks into ~/.claude/settings.json (jq, non-clobbering)
+#   - merges the state hooks + the statusLine into ~/.claude/settings.json
+#     (jq, non-clobbering; a statusLine kel displaces is kept and chained)
 #
 # Idempotent. Re-run any time. Upgrades a pre-v0.1 install (loose kel-* scripts
 # and hooks/kel-hook.sh) to the single `kel` command. Also installs shell
@@ -89,6 +90,23 @@ jq --arg k "$KEL" '
 ' "$SETTINGS" > "$tmp" && mv "$tmp" "$SETTINGS"
 echo "  wired: SessionStart UserPromptSubmit Notification Stop SessionEnd"
 
+say "Claude Code statusLine -> $SETTINGS"
+# kel's statusLine reports this agent's context window / cost, and records them
+# so the tmux bar, `kel ls` and the board can show them without interrupting
+# the agent.  If you already had a statusLine, keep it and chain it after ours.
+PREV="$(jq -r '.statusLine.command // ""' "$SETTINGS")"
+PREV_FILE="$HOME/.claude/statusline-prev"
+if [ -n "$PREV" ] && ! printf '%s' "$PREV" | grep -q 'kel statusline'; then
+  printf '#!/bin/sh\n# statusLine kel displaced on %s — chained after kel'"'"'s own row.\n%s\n' \
+    "$(date -u +%F)" "$PREV" > "$PREV_FILE"
+  chmod +x "$PREV_FILE"
+  echo "  kept your existing statusLine -> $PREV_FILE (runs after kel's line)"
+fi
+tmp="$(mktemp)"
+jq --arg k "$KEL" '.statusLine = {type:"command", command:($k + " statusline")}' \
+  "$SETTINGS" > "$tmp" && mv "$tmp" "$SETTINGS"
+echo "  wired: statusLine  (context % / cost per agent)"
+
 say "done"
 cat <<EOF
 
@@ -99,7 +117,7 @@ cat <<EOF
   Use:
     kel                 go to (or start) this repo's agent
     kel new <name>      new window + agent   (-w = git worktree, --group G)
-    kel ls              list every agent, grouped by repo
+    kel ls              list every agent, grouped by repo (with context %)
     Ctrl+Space          the board — find an agent    ·   prefix m   manage this one
     kel kill <name>     close one      ·   kel doctor    check the machine
 EOF

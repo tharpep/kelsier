@@ -12,7 +12,8 @@ tmux source-file ~/.tmux.conf     # pick up kel.conf changes
 ```
 
 `install.sh` symlinks `bin/kel` to `~/.local/bin`, makes `~/.tmux.conf` source
-`tmux/kel.conf`, and merges the 5 state hooks into `~/.claude/settings.json`
+`tmux/kel.conf`, and merges the 5 state hooks + the `statusLine` into
+`~/.claude/settings.json`
 (non-clobbering, idempotent — a `.kel-bak.<epoch>` copy is kept each run).
 
 ## Commands
@@ -27,7 +28,7 @@ kel new <name> --no-agent      just make the window, don't start the agent
 kel new <name> --agent CMD     run CMD instead of `claude`
 kel kill <name>        close the window; remove the worktree if it was one
 kel kill <name> -f     ...even with uncommitted / unpushed work
-kel ls [--json]        list every agent, grouped by repo
+kel ls [--json]        list every agent, grouped by repo (state, context %, cost)
 kel go [<group>]       switch to a group  (no arg: list the groups)
 kel move [<group>]     put THIS window in another group (cd there first, then kel move)
 kel rename <newname>   rename THIS window and keep its metadata record in sync
@@ -42,7 +43,7 @@ kel doctor             probe the machine, cache to ~/.local/state/kel/doctor.jso
 
 Internal (wired into tmux / Claude Code, you won't call these):
 `kel status-line [group]`, `kel jump`, `kel snapshot`, `kel cheat`,
-`kel hook <EVENT>`, `kel _board_*`. `kel menu` is a deprecated alias for
+`kel hook <EVENT>`, `kel statusline`, `kel _board_*`. `kel menu` is a deprecated alias for
 `kel board` — kept one release for muscle memory.
 
 **Shell completion.** `install.sh` drops a bash completion into
@@ -217,6 +218,12 @@ tmux session per repo.**
 ## State files
 
 `~/.local/state/kel/`
+- `<window-id>.ctx` — `<pct> <cost> <in_tokens> <ctx_size> <rate_5h> <epoch>
+  <model>`, written by `kel statusline` from the JSON Claude Code hands its
+  status-line command. This is how kel knows an agent's context usage and cost
+  **without interrupting it** — no `/context`, no reading the transcript. The
+  bar shows `·NN%` only from `KEL_CTX_WARN` (default 70) up; `kel ls`, `--json`
+  and the board preview always show it. Pruned with the window.
 - `<window-id>.state` — `<state> <epoch>`, written by the hooks, pruned when the
   window is gone
 - `sessions/<group>/<name>.json` — one record per kel-managed agent. Keyed by

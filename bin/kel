@@ -26,6 +26,7 @@
 #   kel snapshot               save the workspace shape (hooks call this)
 #   kel cheat                  keybinding reference
 #   kel hook <EVENT>           Claude Code state hook
+#   kel statusline             Claude Code statusLine — context % / cost
 set -uo pipefail
 
 KEL_PREFIX="${KEL_SESSION:-kel}"          # tmux sessions are  <prefix>/<group>
@@ -37,6 +38,8 @@ DOCTOR_CACHE="$STATE_DIR/doctor.json"
 LAST_GROUP_FILE="$STATE_DIR/last-group"
 SNAPSHOT="$STATE_DIR/snapshot.json"
 RESTORE_LOCK="$STATE_DIR/.restoring"
+STATUSLINE_PREV="$HOME/.claude/statusline-prev"   # a statusLine kel displaced
+KEL_CTX_WARN="${KEL_CTX_WARN:-70}"                # show context on the bar from here up
 SELF="$(command -v kel 2>/dev/null || printf '%s' "$HOME/.local/bin/kel")"
 # commands worth re-running per pane on restore (agents handled separately)
 KEL_RESTORE_CMDS="${KEL_RESTORE_CMDS:-nvim vim hx nano lazygit lazydocker htop btop k9s}"
@@ -259,9 +262,9 @@ prune_state() {
   local live f wid
   live="$(tmux list-windows -a -F '#{window_id}' 2>/dev/null || true)"
   [ -n "$live" ] || return 0
-  for f in "$STATE_DIR"/*.state; do
+  for f in "$STATE_DIR"/*.state "$STATE_DIR"/*.ctx; do
     [ -e "$f" ] || continue
-    wid="$(basename "$f" .state)"
+    wid="$(basename "$f" | sed 's/\.\(state\|ctx\)$//')"
     printf '%s\n' "$live" | grep -qxF "$wid" || rm -f "$f"
   done
 }
@@ -417,7 +420,7 @@ cmd_kill() {
     fi
   fi
 
-  rm -f "$meta" "$STATE_DIR/$wid.state"
+  rm -f "$meta" "$STATE_DIR/$wid.state" "$STATE_DIR/$wid.ctx"
   say "killed $name"
   snapshot
 }
@@ -505,7 +508,7 @@ gather_rows() {
   local cs cw
   cs="$(tmux display-message -p '#{client_session}' 2>/dev/null || true)"
   cw="$(tmux display-message -p '#{window_index}' 2>/dev/null || true)"
-  local grp idx wid name state iso branch dirty panes cwd meta
+  local grp idx wid name state iso branch dirty panes cwd meta ctx cost
 
   while IFS=$'\t' read -r sname grp idx wid name; do
     [ -z "${wid:-}" ] && continue
@@ -522,8 +525,10 @@ gather_rows() {
     fi
     panes="$(tmux list-panes -t "$wid" -F '#{pane_current_command}' 2>/dev/null | paste -sd'|' -)"
     [ "$sname" = "$cs" ] && [ "$idx" = "$cw" ] && idx="${idx}*"
-    printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
-      "$grp" "$idx" "$wid" "$name" "$state" "$iso" "$branch" "$dirty" "${panes:--}" "$cwd"
+    ctx="$(ctx_field "$wid" 1)"; cost="$(ctx_field "$wid" 2)"
+    printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+      "$grp" "$idx" "$wid" "$name" "$state" "$iso" "$branch" "$dirty" "${panes:--}" "$cwd" \
+      "${ctx:--}" "${cost:--}"
   done < <(kel_windows | sort -t$'\t' -k2,2 -k3,3n)
 
   while IFS=$'\t' read -r grp name meta; do
@@ -535,8 +540,8 @@ gather_rows() {
     if [ -n "$cwd" ] && git -C "$cwd" rev-parse --git-dir >/dev/null 2>&1; then
       dirty="$(git -C "$cwd" status --porcelain 2>/dev/null | grep -c . || true)"
     fi
-    printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
-      "$grp" "-" "" "$name" "dead" "$iso" "$branch" "$dirty" "-" "$cwd"
+    printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+      "$grp" "-" "" "$name" "dead" "$iso" "$branch" "$dirty" "-" "$cwd" "-" "-"
   done < <(dead_sessions)
 }
 
@@ -551,16 +556,18 @@ cmd_ls() {
   if [ "${1:-}" = "--json" ]; then
     printf '['
     local first=1
-    gather_rows | while IFS=$'\t' read -r grp idx wid name state iso branch dirty panes cwd; do
+    gather_rows | while IFS=$'\t' read -r grp idx wid name state iso branch dirty panes cwd ctx cost; do
       [ "$first" = 1 ] || printf ','
       first=0
       jq -nc --arg grp "$grp" --arg idx "${idx%\*}" --arg wid "$wid" --arg name "$name" \
              --arg state "$state" --arg iso "$iso" --arg branch "$branch" \
              --arg dirty "$dirty" --arg panes "$panes" --arg cwd "$cwd" \
+             --arg ctx "$ctx" --arg cost "$cost" \
         '{group:$grp, index:(($idx|tonumber?) // null), window_id:$wid, name:$name, state:$state,
           isolation:$iso, branch:(if $branch=="-" then null else $branch end),
           dirty:(($dirty|tonumber?) // null),
-          panes:(if $panes=="-" then null else ($panes|split("|")) end), cwd:$cwd}'
+          panes:(if $panes=="-" then null else ($panes|split("|")) end), cwd:$cwd,
+          context_pct:(($ctx|tonumber?) // null), cost_usd:(($cost|tonumber?) // null)}'
     done
     printf ']\n'
     return 0
@@ -574,13 +581,16 @@ cmd_ls() {
       for (i=1;i<=NR;i++) {
         split(rows[i], f, "\t")
         g=f[1]; idx=f[2]; name=f[4]; st=f[5]; iso=f[6]; br=f[7]; pn=f[9]; cwd=f[10]
+        ctx=f[11]; cost=f[12]
         gsub(ENVIRON["HOME"], "~", cwd)
         # show pane commands only when the window is split
         disp = name
         if (pn != "-" && index(pn, "|")) disp = name " (" pn ")"
+        cx = (ctx=="-" || ctx=="") ? "-" : ctx "%"
+        cs = (cost=="-" || cost=="" || cost+0==0) ? "" : sprintf("  $%.2f", cost)
         if (g!=lastg) { if (lastg!="") print ""; print g; lastg=g }
-        printf "  %s %s %s %s %s  %s\n",
-          pad(idx,4), pad(disp,24), pad(st,8), pad(iso,10), pad(br,12), cwd
+        printf "  %s %s %s %s %s %s  %s%s\n",
+          pad(idx,4), pad(disp,24), pad(st,8), pad(cx,5), pad(iso,10), pad(br,12), cwd, cs
       }
     }'
   [ -n "$(dead_sessions)" ] && echo && echo "  dead = window gone.  kel restore [-c] rebuilds  ·  kel prune discards"
@@ -712,6 +722,15 @@ created    \(.created_at)"' "$meta"
     printf 'group      %s\n(unmanaged window — no metadata)\n' "$group"
   fi
   local wid; wid="$(kel_windows | awk -F'\t' -v n="$name" -v g="$group" '$2==g && $5==n{print $4; exit}')"
+  if [ -n "$wid" ] && [ -f "$STATE_DIR/$wid.ctx" ]; then
+    local c_pct c_cost c_in c_sz c_model
+    c_pct="$(ctx_field "$wid" 1)"; c_cost="$(ctx_field "$wid" 2)"
+    c_in="$(ctx_field "$wid" 3)";  c_sz="$(ctx_field "$wid" 4)"
+    c_model="$(ctx_field "$wid" 7)"
+    case "${c_sz:-}" in ''|*[!0-9]*) c_sz=0 ;; esac
+    printf 'context    %s%% of %sk  (%s tokens used)\n' "${c_pct:-0}" "$(( c_sz / 1000 ))" "${c_in:-0}"
+    printf 'cost       $%.2f%s\n' "$c_cost" "${c_model:+   ·  $c_model}" 2>/dev/null
+  fi
   if [ -n "$wid" ]; then
     printf '\n\033[2m── recent ──\033[0m\n'
     tmux capture-pane -t "$wid" -p 2>/dev/null | grep -v '^[[:space:]]*$' | tail -8
@@ -970,7 +989,7 @@ cmd_doctor() {
     fi
   }
   echo "kel doctor" >&2
-  local r_tmux r_ver r_popup r_wt r_jq r_node r_claude r_hooks r_pass
+  local r_tmux r_ver r_popup r_wt r_jq r_node r_claude r_hooks r_sl r_pass
   r_tmux=$(probe   "tmux present"                     command -v tmux)
   r_ver=$(probe    "tmux >= 3.0"                      bash -c 't=$(tmux -V | grep -oE "[0-9]+\.[0-9]+"); [ -n "$t" ] && [ "$(printf "3.0\n%s\n" "$t" | sort -V | head -1)" = "3.0" ]')
   r_popup=$(probe  "display-popup available"          bash -c 'tmux list-commands 2>/dev/null | grep -q display-popup')
@@ -980,15 +999,17 @@ cmd_doctor() {
   r_node=$(probe   "node on PATH"                     command -v node)
   r_claude=$(probe "claude on PATH"                   command -v claude)
   r_hooks=$(probe  "kel hooks wired in settings.json" bash -c 'jq -e "[.hooks[]?[]?.hooks[]?.command // empty] | any(test(\"kel hook|kel-hook\"))" "$HOME/.claude/settings.json" >/dev/null')
+  r_sl=$(probe     "kel statusLine wired (context %)"  bash -c 'jq -e ".statusLine.command // \"\" | test(\"kel statusline\")" "$HOME/.claude/settings.json" >/dev/null')
   r_pass=$(probe   "tmux allow-passthrough on"        bash -c 'tmux start-server \; show -gv allow-passthrough 2>/dev/null | grep -qx on')
 
   jq -n --arg d "$(date -u +%FT%TZ)" \
     --argjson tmux "$r_tmux" --argjson ver "$r_ver" --argjson popup "$r_popup" \
     --argjson wt "$r_wt" --argjson jq "$r_jq" --argjson fzf "$r_fzf" --argjson node "$r_node" \
-    --argjson claude "$r_claude" --argjson hooks "$r_hooks" --argjson pass "$r_pass" \
+    --argjson claude "$r_claude" --argjson hooks "$r_hooks" --argjson sl "$r_sl" \
+    --argjson pass "$r_pass" \
     '{checked_at:$d, tmux:$tmux, "tmux>=3.0":$ver, display_popup:$popup,
       git_worktree:$wt, jq:$jq, fzf:$fzf, node:$node, claude:$claude,
-      hooks_wired:$hooks, allow_passthrough:$pass}' \
+      hooks_wired:$hooks, statusline_wired:$sl, allow_passthrough:$pass}' \
     > "$DOCTOR_CACHE"
   printf '  cached -> %s\n' "${DOCTOR_CACHE/#$HOME/\~}" >&2
   case "$r_tmux$r_ver$r_jq" in *false*) exit 1 ;; esac
@@ -1022,7 +1043,7 @@ cmd_status_line() {
   local sname; sname="$(sess "$grp")"
   local cur; cur="$(tmux display-message -p '#{window_id}' 2>/dev/null || true)"
   local panes; panes="$(tmux list-windows -a -F '#{window_id} #{window_panes}' 2>/dev/null || true)"
-  local out='' suffix colour pc
+  local out='' suffix colour pc cx cxc
 
   # this group's windows, in full
   while IFS=$'\t' read -r _ _ idx wid name; do
@@ -1036,6 +1057,13 @@ cmd_status_line() {
     esac
     pc="$(printf '%s\n' "$panes" | awk -v w="$wid" '$1==w{print $2}')"
     [ "${pc:-1}" -gt 1 ] 2>/dev/null && name="${name}#[fg=colour240]·${pc}#[default]${colour}"
+    # context only once it matters — below KEL_CTX_WARN it is noise on the bar
+    cx="$(ctx_field "$wid" 1)"
+    if [ -n "$cx" ] && [ "$cx" -ge "$KEL_CTX_WARN" ] 2>/dev/null; then
+      if   [ "$cx" -ge 90 ]; then cxc='#[fg=colour167,bold]'
+      else                        cxc='#[fg=colour179]'; fi
+      name="${name}${cxc}·${cx}%#[default]${colour}"
+    fi
     if [ "$wid" = "$cur" ]; then
       out="$out ${colour}[${idx}:${name}${suffix}]#[default]"
     else
@@ -1162,10 +1190,128 @@ cat <<'EOF'
     1:name*  working   1:name?  waiting-on-you   1:name!  done   1:name  idle
     1:namex  the agent process died (no clean exit) — kel kill or restart it
     [1:name] current window   1:name·3 = 3 panes   ⟨+N waiting⟩ in other groups
+    1:name·84%  context window used — only shown from KEL_CTX_WARN (70%) up.
+                Claude Code's own row has the full picture: model, bar, cost.
 
   prefix ?   tmux's full key list      prefix k   the beginner menu
 
 EOF
+}
+
+# --------------------------------------------------------------------------
+# Claude Code -> kel:  which tmux pane is this session talking from?
+# $TMUX_PANE when the agent passes it (it does), else the pane stashed by this
+# session's SessionStart, else the one pane whose cwd matches the payload.
+# --------------------------------------------------------------------------
+resolve_pane() { # session-id cwd
+  local sid="${1:-}" cwd="${2:-}" pane="${TMUX_PANE:-}" match
+  if [ -z "$pane" ] && [ -n "$sid" ] && [ -f "$STASH_DIR/$sid" ]; then
+    pane="$(cat "$STASH_DIR/$sid" 2>/dev/null || true)"
+  fi
+  if [ -z "$pane" ] && [ -n "$cwd" ]; then
+    match="$(tmux list-panes -a -F '#{pane_id} #{pane_current_path}' 2>/dev/null | awk -v c="$cwd" '$2==c{print $1}')"
+    [ "$(printf '%s\n' "$match" | grep -c .)" = 1 ] && pane="$match"
+  fi
+  printf '%s' "$pane"
+}
+
+# --------------------------------------------------------------------------
+# context / cost, per agent      $STATE_DIR/<wid>.ctx
+#   pct <T> cost_usd <T> in_tokens <T> ctx_size <T> rate5h <T> epoch <T> model
+# Written by `kel statusline`; read by the bar, ls, --json and the board.
+# --------------------------------------------------------------------------
+ctx_field() { # wid n  -> field n of the .ctx line, or empty
+  [ -f "$STATE_DIR/$1.ctx" ] || return 0
+  cut -f"$2" "$STATE_DIR/$1.ctx" 2>/dev/null | head -1
+}
+
+# --------------------------------------------------------------------------
+# kel statusline   —   Claude Code's own status row (wired by install.sh)
+# --------------------------------------------------------------------------
+# Claude Code pipes a JSON blob in on every conversation update: context window,
+# cost, rate limits.  Updates are debounced to 300ms and an in-flight script is
+# CANCELLED when the next one lands, so this stays cheap: one jq pass, one
+# atomic write, and a tmux redraw only when the number the bar shows changed.
+cmd_statusline() {
+  local payload; payload="$(cat 2>/dev/null || true)"
+  [ -n "$payload" ] || exit 0
+  command -v jq >/dev/null 2>&1 || exit 0
+
+  # One field per line, not @tsv: bash folds runs of tab (an IFS whitespace
+  # character) into one delimiter, so a single empty field — an unset model
+  # name, say — would silently shift every value after it.
+  local sid cwd pct cost intok ctxsz rl5 model
+  {
+    read -r sid; read -r cwd; read -r pct;   read -r cost
+    read -r intok; read -r ctxsz; read -r rl5; read -r model
+  } < <(printf '%s' "$payload" | jq -r '[
+      (.session_id // ""),
+      (.workspace.current_dir // .cwd // ""),
+      (.context_window.used_percentage // 0 | floor),
+      (.cost.total_cost_usd // 0),
+      (.context_window.total_input_tokens // 0),
+      (.context_window.context_window_size // 0),
+      (.rate_limits.five_hour.used_percentage // -1 | floor),
+      (.model.display_name // "")
+    ] | .[] | tostring | gsub("[\n\t]"; " ")' 2>/dev/null)
+
+  # never let a surprising payload reach arithmetic or a %f conversion
+  case "${pct:-}"   in ''|*[!0-9]*)  pct=0 ;;   esac
+  case "${intok:-}" in ''|*[!0-9]*)  intok=0 ;; esac
+  case "${ctxsz:-}" in ''|*[!0-9]*)  ctxsz=0 ;; esac
+  case "${rl5:-}"   in ''|-1|*[!0-9]*) rl5=-1 ;; esac
+  case "${cost:-}"  in ''|*[!0-9.]*) cost=0 ;;  esac
+
+  # record it against this agent's window, if we are inside one
+  local wid=''
+  if command -v tmux >/dev/null 2>&1 && [ -n "${TMUX:-}${TMUX_PANE:-}" ]; then
+    local pane; pane="$(resolve_pane "$sid" "$cwd")"
+    [ -n "$pane" ] && wid="$(tmux display-message -p -t "$pane" '#{window_id}' 2>/dev/null || true)"
+  fi
+  if [ -n "$wid" ] && [ "$ctxsz" -gt 0 ]; then
+    local old; old="$(ctx_field "$wid" 1)"
+    local tmp; tmp="$(mktemp "$STATE_DIR/.${wid#@}.ctx.XXXXXX" 2>/dev/null)"
+    if [ -n "${tmp:-}" ]; then
+      printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+        "$pct" "$cost" "$intok" "$ctxsz" "$rl5" "$(date +%s)" "$model" > "$tmp"
+      mv -f "$tmp" "$STATE_DIR/$wid.ctx"
+    fi
+    # only redraw the tmux bar when the figure it renders actually moved —
+    # #(kel status-line) is not free and this runs several times a second
+    [ "$pct" != "$old" ] && tmux refresh-client -S 2>/dev/null
+  fi
+
+  # ---- render Claude Code's row ----
+  local label=''
+  if [ -n "$wid" ]; then
+    local sn wn; sn="$(tmux display-message -p -t "$wid" '#{session_name}' 2>/dev/null || true)"
+    wn="$(tmux display-message -p -t "$wid" '#{window_name}' 2>/dev/null || true)"
+    case "$sn" in
+      "$KEL_PREFIX")   label="$wn" ;;
+      "$KEL_PREFIX"/*) label="${sn#"$KEL_PREFIX"/}/$wn" ;;
+    esac
+  fi
+
+  local bar='' i filled=$(( (${pct:-0} + 9) / 10 ))
+  [ "$filled" -gt 10 ] && filled=10
+  for ((i=0; i<10; i++)); do
+    if [ "$i" -lt "$filled" ]; then bar="$bar█"; else bar="$bar░"; fi
+  done
+  local cc='\033[32m'                                  # green
+  [ "${pct:-0}" -ge "$KEL_CTX_WARN" ] && cc='\033[33m'  # yellow
+  [ "${pct:-0}" -ge 90 ]              && cc='\033[31m'  # red
+
+  [ -n "$label" ] && printf '\033[2mkel\033[0m \033[36m%s\033[0m \033[2m·\033[0m ' "$label"
+  [ -n "$model" ]  && printf '%s \033[2m·\033[0m ' "$model"
+  printf '%b%s %s%%\033[0m \033[2mctx\033[0m' "$cc" "$bar" "${pct:-0}"
+  [ -n "$cost" ] && [ "$cost" != "0" ] && printf ' \033[2m·\033[0m $%.2f' "$cost" 2>/dev/null
+  [ "${rl5:--1}" -ge 50 ] 2>/dev/null && printf ' \033[2m·\033[0m \033[33m5h %s%%\033[0m' "$rl5"
+  printf '\n'
+
+  # a statusLine kel displaced at install time still gets its say
+  if [ -x "$STATUSLINE_PREV" ] || [ -s "$STATUSLINE_PREV" ]; then
+    printf '%s' "$payload" | sh "$STATUSLINE_PREV" 2>/dev/null || true
+  fi
 }
 
 # --------------------------------------------------------------------------
@@ -1180,15 +1326,7 @@ cmd_hook() {
   sid="$(printf '%s' "$payload" | jq -r '.session_id // empty' 2>/dev/null || true)"
   cwd="$(printf '%s' "$payload" | jq -r '.cwd // empty' 2>/dev/null || true)"
 
-  local pane="${TMUX_PANE:-}"
-  if [ -z "$pane" ] && [ -n "$sid" ] && [ -f "$STASH_DIR/$sid" ]; then
-    pane="$(cat "$STASH_DIR/$sid" 2>/dev/null || true)"
-  fi
-  if [ -z "$pane" ] && [ -n "$cwd" ]; then
-    local match
-    match="$(tmux list-panes -a -F '#{pane_id} #{pane_current_path}' 2>/dev/null | awk -v c="$cwd" '$2==c{print $1}')"
-    [ "$(printf '%s\n' "$match" | grep -c .)" = 1 ] && pane="$match"
-  fi
+  local pane; pane="$(resolve_pane "$sid" "$cwd")"
   if [ "$event" = "SessionStart" ] && [ -n "$pane" ] && [ -n "$sid" ]; then
     printf '%s' "$pane" > "$STASH_DIR/$sid"
   fi
@@ -1215,7 +1353,7 @@ cmd_hook() {
     Notification)     state=waiting ;;
     Stop)             state=done ;;
     SessionEnd)
-      rm -f "$STATE_DIR/$wid.state"
+      rm -f "$STATE_DIR/$wid.state" "$STATE_DIR/$wid.ctx"
       [ -n "$sid" ] && rm -f "$STASH_DIR/$sid"
       tmux refresh-client -S 2>/dev/null || true
       exit 0 ;;
@@ -1345,6 +1483,7 @@ main() {
     snapshot)     cmd_snapshot ;;
     doctor)       cmd_doctor "$@" ;;
     status-line)  cmd_status_line "$@" ;;
+    statusline)   cmd_statusline ;;                # hot path — skip migrate
     jump)         cmd_jump ;;
     cheat)        cmd_cheat ;;
     ''|attach)    migrate_meta; cmd_attach ;;

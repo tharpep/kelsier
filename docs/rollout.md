@@ -4,7 +4,8 @@ The constraint is **"will I actually adopt this,"** not "can it be built." Each
 stage ships the minimum that answers a real question; the next stage waits for
 daily use to produce a specific pain.
 
-`spec.md` section numbers are not a build order. This file is.
+`spec.md` section numbers are not a build order. This file is. `docs/backlog.md`
+holds candidates that aren't on the path yet, and what each one is waiting for.
 
 ---
 
@@ -200,8 +201,67 @@ filter / sort / browse across everything at once.
   mismatched group (cosmetic only). Monorepo guidance documented in `usage.md`;
   a `.kel/group` file stays on the backlog.
 
-**Backlog from this round:** `install.sh --uninstall`; `.kel/group` per-dir
-override; context-broadcast between agents.
+**Backlog from this round** is folded into `docs/backlog.md`, along with a
+post-v0.4 review pass (human + Gemini via `agy`). `install.sh --uninstall` and
+the `.kel/group` per-dir override carried over as #11 / #12; context-broadcast
+between agents is now explicitly rejected there (R1 — `CLAUDE.md` covers it).
+
+## v0.4.1 — two bugs and the context adapter  ·  **done**
+
+**Trigger:** an end-to-end exercise of v0.4 (a real tmux server, simulated
+hooks, repeated reboot/restore cycles) plus a re-read of the Claude Code docs
+instead of working from memory.
+
+### Bugs
+
+- **`kel restore` destroyed the snapshot it restored from.** Rebuilding panes
+  fires kel's own `after-split-window` / `pane-exited` hooks, which run
+  `kel snapshot` in the background over the file the restore is still reading —
+  and restore re-read it with a fresh `jq` per field per window, so it also
+  truncated itself. Measured on 2 groups / 4 windows / 5 panes: the snapshot
+  was reduced to one window 3/3 runs; the restore dropped a whole group once
+  and two of three windows once. Fixed with a `.restoring` lockfile (a file,
+  not an env var — the hooks spawn a separate `kel` from the tmux server) plus
+  a private `mktemp` copy to read from, and `snapshot.json.prev` as a spare
+  generation. An actual reboot never corrupted the snapshot; only `restore` did.
+- **Agent names were one global namespace.** `sessions/<name>.json` meant a
+  second repo could not have an agent called `docs` — in a tool organised
+  around one session per repo, exactly the names you reuse. Records moved to
+  `sessions/<group>/<name>.json`; `resolve_agent` takes `name` or
+  `group/name`, prefers the group you are standing in, and lists candidates
+  instead of guessing. Existing flat records are filed on next run.
+
+### `kel statusline` — context and cost, without interrupting the agent
+
+Hook payloads carry no token or cost data. **`statusLine` does**, and it was the
+interface the backlog's parked cost entry was waiting for — documented and
+versioned, not a transcript scrape. Claude Code pipes a JSON blob on every
+conversation update; `kel statusline` takes one `jq` pass over it and records
+`<wid>.ctx`.
+
+- **records** context %, cost, tokens, context size, 5-hour rate-limit burn,
+  and model, per agent window
+- **surfaces** on the tmux bar (only from `KEL_CTX_WARN`, default 70, up — the
+  bar stays minimal), as a `CTX` column plus cost in `kel ls`,
+  `context_pct` / `cost_usd` in `--json`, and two lines in the board preview
+- **renders** Claude Code's own status row: `kel <group>/<agent> · <model> ·
+  ▓▓▓░ 42% ctx · $1.23 · 5h 71%`
+- **costs** ~38 ms per invocation against a 300 ms debounce, and only calls
+  `refresh-client -S` when the integer percent actually moves — `#(kel
+  status-line)` is not free and this fires several times a second
+- `install.sh` wires it the way it wires hooks, and preserves any statusLine it
+  displaces to `~/.claude/statusline-prev`, chained after kel's own row
+- `kel doctor` probes that it is wired
+
+Two things worth remembering from building it: bash folds runs of tab (an IFS
+whitespace character) into a single delimiter, so `IFS=$'\t' read` silently
+shifts every value after an empty field — the payload is read one field per
+line instead. And a malformed payload must never overwrite a good `.ctx`, so
+the write is gated on a non-zero `context_window_size`.
+
+**Not** built here, and now in `backlog.md` #14–#16: `Notification` fidelity
+(kel still maps every notification to `waiting`, including `idle_prompt`),
+compaction counters, and the permission hooks.
 
 ## v1.0 — consolidation
 
@@ -217,8 +277,11 @@ override; context-broadcast between agents.
 
 - **Two-slot / swap-pane architecture** — cut, rationale in `spec.md` §5c.
   Revisit only with a concrete pain the popup board cannot address.
-- Diff view in an `ops` panel, session templates, PR status on the row,
-  attach-to-external — candidates in `spec.md`; none committed, none blocking.
+- Diff view in an `ops` panel, PR status on the row, attach-to-external —
+  candidates in `spec.md`; none committed, none blocking.
+- Session templates moved **onto** the backlog as `kel new --preset`
+  (`backlog.md` #10). The reversal is deliberate: it's tmux layout automation,
+  not agent-wrapping.
 
 ---
 

@@ -259,9 +259,37 @@ record says `working` / `waiting` but the window's only live process is a bare
 shell, the effective state becomes `dead` (bar suffix `x`, red). `kel ls` shows
 `dead`; the board still lists it so you can kill or restart it.
 
+### 9a. Context and cost (v0.4.1)
+
+Hook payloads carry no token, context or cost data. Claude Code's **`statusLine`**
+does: it pipes a JSON blob to a command on every conversation update, carrying
+`context_window.used_percentage`, `cost.total_cost_usd`, `rate_limits.*` and
+`prompt_cache.*`. That is a documented, versioned interface — not a scrape of
+the transcript — so it satisfies the standing rule that kel never reads an
+agent's private files.
+
+`kel statusline` (wired by `install.sh`) records one line per agent window to
+`~/.local/state/kel/<window-id>.ctx`:
+
+```
+<pct> <cost_usd> <in_tokens> <ctx_size> <rate_5h> <epoch> <model>
+```
+
+Reads are cheap and everywhere: the status line shows `·NN%` from
+`KEL_CTX_WARN` (default 70) up, `kel ls` gains a `CTX` column, `--json` gains
+`context_pct` / `cost_usd`, and the board preview shows context and cost.
+
+Constraints that shape the implementation: updates are debounced to 300 ms and
+an in-flight script is **cancelled** when the next one arrives, so the handler
+is one `jq`, one atomic write, and a `refresh-client -S` **only** when the
+displayed integer changes. Writes are gated on a non-zero `context_window_size`
+so a malformed payload cannot blank a good record.
+
 **Agent-agnostic.** State detection is a per-agent adapter. An agent with no
 hook system would fall back to `unknown` and the last output line. Not built —
-Claude Code is the only adapter so far.
+Claude Code is the only adapter so far. Note that context/cost is a *second*
+Claude-Code-shaped adapter, and unlike state it has no fallback: another agent
+would simply have no `CTX` column.
 
 ---
 
