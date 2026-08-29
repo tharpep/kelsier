@@ -1,0 +1,50 @@
+name: ci
+
+# "Does it work", not "is it stylish".  Style/shellcheck is a separate task.
+# The point of the macOS job is that kel's portability bugs are silent under
+# BSD userland — they take a wrong branch rather than erroring — so a human
+# will not notice them and a runner will.
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    name: ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false        # one OS failing must not hide the other's result
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: install tmux + jq (linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq tmux jq
+
+      - name: install tmux + jq (macos)
+        if: runner.os == 'macOS'
+        run: brew install tmux jq
+
+      - name: versions
+        run: tmux -V && jq --version && bash --version | head -1
+
+      - name: syntax
+        run: |
+          bash -n bin/kel
+          bash -n install.sh
+          bash -n test/kel-test.sh
+          bash -n completions/kel.bash
+
+      # `#!/usr/bin/env bash` finds Homebrew's bash 5 on a macOS runner, which
+      # would hide a bash-4 construct that the Mac's stock /bin/bash (3.2,
+      # frozen at GPLv2) would choke on.  Check against the old one explicitly.
+      - name: syntax under macOS stock bash 3.2
+        if: runner.os == 'macOS'
+        run: /bin/bash --version | head -1 && /bin/bash -n bin/kel
+
+      - name: regression suite
+        run: ./test/kel-test.sh
