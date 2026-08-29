@@ -4,10 +4,14 @@
 #   test/kel-test.sh            run everything
 #   test/kel-test.sh -v         show each command's output on failure
 #
-# Fully isolated: overrides $XDG_STATE_HOME and uses KEL_SESSION=keltest, so it
-# cannot see or touch your real agents, state or snapshot.  Agents are faked
-# with `sleep 9999` — no Claude Code session is ever started, no tokens spent.
-# Its tmux server is killed on the way out, including on failure.
+# Fully isolated on three axes, because this suite calls `tmux kill-server`:
+#   * $TMUX_TMPDIR   -> its own tmux socket, so kill-server can NEVER reach the
+#                       server your real workspace is on
+#   * $XDG_STATE_HOME-> its own records, state and snapshot
+#   * KEL_SESSION    -> its own session-name prefix
+# Agents are faked with `sleep 9999` — no Claude Code session is ever started,
+# no tokens spent.  Everything is torn down on the way out, including on
+# failure.
 #
 # Requires: tmux, jq, git.  ~40s.
 set -uo pipefail
@@ -21,6 +25,18 @@ VERBOSE=0; [ "${1:-}" = "-v" ] && VERBOSE=1
 WORK="$(mktemp -d "${TMPDIR:-/tmp}/kel-test.XXXXXX")"
 export XDG_STATE_HOME="$WORK/state"
 export KEL_SESSION=keltest
+
+# tmux resolves its socket under $TMUX_TMPDIR, and bin/kel inherits it — so the
+# suite and the tool under test share one throwaway server and `kill-server`
+# cannot touch the default socket.  Without this the suite kills a real
+# workspace, which is not hypothetical: it has happened.
+export TMUX_TMPDIR="$WORK/tmux"
+mkdir -p "$TMUX_TMPDIR"
+[ -n "$TMUX_TMPDIR" ] && [ -d "$TMUX_TMPDIR" ] || {
+  echo "refusing to run: TMUX_TMPDIR is not set, kill-server would hit the default socket" >&2
+  exit 1
+}
+unset TMUX TMUX_PANE      # don't inherit an outer tmux; we are not "inside" ours
 STATE="$XDG_STATE_HOME/kel"
 SESSIONS="$STATE/sessions"
 
@@ -57,6 +73,13 @@ ${3:+,\"notification_type\":\"$3\"}${4:+,\"notification_text\":\"$4\"}}" \
     | TMUX_PANE="$1" "$KEL" hook "$2"
 }
 state_of() { "$KEL" ls 2>/dev/null | awk -v n="$1" '$2==n {print $3}'; }
+
+# ---------------------------------------------------------------- isolation
+section "the suite cannot reach your real tmux server"
+tmux new-session -d -s isocheck -c /tmp 2>/dev/null
+ok "our socket lives under \$TMUX_TMPDIR"  '[ -n "$(find "$TMUX_TMPDIR" -type s 2>/dev/null)" ]'
+ok "and not on the default socket"        '[ ! -S "/tmp/tmux-$(id -u)/default" ] || ! tmux -S "/tmp/tmux-$(id -u)/default" has-session -t isocheck 2>/dev/null'
+tmux kill-server 2>/dev/null
 
 # ---------------------------------------------------------------- records
 section "records are keyed by group AND name"
