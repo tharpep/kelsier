@@ -55,6 +55,19 @@ ok() {  # description  test-expression
 }
 section() { printf '\n\033[1m== %s ==\033[0m\n' "$*"; }
 
+# Poll for a condition instead of sleeping a guessed interval.  A fixed sleep
+# is either slower than it needs to be or occasionally too short, and the
+# second kind reddens CI at random — this suite already did it once, on a 0.8s
+# wait for a SIGINT'd process to actually die.
+wait_until() {   # 'test expression'  [max tenths of a second, default 50]
+  local i=0 max="${2:-50}"
+  while [ "$i" -lt "$max" ]; do
+    eval "$1" 2>/dev/null && return 0
+    i=$((i + 1)); sleep 0.1
+  done
+  return 1
+}
+
 reset() {
   tmux kill-server 2>/dev/null; sleep 0.4
   # Start the server ourselves with NO user config.  Otherwise the suite
@@ -140,11 +153,13 @@ K api-gw     new auth-fix --agent 'sleep 9999' >/dev/null 2>&1
 K api-gw     new tests    --agent 'sleep 9999' >/dev/null 2>&1
 K coppermind new sazed    --agent 'sleep 9999' >/dev/null 2>&1
 tmux split-window -d -t "$(window_of api-gw auth-fix)" -c "$WORK/repos/api-gw" 'sleep 9999'
-sleep 1; "$KEL" snapshot >/dev/null 2>&1
+wait_until '[ "$(tmux list-panes -t "$(window_of api-gw auth-fix)" -F x 2>/dev/null | grep -c x)" = 2 ]'
+"$KEL" snapshot >/dev/null 2>&1
 want="$(jq -Sc '.groups|map_values(map(.name))' "$STATE/snapshot.json")"
 for i in 1 2 3; do
   tmux kill-server 2>/dev/null; sleep 0.6
-  "$KEL" restore -s >/dev/null 2>&1; sleep 1.2
+  "$KEL" restore -s >/dev/null 2>&1
+  wait_until '[ "$(wins)" = 3 ] && [ "$(grps)" = 2 ]'
   got="$(jq -Sc '.groups|map_values(map(.name))' "$STATE/snapshot.json")"
   ok "restore $i rebuilds 3 windows / 2 groups" "[ '$(wins)' = 3 ] && [ '$(grps)' = 2 ]"
   ok "restore $i leaves the snapshot intact"    "[ '$got' = '$want' ]"
@@ -210,7 +225,8 @@ K api-gw new a --agent 'sleep 9999' >/dev/null 2>&1
 P="$(pane_of api-gw a)"
 W="$(tmux display-message -p -t "$P" '#{window_id}')"
 hook "$P" UserPromptSubmit
-tmux send-keys -t "$P" C-c 2>/dev/null; sleep 0.6
+tmux send-keys -t "$P" C-c 2>/dev/null
+wait_until '[ "$(state_of a)" = dead ]'
 ok "a crashed agent reads dead, not working"        '[ "$(state_of a)" = dead ]'
 
 section "compaction counter (#15)"
@@ -239,9 +255,11 @@ before="$(jq -Sc 'del(.compactions)' "$M")"
 out="$("$KEL" restart api-gw/a 2>&1)"
 ok "refuses while a process is alive"       '[[ "$out" == *"live process"* ]]'
 ok "  ...even though state says working"    '[ "$(state_of a)" = working ]'
-tmux send-keys -t "$P" C-c 2>/dev/null; sleep 0.8
+tmux send-keys -t "$P" C-c 2>/dev/null
+wait_until '[ "$(state_of a)" = dead ]'
 ok "  ...the agent now reads dead"          '[ "$(state_of a)" = dead ]'
-"$KEL" restart api-gw/a >/dev/null 2>&1; sleep 0.5
+"$KEL" restart api-gw/a >/dev/null 2>&1
+wait_until '[ "$(wins)" = 1 ]'
 ok "restart reuses the SAME window"         '[ "$(tmux list-windows -a -F "#{window_id}" | head -1)" = "$W0" ]'
 ok "  ...creates no extra window"           '[ "$(wins)" = 1 ]'
 ok "  ...creates no worktree"               '[ ! -d "$WORK/repos/.kel-worktrees" ]'
@@ -256,18 +274,22 @@ NLOG="$WORK/notify.log"; : > "$NLOG"
 printf '#!/bin/sh\nprintf "%%s|%%s\\n" "$1" "$2" >> %s\n' "$NLOG" > "$WORK/stub"; chmod +x "$WORK/stub"
 export KEL_NOTIFY_CMD="$WORK/stub"
 hook "$P" UserPromptSubmit
-hook "$P" Notification permission_prompt "needs Bash"; sleep 0.3
+hook "$P" Notification permission_prompt "needs Bash"
+wait_until '[ "$(grep -c . "$NLOG")" = 1 ]'
 ok "notifies on entering waiting"           '[ "$(grep -c . "$NLOG")" = 1 ]'
 ok "  ...with the reason as the body"       'grep -q "needs Bash" "$NLOG"'
-hook "$P" Notification permission_prompt "needs Bash again"; sleep 0.3
+hook "$P" Notification permission_prompt "needs Bash again"
+sleep 0.3   # nothing to wait FOR: asserting silence
 ok "silent on a repeat of the same state"   '[ "$(grep -c . "$NLOG")" = 1 ]'
 hook "$P" UserPromptSubmit
-hook "$P" Notification permission_prompt "blocked once more"; sleep 0.3
+hook "$P" Notification permission_prompt "blocked once more"
+wait_until '[ "$(grep -c . "$NLOG")" = 2 ]'
 ok "notifies again after leaving+returning" '[ "$(grep -c . "$NLOG")" = 2 ]'
 : > "$NLOG"; hook "$P" Stop; sleep 0.3
 ok "does not notify for states not in \$KEL_NOTIFY" '[ "$(grep -c . "$NLOG")" = 0 ]'
 : > "$NLOG"; KEL_NOTIFY="done" hook "$P" UserPromptSubmit >/dev/null 2>&1
-: > "$NLOG"; KEL_NOTIFY="done" hook "$P" Stop; sleep 0.3
+: > "$NLOG"; KEL_NOTIFY="done" hook "$P" Stop
+wait_until '[ "$(grep -c . "$NLOG")" = 1 ]'
 ok "\$KEL_NOTIFY selects which states do"   '[ "$(grep -c . "$NLOG")" = 1 ]'
 unset KEL_NOTIFY_CMD
 # The cases above already prove the detached path: this suite never attaches a
