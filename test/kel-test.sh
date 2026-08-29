@@ -57,6 +57,11 @@ section() { printf '\n\033[1m== %s ==\033[0m\n' "$*"; }
 
 reset() {
   tmux kill-server 2>/dev/null; sleep 0.4
+  # Start the server ourselves with NO user config.  Otherwise the suite
+  # inherits whatever ~/.tmux.conf does — on a developer box that sources
+  # kel.conf and sets base-index 1, on a CI runner there is no file at all —
+  # and the two environments quietly disagree about how windows are numbered.
+  tmux -f /dev/null start-server 2>/dev/null
   rm -rf "$XDG_STATE_HOME" "$WORK/repos"; mkdir -p "$STATE"
   local r
   for r in api-gw coppermind; do
@@ -77,6 +82,11 @@ ${3:+,\"notification_type\":\"$3\"}${4:+,\"notification_text\":\"$4\"}}" \
     | TMUX_PANE="$1" "$KEL" hook "$2"
 }
 state_of() { "$KEL" ls 2>/dev/null | awk -v n="$1" '$2==n {print $3}'; }
+# Look windows up by NAME, never by index.  kel.conf sets base-index 1, so a
+# developer box numbers windows from 1 while a bare tmux (CI, a fresh machine)
+# numbers from 0 — hardcoding ":1" silently targets the wrong window, or none.
+pane_of()   { tmux list-panes -s -t "=keltest/$1" -F '#{pane_id} #{window_name}'  | awk -v n="$2" '$2==n {print $1; exit}'; }
+window_of() { tmux list-windows  -t "=keltest/$1" -F '#{window_id} #{window_name}' | awk -v n="$2" '$2==n {print $1; exit}'; }
 
 # ---------------------------------------------------------------- isolation
 section "the suite cannot reach your real tmux server"
@@ -129,7 +139,7 @@ reset
 K api-gw     new auth-fix --agent 'sleep 9999' >/dev/null 2>&1
 K api-gw     new tests    --agent 'sleep 9999' >/dev/null 2>&1
 K coppermind new sazed    --agent 'sleep 9999' >/dev/null 2>&1
-tmux split-window -d -t '=keltest/api-gw:1' -c "$WORK/repos/api-gw" 'sleep 9999'
+tmux split-window -d -t "$(window_of api-gw auth-fix)" -c "$WORK/repos/api-gw" 'sleep 9999'
 sleep 1; "$KEL" snapshot >/dev/null 2>&1
 want="$(jq -Sc '.groups|map_values(map(.name))' "$STATE/snapshot.json")"
 for i in 1 2 3; do
@@ -138,7 +148,7 @@ for i in 1 2 3; do
   got="$(jq -Sc '.groups|map_values(map(.name))' "$STATE/snapshot.json")"
   ok "restore $i rebuilds 3 windows / 2 groups" "[ '$(wins)' = 3 ] && [ '$(grps)' = 2 ]"
   ok "restore $i leaves the snapshot intact"    "[ '$got' = '$want' ]"
-  ok "restore $i rebuilds the split pane"       '[ "$(tmux list-panes -t "=keltest/api-gw:1" -F x 2>/dev/null | grep -c x)" = 2 ]'
+  ok "restore $i rebuilds the split pane"       '[ "$(tmux list-panes -t "$(window_of api-gw auth-fix)" -F x 2>/dev/null | grep -c x)" = 2 ]'
 done
 ok "no stale .restoring lock is left"   '[ ! -e "$STATE/.restoring" ]'
 ok "a .prev generation is kept"         '[ -f "$STATE/snapshot.json.prev" ]'
@@ -146,7 +156,7 @@ ok "a .prev generation is kept"         '[ -f "$STATE/snapshot.json.prev" ]'
 section "portability fixes keep behaving (no stat/sed/sort dependencies)"
 reset
 K api-gw new a --agent 'sleep 9999' >/dev/null 2>&1
-W0="$(tmux list-windows -a -F '#{window_id}' | head -1)"
+W0="$(window_of api-gw a)"
 printf 'waiting 1\n' > "$STATE/@99.state"; printf 'x\n' > "$STATE/@99.ctx"
 printf 'idle 1\n'    > "$STATE/$W0.state"
 "$KEL" ls >/dev/null 2>&1
@@ -176,7 +186,7 @@ ok "  ...and --force gets through"      '"$KEL" kill api-gw/wt -f >/dev/null 2>&
 section "Notification maps to what it actually means (#14)"
 reset
 K api-gw new a --agent 'sleep 9999' >/dev/null 2>&1
-P="$(tmux list-panes -t '=keltest/api-gw:1' -F '#{pane_id}')"
+P="$(pane_of api-gw a)"
 hook "$P" UserPromptSubmit
 ok "UserPromptSubmit -> working"                    '[ "$(state_of a)" = working ]'
 hook "$P" Notification permission_prompt "needs Bash"
@@ -197,7 +207,7 @@ ok "an unknown type falls back to waiting"          '[ "$(state_of a)" = waiting
 section "dead agents are detected at read time"
 reset
 K api-gw new a --agent 'sleep 9999' >/dev/null 2>&1
-P="$(tmux list-panes -t '=keltest/api-gw:1' -F '#{pane_id}')"
+P="$(pane_of api-gw a)"
 W="$(tmux display-message -p -t "$P" '#{window_id}')"
 hook "$P" UserPromptSubmit
 tmux send-keys -t "$P" C-c 2>/dev/null; sleep 0.6
@@ -206,7 +216,7 @@ ok "a crashed agent reads dead, not working"        '[ "$(state_of a)" = dead ]'
 section "compaction counter (#15)"
 reset
 K api-gw new a --agent 'sleep 9999' >/dev/null 2>&1
-P="$(tmux list-panes -t '=keltest/api-gw:1' -F '#{pane_id}')"
+P="$(pane_of api-gw a)"
 M="$SESSIONS/api-gw/a.json"
 hook "$P" UserPromptSubmit
 hook "$P" PreCompact
@@ -221,7 +231,7 @@ ok "the board preview shows it"             '[[ "$("$KEL" _board_preview a api-g
 section "restart-in-place (#13)"
 reset
 K api-gw new a --agent 'sleep 9999' >/dev/null 2>&1
-W0="$(tmux list-windows -a -F '#{window_id}' | head -1)"
+W0="$(window_of api-gw a)"
 M="$SESSIONS/api-gw/a.json"
 P="$(tmux list-panes -t "$W0" -F '#{pane_id}')"
 hook "$P" UserPromptSubmit
@@ -241,7 +251,7 @@ ok "an unknown name is refused"             '! "$KEL" restart nope-not-here >/de
 section "fleet notifications (#1)"
 reset
 K api-gw new a --agent 'sleep 9999' >/dev/null 2>&1
-P="$(tmux list-panes -t '=keltest/api-gw:1' -F '#{pane_id}')"
+P="$(pane_of api-gw a)"
 NLOG="$WORK/notify.log"; : > "$NLOG"
 printf '#!/bin/sh\nprintf "%%s|%%s\\n" "$1" "$2" >> %s\n' "$NLOG" > "$WORK/stub"; chmod +x "$WORK/stub"
 export KEL_NOTIFY_CMD="$WORK/stub"
@@ -284,7 +294,7 @@ unset TMUX
 section "statusline records context without a live agent"
 reset
 K api-gw new a --agent 'sleep 9999' >/dev/null 2>&1
-P="$(tmux list-panes -t '=keltest/api-gw:1' -F '#{pane_id}')"
+P="$(pane_of api-gw a)"
 W="$(tmux display-message -p -t "$P" '#{window_id}')"
 sl() { printf '%s' "$1" | TMUX_PANE="$P" "$KEL" statusline; }
 sl '{"session_id":"a","model":{"display_name":"Opus 5"},"workspace":{"current_dir":"/x"},
