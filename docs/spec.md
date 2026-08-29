@@ -376,9 +376,15 @@ or `jq` is missing.
 ## 12. Stack
 
 - **Now: shell + `tmux` config.** `bin/kel` is one bash script. No runtime, no
-  build.
-- **Later (v1.0): Go + Bubble Tea**, single static binary — if and only if the
-  board outgrows a shell TUI.
+  build — and it stays the fallback, so `git clone && ./install.sh` works on a
+  machine where a Go toolchain can't be installed.
+- **From v0.6: Go, incrementally, alongside.** Not a rewrite and not a parallel
+  branch — a strangler fig where the migration unit is the subcommand and the
+  **on-disk state format is the contract** between the two implementations.
+  `kel _fleet --json` goes first (hot path, needs concurrency and types), then
+  `kel top` in **Bubble Tea v2**. Read/render surfaces port first; mutating
+  commands — `kel kill`'s uncommitted/unpushed check above all — port last or
+  never. Build order and rules in `rollout.md` § v0.6.
 - **`tmux`** as the required substrate.
 - **State:** `~/.local/state/kel/` — `tmux` is the source of truth for what's
   alive; these files hold the metadata `tmux` doesn't know.

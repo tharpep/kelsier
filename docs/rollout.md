@@ -263,13 +263,128 @@ the write is gated on a non-zero `context_window_size`.
 (kel still maps every notification to `waiting`, including `idle_prompt`),
 compaction counters, and the permission hooks.
 
-## v1.0 — consolidation
+## v0.5 — tell the truth, and tell me out of band
 
-**Trigger:** the shell scripts got slow or hairy; or it's ready to show people.
+**Theme:** signal, not surfaces. Everything here is hook/state work in the layer
+v0.4.1 just warmed up; nothing new to look at.
 
-- Go + Bubble Tea single static binary replacing the shell `kel`
-- `~/.config/kel/config.toml` + per-repo `.kel/config.toml`
-- README leading with the layout and the jump key; MIT
+- ~~**#14** notification fidelity~~ — **done** (`84f7329`). `Notification` maps to
+  what it means; `throttled` is a real state; `kel jump` stopped lying.
+- **#15** compaction counter — `PreCompact` / `PostCompact`, `compactions: N` in
+  the record. Catches what context % can't: an agent repeatedly squeezed back
+  down. Take `SessionStart`'s matcher values while in there.
+- **#13** restart-in-place — moved up from Tier 3 deliberately. v0.4 shipped
+  `dead` detection, so an agent can now be *diagnosed* as crashed with no way to
+  *fix* it short of a workspace-wide `kel restore`. A state with no exit is
+  worse than no state. ~15 LOC and it completes something already shipped.
+- **#1** fleet notifications — the missing half of v0, and unblocked by #14:
+  notifying on the old `waiting` would have paged you for `idle_prompt`, the
+  false positive that makes people switch notifications off for good. On WSL2
+  the ladder is bell → `display-message` → OSC 9 → `powershell.exe` toast.
+- **#4** informative `⟨+N waiting⟩` badge.
+
+## v0.6 — one place to look  ·  *Go enters here*
+
+**Theme:** one computed view of the fleet, and a dashboard on top of it.
+
+- **`kel _fleet --json`** — fleet state computed **once**, consumed by `ls`,
+  `--json`, the board, `status-line` and `kel top`. Today every surface
+  re-derives it, positionally, over TSV. That plumbing caused both of v0.4.1's
+  real bugs: adding one field meant touching four consumers, and bash folding a
+  run of tabs (IFS whitespace) shifted every value after an empty field, so an
+  unset model name reported cost as the context percentage. This is the fix,
+  and it is also the port boundary (below).
+- **#2** `kel top` (folds in **#3** durations/stall and **#7** dirty) — now
+  worth building, because it finally has columns the bar doesn't already show:
+  CTX, cost, compactions.
+- **#5** peek — partly absorbed by v0.4.1's context %, still worth it for
+  *why* an agent is blocked.
+
+### Why Go starts here, and not with a rewrite
+
+Two components, and they are exactly where Go pays:
+
+- **`_fleet`** is the hot path (`status-line` on every refresh, `statusline`
+  every 300 ms), it is N sequential `tmux` calls plus N `jq` forks, and it is
+  where both type bugs lived. Speed, concurrency and types, one component.
+- **`kel top`** is new, has no bash version to keep in sync, and is precisely
+  what Bubble Tea is for.
+
+**Strangler fig, not a parallel branch.** Both implementations live on `main`
+and the migration unit is the *subcommand*:
+
+```
+bin/kel        bash — the dispatcher.  Always works.  No Go required.
+go/            Go source
+  -> kel-fleet built by install.sh when `go` is on PATH
+```
+
+`gather_rows` becomes "use `kel-fleet` if it exists, else the bash path" — one
+`if`. Rules that make this hold:
+
+- **the on-disk format is the contract**, not the language: `sessions/<group>/<name>.json`,
+  `<wid>.state`, `<wid>.ctx`, `snapshot.json`. Either implementation must read
+  and write them identically, so any command can be either one on any day.
+- **bash stays the fallback, permanently, until v1.0 says otherwise.** One of
+  the three machines this runs on is a work laptop; `git clone && ./install.sh`
+  has to keep working where a Go toolchain can't be installed.
+- **the bash implementation is the test oracle.** Differential-test Go against
+  it — same state dir, same JSON — on top of the existing 28-case suite. This
+  is the specific answer to "a rewrite re-earns every bug you just fixed."
+- **short feature branches per component**, never a long-lived `go` branch: you
+  would daily-drive one and let the other rot, land fixes twice, and stop
+  dogfooding the version you are trying to ship.
+- **target Bubble Tea v2** (Feb 2026 — declarative `View`, new renderer, with
+  matching Lip Gloss v2 / Bubbles v2). Nearly every tutorial and model answer
+  still describes v1. This is a deliberate choice, not a default.
+
+**Mutating commands port last, or never.** `kel kill`'s uncommitted/unpushed
+check is the one place a bug is unforgivable (§10). Read/render surfaces are
+pure functions of on-disk state — if the Go `ls` is wrong, nothing is lost.
+
+## v0.7 — landing the work
+
+**Theme:** the other end of the day. `kel new -w` makes five worktrees trivial
+and does nothing for the five branches that need to land.
+
+- **#6** merge-readiness via `gh` — ahead/behind from plain `git`, PR state from
+  `gh pr status --json`. The column is **three-valued**: ready / not-ready /
+  **unknown**. An expired `gh` token exits non-zero with empty stdout, which is
+  byte-identical to "there is no PR" — rendering that as not-ready is the same
+  class of lie as a bar that says `working` for a dead agent.
+- **#8** `kel sweep` — batch teardown of merged, clean, pushed agents.
+- **#12** `.kel/group` per-directory override.
+
+## v0.8 — someone else could install this
+
+- **#11** `install.sh --uninstall` — the standing release blocker.
+- **`~/.config/kel/config.toml`** + per-repo `.kel/config.toml`, absorbing the
+  `KEL_*` env vars. This lands *before* v1.0 and before **#10** presets, so kel
+  never has two config systems at once.
+- README leading with the layout and the jump key; MIT.
+- docs pass: `spec.md` / `usage.md` / `rollout.md` reconciled against reality.
+
+## v1.0 — shareable
+
+**v1.0 is a product milestone, not an implementation one.** It previously read
+"Go + Bubble Tea single static binary," which would have been reached without
+kelsier getting better at anything, while `install.sh --uninstall` — a blocker
+by the backlog's own words — sat outside the definition.
+
+**v1.0 means:** the loop is closed (you know which agent is blocked, why, how
+deep it is, and what it cost), the worktree lifecycle ends as cleanly as it
+starts, the install is reversible, and someone who is not the author can run
+`git clone && ./install.sh` and have it work — with or without Go.
+
+How much of it is Go by then is an outcome, not a requirement.
+
+### v2.0 — all Go, if ever
+
+Retiring `bin/kel` is its own decision, taken after v1.0 with evidence from
+running both. It needs: every subcommand ported and differentially tested, a
+release pipeline (so a machine without a toolchain gets a binary rather than
+nothing), and an honest answer to what is lost — editing a script and having it
+live is a real feature of a tool you bend to this week's workflow.
 
 ---
 

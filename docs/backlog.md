@@ -20,6 +20,18 @@ Entries #14–#16 and the *Known interactions* section come from that pass.
 **Numbering** is allocation order and a stable ID — not priority. Tier, and
 position within a tier, carry that.
 
+**Scheduled entries.** `rollout.md` now assigns most of this file to a release,
+so tiers describe *kind* and rollout describes *when*; where they disagree,
+rollout wins.
+
+| release | entries |
+|---|---|
+| v0.5 | ~~#14~~ done · #15 · **#13** · #1 · #4 |
+| v0.6 | `_fleet --json` · #2 (folds #3, #7) · #5  — *Go starts here* |
+| v0.7 | #6 · #8 · #12 |
+| v0.8 | #11 · config file (un-parked below) |
+| unscheduled | #9 · #10 · #16 · everything under *Parked* |
+
 **Tags.** `[fits]` — inside "just bookkeeping, never wrap the agent."
 `[borderline]` — one design decision away from crossing a non-goal; the entry
 says which. `[violates]` — recorded so it stops getting re-proposed.
@@ -357,7 +369,13 @@ group, for monorepos that don't split cleanly on git root.
 
 **Gate:** when the monorepo fallback is a daily annoyance — not before.
 
-### 13. Restart-in-place  ·  `[fits]`
+### 13. Restart-in-place  ·  `[fits]`  ·  **promoted to v0.5**
+
+> Moved out of Tier 3 order. v0.4 shipped `dead` detection, so kel can now
+> *diagnose* a crashed agent with no way to *fix* it short of a workspace-wide
+> `kel restore`. A state with no exit is worse than no state, and this is
+> ~15 LOC that completes something already shipped.
+
 
 A crashed agent leaves a live window sitting at a bare shell, its worktree and
 branch intact. `kel new` would try to build a duplicate worktree; `kel restore`
@@ -381,10 +399,12 @@ recorded session id) in the existing window, touching nothing else.
   versioned — a real interface, not a scrape. `kel statusline` records it to
   `<wid>.ctx`; the bar, `kel ls --json` and the board read it. The lesson worth
   keeping: this sat parked for a release because the search was for a *hook*.
-- **Config file / theming** (`~/.config/kel/config.toml` + `.kel/config.toml`):
-  status-line format, colours, state glyphs, board size, keybind opt-outs, the
-  `KEL_*` env vars migrated in. Real, and CLI power users will want their
-  colourscheme — but it rides with the v1.0 Go rewrite, not before it.
+- ~~**Config file / theming**~~ — **un-parked, scheduled for v0.8.**
+  (`~/.config/kel/config.toml` + `.kel/config.toml`): status-line format,
+  colours, state glyphs, board size, keybind opt-outs, the `KEL_*` env vars
+  migrated in. It was parked behind "the v1.0 Go rewrite", which no longer
+  exists as a milestone — and it has to land *before* #10 presets so kel never
+  runs two config systems at once. See `rollout.md` § v0.8.
 - **Two-slot / swap-pane layout** — cut in `spec.md` §5c. Revisit only against a
   pain the popup board cannot address.
 - **PR status on the board row; attach-to-external-agent** — candidates in
