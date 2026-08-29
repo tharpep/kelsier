@@ -271,7 +271,7 @@ prune_state() {
   [ -n "$live" ] || return 0
   for f in "$STATE_DIR"/*.state "$STATE_DIR"/*.ctx; do
     [ -e "$f" ] || continue
-    wid="$(basename "$f" | sed 's/\.\(state\|ctx\)$//')"
+    wid="${f##*/}"; wid="${wid%.state}"; wid="${wid%.ctx}"
     printf '%s\n' "$live" | grep -qxF "$wid" || rm -f "$f"
   done
 }
@@ -854,8 +854,11 @@ snapshot() {   # silent; called by hooks and state-changing commands
   # spawn a fresh `kel` from the server, which inherits nothing.  A lock left
   # behind by a killed restore goes stale after five minutes.
   if [ -e "$RESTORE_LOCK" ]; then
-    local lock_age=$(( $(date +%s) - $(stat -c %Y "$RESTORE_LOCK" 2>/dev/null || echo 0) ))
-    [ "$lock_age" -lt 300 ] && return 0
+    # the lock carries the epoch the restore started — no stat(1), whose flag
+    # for mtime differs between GNU (-c %Y) and BSD (-f %m)
+    local lock_ts=''; read -r lock_ts < "$RESTORE_LOCK" 2>/dev/null || true
+    case "${lock_ts:-}" in ''|*[!0-9]*) lock_ts=0 ;; esac
+    [ $(( $(date +%s) - lock_ts )) -lt 300 ] && return 0
     rm -f "$RESTORE_LOCK"
   fi
   command -v tmux >/dev/null 2>&1 && command -v jq >/dev/null 2>&1 || return 0
@@ -899,7 +902,7 @@ restore_from_snapshot() {   # [-c]
   # rebuilt.  Hold the lock so those writes stand down, and read from a private
   # copy so nothing can move underneath us either way.
   local src="$SNAPSHOT"
-  : > "$RESTORE_LOCK"
+  date +%s > "$RESTORE_LOCK"
   local SNAPSHOT
   SNAPSHOT="$(mktemp "$STATE_DIR/.snapin.XXXXXX" 2>/dev/null)" \
     || { rm -f "$RESTORE_LOCK"; warn "no scratch space to restore from"; return 1; }
@@ -1022,7 +1025,7 @@ cmd_doctor() {
   echo "kel doctor" >&2
   local r_tmux r_ver r_popup r_wt r_jq r_node r_claude r_hooks r_sl r_pass
   r_tmux=$(probe   "tmux present"                     command -v tmux)
-  r_ver=$(probe    "tmux >= 3.0"                      bash -c 't=$(tmux -V | grep -oE "[0-9]+\.[0-9]+"); [ -n "$t" ] && [ "$(printf "3.0\n%s\n" "$t" | sort -V | head -1)" = "3.0" ]')
+  r_ver=$(probe    "tmux >= 3.0"                      bash -c 'v=$(tmux -V | grep -oE "[0-9]+\.[0-9]+" | head -1); [ -n "$v" ] || exit 1; [ "${v%%.*}" -gt 3 ] || { [ "${v%%.*}" -eq 3 ] && [ "${v#*.}" -ge 0 ]; }')
   r_popup=$(probe  "display-popup available"          bash -c 'tmux list-commands 2>/dev/null | grep -q display-popup')
   r_wt=$(probe     "git worktree available"           bash -c 'git worktree -h 2>&1 | grep -q "add"')
   r_jq=$(probe     "jq present"                       command -v jq)

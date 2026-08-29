@@ -30,8 +30,12 @@ export KEL_SESSION=keltest
 # suite and the tool under test share one throwaway server and `kill-server`
 # cannot touch the default socket.  Without this the suite kills a real
 # workspace, which is not hypothetical: it has happened.
-export TMUX_TMPDIR="$WORK/tmux"
-mkdir -p "$TMUX_TMPDIR"
+# Deliberately /tmp and not under $WORK: a unix socket path caps at ~104 chars,
+# and $TMPDIR is a long /var/folders/... path on macOS, so "$WORK/tmux" can
+# overflow it — tmux then fails with "File name too long" and every test that
+# needs a server fails for a reason that looks nothing like the cause.
+TMUX_TMPDIR="$(mktemp -d /tmp/kel-tsock.XXXXXX)" || exit 1
+export TMUX_TMPDIR
 [ -n "$TMUX_TMPDIR" ] && [ -d "$TMUX_TMPDIR" ] || {
   echo "refusing to run: TMUX_TMPDIR is not set, kill-server would hit the default socket" >&2
   exit 1
@@ -40,7 +44,7 @@ unset TMUX TMUX_PANE      # don't inherit an outer tmux; we are not "inside" our
 STATE="$XDG_STATE_HOME/kel"
 SESSIONS="$STATE/sessions"
 
-cleanup() { tmux kill-server 2>/dev/null; rm -rf "$WORK"; }
+cleanup() { tmux kill-server 2>/dev/null; rm -rf "$WORK" "$TMUX_TMPDIR"; }
 trap cleanup EXIT INT TERM
 
 pass=0; fail=0; failed=()
@@ -78,6 +82,7 @@ state_of() { "$KEL" ls 2>/dev/null | awk -v n="$1" '$2==n {print $3}'; }
 section "the suite cannot reach your real tmux server"
 tmux new-session -d -s isocheck -c /tmp 2>/dev/null
 ok "our socket lives under \$TMUX_TMPDIR"  '[ -n "$(find "$TMUX_TMPDIR" -type s 2>/dev/null)" ]'
+ok "  ...and its path fits in sun_path"   '[ "${#TMUX_TMPDIR}" -lt 70 ]'
 ok "and not on the default socket"        '[ ! -S "/tmp/tmux-$(id -u)/default" ] || ! tmux -S "/tmp/tmux-$(id -u)/default" has-session -t isocheck 2>/dev/null'
 tmux kill-server 2>/dev/null
 
@@ -137,6 +142,25 @@ for i in 1 2 3; do
 done
 ok "no stale .restoring lock is left"   '[ ! -e "$STATE/.restoring" ]'
 ok "a .prev generation is kept"         '[ -f "$STATE/snapshot.json.prev" ]'
+
+section "portability fixes keep behaving (no stat/sed/sort dependencies)"
+reset
+K api-gw new a --agent 'sleep 9999' >/dev/null 2>&1
+W0="$(tmux list-windows -a -F '#{window_id}' | head -1)"
+printf 'waiting 1\n' > "$STATE/@99.state"; printf 'x\n' > "$STATE/@99.ctx"
+printf 'idle 1\n'    > "$STATE/$W0.state"
+"$KEL" ls >/dev/null 2>&1
+ok "prune drops a stale .state"          '[ ! -e "$STATE/@99.state" ]'
+ok "prune drops a stale .ctx"            '[ ! -e "$STATE/@99.ctx" ]'
+ok "prune keeps a LIVE window's state"   '[ -e "$STATE/$W0.state" ]'
+rm -f "$STATE/snapshot.json"
+date +%s > "$STATE/.restoring";                  "$KEL" snapshot >/dev/null 2>&1
+ok "a fresh lock stops snapshot writing" '[ ! -f "$STATE/snapshot.json" ]'
+echo $(( $(date +%s) - 400 )) > "$STATE/.restoring"; "$KEL" snapshot >/dev/null 2>&1
+ok "a stale lock does not"               '[ -f "$STATE/snapshot.json" ]'
+rm -f "$STATE/snapshot.json"; printf 'garbage\n' > "$STATE/.restoring"
+"$KEL" snapshot >/dev/null 2>&1
+ok "an unparseable lock reads as stale"  '[ -f "$STATE/snapshot.json" ]'
 
 # ---------------------------------------------------------------- safety
 section "kill never destroys the only copy of work"
