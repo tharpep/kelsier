@@ -41,11 +41,20 @@ SNAPSHOT="$STATE_DIR/snapshot.json"
 RESTORE_LOCK="$STATE_DIR/.restoring"
 STATUSLINE_PREV="$HOME/.claude/statusline-prev"   # a statusLine kel displaced
 KEL_CTX_WARN="${KEL_CTX_WARN:-70}"                # show context on the bar from here up
+KEL_NOTIFY="${KEL_NOTIFY:-waiting}"               # states worth interrupting you for
 SELF="$(command -v kel 2>/dev/null || printf '%s' "$HOME/.local/bin/kel")"
 # commands worth re-running per pane on restore (agents handled separately)
 KEL_RESTORE_CMDS="${KEL_RESTORE_CMDS:-nvim vim hx nano lazygit lazydocker htop btop k9s}"
 
 mkdir -p "$STATE_DIR" "$SESSIONS_DIR" "$STASH_DIR"
+
+humanize_secs() {   # 45 -> 45s   400 -> 6m   3900 -> 1h05m
+  local s="${1:-0}"
+  case "$s" in ''|*[!0-9]*) s=0 ;; esac
+  if   [ "$s" -lt 60 ];   then printf '%ds' "$s"
+  elif [ "$s" -lt 3600 ]; then printf '%dm' $(( s / 60 ))
+  else                         printf '%dh%02dm' $(( s / 3600 )) $(( (s % 3600) / 60 )); fi
+}
 
 say()  { printf '\033[1;32mkel\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33mkel\033[0m %s\n' "$*" >&2; }
@@ -1175,14 +1184,21 @@ cmd_status_line() {
     fi
   done < <(kel_windows | awk -F'\t' -v s="$sname" '$1==s' | sort -t$'\t' -k3,3n)
 
-  # waiting agents in OTHER kel groups
-  local other=0
-  while IFS=$'\t' read -r osn _ _ wid _; do
+  # Waiting agents in OTHER kel groups.  "+2 waiting" told you someone was
+  # blocked but not who or where; per-group is the same footprint, more signal.
+  local others='' ogrp
+  while IFS=$'\t' read -r osn ogrp _ wid _; do
     [ -z "${wid:-}" ] && continue
     [ "$osn" = "$sname" ] && continue
-    [ "$(effective_state "$wid")" = waiting ] && other=$((other+1))
+    [ "$(effective_state "$wid")" = waiting ] || continue
+    others="$others$ogrp"$'\n'
   done < <(kel_windows)
-  [ "$other" -gt 0 ] && out="$out  #[fg=colour214]⟨+${other} waiting⟩#[default]"
+  if [ -n "$others" ]; then
+    local badge
+    badge="$(printf '%s' "$others" | grep -v '^$' | sort | uniq -c \
+      | awk 'NR<=3 {printf "%s·%s ", $2, $1; next} {x+=$1} END {if (x) printf "+%d ", x}')"
+    [ -n "$badge" ] && out="$out  #[fg=colour214]⟨${badge% }⟩#[default]"
+  fi
 
   printf '%s ' "$out"
 }
@@ -1200,7 +1216,7 @@ cmd_jump() {
   while IFS=$'\t' read -r sname _ idx wid _; do
     [ -z "${wid:-}" ] && continue
     [ "$(effective_state "$wid")" = waiting ] || continue
-    w+=( "$sname"$'\t'"$idx" )
+    w+=( "$sname"$'\t'"$idx"$'\t'"$wid" )
   done < <(kel_windows | sort -t$'\t' -k2,2 -k3,3n)
 
   local n="${#w[@]}"
@@ -1208,7 +1224,7 @@ cmd_jump() {
 
   local i pos=-1 es ei
   for ((i=0; i<n; i++)); do
-    es="${w[$i]%%$'\t'*}"; ei="${w[$i]##*$'\t'}"
+    IFS=$'\t' read -r es ei _ <<< "${w[$i]}"
     [ "$es" = "$cs" ] && [ "$ei" = "$cw" ] && { pos=$i; break; }
   done
 
@@ -1218,14 +1234,28 @@ cmd_jump() {
   else
     tgt="${w[0]}"
     for ((i=0; i<n; i++)); do
-      es="${w[$i]%%$'\t'*}"; ei="${w[$i]##*$'\t'}"
+      IFS=$'\t' read -r es ei _ <<< "${w[$i]}"
       if [ "$es" \> "$cs" ] || { [ "$es" = "$cs" ] && [ -n "$cw" ] && [ "$ei" -gt "$cw" ]; }; then
         tgt="${w[$i]}"; break
       fi
     done
   fi
-  local ts="${tgt%%$'\t'*}" ti="${tgt##*$'\t'}"
+  local ts ti tw
+  IFS=$'\t' read -r ts ti tw <<< "$tgt"
   tmux switch-client -t "=$ts" \; select-window -t "$ti"
+
+  # say where you landed and how long it has been sitting — the jump is
+  # otherwise silent, and "which one was that?" is the next question
+  local grp="$ts" nm ep
+  case "$ts" in "$KEL_PREFIX") ;; "$KEL_PREFIX"/*) grp="${ts#"$KEL_PREFIX"/}" ;; esac
+  nm="$(tmux display-message -p -t "$tw" '#{window_name}' 2>/dev/null || echo "$ti")"
+  ep=''; [ -f "$STATE_DIR/$tw.state" ] && read -r _ ep _ < "$STATE_DIR/$tw.state" 2>/dev/null
+  case "${ep:-}" in ''|*[!0-9]*) ep='' ;; esac
+  if [ -n "$ep" ]; then
+    tmux display-message "→ $grp/$nm  (waiting $(humanize_secs $(( $(date +%s) - ep ))))"
+  else
+    tmux display-message "→ $grp/$nm"
+  fi
 }
 
 # --------------------------------------------------------------------------
@@ -1302,6 +1332,36 @@ cat <<'EOF'
   prefix ?   tmux's full key list      prefix k   the beginner menu
 
 EOF
+}
+
+# --------------------------------------------------------------------------
+# notifications  (#1)
+# --------------------------------------------------------------------------
+# The status line is a *pull* surface — it only helps while you are looking at
+# it.  This is the push half, fired from the state hook.  It is never polled:
+# a poller would be a background daemon, which is a hard non-goal.
+#
+# `notify` is the ONLY place delivery lives.  Teaching kel about
+# powershell.exe (WSL), osascript (macOS) or notify-send (Linux desktop) later
+# is a `command -v` ladder inside this one function and nowhere else; today it
+# stays out, and setup.md carries paste-ready recipes for $KEL_NOTIFY_CMD.
+notify() {   # title body
+  tmux display-message "$1 — $2" 2>/dev/null || true
+  [ -n "${KEL_NOTIFY_CMD:-}" ] || return 0
+  # Backgrounded, and deliberately not with setsid — macOS has no setsid.  A
+  # hook is synchronous: Claude Code waits for it, and a PowerShell toast
+  # costs a third of a second before it has done anything useful.
+  ( "$KEL_NOTIFY_CMD" "$1" "$2" >/dev/null 2>&1 & ) 2>/dev/null || true
+}
+
+# Is the user actually looking at this window?  Active in its session AND that
+# session has a client attached.  Detached tmux => nobody is looking => notify.
+window_focused() {   # wid
+  local act att
+  act="$(tmux display-message -p -t "$1" '#{window_active}'    2>/dev/null || echo 0)"
+  att="$(tmux display-message -p -t "$1" '#{session_attached}' 2>/dev/null || echo 0)"
+  case "${att:-0}" in ''|*[!0-9]*) att=0 ;; esac
+  [ "${act:-0}" = 1 ] && [ "$att" -gt 0 ]
 }
 
 # --------------------------------------------------------------------------
@@ -1446,6 +1506,7 @@ cmd_hook() {
 
   local wid; wid="$(tmux display-message -p -t "$pane" '#{window_id}' 2>/dev/null || true)"
   [ -z "$wid" ] && exit 0
+  local prev; prev="$(state_of "$wid")"   # for the transition test below
 
   if [ -n "$sid" ] && [ "$event" != SessionEnd ]; then
     local m
@@ -1504,6 +1565,17 @@ cmd_hook() {
   printf '%s %s %s\n' "$state" "$(date +%s)" "$ntext" > "$tmp"
   mv -f "$tmp" "$STATE_DIR/$wid.state"
   tmux refresh-client -S 2>/dev/null || true
+
+  # Only on a transition *into* a notifying state, and only when you are not
+  # already looking at it.  Without the transition test every repeat hook of
+  # the same state re-notifies, which is how people learn to ignore them.
+  [ "$state" = "$prev" ] && exit 0
+  case " $KEL_NOTIFY " in
+    *" $state "*)
+      window_focused "$wid" && exit 0
+      local wn; wn="$(tmux display-message -p -t "$wid" '#{window_name}' 2>/dev/null || echo "$wid")"
+      notify "kel: $wn" "${ntext:-$state}" ;;
+  esac
 }
 
 # --------------------------------------------------------------------------

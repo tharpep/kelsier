@@ -238,6 +238,48 @@ ok "  ...creates no worktree"               '[ ! -d "$WORK/repos/.kel-worktrees"
 ok "  ...leaves the record otherwise as-is" '[ "$(jq -Sc "del(.compactions)" "$M")" = "$before" ]'
 ok "an unknown name is refused"             '! "$KEL" restart nope-not-here >/dev/null 2>&1'
 
+section "fleet notifications (#1)"
+reset
+K api-gw new a --agent 'sleep 9999' >/dev/null 2>&1
+P="$(tmux list-panes -t '=keltest/api-gw:1' -F '#{pane_id}')"
+NLOG="$WORK/notify.log"; : > "$NLOG"
+printf '#!/bin/sh\nprintf "%%s|%%s\\n" "$1" "$2" >> %s\n' "$NLOG" > "$WORK/stub"; chmod +x "$WORK/stub"
+export KEL_NOTIFY_CMD="$WORK/stub"
+hook "$P" UserPromptSubmit
+hook "$P" Notification permission_prompt "needs Bash"; sleep 0.3
+ok "notifies on entering waiting"           '[ "$(grep -c . "$NLOG")" = 1 ]'
+ok "  ...with the reason as the body"       'grep -q "needs Bash" "$NLOG"'
+hook "$P" Notification permission_prompt "needs Bash again"; sleep 0.3
+ok "silent on a repeat of the same state"   '[ "$(grep -c . "$NLOG")" = 1 ]'
+hook "$P" UserPromptSubmit
+hook "$P" Notification permission_prompt "blocked once more"; sleep 0.3
+ok "notifies again after leaving+returning" '[ "$(grep -c . "$NLOG")" = 2 ]'
+: > "$NLOG"; hook "$P" Stop; sleep 0.3
+ok "does not notify for states not in \$KEL_NOTIFY" '[ "$(grep -c . "$NLOG")" = 0 ]'
+: > "$NLOG"; KEL_NOTIFY="done" hook "$P" UserPromptSubmit >/dev/null 2>&1
+: > "$NLOG"; KEL_NOTIFY="done" hook "$P" Stop; sleep 0.3
+ok "\$KEL_NOTIFY selects which states do"   '[ "$(grep -c . "$NLOG")" = 1 ]'
+unset KEL_NOTIFY_CMD
+# The cases above already prove the detached path: this suite never attaches a
+# client, so every notification here took the "nobody is looking" branch.
+# Suppression *while focused* needs an attached client, and attaching one
+# portably in CI would mean `script`, whose flags differ between GNU and BSD —
+# exactly the class of trap this suite exists to catch. Verified by hand.
+
+section "per-group waiting badge (#4)"
+reset
+K api-gw     new a --agent 'sleep 9999' >/dev/null 2>&1
+K coppermind new b --agent 'sleep 9999' >/dev/null 2>&1
+for g in api-gw coppermind; do
+  hook "$(tmux list-panes -t "=keltest/$g" -F '#{pane_id}' | head -1)" Notification permission_prompt "x"
+done
+export TMUX="$TMUX_TMPDIR/tmux-$(id -u)/default,$(tmux display-message -p '#{pid}'),0"
+bar="$("$KEL" status-line api-gw)"
+ok "the badge names the other group"        '[[ "$bar" == *"coppermind·1"* ]]'
+ok "  ...and not the one you are in"        '[[ "$bar" != *"api-gw·1"* ]]'
+ok "  ...and not the old +N form"           '[[ "$bar" != *"+1 waiting"* ]]'
+unset TMUX
+
 # ---------------------------------------------------------------- statusline
 section "statusline records context without a live agent"
 reset
