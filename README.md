@@ -45,16 +45,17 @@ Explicit, because each is a thing this project will be tempted into.
 **v0.4** — working and in daily use. One `kel` command:
 
 ```
-kel                enter the workspace          kel ls        every agent, grouped
-kel new <name>     new window + agent           kel go [G]     switch group
-kel new <name> -w  ...in a git worktree         kel board     the fleet browser
-kel kill <name>    close one                    kel restore   rebuild after a kill
+kel                go to (or start) this repo's agent   kel ls      every agent, grouped
+kel new <name>     new window + agent                   kel go [G]   switch group
+kel new <name> -w  ...in a git worktree                 kel restore  rebuild after a kill
+kel kill <name>    close one                            kel rename   rename this agent
 ```
 
-One tmux session per repo, a state-aware status line, and `` prefix ` `` to jump
-to the next blocked agent in *any* group. The board (`Ctrl+Space`) is the
-interactive navigator — filter, preview, jump / new / kill. Shell + `tmux`
-config, no binary yet.
+One tmux session per repo and a state-aware status line. Four keys carry it:
+`` prefix ` `` jumps to whoever's blocked on you (any group); **`Ctrl+Space`**
+(or `prefix b`) opens the board to *find* an agent — `enter` jumps, `tab` acts;
+**`prefix m`** *manages* the agent you're on; **`prefix k`** is the "new to kel?"
+primer. Shell + `tmux` config, no binary yet.
 
 `docs/usage.md` is the reference · `docs/rollout.md` is the build order ·
 `docs/spec.md` is the design.

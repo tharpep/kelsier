@@ -45,12 +45,14 @@ does pass tmux context to hook subprocesses.
 > mouse on + smart wheel-scroll (PageUp/Dn to full-screen
 > TUIs), 1-indexed windows, pane labels, pane commands in `kel ls`, and
 > **workspace snapshot / restore** — `kel` rebuilds every group, window, and
-> split (agents resumed) after a reboot; `prefix D` = detach + snapshot.
+> split (agents resumed) after a reboot. (Detach + snapshot ended up on plain
+> `prefix d` via the `client-detached` hook — no separate key.)
 
 > **Shipped.** One tmux session per repo (`kel/<group>`); `kel jump` global;
-> status line = current group + `⟨+N waiting⟩`; `kel go`, `kel menu`
-> (`prefix m`), `prefix G`; `group` metadata field + auto-migration from the
-> flat session. `kel restore` rebuilds into groups.
+> status line = current group + `⟨+N waiting⟩`; `kel go`, the `kel menu`
+> quick-jump, `prefix g` group tree; `group` metadata field + auto-migration
+> from the flat session. `kel restore` rebuilds into groups. (v0.4 retired the
+> `kel menu` quick-jump — the board replaced it.)
 
 **Trigger:** the flat `kel` session overflows — routinely running agents across
 several repos at once, so the status line is cramped, `prefix 1-9` runs out, and
@@ -117,7 +119,7 @@ Native tmux, ~30–40 lines to build the menu string. No scroll, single-key
 items — good to ~15–20 agents. Past that (or when you want filter / sort /
 browse) is the v0.3 board.
 
-`prefix G` → native `choose-tree -Zs` for a plain group picker; a state-aware
+`prefix g` → native `choose-tree -Zs` for a plain group picker; a state-aware
 group menu can come later if the plain one isn't enough.
 
 ### Build order
@@ -126,7 +128,7 @@ group menu can come later if the plain one isn't enough.
 2. `kel jump` cross-session
 3. `kel ls` grouped
 4. `kel restore` / `kel prune` across groups
-5. `kel go` + `prefix G`
+5. `kel go` + `prefix g`
 6. `kel menu` (dynamic display-menu)
 7. two-level status line (option A) — last, it's the fiddliest
 8. metadata auto-migration
@@ -162,18 +164,22 @@ filter / sort / browse across everything at once.
 > A review (mine + Gemini via agy) found the core loop solid but flagged
 > friction for someone learning the tool. No new features.
 
-- **One navigator.** The board is it — `Ctrl+Space` (no prefix), plus `prefix b`
-  and `prefix m`. The old `display-menu` quick-jump is retired; `kel menu` is a
-  one-release alias for `kel board`. `prefix k` is reframed as a "new to kel?"
-  menu (tmux primitives + "browse agents" + "show me around").
-  **Follow-up (post-review, second Gemini pass):** the board's single-line key
-  legend truncated inside the popup and its actions were invisible chords. Fixed:
-  a compact `--footer` (`enter jump · tab actions`), and **`tab`** opens a
-  labelled `tmux display-menu` on the highlighted agent (jump / new here / rename
-  / go to group / kill). `prefix m` is repointed from "open the board" to
-  "**manage** the agent you're on" (rename / move / new sibling / kill). Key
-  story is now one job per key: `` ` `` waiting · `Ctrl+Space`/`b` find ·
-  `m` manage · `k` primer.
+- **One job per key.** The old `display-menu` quick-jump is retired (`kel menu`
+  is a one-release alias for `kel board`). It took two review passes (mine, then
+  Gemini 3.1 Pro on the first cut) to land the final shape:
+  - **`` prefix ` ``** — jump to whoever's waiting
+  - **`Ctrl+Space` / `prefix b`** — the board: *find* an agent. Compact
+    `--footer` (`enter jump · tab actions`); `enter` jumps, **`tab`** opens a
+    labelled `tmux display-menu` on the highlighted agent (jump / new here /
+    rename / go to group / kill). `ctrl-n/k/g/r` stay bound, unadvertised.
+  - **`prefix m`** — *manage* the agent you're on (rename / move / new sibling /
+    kill). A `display-menu`, not the board.
+  - **`prefix k`** — the "new to kel?" primer (tmux primitives + "browse agents"
+    + "show me around").
+
+  The first cut had the board on three keys with a truncating single-line
+  header; the fix was the footer + `tab` menu, and repointing `prefix m` from
+  the board to "manage".
 - **Bugs.** `kel rename <new>` (+ `prefix ,`) renames a window *and* its
   metadata record — a bare `rename-window` used to desync it so `kel kill`
   couldn't clean up; `kel kill` now also finds a record by window id as a
@@ -209,8 +215,8 @@ override; context-broadcast between agents.
 
 ## Explicitly not on the path
 
-- **Two-slot / swap-pane architecture** — cut, rationale in `spec.md` 5b. Revisit
-  only with a concrete pain the popup board cannot address.
+- **Two-slot / swap-pane architecture** — cut, rationale in `spec.md` §5c.
+  Revisit only with a concrete pain the popup board cannot address.
 - Diff view in an `ops` panel, session templates, PR status on the row,
   attach-to-external — candidates in `spec.md`; none committed, none blocking.
 

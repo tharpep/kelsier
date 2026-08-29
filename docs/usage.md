@@ -7,7 +7,8 @@
 
 ```bash
 cd ~/code/kelsier && ./install.sh
-tmux kill-server        # then reopen; restart any running Claude sessions
+tmux source-file ~/.tmux.conf     # pick up kel.conf changes
+# first install only: restart running Claude sessions so they load the hooks
 ```
 
 `install.sh` symlinks `bin/kel` to `~/.local/bin`, makes `~/.tmux.conf` source
@@ -206,7 +207,7 @@ tmux session per repo.**
 | `` prefix ` `` | jump to the next agent **waiting** on you — any group |
 | `prefix g` / `prefix (` `)` | pick / cycle groups |
 | `prefix ,` | rename this window (routes through `kel rename`) |
-| `prefix k` | "new to kel?" primer (new · browse · split · scroll · rename · close · detach · show me around) |
+| `prefix k` | "new to kel?" primer — new agent, browse, split, scroll, zoom, rename, close, detach, "show me around" |
 | `prefix [` | tmux scroll mode for a shell pane (`q` to leave) |
 | mouse wheel / PgUp PgDn | scroll an agent's conversation (kel maps the wheel to PageUp/Down) |
 | `prefix \|` / `-` | split a window (agent + editor); arrows or click to focus; `z` zoom |

@@ -78,8 +78,8 @@ sudo apt update && sudo apt install -y \
 ```
 
 Notes:
-- `bat` installs as `batcat`, `fd-find` as `fdfind` — `install.sh` aliases both
-  back to `bat` / `fd`.
+- `bat` installs as `batcat`, `fd-find` as `fdfind` — `install/20-user-tools.sh`
+  aliases both back to `bat` / `fd` in the `~/.bashrc` block.
 - Ubuntu 24.04 LTS ships current-enough `tmux` (3.4) and `ripgrep` (14.x).
 - The last line is `yazi`'s preview stack (video thumbs, archives, PDF, images).
 - **Neovim is deliberately not in this list.** apt's Neovim (0.9.5 on 24.04) is
@@ -87,7 +87,7 @@ Notes:
   `blink.cmp` / `snacks.nvim` families) need 0.10+. Install from the official
   tarball (see 3b). Not the AppImage — that needs `libfuse2t64` on 24.04.
 
-### 3b. Not in apt (or too old) — from upstream, handled by install.sh
+### 3b. Not in apt (or too old) — from upstream, handled by `install/*.sh`
 
 | Tool | Source | Why not apt |
 |---|---|---|
@@ -108,7 +108,7 @@ Windows-side Node on the shared PATH will shadow it unpredictably.
 
 ```
 curl -fsSL https://fnm.vercel.app/install | bash -s -- --skip-shell
-# install.sh adds `eval "$(fnm env --use-on-cd --shell bash)"` to the shell rc
+# 20-user-tools.sh adds `eval "$(fnm env --use-on-cd --shell bash)"` to the shell rc
 # then, in a new shell:
 fnm install --lts && fnm default lts-latest
 ```
@@ -141,9 +141,9 @@ still works but adds ~20–50ms of Windows-interop latency per operation, and
 
 - **Yank →** `vim.g.clipboard` set to the OSC 52 provider (`vim.ui.clipboard.osc52`).
 - **Paste →** terminal-native `Ctrl+Shift+V`, or `win32yank` as an explicit
-  synchronous `"+p` provider. `install.sh` drops `win32yank` on PATH as the
-  fallback; `:checkhealth` auto-detects it, no `g:clipboard` override needed for
-  paste.
+  synchronous `"+p` provider. `10-system-tools.sh` drops `win32yank` on PATH as
+  the fallback; `:checkhealth` auto-detects it, no `g:clipboard` override needed
+  for paste.
 - **tmux caveat:** OSC 52 through tmux needs `set -g allow-passthrough on` —
   `kel`'s tmux config includes it.
 

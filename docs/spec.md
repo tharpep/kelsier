@@ -123,7 +123,7 @@ and editor in a hidden holding session swapped into the visible slots via
 - **Three panel modes over one slot** means you can't see the board while
   editing.
 
-Revisit only with a concrete pain the board (5a) cannot address.
+Revisit only with a concrete pain the board (§5b) cannot address.
 
 ---
 
@@ -175,8 +175,10 @@ grouping trigger (§5a).
 ## 8. The agent record
 
 An agent is one `tmux` window and one working directory. kel-managed agents
-get a metadata record; hand-made windows (`prefix c`, or the menu's "new agent")
-are tracked for state but have no metadata and show as `(unmanaged)`.
+get a metadata record; a hand-made `prefix c` window is tracked for state but
+has no metadata and shows as `(unmanaged)` (every "new agent" menu item routes
+through `kel new`, so those are managed). Adopt a `prefix c` window with
+`kel move`.
 
 `~/.local/state/kel/sessions/<name>.json`:
 
@@ -279,7 +281,10 @@ kel doctor                 capability probe, cached to doctor.json
 ```
 
 Internal (wired into tmux / Claude Code): `kel status-line [group]`,
-`kel jump`, `kel snapshot`, `kel cheat`, `kel hook <EVENT>`.
+`kel jump`, `kel snapshot`, `kel cheat`, `kel hook <EVENT>`, and the board
+helpers `kel _board_rows` / `_board_preview` / `_board_jump` / `_board_kill` /
+`_board_actions` / `_board_rename`. `kel menu` is a one-release alias for
+`kel board`.
 
 **Workspace snapshot.** `kel snapshot` (fired by a `client-detached` /
 `after-split-window` tmux hook and by state-changing commands) writes the full
@@ -303,7 +308,8 @@ or `jq` is missing.
 | Probe | Why |
 |---|---|
 | `tmux` present, `>= 3.0` | the substrate |
-| `display-popup` available | the `prefix k` cheatsheet and the future board |
+| `display-popup` available | the board and the `prefix k` / `prefix m` menus |
+| `fzf` present | `kel board` |
 | `git worktree` available | `kel new -w` |
 | `jq` present | metadata + the hook merge |
 | `node` on `PATH` | Claude Code needs it; catches a broken WSL PATH |
@@ -323,8 +329,8 @@ or `jq` is missing.
 - **State:** `~/.local/state/kel/` — `tmux` is the source of truth for what's
   alive; these files hold the metadata `tmux` doesn't know.
 - **Config (v1.0):** `~/.config/kel/config.toml` + per-repo `.kel/config.toml`.
-  Today the only knobs are env vars (`KEL_SESSION`, `KEL_AGENT`,
-  `KEL_WORKTREES`).
+  Today the only knobs are env vars: `KEL_SESSION`, `KEL_AGENT`, `KEL_GROUP`,
+  `KEL_WORKTREES`, `KEL_RESTORE_CMDS`.
 
 Portability rule: nothing machine-specific in the script or the schema.
 

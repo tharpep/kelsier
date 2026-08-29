@@ -570,7 +570,7 @@
               <li><code>kel jump</code> goes <em>global</em> &mdash; next <span class="mono">waiting</span> agent in any group, switching sessions</li>
               <li><code>kel menu</code> (+ a <code>prefix</code> key) &mdash; a dynamic <code>display-menu</code> of every agent with its state; press to jump</li>
               <li>status line, minimal: current group in full, others collapsed to <span class="mono">&#10216;+N waiting&#10217;</span></li>
-              <li><code>kel go &lt;group&gt;</code>, <code>prefix G</code>; <code>kel ls</code> grouped; a <code>group</code> field in the metadata</li>
+              <li><code>kel go &lt;group&gt;</code>, <code>prefix g</code>; <code>kel ls</code> grouped; a <code>group</code> field in the metadata</li>
             </ul>
           </div>
 
@@ -607,7 +607,7 @@
               <li><code>kel board</code> / <code>prefix b</code> &mdash; <code>fzf</code> over every live agent, fuzzy filter on group + name</li>
               <li>preview pane: metadata + recent pane output + <code>git status</code></li>
               <li>binds: <kbd>enter</kbd> jump, <kbd>^n</kbd> new, <kbd>^k</kbd> kill, <kbd>^g</kbd> go to group, <kbd>^r</kbd> refresh</li>
-              <li><code>prefix m</code> stays as the zero-latency quick jump; the board is for filtering + acting</li>
+              <li><code>prefix m</code> kept the old quick-jump menu alongside it <span class="dim">(both reworked in v0.4 &mdash; see below)</span></li>
             </ul>
           </div>
 

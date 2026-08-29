@@ -93,13 +93,13 @@ say "done"
 cat <<EOF
 
   Reload:
-    tmux kill-server            # or: tmux source-file ~/.tmux.conf
-    restart running Claude Code sessions so they pick up the hooks
+    tmux source-file ~/.tmux.conf   # picks up kel.conf  (kill-server for a clean slate)
+    first install only: restart running Claude Code sessions so they load the hooks
 
   Use:
-    kel                 enter the workspace
+    kel                 go to (or start) this repo's agent
     kel new <name>      new window + agent   (-w = git worktree, --group G)
     kel ls              list every agent, grouped by repo
-    kel go [group]      switch group   ·   Ctrl+Space   the board
+    Ctrl+Space          the board — find an agent    ·   prefix m   manage this one
     kel kill <name>     close one      ·   kel doctor    check the machine
 EOF
