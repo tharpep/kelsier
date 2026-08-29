@@ -467,7 +467,7 @@
       earned its place in daily use.
     </p>
     <p class="standfirst" style="font-size:0.9rem;">
-      <strong>Status &middot; 2026-08-29:</strong> v0 through v0.3 are shipped and in
+      <strong>Status &middot; 2026-08-29:</strong> v0 through v0.4 are shipped and in
       use. Only v1.0 (the Go rewrite) remains, and it's optional &mdash; decided after
       living with the shell version. Authoritative build order and test plan live in
       <code>docs/rollout.md</code>; this page is the visual companion.
@@ -627,10 +627,32 @@
       </li>
 
       <!-- STAGE 4 -->
-      <li class="stage now">
-        <div class="node" aria-hidden="true">4</div>
+      <li class="stage done">
+        <div class="node" aria-hidden="true">&#10003;</div>
         <div class="stage-main">
-          <p class="stage-tag">Stage 4 &nbsp;<span class="ver">v1.0 &middot; consolidation</span><span class="badge next">maybe</span></p>
+          <p class="stage-tag">Stage 4 &nbsp;<span class="ver">v0.4 &middot; UX &amp; learnability</span><span class="badge shipped">shipped</span></p>
+          <h2>Make it one navigator, safe to fumble, learnable without the docs</h2>
+          <p class="stance">A review (mine + Gemini via agy) &mdash; core loop solid, friction for a newcomer. No new features.</p>
+
+          <div class="field">
+            <span class="k">Shipped</span>
+            <ul>
+              <li><strong>One navigator.</strong> The board opens three ways &mdash; <kbd>Ctrl+Space</kbd> (no prefix), <code>prefix b</code>, <code>prefix m</code>. The old quick-jump <code>display-menu</code> is retired; <code>kel menu</code> is a one-release alias. <code>prefix k</code> is now a &ldquo;new to kel?&rdquo; primer menu.</li>
+              <li><strong>Trust bugs fixed.</strong> <code>kel rename</code> (+ <code>prefix ,</code>) keeps the metadata record in sync; both menu &ldquo;new agent&rdquo; paths route through <code>kel new</code>; the board&rsquo;s <kbd>^k</kbd> always confirms and <kbd>^n</kbd> uses tmux&rsquo;s prompt; a crashed agent reads as <span class="mono">dead</span> / <code>x</code> instead of stuck on <span class="mono">working</span>.</li>
+              <li><strong>Learnability.</strong> first-run prints the three keys that matter; bash + zsh completion (agent names for <code>kill</code>, groups for <code>go</code>/<code>move</code>); Shift+drag copy tip surfaced in <code>kel cheat</code>.</li>
+              <li><strong>Group model.</strong> non-repo <code>kel new</code>/<code>move</code> warn about the <span class="mono">misc</span> fallback; <code>kel move</code> warns on a worktree/group mismatch; monorepo split documented.</li>
+            </ul>
+          </div>
+
+          <p class="gain"><span class="k">Unlocked</span>One thing to learn (the board), one chord to reach it, and fumbling a key no longer desyncs state.</p>
+        </div>
+      </li>
+
+      <!-- STAGE 5 -->
+      <li class="stage now">
+        <div class="node" aria-hidden="true">5</div>
+        <div class="stage-main">
+          <p class="stage-tag">Stage 5 &nbsp;<span class="ver">v1.0 &middot; consolidation</span><span class="badge next">maybe</span></p>
           <h2>Turn the pile of scripts into one thing you install anywhere</h2>
           <p class="stance">Go + Bubble Tea, single static binary. Adds no features &mdash; decided after living with the shell version.</p>
 
@@ -716,6 +738,6 @@ kel doctor
   </main>
 
   <footer>
-    <p>Order is the contract. Each stage is gated on the one below it proving itself in daily use &mdash; if the status line becomes noise you ignore, or the hooks misfire enough that you stop trusting the state, <strong>nothing above it gets built, and that&rsquo;s the point.</strong> v0 and v0.1 cleared that bar; v0.2 waits for the flat list to actually overflow. Current status and the full test plan: <code>docs/rollout.md</code>.</p>
+    <p>Order is the contract. Each stage is gated on the one below it proving itself in daily use &mdash; if the status line becomes noise you ignore, or the hooks misfire enough that you stop trusting the state, <strong>nothing above it gets built, and that&rsquo;s the point.</strong> v0 through v0.4 have each cleared that bar and are in daily use; v1.0 waits until the shell version actually strains. Current status and the full test plan: <code>docs/rollout.md</code>.</p>
   </footer>
 </div>

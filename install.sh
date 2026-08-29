@@ -6,7 +6,8 @@
 #   - merges the 5 state hooks into ~/.claude/settings.json (jq, non-clobbering)
 #
 # Idempotent. Re-run any time. Upgrades a pre-v0.1 install (loose kel-* scripts
-# and hooks/kel-hook.sh) to the single `kel` command.
+# and hooks/kel-hook.sh) to the single `kel` command. Also installs shell
+# completion (bash + zsh).
 set -euo pipefail
 
 KEL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -28,7 +29,29 @@ chmod +x "$KEL"
 ln -sf "$KEL" "$BIN_DIR/kel"
 # remove pre-v0.1 loose scripts
 rm -f "$BIN_DIR/kel-status" "$BIN_DIR/kel-jump" "$BIN_DIR/kel-cheat"
-echo "  kel  (new kill ls go menu restore prune doctor status-line jump cheat hook)"
+echo "  kel  (new kill ls go move rename board restore prune doctor cheat + internals)"
+
+say "shell completion"
+# bash: XDG completions dir is loaded lazily by bash-completion >= 2.x
+BASH_COMPDIR="${XDG_DATA_HOME:-$HOME/.local/share}/bash-completion/completions"
+mkdir -p "$BASH_COMPDIR"
+ln -sf "$KEL_DIR/completions/kel.bash" "$BASH_COMPDIR/kel"
+echo "  bash -> $BASH_COMPDIR/kel"
+# zsh: drop _kel on a site-functions dir and make sure it is on fpath
+ZSH_FPATH_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/zsh/site-functions"
+mkdir -p "$ZSH_FPATH_DIR"
+ln -sf "$KEL_DIR/completions/kel.zsh" "$ZSH_FPATH_DIR/_kel"
+if [ -f "$HOME/.zshrc" ]; then
+  FPATH_LINE="fpath+=($ZSH_FPATH_DIR)"
+  if ! grep -qF "$FPATH_LINE" "$HOME/.zshrc"; then
+    printf '\n# kelsier completion\n%s\n' "$FPATH_LINE" >> "$HOME/.zshrc"
+    echo "  zsh -> $ZSH_FPATH_DIR/_kel  (added fpath line to ~/.zshrc; run compinit)"
+  else
+    echo "  zsh -> $ZSH_FPATH_DIR/_kel"
+  fi
+else
+  echo "  zsh -> $ZSH_FPATH_DIR/_kel  (add '$ZSH_FPATH_DIR' to fpath before compinit)"
+fi
 
 say "tmux config"
 if [ -f "$HOME/.config/tmux/tmux.conf" ]; then
@@ -77,6 +100,6 @@ cat <<EOF
     kel                 enter the workspace
     kel new <name>      new window + agent   (-w = git worktree, --group G)
     kel ls              list every agent, grouped by repo
-    kel go [group]      switch group   ·   kel menu   fleet picker
-    kel kill <name>     close one      ·   kel doctor   check the machine
+    kel go [group]      switch group   ·   Ctrl+Space   the board
+    kel kill <name>     close one      ·   kel doctor    check the machine
 EOF

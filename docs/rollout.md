@@ -157,6 +157,33 @@ filter / sort / browse across everything at once.
   structure) — the cross-group navigator, filter, jump, new, kill
 - transient: opens over the current window, never occupies a pane
 
+## v0.4 — UX & learnability pass  ·  **done**
+
+> A review (mine + Gemini via agy) found the core loop solid but flagged
+> friction for someone learning the tool. No new features.
+
+- **One navigator.** The board is it — `Ctrl+Space` (no prefix), plus `prefix b`
+  and `prefix m`. The old `display-menu` quick-jump is retired; `kel menu` is a
+  one-release alias for `kel board`. `prefix k` is reframed as a "new to kel?"
+  menu (tmux primitives + "browse agents" + "show me around").
+- **Bugs.** `kel rename <new>` (+ `prefix ,`) renames a window *and* its
+  metadata record — a bare `rename-window` used to desync it so `kel kill`
+  couldn't clean up; `kel kill` now also finds a record by window id as a
+  fallback. Both menu "new agent" paths route through `kel new` (managed). The
+  board's `ctrl-k` always confirms; `ctrl-n` uses tmux's own prompt. A crashed
+  agent (no clean exit) now reads as `dead` / `x` instead of stuck on `working`.
+- **Learnability.** First run (and `kel` with zero agents) prints the three keys
+  that matter. Shell completion for bash + zsh (`install.sh` wires it) —
+  subcommands, agent names for `kill`, group names for `go` / `move`. The
+  copy-text tip (Shift+drag) moved up into `kel cheat`'s model section.
+- **Group model.** `kel new` / `kel move` outside a repo now warn about the
+  `misc` fallback. `kel move` warns when relocating a worktree agent to a
+  mismatched group (cosmetic only). Monorepo guidance documented in `usage.md`;
+  a `.kel/group` file stays on the backlog.
+
+**Backlog from this round:** `install.sh --uninstall`; `.kel/group` per-dir
+override; context-broadcast between agents.
+
 ## v1.0 — consolidation
 
 **Trigger:** the shell scripts got slow or hairy; or it's ready to show people.

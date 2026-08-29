@@ -28,8 +28,9 @@ kel kill <name> -f     ...even with uncommitted / unpushed work
 kel ls [--json]        list every agent, grouped by repo
 kel go [<group>]       switch to a group  (no arg: list the groups)
 kel move [<group>]     put THIS window in another group (cd there first, then kel move)
-kel menu               floating list of every agent — press a key to jump
-kel board              fzf browser: filter, preview, jump / new / kill
+kel rename <newname>   rename THIS window and keep its metadata record in sync
+kel board              the fleet browser — fuzzy filter, preview, jump / new / kill
+                       (Ctrl+Space, or prefix b / prefix m)
 kel restore [-c] [-s]  rebuild the workspace after a kill / reboot
                        (-c resume conversations; -s force the snapshot)
 kel prune [-f]         discard dead agent records (and their worktrees)
@@ -38,7 +39,15 @@ kel doctor             probe the machine, cache to ~/.local/state/kel/doctor.jso
 
 Internal (wired into tmux / Claude Code, you won't call these):
 `kel status-line [group]`, `kel jump`, `kel snapshot`, `kel cheat`,
-`kel hook <EVENT>`, `kel _board_*`.
+`kel hook <EVENT>`, `kel _board_*`. `kel menu` is a deprecated alias for
+`kel board` — kept one release for muscle memory.
+
+**Shell completion.** `install.sh` drops a bash completion into
+`~/.local/share/bash-completion/completions/kel` and a zsh one on the zsh
+`fpath` (`~/.local/share/zsh/site-functions/_kel`, plus an `fpath+=` line in
+`~/.zshrc` if that file exists — run `compinit` or restart the shell).
+`kel kill <TAB>` completes agent names; `kel go <TAB>` / `kel move <TAB>`
+complete group names.
 
 Env knobs: `KEL_GROUP` (force every `kel new` into one group — see below),
 `KEL_SESSION` (session-name prefix, default `kel`), `KEL_AGENT` (default
@@ -61,6 +70,14 @@ now every `kel new` lands in `kel/work` no matter the repo, so `prefix 1-9`
 reaches every agent like plain tabs. `kel new x --group foo` still peels one
 off into its own group when you want that.
 
+**Monorepos.** One git root = one default group, so every service in a monorepo
+lands together. Split them with `kel new checkout-svc --group payments` per
+agent, or `export KEL_GROUP=payments` in the shell you work that service from.
+(A per-directory `.kel/group` file is on the backlog — only if this bites.)
+
+**Outside a repo**, `kel new` / `kel move` fall into a `misc` group and say so;
+pass `--group NAME` (or `kel move NAME`) to name it something real.
+
 **Relocating a window** — `cd` to another repo in a shell pane, run `kel move`;
 the window (agent and all) hops into that repo's group and you follow it,
 nothing restarts. `kel move <group>` for an explicit target. A hand-made
@@ -79,7 +96,7 @@ nothing restarts. `kel move <group>` for an explicit target. A hand-made
   for agents blocked elsewhere. Inside a group: native `prefix 1-9` / `n` / `p`
   / `w`.
 - Between groups: native `prefix (` / `)` cycle, `prefix g` group tree,
-  `kel go <group>`, or the `prefix m` fleet menu.
+  `kel go <group>`, or the board (`Ctrl+Space`) → `enter` on any row.
 - `` prefix ` `` (jump to next **waiting** agent) is **global** — it crosses
   group boundaries. That's the point of it: go to whoever's blocked, not to a
   specific group.
@@ -91,15 +108,22 @@ nothing restarts. `kel move <group>` for an explicit target. A hand-made
 [api] 0:auth-fix? [1:rate-limit*] 2:docs   ⟨+2 waiting⟩
 ```
 
-`?` waiting on you · `*` working · `!` done · bare = idle · `[ ]` = current
-window · `⟨+N waiting⟩` = agents blocked in other groups (hit `` ` `` to reach
-them). In a non-kel tmux session the bar shows a compact `[kel] N agents · M
-waiting`.
+`?` waiting on you · `*` working · `!` done · `x` = the agent process died
+without a clean exit (SIGKILL / OOM / crash — `kel kill` or restart it) · bare =
+idle · `[ ]` = current window · `⟨+N waiting⟩` = agents blocked in other groups
+(hit `` ` `` to reach them). In a non-kel tmux session the bar shows a compact
+`[kel] N agents · M waiting`.
 
-**Managed vs unmanaged.** `kel new` writes a metadata record. Windows you make
-by hand (`prefix c`, or the menus' "new agent here") are still state-tracked
-and show in `kel ls` as `(unmanaged)` — `kel kill` on them just closes the
-window. State is keyed by window id, so two windows may even share a name.
+The `x` / `dead` state is a read-time check, not a hook: if the record says
+`working` / `waiting` but the window's only process is a bare shell, the agent
+is gone. It still shows on the board so you can act on it.
+
+**Managed vs unmanaged.** `kel new` writes a metadata record — and so do both
+menu paths' "new agent here" now (they route through `kel new`). Only tmux's
+own `prefix c` makes an *unmanaged* window: still state-tracked, shown in
+`kel ls` as `(unmanaged)`, and `kel kill` on it just closes the window (adopt it
+into kel with `kel move`). State is keyed by window id, so two windows may even
+share a name.
 
 ## Detach vs kill
 
@@ -124,9 +148,9 @@ Yes → every group, window, and split comes back in place, agents resumed
 restore` does the same non-interactively; `kel restore -s` forces the snapshot
 even if some sessions are still live.
 
-**`prefix D`** is the deliberate "leave kel" — detaches *and* snapshots. Plain
-`prefix d` also detaches (agents keep running either way); `kel` brings you back
-to your last group.
+Plain `prefix d` detaches and snapshots in one step (the `client-detached`
+hook) — there is no separate key. Agents keep running; `kel` brings you back to
+your last group.
 
 ## Isolation
 
@@ -151,21 +175,25 @@ agent's only copy of real work — commit & push, or `-f`). Full example in
 ## Keys
 
 `kel.conf` also turns on the mouse (click a pane to focus, drag borders to
-resize, wheel to scroll — text selection then needs Shift+drag), counts windows
-from 1, and labels each pane. **window = a tab, one per agent; pane = a split
-inside a window; group = one tmux session per repo.**
+resize, wheel to scroll — **to select text, hold Shift while you drag**, since
+mouse mode owns a plain drag), counts windows from 1, and labels each pane.
+**window = a tab, one per agent; pane = a split inside a window; group = one
+tmux session per repo.**
 
-`prefix` is `Ctrl+b`. `prefix k` = a floating menu of the common moves;
-`prefix k` → `?` (or `kel cheat`) shows the full reference.
+`prefix` is `Ctrl+b`. The board is the one navigator — `Ctrl+Space` (no prefix)
+opens it, and so do `prefix b` and `prefix m`. `prefix k` is the "new to kel?"
+menu of common moves; `prefix k` → `?` (or `kel cheat`) shows the full
+reference.
 
 | | |
 |---|---|
+| `Ctrl+Space` (no prefix) | the board — every agent; filter, preview, enter jump, ^n new, ^k kill, ^g group |
+| `prefix b` / `prefix m` | also open the board |
 | `prefix 0..9` / `n` / `p` / `w` | move between agents in the group |
 | `` prefix ` `` | jump to the next agent **waiting** on you — any group |
-| `prefix m` | fleet menu — quick jump, every agent, press a key |
-| `prefix b` | the board — fuzzy filter + preview; enter jump, ^n new, ^k kill |
-| `prefix G` / `prefix (` `)` | pick / cycle groups |
-| `prefix k` | command menu (new · jump · split · scroll · rename · close · detach) |
+| `prefix g` / `prefix (` `)` | pick / cycle groups |
+| `prefix ,` | rename this window (routes through `kel rename`) |
+| `prefix k` | "new to kel?" menu (new · browse · split · scroll · rename · close · detach · show me around) |
 | `prefix [` | tmux scroll mode for a shell pane (`q` to leave) |
 | mouse wheel / PgUp PgDn | scroll an agent's conversation (kel maps the wheel to PageUp/Down) |
 | `prefix \|` / `-` | split a window (agent + editor); arrows or click to focus; `z` zoom |

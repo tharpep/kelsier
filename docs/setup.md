@@ -168,7 +168,10 @@ still works but adds ~20–50ms of Windows-interop latency per operation, and
 1. `wsl --install -d Ubuntu-24.04`, set user.
 2. Install `fnm` + Node, Claude Code.
 3. `git clone <kelsier repo> ~/code/kelsier`
-4. `cd ~/code/kelsier && ./install.sh`
+4. `cd ~/code/kelsier && ./install.sh` — symlinks `kel`, sources `tmux/kel.conf`,
+   wires the Claude Code hooks, and installs bash + zsh completion
+   (`~/.local/share/{bash-completion/completions,zsh/site-functions}`; for zsh it
+   also appends an `fpath+=` line to `~/.zshrc` — run `compinit` after).
 5. Recreate `~/.claude/settings.json` MCP servers.
 
 The only per-machine value is the repos root (`~/code`), and that's the default.

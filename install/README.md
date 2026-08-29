@@ -2,7 +2,8 @@
 
 **Machine provisioning** — the toolchain kelsier assumes. Distinct from the
 repo-root **`install.sh`**, which wires up `kel` itself (symlink + tmux config +
-Claude Code hooks) and assumes this toolchain is already present.
+Claude Code hooks + bash/zsh completion) and assumes this toolchain is already
+present.
 
 These are the exact steps that provisioned the first machine (WSL2 Ubuntu 24.04,
 2026-08-28), kept as a known-good starting point and so a second machine can be
@@ -30,6 +31,11 @@ bat btop jq` + yazi's preview stack) install separately — `docs/setup.md` §3a
 - `tldr`: apt's Haskell client and apt's tealdeer 1.6.1 both fail on the current
   pages archive. `10-system-tools.sh` installs the tealdeer 1.9.0 release binary
   as `tldr`.
+- Shell completion: repo-root `install.sh` symlinks `completions/kel.bash` to
+  `~/.local/share/bash-completion/completions/kel` and `completions/kel.zsh` to
+  `~/.local/share/zsh/site-functions/_kel` (adding an `fpath+=` line to
+  `~/.zshrc` when that file exists). bash-completion 2.x picks the bash one up
+  lazily; for zsh, run `compinit` or restart the shell.
 - After provisioning, from Windows: `wsl --set-default Ubuntu-24.04` if
   `docker-desktop` is still the default distro.
 - git + delta pager config isn't scripted — see `docs/setup.md`.

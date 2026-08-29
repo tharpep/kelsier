@@ -85,25 +85,26 @@ test-runner strip — split with `prefix |` / `prefix -` (or the defaults `%` /
 panes.
 
 **The fleet view is the status line** (§7), backed by `kel status-line`. It
-replaces tmux's own window list. `prefix k` is a floating menu of the common
-moves.
+replaces tmux's own window list. The board (§5b) is the interactive navigator;
+`prefix k` is a "new to kel?" menu of the common tmux moves for newcomers.
 
 ### 5a. Grouping (v0.2, built)
 
 One `tmux` session per repo — `kel/<group>`, group = repo basename (or
 `--group`, or `misc`). Inside a group, agents are windows and native nav is
-untouched. Between groups: native `prefix (` / `)`, `prefix G` (group tree),
+untouched. Between groups: native `prefix (` / `)`, `prefix g` (group tree),
 `kel go <group>`. **`kel jump` is global** — it crosses groups. The status line
-shows the current group in full plus `⟨+N waiting⟩` for the rest. `kel menu`
-(`prefix m`) is a dynamic `display-menu` of every agent, press a key to jump.
+shows the current group in full plus `⟨+N waiting⟩` for the rest.
 
-### 5b. The board (v0.3, built)
+### 5b. The board (v0.3, built; navigator in v0.4)
 
-`kel board` / `prefix b` — a `display-popup` running `fzf` over every live
-agent: fuzzy filter, a preview pane (metadata, recent pane output, git status),
-and binds for enter (jump), ctrl-n (new), ctrl-k (kill), ctrl-g (go to group),
-ctrl-r (refresh). `prefix m` stays as the zero-latency quick jump; the board is
-for filtering and acting.
+`kel board` — a `display-popup` running `fzf` over every agent: fuzzy filter, a
+preview pane (metadata, recent pane output, git status), and binds for enter
+(jump), ctrl-n (new — routes through `kel new`), ctrl-k (kill, always confirms),
+ctrl-g (go to group), ctrl-r (refresh). Since v0.4 it is *the* navigator, opened
+three ways: **`Ctrl+Space`** (no prefix), `prefix b`, `prefix m`. The old
+`display-menu` quick-jump is retired; `kel menu` is a one-release alias for
+`kel board`.
 
 ### 5c. Rejected: the two-slot / swap-pane architecture
 
@@ -132,9 +133,10 @@ Switching is one keystroke — never open-menu, find-row, press-enter.
 |---|---|
 | `prefix 0`..`9` / `n` / `p` / `w` | native window nav (within a group) |
 | `` prefix ` `` | jump to the next `waiting` agent in **any** group — cycles, wraps |
-| `prefix m` | fleet menu — every agent, every group, press a key to jump |
-| `prefix G` / `prefix (` `)` | pick / cycle groups |
-| `prefix k` | command menu (new, jump, split, scroll, rename, close, detach) |
+| `Ctrl+Space` (no prefix) | the board — filter / preview / act; also `prefix b`, `prefix m` |
+| `prefix g` / `prefix (` `)` | pick / cycle groups |
+| `prefix ,` | rename this window (routes through `kel rename`) |
+| `prefix k` | "new to kel?" menu (new, browse, split, scroll, rename, close, detach, show me around) |
 
 The `` ` `` binding is the capability terminal tabs cannot offer: not "go to
 window 3" but "go to whoever is blocked on me," and it ignores group
@@ -238,6 +240,13 @@ talks to the server socket). `kel hook` resolves which window it's in, in order:
 Keyed by window id because `tmux` auto-names every `claude` window `claude` —
 name keying would collide. Stale files are pruned on `kel ls` / `kel`.
 
+**Dead agents (v0.4).** A SIGKILL / OOM / crash fires neither `Stop` nor
+`SessionEnd`, so the state file keeps saying `working`. `kel` catches this at
+*read* time, not with a new hook: in `gather_rows` and `kel status-line`, if the
+record says `working` / `waiting` but the window's only live process is a bare
+shell, the effective state becomes `dead` (bar suffix `x`, red). `kel ls` shows
+`dead`; the board still lists it so you can kill or restart it.
+
 **Agent-agnostic.** State detection is a per-agent adapter. An agent with no
 hook system would fall back to `unknown` and the last output line. Not built —
 Claude Code is the only adapter so far.
@@ -255,8 +264,9 @@ kel kill <name> [-f]       close the window; remove the worktree; -f overrides
 kel ls [--json]            every agent, grouped by repo
 kel go [<group>]           switch to a group (no arg: list them)
 kel move [<group>]         relocate the current window to another group
-kel menu                   floating list of every agent — press a key to jump
-kel board                  fzf browser — filter, preview, jump / new / kill  (prefix b)
+kel rename <newname>       rename the current window, keep the record in sync
+kel board                  the fleet browser — filter, preview, jump / new / kill
+                           (Ctrl+Space, or prefix b / prefix m)
 kel restore [-c] [-s]      rebuild the workspace after a kill / reboot — groups,
                            windows, splits, agents; -c resume conversations,
                            -s force the snapshot
