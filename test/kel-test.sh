@@ -178,6 +178,39 @@ reset
 ok "an empty fleet is {agents:[]}"       '[ "$("$KEL" _fleet | jq -c ".agents")" = "[]" ]'
 ok "  ...and still exits 0"              '"$KEL" _fleet >/dev/null 2>&1'
 
+section "the Go kel-fleet agrees with the bash one (v0.6 seam)"
+GOBIN_FLEET="$WORK/kel-fleet"
+if command -v go >/dev/null 2>&1 && (cd "$HERE/.." && go build -o "$GOBIN_FLEET" ./cmd/kel-fleet) 2>/dev/null; then
+  reset
+  NEW api-gw auth-fix
+  NEW api-gw wt
+  NEW coppermind sazed
+  P="$(pane_of api-gw auth-fix)"
+  hook "$P" Notification permission_prompt "needs Bash now"
+  hook "$P" PreCompact
+  printf '%s' '{"model":{"display_name":"Opus 5"},"cost":{"total_cost_usd":18.7},"context_window":{"total_input_tokens":178000,"context_window_size":200000,"used_percentage":91},"rate_limits":{"five_hour":{"used_percentage":74}}}' \
+    | TMUX_PANE="$P" "$KEL" statusline >/dev/null
+  echo wip > "$WORK/repos/api-gw/dirt.txt"
+  tmux new-window -d -t '=keltest/api-gw' -n stray 2>/dev/null      # unmanaged
+  cp "$SESSIONS/coppermind/sazed.json" "$SESSIONS/coppermind/ghost.json"
+  jq '.name="ghost"' "$SESSIONS/coppermind/ghost.json" > "$WORK/g" && mv "$WORK/g" "$SESSIONS/coppermind/ghost.json"
+  norm() { jq -S 'del(.generated_at)'; }
+  for flag in "" "--dirty"; do
+    "$KEL" _fleet $flag | norm > "$WORK/bash.json"
+    KEL_FLEET_BIN=/nonexistent "$KEL" _fleet $flag | norm > "$WORK/bash2.json"
+    "$GOBIN_FLEET" $flag       | norm > "$WORK/go.json"
+    ok "bash and Go agree${flag:+ ($flag)}"  '[ -z "$(diff "$WORK/bash2.json" "$WORK/go.json")" ]'
+  done
+  # regenerate without flags: the loop above left go.json holding --dirty output
+  "$GOBIN_FLEET" | norm > "$WORK/go-plain.json"
+  KEL_FLEET_BIN=/nonexistent "$KEL" _fleet | norm > "$WORK/bash-plain.json"
+  ok "the seam prefers the Go binary"  'KEL_FLEET_BIN="$GOBIN_FLEET" "$KEL" _fleet | norm | diff -q - "$WORK/go-plain.json" >/dev/null'
+  ok "  ...and falls back without it"  'KEL_FLEET_BIN=/nonexistent "$KEL" _fleet | jq -e ".agents|length > 0" >/dev/null'
+  ok "  ...identically either way"     '[ -z "$(diff "$WORK/bash-plain.json" "$WORK/go-plain.json")" ]'
+else
+  echo "  skip  (no Go toolchain — bash implementation is the only one here)"
+fi
+
 # ---------------------------------------------------------------- restore
 section "restore rebuilds the workspace and keeps the snapshot"
 reset

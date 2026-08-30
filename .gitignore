@@ -8,3 +8,7 @@
 
 # OneDrive placeholder junk if this ever lives under a synced folder
 desktop.ini
+
+# built Go binaries (install.sh puts them in ~/.local/bin)
+/kel-fleet
+/kel-top

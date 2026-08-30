@@ -46,5 +46,20 @@ jobs:
         if: runner.os == 'macOS'
         run: /bin/bash --version | head -1 && /bin/bash -n bin/kel
 
+      # Go is optional for kel — bin/kel falls back to its bash implementation
+      # when kel-fleet is absent — but CI always has it, so CI always checks
+      # that the two agree. That differential is the whole safety net for the
+      # port: a disagreement is a failure, not a curiosity.
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+          cache: false
+
+      - name: go vet / build
+        run: |
+          go version
+          go vet ./...
+          go build ./...
+
       - name: regression suite
         run: ./test/kel-test.sh

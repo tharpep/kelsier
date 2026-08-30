@@ -1167,7 +1167,7 @@ cmd_doctor() {
     fi
   }
   echo "kel doctor" >&2
-  local r_tmux r_ver r_popup r_wt r_jq r_node r_claude r_hooks r_sl r_pass
+  local r_tmux r_ver r_popup r_wt r_jq r_node r_claude r_hooks r_sl r_pass r_go
   r_tmux=$(probe   "tmux present"                     command -v tmux)
   r_ver=$(probe    "tmux >= 3.0"                      bash -c 'v=$(tmux -V | grep -oE "[0-9]+\.[0-9]+" | head -1); [ -n "$v" ] || exit 1; [ "${v%%.*}" -gt 3 ] || { [ "${v%%.*}" -eq 3 ] && [ "${v#*.}" -ge 0 ]; }')
   r_popup=$(probe  "display-popup available"          bash -c 'tmux list-commands 2>/dev/null | grep -q display-popup')
@@ -1178,16 +1178,22 @@ cmd_doctor() {
   r_claude=$(probe "claude on PATH"                   command -v claude)
   r_hooks=$(probe  "kel hooks wired in settings.json" bash -c 'jq -e "[.hooks[]?[]?.hooks[]?.command // empty] | any(test(\"kel hook|kel-hook\"))" "$HOME/.claude/settings.json" >/dev/null')
   r_sl=$(probe     "kel statusLine wired (context %)"  bash -c 'jq -e ".statusLine.command // \"\" | test(\"kel statusline\")" "$HOME/.claude/settings.json" >/dev/null')
+  if [ -x "$KEL_FLEET_BIN" ]; then
+    printf '  \033[1;32m✓\033[0m %s\n' "fleet reader: kel-fleet (Go)" >&2; r_go=true
+  else
+    printf '  \033[2m·\033[0m %s\n' "fleet reader: bash (build kel-fleet for a faster one)" >&2; r_go=false
+  fi
   r_pass=$(probe   "tmux allow-passthrough on"        bash -c 'tmux start-server \; show -gv allow-passthrough 2>/dev/null | grep -qx on')
 
   jq -n --arg d "$(date -u +%FT%TZ)" \
     --argjson tmux "$r_tmux" --argjson ver "$r_ver" --argjson popup "$r_popup" \
     --argjson wt "$r_wt" --argjson jq "$r_jq" --argjson fzf "$r_fzf" --argjson node "$r_node" \
     --argjson claude "$r_claude" --argjson hooks "$r_hooks" --argjson sl "$r_sl" \
-    --argjson pass "$r_pass" \
+    --argjson go "$r_go" --argjson pass "$r_pass" \
     '{checked_at:$d, tmux:$tmux, "tmux>=3.0":$ver, display_popup:$popup,
       git_worktree:$wt, jq:$jq, fzf:$fzf, node:$node, claude:$claude,
-      hooks_wired:$hooks, statusline_wired:$sl, allow_passthrough:$pass}' \
+      hooks_wired:$hooks, statusline_wired:$sl, go_fleet:$go,
+      allow_passthrough:$pass}' \
     > "$DOCTOR_CACHE"
   printf '  cached -> %s\n' "${DOCTOR_CACHE/#$HOME/\~}" >&2
   case "$r_tmux$r_ver$r_jq" in *false*) exit 1 ;; esac

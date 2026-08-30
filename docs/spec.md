@@ -434,11 +434,17 @@ or `jq` is missing.
   machine where a Go toolchain can't be installed.
 - **From v0.6: Go, incrementally, alongside.** Not a rewrite and not a parallel
   branch — a strangler fig where the migration unit is the subcommand and the
-  **on-disk state format is the contract** between the two implementations.
-  `kel _fleet --json` goes first (hot path, needs concurrency and types), then
-  `kel top` in **Bubble Tea v2**. Read/render surfaces port first; mutating
-  commands — `kel kill`'s uncommitted/unpushed check above all — port last or
-  never. Build order and rules in `rollout.md` § v0.6.
+  **fleet document is the contract** between the two implementations.
+  `cmd/kel-fleet` shipped first; `bin/kel`'s `fleet_json()` runs it when
+  `$KEL_FLEET_BIN` exists and answers in bash otherwise, so a machine with no
+  toolchain loses nothing. `kel top` in **Bubble Tea v2** is next. Read/render
+  surfaces port first; mutating commands — `kel kill`'s uncommitted/unpushed
+  check above all — port last or never. Rules in `rollout.md` § v0.6.
+
+  The seam stats `$KEL_FLEET_BIN` rather than asking `command -v`: a lookup for
+  a binary that does not exist walks all of `$PATH`, which on WSL2 includes the
+  Windows directories and costs ~76ms — more than everything else the fleet
+  read does put together.
 - **`tmux`** as the required substrate.
 - **State:** `~/.local/state/kel/` — `tmux` is the source of truth for what's
   alive; these files hold the metadata `tmux` doesn't know.

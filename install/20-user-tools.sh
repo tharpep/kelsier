@@ -51,4 +51,30 @@ fnm use default
 node --version
 npm --version
 
+say "Go (optional — builds kel-fleet, the faster fleet reader)"
+# Deliberately the go.dev tarball, not apt: Ubuntu ships a Go too old to build
+# recent modules. Into ~/.local/go so this needs no sudo.
+# kel works fine without any of this — bin/kel falls back to bash.
+if command -v go >/dev/null 2>&1; then
+  echo "  already installed: $(go version)"
+else
+  GO_VER="$(curl -fsSL 'https://go.dev/VERSION?m=text' | head -1)"
+  case "$(uname -m)" in
+    x86_64)         GO_ARCH=amd64 ;;
+    aarch64|arm64)  GO_ARCH=arm64 ;;
+    *)              GO_ARCH='' ;;
+  esac
+  if [ -n "${GO_VER:-}" ] && [ -n "$GO_ARCH" ]; then
+    curl -fsSL "https://go.dev/dl/${GO_VER}.linux-${GO_ARCH}.tar.gz" -o /tmp/go.tgz
+    rm -rf "$HOME/.local/go" && mkdir -p "$HOME/.local" && tar -C "$HOME/.local" -xzf /tmp/go.tgz
+    rm -f /tmp/go.tgz
+    mkdir -p "$HOME/.local/bin"
+    ln -sf "$HOME/.local/go/bin/go"     "$HOME/.local/bin/go"
+    ln -sf "$HOME/.local/go/bin/gofmt"  "$HOME/.local/bin/gofmt"
+    echo "  installed $("$HOME/.local/go/bin/go" version)"
+  else
+    echo "  skipped (could not resolve a Go release for $(uname -m))"
+  fi
+fi
+
 say "user tools done"

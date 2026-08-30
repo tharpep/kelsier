@@ -37,7 +37,10 @@ v1.0 — not a product chasing an audience.
 ## Layout
 
 ```
-bin/kel              the whole tool — one bash script, ~1400 lines
+bin/kel              the tool — one bash script, and the fallback for all of Go
+go.mod               module github.com/tharpep/kelsier
+cmd/kel-fleet/       the Go fleet reader; bin/kel uses it when installed
+internal/fleet/      the fleet document, ported from _fleet_bash
 tmux/kel.conf        keybindings, status line, hooks; sourced from ~/.tmux.conf
 install.sh           symlinks kel, sources kel.conf, merges hooks + statusLine
                      into ~/.claude/settings.json (jq, non-clobbering, backs up)
@@ -120,8 +123,15 @@ hook). `kel jump` matches `waiting` only.
 
 ```sh
 bash -n bin/kel && bash -n install.sh      # syntax
-test/kel-test.sh                            # 75 cases, ~60s
+go vet ./... && go build ./...              # Go, if installed
+test/kel-test.sh                            # 92 cases, ~60s
 ```
+
+Go is **optional**: `bin/kel` falls back to its bash implementation whenever
+`$KEL_FLEET_BIN` is absent, and `./install.sh` works with no toolchain. But
+where Go exists, the suite builds `kel-fleet` and asserts the two produce an
+identical document — that differential is the entire safety net for the port,
+so a disagreement is a failure, not a curiosity.
 
 CI (`.github/workflows/ci.yml`) runs exactly this on `ubuntu-latest` and
 `macos-latest` on every push, plus `/bin/bash -n bin/kel` on macOS to catch
@@ -231,11 +241,10 @@ under its own work dir.
 
 ## Where things stand
 
-**v0.5 is complete** — `#14` notification fidelity, `#15` compaction counter,
-`#13` restart-in-place, `#1` fleet notifications, `#4` per-group badge, plus
-the macOS portability fixes and CI. Next is **v0.6** (`rollout.md`):
-`kel _fleet --json`, then `#2` `kel top`, then `#5` peek.
-**Go enters at v0.6** as a strangler fig on `main`
+**v0.6 is underway.** Phase A (`kel _fleet --json`, one computed view) and
+Phase B (the Go `kel-fleet` behind the fallback seam) are done. Next is
+`#2` **`kel top`** in Bubble Tea v2, then `#5` peek. Go is a strangler fig on
+`main`
 (`kel _fleet --json` first, then `kel top` in Bubble Tea **v2**), with bash
 retained as the fallback and as the differential-test oracle. `rollout.md`
 § v0.6 has the rules; follow them rather than re-deriving the strategy.
