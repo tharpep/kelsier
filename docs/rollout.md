@@ -323,7 +323,7 @@ v0.4.1 just warmed up; nothing new to look at.
   them by hand was the one-off. Deliberately no shellcheck yet — a red build
   should mean exactly one thing.
 
-## v0.6 — one place to look  ·  *Go enters here*
+## v0.6 — one place to look  ·  *Go enters here*  ·  **done**
 
 **Theme:** one computed view of the fleet, and a dashboard on top of it.
 
@@ -337,8 +337,17 @@ v0.4.1 just warmed up; nothing new to look at.
 - **#2** `kel top` (folds in **#3** durations/stall and **#7** dirty) — now
   worth building, because it finally has columns the bar doesn't already show:
   CTX, cost, compactions.
-- **#5** peek — partly absorbed by v0.4.1's context %, still worth it for
-  *why* an agent is blocked.
+- ~~**#5** peek~~ — **cut**, now `backlog.md` R6. The board preview and
+  `kel top`'s LAST OUTPUT column between them answer "what is this thing
+  doing" twice over, and paying a keybinding to avoid a keystroke is a bad
+  trade in a tool whose premise is that switching costs one key. If the want
+  returns it belongs inside `kel top` as a row expander, not as its own
+  command.
+- **Also shipped here:** declining the rebuild prompt is now durable. Saying
+  no used to last exactly one invocation, so a workspace you had finished with
+  asked again on every single `kel`. The refusal is remembered against that
+  snapshot's timestamp — a *new* snapshot is a new question and still asks —
+  and the prompt grew a `d` to discard the saved workspace outright.
 
 ### Why Go starts here, and not with a rewrite
 

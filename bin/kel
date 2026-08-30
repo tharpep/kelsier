@@ -42,6 +42,7 @@ SNAPSHOT="$STATE_DIR/snapshot.json"
 RESTORE_LOCK="$STATE_DIR/.restoring"
 KEL_FLEET_BIN="${KEL_FLEET_BIN:-$HOME/.local/bin/kel-fleet}"   # the Go seam (v0.6)
 KEL_TOP_BIN="${KEL_TOP_BIN:-$HOME/.local/bin/kel-top}"
+SNAPSHOT_DECLINED="$STATE_DIR/snapshot-declined"   # a snapshot you said no to
 STATUSLINE_PREV="$HOME/.claude/statusline-prev"   # a statusLine kel displaced
 KEL_CTX_WARN="${KEL_CTX_WARN:-70}"                # show context on the bar from here up
 KEL_NOTIFY="${KEL_NOTIFY:-waiting}"               # states worth interrupting you for
@@ -970,9 +971,25 @@ snapshot() {   # silent; called by hooks and state-changing commands
   local tmp; tmp="$(mktemp "$STATE_DIR/.snap.XXXXXX" 2>/dev/null)" || return 0
   [ -f "$SNAPSHOT" ] && cp -f "$SNAPSHOT" "$SNAPSHOT.prev" 2>/dev/null
   printf '%s' "$snap" > "$tmp" && mv -f "$tmp" "$SNAPSHOT"
+  rm -f "$SNAPSHOT_DECLINED"          # a new snapshot is a new question
 }
 
 cmd_snapshot() { need tmux; need jq; snapshot; say "snapshot -> ${SNAPSHOT/#$HOME/\~}"; }
+
+# Saying "no" to the rebuild prompt used to last exactly one invocation, so a
+# workspace you had finished with asked again every single time you ran `kel`.
+# Remember the refusal against that snapshot's timestamp: a NEW snapshot is a
+# new question and will ask again, the same one will not.
+decline_snapshot() {
+  jq -r '.saved_at // ""' "$SNAPSHOT" 2>/dev/null > "$SNAPSHOT_DECLINED" || true
+}
+snapshot_declined() {
+  [ -f "$SNAPSHOT_DECLINED" ] || return 1
+  local d s
+  read -r d < "$SNAPSHOT_DECLINED" 2>/dev/null || return 1
+  s="$(jq -r '.saved_at // ""' "$SNAPSHOT" 2>/dev/null)"
+  [ -n "$d" ] && [ "$d" = "$s" ]
+}
 
 # rebuild the workspace from snapshot.json (windows, splits, layout, agents)
 restore_from_snapshot() {   # [-c]
@@ -1726,16 +1743,21 @@ cmd_attach() {
   # --- no live groups below this point ---
 
   # 4. server down but the workspace was snapshotted — offer to rebuild it
-  if [ -f "$SNAPSHOT" ]; then
+  if [ -f "$SNAPSHOT" ] && ! snapshot_declined; then
     local ng na
     ng="$(jq -r '.groups | length' "$SNAPSHOT" 2>/dev/null || echo '?')"
     na="$(jq -r '[.groups[][].name] | length' "$SNAPSHOT" 2>/dev/null || echo '?')"
     if [ -t 0 ] && [ -t 1 ]; then
-      printf '\033[1;33mkel\033[0m rebuild your workspace? %s group(s), %s window(s)  [Y/n] ' "$ng" "$na"
+      printf '\033[1;33mkel\033[0m rebuild your workspace? %s group(s), %s window(s)  [Y/n/d=discard] ' "$ng" "$na"
       local ans=''; read -r ans || ans=n
       case "$ans" in
-        n|N|no) say "ok — starting fresh here; 'kel restore' brings the old one back" ;;
-        *)      restore_from_snapshot -c; return ;;
+        d|D|discard)
+          rm -f "$SNAPSHOT" "$SNAPSHOT.prev" "$SNAPSHOT_DECLINED"
+          say "discarded the saved workspace" ;;
+        n|N|no)
+          decline_snapshot
+          say "ok — starting fresh; 'kel restore' still rebuilds it, and this won't ask again" ;;
+        *) restore_from_snapshot -c; return ;;
       esac
       # declined — fall through to a fresh start instead of dead-ending
     else

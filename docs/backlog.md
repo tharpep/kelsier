@@ -27,7 +27,7 @@ rollout wins.
 | release | entries |
 |---|---|
 | ~~v0.5~~ **done** | ~~#14~~ · ~~#15~~ · ~~#13~~ · ~~#1~~ · ~~#4~~ · macOS fixes · CI |
-| v0.6 | `_fleet --json` · #2 (folds #3, #7) · #5  — *Go starts here* |
+| ~~v0.6~~ **done** | ~~`_fleet --json`~~ · ~~#2~~ (folds #3, #7) · Go seam · ~~#5~~ **cut, see R6** |
 | v0.7 | #6 · #8 · #12 |
 | v0.8 | #11 · config file (un-parked below) |
 | unscheduled | #9 · #10 · #16 · everything under *Parked* |
@@ -44,9 +44,9 @@ The core value prop is "know which agent is blocked, get there in one key." Half
 of that — the *knowing* — currently only works if you're looking at the status
 bar. These finish it.
 
-Key budget: the polished designs below add exactly two bindings — `prefix t`
-(dashboard, replaces tmux's useless clock) and `prefix v` (peek, unbound in
-stock tmux). Everything else is a subcommand or a board action.
+Key budget: one new binding, `prefix t` (dashboard, replaces tmux's useless
+clock). `prefix v` was reserved for peek, which is cut (R6) — the key is free
+again. Everything else is a subcommand or a board action.
 
 **Principle from the review:** the status bar stays minimal. Everything richer —
 durations, last output, git state, merge-readiness — lives in `kel top` (#2),
@@ -191,39 +191,6 @@ it jumps. This is the one place richer state earns a spot on the bar — it's th
 same footprint, more signal.
 
 **Gate:** low; bundle with #2.
-
-### 5. Quick peek — `kel peek`  ·  `[fits]`
-
-Glance at an agent's recent output without leaving the pane you're typing in.
-Same core loop as jump-to-blocked: see *why* an agent is blocked without losing
-your context.
-
-**Surface.** `kel peek [name]`, bound to `prefix v` (unbound in stock tmux).
-
-**Target.** No name → the agent whose window most recently produced output
-(`tmux list-windows -a -F '#{window_activity} #{window_id}' | sort -rn | head`),
-falling back to the newest `.state` mtime if that's ambiguous. `name` → that
-agent.
-
-**Shows.** `display-popup -w 95% -h 90% -E` running
-`tmux capture-pane -t <wid> -p -e -S -1000 | less -R +G` — last ~1000 lines,
-colour preserved, scrolled to the bottom. `less` keys to scroll and search;
-`q` drops you back exactly where you were.
-
-**Edge case.** If the agent has shelled into a full-screen TUI (lazygit, an
-editor), `capture-pane` grabs the alternate screen and the capture looks odd.
-Acceptable for a one-shot bash peek.
-
-**Does not.** Send keystrokes, switch windows, follow live output, touch state.
-
-**Partly absorbed by v0.4.1.** A good share of "let me peek at that one" was
-really "how deep is this session," which is now a number on the bar and in
-`kel ls`. Still worth building for the other half — *why* it's blocked — but
-it dropped a notch in value.
-
-**Gate:** do it alongside #2. ~20 LOC.
-
----
 
 ## Tier 2 — worktree & fleet hygiene
 
@@ -477,6 +444,68 @@ a bookkeeping script and doesn't reason about content.
 
 `yazi` / `eza --tree` / `tre` in an adjacent pane. Explicit non-goal (§"Not a
 file manager"); the author's instinct to push back is right.
+
+### R6. Quick peek — `kel peek`  ·  `[obsoleted, not violating]`
+
+Cut 2026-08-30. It was a good idea when written and two things shipped since
+that ate it:
+
+- the **board preview** shows the last 8 non-blank lines, plus the `says` line
+  carrying `notification_text` — the literal permission prompt — and context,
+  cost, compactions and uncommitted files
+- **`kel top`** shows a LAST OUTPUT column for *every* agent at once, which is
+  strictly more than peeking at one
+
+What peek would still uniquely offer is narrow: deep searchable scrollback
+(~1000 lines through `less` rather than 8), read-only by construction so you
+cannot fat-finger into an agent's prompt, and zero movement between groups.
+Against that, switching windows is one keystroke — the tool's entire premise —
+and spending a keybinding to avoid a keystroke is a bad trade.
+
+**If the want ever returns, build it into `kel top`** as a row expander:
+`enter` on the highlighted row pages that agent's scrollback, `q` back to the
+table. That is where you are already standing when the question occurs to you,
+it costs no new keybinding, and it is a view rather than an action so it does
+not cross `kel top`'s read-only boundary.
+
+Original entry kept below for the design detail, should that happen.
+
+<details><summary>the original #5</summary>
+
+### 5. Quick peek — `kel peek`  ·  `[fits]`
+
+Glance at an agent's recent output without leaving the pane you're typing in.
+Same core loop as jump-to-blocked: see *why* an agent is blocked without losing
+your context.
+
+**Surface.** `kel peek [name]`, bound to `prefix v` (unbound in stock tmux).
+
+**Target.** No name → the agent whose window most recently produced output
+(`tmux list-windows -a -F '#{window_activity} #{window_id}' | sort -rn | head`),
+falling back to the newest `.state` mtime if that's ambiguous. `name` → that
+agent.
+
+**Shows.** `display-popup -w 95% -h 90% -E` running
+`tmux capture-pane -t <wid> -p -e -S -1000 | less -R +G` — last ~1000 lines,
+colour preserved, scrolled to the bottom. `less` keys to scroll and search;
+`q` drops you back exactly where you were.
+
+**Edge case.** If the agent has shelled into a full-screen TUI (lazygit, an
+editor), `capture-pane` grabs the alternate screen and the capture looks odd.
+Acceptable for a one-shot bash peek.
+
+**Does not.** Send keystrokes, switch windows, follow live output, touch state.
+
+**Partly absorbed by v0.4.1.** A good share of "let me peek at that one" was
+really "how deep is this session," which is now a number on the bar and in
+`kel ls`. Still worth building for the other half — *why* it's blocked — but
+it dropped a notch in value.
+
+**Gate:** do it alongside #2. ~20 LOC.
+
+---
+
+</details>
 
 ### R5. Bespoke diff viewer  ·  `[violates]`
 
