@@ -287,6 +287,24 @@ record says `working` / `waiting` but the window's only live process is a bare
 shell, the effective state becomes `dead` (bar suffix `x`, red). `kel ls` shows
 `dead`; the board still lists it so you can kill or restart it.
 
+### 9c. The fleet document (v0.6)
+
+`kel _fleet [--dirty]` computes the whole fleet **once** and prints it as one
+JSON object: `{generated_at, current:{group,window_id}, agents:[…]}`. Every
+read surface — `ls`, `ls --json`, the board, `status-line` — is a `jq` over
+that document rather than its own derivation. Before v0.6 there were two
+independent derivations over 13 positional TSV fields, and that plumbing caused
+three separate bugs.
+
+It is also the **port boundary**: the Go `kel-fleet` must emit the same
+document, and a difference between the two is a test failure (§12).
+
+Cost discipline matters because `status-line` runs on every bar redraw: two
+`tmux` calls and one `jq`, whatever the fleet size — where the old path spent
+one `tmux list-panes` per window plus a `jq` per record. `--dirty` is opt-in
+because `git status` per worktree is the expensive part and the bar never shows
+it. Measured at 8 agents: `status-line` 106ms → 35ms, `kel ls` 478ms → 86ms.
+
 ### 9a. Context and cost (v0.4.1)
 
 Hook payloads carry no token, context or cost data. Claude Code's **`statusLine`**

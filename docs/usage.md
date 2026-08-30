@@ -29,6 +29,9 @@ kel new <name> --agent CMD     run CMD instead of `claude`
 kel kill <name>        close the window; remove the worktree if it was one
 kel kill <name> -f     ...even with uncommitted / unpushed work
 kel ls [--json]        list every agent, grouped by repo (state, context %, cost)
+                       --json emits the fleet document: {generated_at, current,
+                       agents:[...]}.  v0.6 changed this from a bare array —
+                       the list is now under .agents
 kel go [<group>]       switch to a group  (no arg: list the groups)
 kel move [<group>]     put THIS window in another group (cd there first, then kel move)
 kel rename <newname>   rename THIS window and keep its metadata record in sync

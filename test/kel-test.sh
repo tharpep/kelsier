@@ -98,6 +98,12 @@ state_of() { "$KEL" ls 2>/dev/null | awk -v n="$1" '$2==n {print $3}'; }
 # Look windows up by NAME, never by index.  kel.conf sets base-index 1, so a
 # developer box numbers windows from 1 while a bare tmux (CI, a fresh machine)
 # numbers from 0 — hardcoding ":1" silently targets the wrong window, or none.
+# `kel new` starts the agent with send-keys, so for a moment the pane is still
+# a bare shell and effective_state correctly calls that `dead`.  Wait for the
+# process before asserting on state.  v0.6 made the fleet read 3x faster, which
+# is what first lost this race.
+agent_up() { wait_until "tmux list-panes -t '$1' -F '#{pane_current_command}' 2>/dev/null | grep -qvxE 'bash|zsh|fish|sh|dash|tmux'"; }
+NEW() { K "$1" new "$2" --agent 'sleep 9999' >/dev/null 2>&1; agent_up "$(window_of "$1" "$2")"; }
 pane_of()   { tmux list-panes -s -t "=keltest/$1" -F '#{pane_id} #{window_name}'  | awk -v n="$2" '$2==n {print $1; exit}'; }
 window_of() { tmux list-windows  -t "=keltest/$1" -F '#{window_id} #{window_name}' | awk -v n="$2" '$2==n {print $1; exit}'; }
 
@@ -112,8 +118,8 @@ tmux kill-server 2>/dev/null
 # ---------------------------------------------------------------- records
 section "records are keyed by group AND name"
 reset
-K api-gw     new docs --agent 'sleep 9999' >/dev/null 2>&1
-K coppermind new docs --agent 'sleep 9999' >/dev/null 2>&1
+NEW api-gw docs
+NEW coppermind docs
 ok "the same name works in two repos"   '[ "$(wins)" = 2 ]'
 ok "one record per group"               '[ -f "$SESSIONS/api-gw/docs.json" ] && [ -f "$SESSIONS/coppermind/docs.json" ]'
 ok "ls shows both"                      '[ "$("$KEL" ls 2>/dev/null | grep -c "  docs")" = 2 ]'
@@ -129,8 +135,8 @@ ok "a now-unique bare name works"       '"$KEL" kill docs >/dev/null 2>&1; [ ! -
 
 section "rename and move stay inside their group"
 reset
-K api-gw     new alpha --agent 'sleep 9999' >/dev/null 2>&1
-K coppermind new alpha --agent 'sleep 9999' >/dev/null 2>&1
+NEW api-gw alpha
+NEW coppermind alpha
 w="$(tmux list-windows -a -F '#{session_name} #{window_id}' | awk '$1=="keltest/api-gw"{print $2}')"
 "$KEL" _board_rename "$w" beta >/dev/null 2>&1
 ok "rename moves the record"            '[ -f "$SESSIONS/api-gw/beta.json" ] && [ ! -f "$SESSIONS/api-gw/alpha.json" ]'
@@ -139,17 +145,43 @@ ok "  ...and rewrites .name"            '[ "$(jq -r .name "$SESSIONS/api-gw/beta
 
 section "legacy flat records migrate"
 reset
-K api-gw new legacy --agent 'sleep 9999' >/dev/null 2>&1
+NEW api-gw legacy
 mv "$SESSIONS/api-gw/legacy.json" "$SESSIONS/legacy.json"; rmdir "$SESSIONS/api-gw"
 jq 'del(.group)' "$SESSIONS/legacy.json" > "$WORK/l" && mv "$WORK/l" "$SESSIONS/legacy.json"
 "$KEL" ls >/dev/null 2>&1
 ok "a flat pre-v0.2 record is filed"    '[ -f "$SESSIONS/api-gw/legacy.json" ]'
 ok "  ...with a group derived from repo" '[ "$(jq -r .group "$SESSIONS/api-gw/legacy.json")" = api-gw ]'
 
+section "_fleet is one computed view, and every surface agrees with it"
+reset
+NEW api-gw a
+NEW coppermind b
+P="$(pane_of api-gw a)"
+hook "$P" Notification permission_prompt "needs Bash"
+ok "emits valid JSON"                    '"$KEL" _fleet | jq -e . >/dev/null'
+ok "one entry per live agent"            '[ "$("$KEL" _fleet | jq ".agents|length")" = 2 ]'
+ok "carries state from the hook"         '[ "$("$KEL" _fleet | jq -r ".agents[]|select(.name==\"a\")|.state")" = waiting ]'
+ok "  ...and the note with it"           '[[ "$("$KEL" _fleet | jq -r ".agents[]|select(.name==\"a\")|.note")" == *"needs Bash"* ]]'
+ok "dirty is null unless asked for"      '[ "$("$KEL" _fleet | jq -r ".agents[0].dirty")" = null ]'
+ok "  ...and computed when it is"        '[ "$("$KEL" _fleet --dirty | jq -r ".agents[0].dirty")" != null ]'
+ok "ls agrees with _fleet on state"      '[ "$(state_of a)" = "$("$KEL" _fleet | jq -r ".agents[]|select(.name==\"a\")|.state")" ]'
+ok "the board agrees too"                '[[ "$("$KEL" _board_rows | sed "s/\x1b\[[0-9;]*m//g")" == *"api-gw	a	waiting"* ]]'
+# a record whose window is gone must still appear, flagged, not vanish
+"$KEL" kill coppermind/b >/dev/null 2>&1
+NEW api-gw c
+mv "$SESSIONS/api-gw/c.json" "$SESSIONS/api-gw/ghost.json"
+jq '.name="ghost"' "$SESSIONS/api-gw/ghost.json" > "$WORK/g" && mv "$WORK/g" "$SESSIONS/api-gw/ghost.json"
+ok "an orphaned record shows as dead"    '[ "$("$KEL" _fleet | jq -r ".agents[]|select(.name==\"ghost\")|.state")" = dead ]'
+ok "  ...with a null window_id"          '[ "$("$KEL" _fleet | jq -r ".agents[]|select(.name==\"ghost\")|.window_id")" = null ]'
+# empty fleet must be a document, not an error
+reset
+ok "an empty fleet is {agents:[]}"       '[ "$("$KEL" _fleet | jq -c ".agents")" = "[]" ]'
+ok "  ...and still exits 0"              '"$KEL" _fleet >/dev/null 2>&1'
+
 # ---------------------------------------------------------------- restore
 section "restore rebuilds the workspace and keeps the snapshot"
 reset
-K api-gw     new auth-fix --agent 'sleep 9999' >/dev/null 2>&1
+NEW api-gw auth-fix
 K api-gw     new tests    --agent 'sleep 9999' >/dev/null 2>&1
 K coppermind new sazed    --agent 'sleep 9999' >/dev/null 2>&1
 tmux split-window -d -t "$(window_of api-gw auth-fix)" -c "$WORK/repos/api-gw" 'sleep 9999'
@@ -170,7 +202,7 @@ ok "a .prev generation is kept"         '[ -f "$STATE/snapshot.json.prev" ]'
 
 section "portability fixes keep behaving (no stat/sed/sort dependencies)"
 reset
-K api-gw new a --agent 'sleep 9999' >/dev/null 2>&1
+NEW api-gw a
 W0="$(window_of api-gw a)"
 printf 'waiting 1\n' > "$STATE/@99.state"; printf 'x\n' > "$STATE/@99.ctx"
 printf 'idle 1\n'    > "$STATE/$W0.state"
@@ -200,7 +232,7 @@ ok "  ...and --force gets through"      '"$KEL" kill api-gw/wt -f >/dev/null 2>&
 # ---------------------------------------------------------------- state
 section "Notification maps to what it actually means (#14)"
 reset
-K api-gw new a --agent 'sleep 9999' >/dev/null 2>&1
+NEW api-gw a
 P="$(pane_of api-gw a)"
 hook "$P" UserPromptSubmit
 ok "UserPromptSubmit -> working"                    '[ "$(state_of a)" = working ]'
@@ -221,7 +253,7 @@ ok "an unknown type falls back to waiting"          '[ "$(state_of a)" = waiting
 
 section "dead agents are detected at read time"
 reset
-K api-gw new a --agent 'sleep 9999' >/dev/null 2>&1
+NEW api-gw a
 P="$(pane_of api-gw a)"
 W="$(tmux display-message -p -t "$P" '#{window_id}')"
 hook "$P" UserPromptSubmit
@@ -231,7 +263,7 @@ ok "a crashed agent reads dead, not working"        '[ "$(state_of a)" = dead ]'
 
 section "compaction counter (#15)"
 reset
-K api-gw new a --agent 'sleep 9999' >/dev/null 2>&1
+NEW api-gw a
 P="$(pane_of api-gw a)"
 M="$SESSIONS/api-gw/a.json"
 hook "$P" UserPromptSubmit
@@ -241,12 +273,12 @@ ok "  ...and leaves state alone (mid-turn)" '[ "$(state_of a)" = working ]'
 hook "$P" PreCompact; hook "$P" PreCompact
 ok "  ...and accumulates"                   '[ "$(jq -r .compactions "$M")" = 3 ]'
 ok "PostCompact does not double-count"      'hook "$P" PostCompact; [ "$(jq -r .compactions "$M")" = 3 ]'
-ok "--json exposes it"                      '[ "$("$KEL" ls --json | jq -r ".[0].compactions")" = 3 ]'
+ok "--json exposes it"                      '[ "$("$KEL" ls --json | jq -r ".agents[0].compactions")" = 3 ]'
 ok "the board preview shows it"             '[[ "$("$KEL" _board_preview a api-gw)" == *"compacted  3"* ]]'
 
 section "restart-in-place (#13)"
 reset
-K api-gw new a --agent 'sleep 9999' >/dev/null 2>&1
+NEW api-gw a
 W0="$(window_of api-gw a)"
 M="$SESSIONS/api-gw/a.json"
 P="$(tmux list-panes -t "$W0" -F '#{pane_id}')"
@@ -268,7 +300,7 @@ ok "an unknown name is refused"             '! "$KEL" restart nope-not-here >/de
 
 section "fleet notifications (#1)"
 reset
-K api-gw new a --agent 'sleep 9999' >/dev/null 2>&1
+NEW api-gw a
 P="$(pane_of api-gw a)"
 NLOG="$WORK/notify.log"; : > "$NLOG"
 printf '#!/bin/sh\nprintf "%%s|%%s\\n" "$1" "$2" >> %s\n' "$NLOG" > "$WORK/stub"; chmod +x "$WORK/stub"
@@ -300,8 +332,8 @@ unset KEL_NOTIFY_CMD
 
 section "per-group waiting badge (#4)"
 reset
-K api-gw     new a --agent 'sleep 9999' >/dev/null 2>&1
-K coppermind new b --agent 'sleep 9999' >/dev/null 2>&1
+NEW api-gw a
+NEW coppermind b
 for g in api-gw coppermind; do
   hook "$(tmux list-panes -t "=keltest/$g" -F '#{pane_id}' | head -1)" Notification permission_prompt "x"
 done
@@ -315,7 +347,7 @@ unset TMUX
 # ---------------------------------------------------------------- statusline
 section "statusline records context without a live agent"
 reset
-K api-gw new a --agent 'sleep 9999' >/dev/null 2>&1
+NEW api-gw a
 P="$(pane_of api-gw a)"
 W="$(tmux display-message -p -t "$P" '#{window_id}')"
 sl() { printf '%s' "$1" | TMUX_PANE="$P" "$KEL" statusline; }
@@ -326,7 +358,7 @@ ok "a .ctx file is written"                         '[ -f "$STATE/$W.ctx" ]'
 ok "  ...with the right percentage"                 '[ "$(cut -f1 "$STATE/$W.ctx")" = 42 ]'
 ok "  ...and the model in the last field"           '[ "$(cut -f7 "$STATE/$W.ctx")" = "Opus 5" ]'
 ok "ls surfaces it"                                 '[[ "$("$KEL" ls 2>/dev/null)" == *42%* ]]'
-ok "--json surfaces it"                             '[ "$("$KEL" ls --json | jq -r ".[0].context_pct")" = 42 ]'
+ok "--json surfaces it"                             '[ "$("$KEL" ls --json | jq -r ".agents[0].context.pct")" = 42 ]'
 # the IFS-tab-folding regression: an empty field must not shift every later value
 sl '{"session_id":"a","cost":{"total_cost_usd":9.25},
      "context_window":{"total_input_tokens":170000,"context_window_size":200000,"used_percentage":86}}' >/dev/null

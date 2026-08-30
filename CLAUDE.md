@@ -77,6 +77,12 @@ breaking change; migrate old records in `migrate_meta`.
 State is keyed by **window id**, metadata by **group + name**. tmux auto-names
 every `claude` window `claude`, so name-keyed state would collide.
 
+**Read it through `fleet_json`, never by re-deriving.** `kel _fleet [--dirty]`
+turns all of the above into one JSON document, and `ls` / `--json` / the board /
+`status-line` are each a `jq` over it. Adding a field means adding it there
+once. This replaced `gather_rows`, whose 13 positional TSV fields caused three
+bugs. It is also the contract the Go `kel-fleet` must match.
+
 ### Agent states
 
 `idle` · `working` · `waiting` (blocked on you) · `done` · `throttled` (waiting
@@ -156,7 +162,16 @@ bugs in this repo were invisible to inspection and obvious on the first run.
   which is a separate settings key with a different payload shape.
 - **`kel new` sends the agent command with `send-keys`**, so there is a brief
   window where the pane still shows a bare shell and `effective_state` reads
-  `dead`. Harmless in practice; do not "fix" it by polling.
+  `dead`. Harmless in practice; do not "fix" it by polling. Tests must wait for
+  the process (`agent_up` in the suite) — v0.6 made the fleet read 3x faster
+  and immediately started losing that race.
+- **`command -v` on a binary that does *not* exist costs ~76ms on WSL2.** It
+  walks all of `$PATH`, and 28 of this machine's 44 entries are Windows dirs
+  under `/mnt/c`. The Go seam therefore stats one known path
+  (`$KEL_FLEET_BIN`) instead. Never put a `command -v` for an optional binary
+  on a hot path.
+- **An unconditional `mkdir -p` is not free** — three already-existing dirs
+  measured ~10ms, paid by every invocation including each bar redraw.
 
 ---
 

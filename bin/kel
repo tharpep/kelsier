@@ -39,6 +39,7 @@ DOCTOR_CACHE="$STATE_DIR/doctor.json"
 LAST_GROUP_FILE="$STATE_DIR/last-group"
 SNAPSHOT="$STATE_DIR/snapshot.json"
 RESTORE_LOCK="$STATE_DIR/.restoring"
+KEL_FLEET_BIN="${KEL_FLEET_BIN:-$HOME/.local/bin/kel-fleet}"   # the Go seam (v0.6)
 STATUSLINE_PREV="$HOME/.claude/statusline-prev"   # a statusLine kel displaced
 KEL_CTX_WARN="${KEL_CTX_WARN:-70}"                # show context on the bar from here up
 KEL_NOTIFY="${KEL_NOTIFY:-waiting}"               # states worth interrupting you for
@@ -46,7 +47,9 @@ SELF="$(command -v kel 2>/dev/null || printf '%s' "$HOME/.local/bin/kel")"
 # commands worth re-running per pane on restore (agents handled separately)
 KEL_RESTORE_CMDS="${KEL_RESTORE_CMDS:-nvim vim hx nano lazygit lazydocker htop btop k9s}"
 
-mkdir -p "$STATE_DIR" "$SESSIONS_DIR" "$STASH_DIR"
+# guarded: an unconditional mkdir -p of three existing dirs measured ~10ms,
+# and every kel invocation — including each status-bar redraw — paid it
+[ -d "$SESSIONS_DIR" ] && [ -d "$STASH_DIR" ] || mkdir -p "$STATE_DIR" "$SESSIONS_DIR" "$STASH_DIR"
 
 humanize_secs() {   # 45 -> 45s   400 -> 6m   3900 -> 1h05m
   local s="${1:-0}"
@@ -520,100 +523,170 @@ cmd_prune() {
 # --------------------------------------------------------------------------
 # kel ls
 # --------------------------------------------------------------------------
-# emits TSV: group idx wid name state iso branch dirty panes cwd   ('*' on idx = current)
-gather_rows() {
-  local cs cw
-  cs="$(tmux display-message -p '#{client_session}' 2>/dev/null || true)"
-  cw="$(tmux display-message -p '#{window_index}' 2>/dev/null || true)"
-  local grp idx wid name state iso branch dirty panes cwd meta ctx cost cmpc
+# --------------------------------------------------------------------------
+# kel _fleet [--dirty]   —  ONE computed view of the whole fleet, as JSON
+# --------------------------------------------------------------------------
+# Every surface used to derive this for itself: gather_rows fed ls / --json /
+# the board over 13 positional TSV fields, and cmd_status_line re-derived its
+# own on every bar redraw.  They disagreed by construction, and the positional
+# plumbing caused three separate bugs.  This is the single answer, and the
+# contract the Go implementation has to match (spec.md 12).
+#
+# Cost discipline: the old path spent one `tmux list-panes` per window inside
+# effective_state plus a `jq` per record.  This spends two tmux calls and two
+# jq calls total, whatever the fleet size.  --dirty is opt-in because
+# `git status` per worktree is the expensive part and the bar never shows it.
+_fleet_bash() {
+  command -v jq >/dev/null 2>&1 || { printf '{"agents":[]}\n'; return 0; }
+  local want_dirty=0
+  [ "${1:-}" = "--dirty" ] && want_dirty=1
 
-  while IFS=$'\t' read -r sname grp idx wid name; do
-    [ -z "${wid:-}" ] && continue
-    state="$(effective_state "$wid")"; [ -z "$state" ] && state='-'
-    iso='(unmanaged)'; branch='-'; dirty='-'; cwd=''
-    meta="$(meta_path "$grp" "$name")"
-    if [ -f "$meta" ]; then
-      iso="$(jq -r '.isolation' "$meta")"
-      branch="$(jq -r '.branch // "-"' "$meta")"
-      cwd="$(jq -r '.cwd // ""' "$meta")"
-    fi
-    if [ -n "$cwd" ] && git -C "$cwd" rev-parse --git-dir >/dev/null 2>&1; then
-      dirty="$(git -C "$cwd" status --porcelain 2>/dev/null | grep -c . || true)"
-    fi
-    panes="$(tmux list-panes -t "$wid" -F '#{pane_current_command}' 2>/dev/null | paste -sd'|' -)"
-    [ "$sname" = "$cs" ] && [ "$idx" = "$cw" ] && idx="${idx}*"
-    ctx="$(ctx_field "$wid" 1)"; cost="$(ctx_field "$wid" 2)"
-    cmpc='-'; [ -f "$meta" ] && cmpc="$(jq -r '.compactions // "-"' "$meta")"
-    printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
-      "$grp" "$idx" "$wid" "$name" "$state" "$iso" "$branch" "$dirty" "${panes:--}" "$cwd" \
-      "${ctx:--}" "${cost:--}" "$cmpc"
-  done < <(kel_windows | sort -t$'\t' -k2,2 -k3,3n)
+  local wins panes cur_sess='' cur_wid=
+  wins="$(tmux list-windows -a -F '#{session_name}	#{window_index}	#{window_id}	#{window_name}	#{window_activity}' 2>/dev/null || true)"
+  panes="$(tmux list-panes -a -F '#{window_id}	#{pane_current_command}' 2>/dev/null || true)"
+  IFS=' ' read -r cur_sess cur_wid < <(tmux display-message -p '#{client_session} #{window_id}' 2>/dev/null || true)
 
-  while IFS=$'\t' read -r grp name meta; do
-    [ -z "$name" ] && continue
-    iso="$(jq -r '.isolation' "$meta")"
-    branch="$(jq -r '.branch // "-"' "$meta")"
-    cwd="$(jq -r '.cwd // ""' "$meta")"
-    dirty='-'
-    if [ -n "$cwd" ] && git -C "$cwd" rev-parse --git-dir >/dev/null 2>&1; then
-      dirty="$(git -C "$cwd" status --porcelain 2>/dev/null | grep -c . || true)"
-    fi
-    printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
-      "$grp" "-" "" "$name" "dead" "$iso" "$branch" "$dirty" "-" "$cwd" "-" "-" \
-      "$(jq -r '.compactions // "-"' "$meta" 2>/dev/null)"
-  done < <(dead_sessions)
+  # state + ctx with builtins only, no fork per file
+  local states='' ctxs='' f wid st ep note line
+  for f in "$STATE_DIR"/*.state; do
+    [ -e "$f" ] || continue
+    wid="${f##*/}"; wid="${wid%.state}"
+    read -r st ep note < "$f" 2>/dev/null || continue
+    states="$states$wid	$st	$ep	$note"$'\n'
+  done
+  for f in "$STATE_DIR"/*.ctx; do
+    [ -e "$f" ] || continue
+    wid="${f##*/}"; wid="${wid%.ctx}"
+    IFS= read -r line < "$f" 2>/dev/null || continue
+    ctxs="$ctxs$wid	$line"$'\n'
+  done
+
+  # every record in ONE slurp
+  local -a rf=()
+  for f in "$SESSIONS_DIR"/*/*.json; do [ -e "$f" ] && rf+=( "$f" ); done
+
+  # dirty is keyed by cwd: it is a property of the directory, not the window
+  local dirty=''
+  if [ "$want_dirty" = 1 ]; then
+    local cwd seen=''
+    while IFS= read -r cwd; do
+      [ -n "$cwd" ] || continue
+      case "$seen" in *"|$cwd|"*) continue ;; esac
+      seen="$seen|$cwd|"
+      git -C "$cwd" rev-parse --git-dir >/dev/null 2>&1 || continue
+      dirty="$dirty$cwd	$(git -C "$cwd" status --porcelain 2>/dev/null | grep -c . || printf 0)"$'\n'
+    done < <(cat "${rf[@]}" 2>/dev/null | jq -r '.cwd // empty')
+  fi
+
+  jq -n --slurpfile records <(cat "${rf[@]}" 2>/dev/null) \
+        --arg wins "$wins" --arg panes "$panes" --arg states "$states" \
+        --arg ctxs "$ctxs" --arg dirtyraw "$dirty" \
+        --arg prefix "$KEL_PREFIX" --arg cur_sess "$cur_sess" --arg cur_wid "$cur_wid" '
+    def rows($s): ($s // "") | split("\n") | map(select(length > 0) | split("\t"));
+    def num: (tonumber? // null);
+    def isshell: . as $c | (["bash","zsh","fish","sh","dash","tmux"] | index($c)) != null;
+    def groupof($s):
+      if   $s == $prefix                    then $prefix
+      elif ($s | startswith($prefix + "/")) then ($s[($prefix|length)+1:])
+      else null end;
+
+    rows($wins) as $W | rows($panes) as $P | rows($states) as $S
+    | rows($ctxs) as $C | rows($dirtyraw) as $DR
+    | (reduce $P[]  as $p ({}; .[$p[0]] += [$p[1]]))  as $panemap
+    | (reduce $S[]  as $s ({}; .[$s[0]] = {state:$s[1], since:($s[2]|num),
+        note:(if ($s[3] // "") == "" then null else $s[3] end)}))  as $statemap
+    | (reduce $C[]  as $c ({}; .[$c[0]] = {pct:($c[1]|num), cost_usd:($c[2]|num),
+        in_tokens:($c[3]|num), size:($c[4]|num),
+        rate_5h:(($c[5]|num) | if . == -1 then null else . end),
+        at:($c[6]|num), model:(if ($c[7] // "") == "" then null else $c[7] end)}))  as $ctxmap
+    | (reduce $DR[] as $d ({}; .[$d[0]] = ($d[1]|num)))  as $dirtymap
+    | (reduce $records[] as $r ({}; .[(($r.group // "misc") + " " + $r.name)] = $r))  as $recmap
+    | [ $W[]
+        | groupof(.[0]) as $g | select($g != null)
+        | .[2] as $wid | .[3] as $nm
+        | ($panemap[$wid] // [])            as $pl
+        | ($statemap[$wid] // null)         as $stt
+        | ($recmap[$g + " " + $nm] // null) as $rec
+        | (($stt.state // null) as $raw
+           | if ($raw == "working" or $raw == "waiting" or $raw == "throttled")
+                and (([$pl[] | select(isshell | not)] | length) == 0)
+             then "dead" else $raw end)     as $eff
+        | { group:$g, name:$nm, window_id:$wid, index:(.[1]|num),
+            current: (.[0] == $cur_sess and $wid == $cur_wid),
+            managed: ($rec != null),
+            state:$eff, state_since:($stt.since // null), note:($stt.note // null),
+            isolation:($rec.isolation // null), branch:($rec.branch // null),
+            repo:($rec.repo // null), cwd:($rec.cwd // null),
+            agent:($rec.agent // null), claude_session:($rec.claude_session // null),
+            compactions:($rec.compactions // null),
+            dirty:($dirtymap[($rec.cwd // "")] // null),
+            panes:$pl, activity:(.[4]|num), context:($ctxmap[$wid] // null) } ]
+      # records with no live window. Same liveness rule as meta_is_live: the
+      # window must match BOTH the recorded id and the recorded name.
+      + [ $records[] as $r
+          | select([ $W[] | select(.[2] == $r.window_id and .[3] == $r.name) ] | length == 0)
+          | { group:($r.group // "misc"), name:$r.name, window_id:null, index:null,
+              current:false, managed:true,
+              state:"dead", state_since:null, note:null,
+              isolation:($r.isolation // null), branch:($r.branch // null),
+              repo:($r.repo // null), cwd:($r.cwd // null),
+              agent:($r.agent // null), claude_session:($r.claude_session // null),
+              compactions:($r.compactions // null),
+              dirty:($dirtymap[($r.cwd // "")] // null),
+              panes:[], activity:null, context:null } ]
+    | { generated_at:(now|todate),
+        current:{ group:(if $cur_sess == "" then null else groupof($cur_sess) end),
+                  window_id:(if $cur_wid == "" then null else $cur_wid end) },
+        agents:. }'
 }
+
+# The seam: a Go kel-fleet takes over when installed, bash answers otherwise.
+# Deliberately a stat of one known path, NOT `command -v`.  Looking up a binary
+# that does not exist walks all of $PATH, and on WSL2 $PATH carries the Windows
+# directories under /mnt/c — that miss measured 62ms, six times the cost of
+# everything else this function does put together.
+fleet_json() {
+  if [ -x "$KEL_FLEET_BIN" ]; then "$KEL_FLEET_BIN" "$@"; else _fleet_bash "$@"; fi
+}
+
 
 cmd_ls() {
   need tmux; need jq
   prune_state
-  if [ -z "$(group_sessions)" ] && [ -z "$(dead_sessions)" ]; then
+  local doc
+  if [ "${1:-}" = "--json" ]; then doc="$(fleet_json --dirty)"; else doc="$(fleet_json)"; fi
+  if [ "$(printf '%s' "$doc" | jq '.agents | length')" = 0 ]; then
     echo "no agents yet — 'kel new <name>' to start one"
     return 0
   fi
 
   if [ "${1:-}" = "--json" ]; then
-    printf '['
-    local first=1
-    gather_rows | while IFS=$'\t' read -r grp idx wid name state iso branch dirty panes cwd ctx cost cmpc; do
-      [ "$first" = 1 ] || printf ','
-      first=0
-      jq -nc --arg grp "$grp" --arg idx "${idx%\*}" --arg wid "$wid" --arg name "$name" \
-             --arg state "$state" --arg iso "$iso" --arg branch "$branch" \
-             --arg dirty "$dirty" --arg panes "$panes" --arg cwd "$cwd" \
-             --arg ctx "$ctx" --arg cost "$cost" --arg cmpc "$cmpc" \
-        '{group:$grp, index:(($idx|tonumber?) // null), window_id:$wid, name:$name, state:$state,
-          isolation:$iso, branch:(if $branch=="-" then null else $branch end),
-          dirty:(($dirty|tonumber?) // null),
-          panes:(if $panes=="-" then null else ($panes|split("|")) end), cwd:$cwd,
-          context_pct:(($ctx|tonumber?) // null), cost_usd:(($cost|tonumber?) // null),
-          compactions:(($cmpc|tonumber?) // null)}'
-    done
-    printf ']\n'
+    # v0.6: the whole document, not a bare array — .agents is the list
+    printf '%s\n' "$doc" | jq .
     return 0
   fi
 
-  gather_rows | awk -F'\t' '
-    function pad(s,n){ while(length(s)<n) s=s" "; return s }
-    { rows[NR]=$0 }
-    END {
-      lastg=""
-      for (i=1;i<=NR;i++) {
-        split(rows[i], f, "\t")
-        g=f[1]; idx=f[2]; name=f[4]; st=f[5]; iso=f[6]; br=f[7]; pn=f[9]; cwd=f[10]
-        ctx=f[11]; cost=f[12]
-        gsub(ENVIRON["HOME"], "~", cwd)
-        # show pane commands only when the window is split
-        disp = name
-        if (pn != "-" && index(pn, "|")) disp = name " (" pn ")"
-        cx = (ctx=="-" || ctx=="") ? "-" : ctx "%"
-        cs = (cost=="-" || cost=="" || cost+0==0) ? "" : sprintf("  $%.2f", cost)
-        if (g!=lastg) { if (lastg!="") print ""; print g; lastg=g }
-        printf "  %s %s %s %s %s %s  %s%s\n",
-          pad(idx,4), pad(disp,24), pad(st,10), pad(cx,5), pad(iso,10), pad(br,12), cwd, cs
-      }
-    }'
-  [ -n "$(dead_sessions)" ] && echo && echo "  dead = window gone.  kel restore [-c] rebuilds  ·  kel prune discards"
+  printf '%s' "$doc" | jq -r --arg home "$HOME" '
+    def money: (. * 100 | round) as $c | "\($c / 100 | floor).\((($c % 100) | tostring) | if length == 1 then "0" + . else . end)";
+    def pad($n): (. // "-") | tostring | . + (" " * ($n - length)) | .[0:$n];
+    .agents
+    | sort_by(.group, (.index // 9999))
+    | group_by(.group)[]
+    | (.[0].group), ( .[] |
+        ( (if .current then "\(.index)*" else (.index // "-" | tostring) end) | pad(4) ) as $ix
+      | ( .name + (if (.panes | length) > 1 then " (" + (.panes | join("|")) + ")" else "" end) | pad(24) ) as $nm
+      | ( (.state // "-") | pad(10) ) as $st
+      | ( (if .context.pct == null then "-" else "\(.context.pct)%" end) | pad(5) ) as $cx
+      | ( (if .managed then .isolation else "(unmanaged)" end) | pad(10) ) as $iso
+      | ( (.branch // "-") | pad(12) ) as $br
+      | ( (.cwd // "") | sub("^" + $home; "~") ) as $cw
+      | ( if (.context.cost_usd // 0) > 0 then "  $" + (.context.cost_usd | money) else "" end ) as $cost
+      | "  \($ix) \($nm) \($st) \($cx) \($iso) \($br)  \($cw)\($cost)" ),
+      ""' | sed '$d'
+
+  if [ -n "$(printf '%s' "$doc" | jq -r '.agents[] | select(.window_id == null) | .name')" ]; then
+    echo "  dead = window gone.  kel restore [-c] rebuilds  ·  kel prune discards"
+  fi
   return 0
 }
 
@@ -715,56 +788,49 @@ cmd_move() {
 # --------------------------------------------------------------------------
 # rows for fzf:  group <T> name <T> state <T> dirty <T> path <T> wid
 cmd_board_rows() {
-  gather_rows | awk -F'\t' '
-    {
-      grp=$1; wid=$3; name=$4; st=$5; dirty=$8; cwd=$10
-      if (wid=="") next                          # skip orphan-metadata rows (no window)
-      c="\033[0m"
-      if (st=="waiting") c="\033[1;33m"
-      else if (st=="working")   c="\033[1;36m"
-      else if (st=="done")      c="\033[1;32m"
-      else if (st=="throttled") c="\033[1;35m"
-      else if (st=="dead")      c="\033[1;31m"
-      else if (st=="idle")      c="\033[2m"
-      sd = (dirty=="-" || dirty=="0") ? "" : dirty " dirty"
-      printf "%s\t%s\t%s%s\033[0m\t%s\t%s\t%s\n", grp, name, c, (st=="-"?"idle":st), sd, cwd, wid
-    }' | sort
+  fleet_json --dirty | jq -r '
+    def colour:
+      if   . == "waiting"   then "\u001b[1;33m"
+      elif . == "working"   then "\u001b[1;36m"
+      elif . == "done"      then "\u001b[1;32m"
+      elif . == "throttled" then "\u001b[1;35m"
+      elif . == "dead"      then "\u001b[1;31m"
+      elif . == "idle"      then "\u001b[2m"
+      else "\u001b[0m" end;
+    .agents[]
+    | select(.window_id != null)          # orphan-metadata rows have no window
+    | (.state // "idle") as $st
+    | [ .group, .name, ($st | colour) + $st + "\u001b[0m",
+        (if (.dirty // 0) > 0 then "\(.dirty) dirty" else "" end),
+        (.cwd // ""), .window_id ]
+    | @tsv' | sort
 }
 
 cmd_board_preview() {   # name group
-  local name="$1" group="$2" meta; meta="$(meta_path "$group" "$name")"
-  if [ -f "$meta" ]; then
-    jq -r '"group      \(.group)
-agent      \(.agent)
-isolation  \(.isolation)\(if .branch then "  (branch \(.branch))" else "" end)
-directory  \(.cwd)
-created    \(.created_at)"' "$meta"
-  else
-    printf 'group      %s\n(unmanaged window — no metadata)\n' "$group"
-  fi
+  local name="$1" group="$2"
+  fleet_json | jq -r --arg n "$name" --arg g "$group" '
+    def money: (. * 100 | round) as $c | "\($c / 100 | floor).\((($c % 100) | tostring) | if length == 1 then "0" + . else . end)";
+    (.agents[] | select(.group == $g and .name == $n)) // empty
+    | if .managed then
+        "group      \(.group)",
+        "agent      \(.agent // "-")",
+        "isolation  \(.isolation)\(if .branch then "  (branch \(.branch))" else "" end)",
+        "directory  \(.cwd // "-")"
+      else
+        "group      \(.group)", "(unmanaged window — no metadata)"
+      end,
+      (if .note        then "says       \(.note)" else empty end),
+      (if .context     then "context    \(.context.pct)% of \((.context.size / 1000 | floor))k  (\(.context.in_tokens) tokens used)",
+                            "cost       $\(.context.cost_usd | money)\(if .context.model then "   ·  \(.context.model)" else "" end)"
+                       else empty end),
+      (if (.compactions // 0) > 0 then "compacted  \(.compactions) time(s)" else empty end)'
+
   local wid; wid="$(kel_windows | awk -F'\t' -v n="$name" -v g="$group" '$2==g && $5==n{print $4; exit}')"
-  if [ -n "$wid" ]; then
-    local note; note="$(state_note "$wid")"
-    [ -n "$note" ] && printf 'says       %s\n' "$note"
-  fi
-  if [ -n "$wid" ] && [ -f "$STATE_DIR/$wid.ctx" ]; then
-    local c_pct c_cost c_in c_sz c_model
-    c_pct="$(ctx_field "$wid" 1)"; c_cost="$(ctx_field "$wid" 2)"
-    c_in="$(ctx_field "$wid" 3)";  c_sz="$(ctx_field "$wid" 4)"
-    c_model="$(ctx_field "$wid" 7)"
-    case "${c_sz:-}" in ''|*[!0-9]*) c_sz=0 ;; esac
-    printf 'context    %s%% of %sk  (%s tokens used)\n' "${c_pct:-0}" "$(( c_sz / 1000 ))" "${c_in:-0}"
-    printf 'cost       $%.2f%s\n' "$c_cost" "${c_model:+   ·  $c_model}" 2>/dev/null
-  fi
-  if [ -f "$meta" ]; then
-    local c_cmp; c_cmp="$(jq -r '.compactions // 0' "$meta" 2>/dev/null)"
-    [ "${c_cmp:-0}" -gt 0 ] 2>/dev/null && printf 'compacted  %s time(s)\n' "$c_cmp"
-  fi
   if [ -n "$wid" ]; then
     printf '\n\033[2m── recent ──\033[0m\n'
     tmux capture-pane -t "$wid" -p 2>/dev/null | grep -v '^[[:space:]]*$' | tail -8
   fi
-  local cwd; cwd="$(jq -r '.cwd // ""' "$meta" 2>/dev/null)"
+  local cwd; cwd="$(jq -r '.cwd // ""' "$(meta_path "$group" "$name")" 2>/dev/null)"
   if [ -n "$cwd" ] && git -C "$cwd" rev-parse --git-dir >/dev/null 2>&1; then
     local d; d="$(git -C "$cwd" status --short 2>/dev/null | head -10)"
     [ -n "$d" ] && printf '\n\033[2m── uncommitted ──\033[0m\n%s\n' "$d"
@@ -1132,75 +1198,54 @@ cmd_doctor() {
 # --------------------------------------------------------------------------
 cmd_status_line() {
   [ -n "${TMUX:-}" ] || exit 0
-  local grp="${1:-}"
-  [ -z "$grp" ] && grp="$(current_group)"
+  # One fleet_json, one jq.  This used to walk every window calling
+  # effective_state (a tmux fork each) and then walk them all again to count
+  # waiting agents elsewhere.  --dirty is deliberately NOT passed: the bar
+  # never shows it and `git status` per worktree is the expensive part.
+  fleet_json | jq -r --arg want "${1:-}" --argjson warn "${KEL_CTX_WARN:-70}" '
+    def glyph:
+      if   . == "waiting"   then {s:"?", c:"#[fg=colour214,bold]"}
+      elif . == "working"   then {s:"*", c:"#[fg=colour111]"}
+      elif . == "done"      then {s:"!", c:"#[fg=colour114]"}
+      elif . == "throttled" then {s:"~", c:"#[fg=colour141]"}
+      elif . == "dead"      then {s:"x", c:"#[fg=colour167,bold]"}
+      else {s:"", c:""} end;
 
-  # not in a kel session: compact global summary
-  if [ -z "$grp" ]; then
-    local total=0 waiting=0 st
-    while IFS=$'\t' read -r _ _ _ wid _; do
-      [ -z "${wid:-}" ] && continue
-      total=$((total+1)); [ "$(effective_state "$wid")" = waiting ] && waiting=$((waiting+1))
-    done < <(kel_windows)
-    [ "$total" -eq 0 ] && exit 0
-    if [ "$waiting" -gt 0 ]; then
-      printf '#[fg=colour245][kel]#[default] #[fg=colour214,bold]%d agent%s · %d waiting#[default] ' \
-        "$total" "$([ "$total" -ne 1 ] && echo s)" "$waiting"
-    else
-      printf '#[fg=colour245][kel] %d agents#[default] ' "$total"
-    fi
-    exit 0
-  fi
-
-  local sname; sname="$(sess "$grp")"
-  local cur; cur="$(tmux display-message -p '#{window_id}' 2>/dev/null || true)"
-  local panes; panes="$(tmux list-windows -a -F '#{window_id} #{window_panes}' 2>/dev/null || true)"
-  local out='' suffix colour pc cx cxc
-
-  # this group's windows, in full
-  while IFS=$'\t' read -r _ _ idx wid name; do
-    [ -z "${wid:-}" ] && continue
-    suffix=''; colour=''
-    case "$(effective_state "$wid")" in
-      waiting)   suffix='?'; colour='#[fg=colour214,bold]' ;;
-      working)   suffix='*'; colour='#[fg=colour111]' ;;
-      done)      suffix='!'; colour='#[fg=colour114]' ;;
-      throttled) suffix='~'; colour='#[fg=colour141]' ;;
-      dead)      suffix='x'; colour='#[fg=colour167,bold]' ;;
-    esac
-    pc="$(printf '%s\n' "$panes" | awk -v w="$wid" '$1==w{print $2}')"
-    [ "${pc:-1}" -gt 1 ] 2>/dev/null && name="${name}#[fg=colour240]·${pc}#[default]${colour}"
-    # context only once it matters — below KEL_CTX_WARN it is noise on the bar
-    cx="$(ctx_field "$wid" 1)"
-    if [ -n "$cx" ] && [ "$cx" -ge "$KEL_CTX_WARN" ] 2>/dev/null; then
-      if   [ "$cx" -ge 90 ]; then cxc='#[fg=colour167,bold]'
-      else                        cxc='#[fg=colour179]'; fi
-      name="${name}${cxc}·${cx}%#[default]${colour}"
-    fi
-    if [ "$wid" = "$cur" ]; then
-      out="$out ${colour}[${idx}:${name}${suffix}]#[default]"
-    else
-      out="$out ${colour}${idx}:${name}${suffix}#[default]"
-    fi
-  done < <(kel_windows | awk -F'\t' -v s="$sname" '$1==s' | sort -t$'\t' -k3,3n)
-
-  # Waiting agents in OTHER kel groups.  "+2 waiting" told you someone was
-  # blocked but not who or where; per-group is the same footprint, more signal.
-  local others='' ogrp
-  while IFS=$'\t' read -r osn ogrp _ wid _; do
-    [ -z "${wid:-}" ] && continue
-    [ "$osn" = "$sname" ] && continue
-    [ "$(effective_state "$wid")" = waiting ] || continue
-    others="$others$ogrp"$'\n'
-  done < <(kel_windows)
-  if [ -n "$others" ]; then
-    local badge
-    badge="$(printf '%s' "$others" | grep -v '^$' | sort | uniq -c \
-      | awk 'NR<=3 {printf "%s·%s ", $2, $1; next} {x+=$1} END {if (x) printf "+%d ", x}')"
-    [ -n "$badge" ] && out="$out  #[fg=colour214]⟨${badge% }⟩#[default]"
-  fi
-
-  printf '%s ' "$out"
+    (if $want == "" then (.current.group // "") else $want end) as $g
+    | [.agents[] | select(.window_id != null)] as $live
+    | if $g == "" then
+        ($live | length) as $n
+        | ([$live[] | select(.state == "waiting")] | length) as $w
+        | if   $n == 0 then ""
+          elif $w > 0  then "#[fg=colour245][kel]#[default] #[fg=colour214,bold]\($n) agent\(if $n == 1 then "" else "s" end) · \($w) waiting#[default] "
+          else              "#[fg=colour245][kel] \($n) agents#[default] " end
+      else
+        ( [ $live[] | select(.group == $g) ] | sort_by(.index)
+            | map(
+                . as $a | ($a.state // "" | glyph) as $gl
+                | ($a.panes | length) as $np
+                | ($a.context.pct // null) as $pct
+                | ( $a.name
+                    + (if $np > 1 then "#[fg=colour240]·\($np)#[default]" + $gl.c else "" end)
+                    + (if ($pct != null and $pct >= $warn)
+                       then (if $pct >= 90 then "#[fg=colour167,bold]" else "#[fg=colour179]" end)
+                            + "·\($pct)%#[default]" + $gl.c
+                       else "" end) ) as $nm
+                | $gl.c
+                  + (if $a.current then "[\($a.index):\($nm)\($gl.s)]" else "\($a.index):\($nm)\($gl.s)" end)
+                  + "#[default]" )
+            | " " + join(" ") ) as $row
+        | ( [ $live[] | select(.group != $g and .state == "waiting") | .group ]
+            | group_by(.) | map({g:.[0], n:length}) | sort_by(-.n, .g) ) as $others
+        | $row
+          + ( if ($others | length) == 0 then ""
+              else "  #[fg=colour214]⟨"
+                   + ( ( $others[0:3] | map("\(.g)·\(.n)") | join(" ") )
+                       + ( ($others[3:] | map(.n) | add) as $x
+                           | if $x == null then "" else " +\($x)" end ) )
+                   + "⟩#[default]" end )
+          + " "
+      end'
 }
 
 # --------------------------------------------------------------------------
@@ -1696,6 +1741,7 @@ main() {
     snapshot)     cmd_snapshot ;;
     doctor)       cmd_doctor "$@" ;;
     status-line)  cmd_status_line "$@" ;;
+    _fleet)       fleet_json "$@" ;;
     statusline)   cmd_statusline ;;                # hot path — skip migrate
     jump)         cmd_jump ;;
     cheat)        cmd_cheat ;;
