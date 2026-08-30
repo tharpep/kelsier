@@ -40,6 +40,7 @@ v1.0 — not a product chasing an audience.
 bin/kel              the tool — one bash script, and the fallback for all of Go
 go.mod               module github.com/tharpep/kelsier
 cmd/kel-fleet/       the Go fleet reader; bin/kel uses it when installed
+cmd/kel-top/         the fleet dashboard (Bubble Tea v2) — Go only, no fallback
 internal/fleet/      the fleet document, ported from _fleet_bash
 tmux/kel.conf        keybindings, status line, hooks; sourced from ~/.tmux.conf
 install.sh           symlinks kel, sources kel.conf, merges hooks + statusLine
@@ -241,10 +242,12 @@ under its own work dir.
 
 ## Where things stand
 
-**v0.6 is underway.** Phase A (`kel _fleet --json`, one computed view) and
-Phase B (the Go `kel-fleet` behind the fallback seam) are done. Next is
-`#2` **`kel top`** in Bubble Tea v2, then `#5` peek. Go is a strangler fig on
-`main`
+**v0.6 is nearly done.** Phase A (`kel _fleet --json`), Phase B (the Go
+`kel-fleet` behind the fallback seam) and Phase C (`kel top`) are shipped.
+Bubble Tea is **v2** — `charm.land/bubbletea/v2`, `View() tea.View`,
+`tea.KeyPressMsg`; almost every tutorial online is v1 and will not compile.
+Next is
+`#5` peek. Go is a strangler fig on `main`
 (`kel _fleet --json` first, then `kel top` in Bubble Tea **v2**), with bash
 retained as the fallback and as the differential-test oracle. `rollout.md`
 § v0.6 has the rules; follow them rather than re-deriving the strategy.

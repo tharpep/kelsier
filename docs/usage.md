@@ -38,6 +38,10 @@ kel rename <newname>   rename THIS window and keep its metadata record in sync
 kel board              the fleet browser — fuzzy filter + preview  (Ctrl+Space
                        or prefix b).  enter jumps; tab = act on the highlighted
                        agent (jump / new here / rename / go to group / kill)
+kel top                the fleet dashboard (also prefix t) — every agent, sorted
+                       by who needs you. j/k scroll, s cycles sort
+                       (triage/ctx/cost), / filters, q quits. Needs the Go
+                       build; `kel doctor` says whether you have it
 kel restart [name]     relaunch a crashed agent in its existing window (-f to
                        force while something is still running there)
 kel restore [-c] [-s]  rebuild the workspace after a kill / reboot

@@ -68,7 +68,7 @@ else
   echo "  added source-file line to $TMUX_CONF"
 fi
 
-say "kel-fleet (Go, optional)"
+say "kel-fleet + kel-top (Go, optional)"
 # The Go fleet reader is a speed-up, never a requirement: bin/kel falls back to
 # its own bash implementation when the binary is absent, which is what keeps
 # `git clone && ./install.sh` working on a machine with no toolchain.
@@ -76,7 +76,12 @@ if command -v go >/dev/null 2>&1; then
   if (cd "$KEL_DIR" && go build -o "$BIN_DIR/kel-fleet" ./cmd/kel-fleet) 2>/dev/null; then
     echo "  built $BIN_DIR/kel-fleet  ($(go version | awk '{print $3}'))"
   else
-    echo "  build FAILED — kel will use the bash implementation"
+    echo "  kel-fleet build FAILED — kel will use the bash implementation"
+  fi
+  if (cd "$KEL_DIR" && go build -o "$BIN_DIR/kel-top" ./cmd/kel-top) 2>/dev/null; then
+    echo "  built $BIN_DIR/kel-top     (prefix t)"
+  else
+    echo "  kel-top build FAILED — 'kel top' will be unavailable"
   fi
 else
   echo "  go not installed — using the bash implementation (this is fine)"

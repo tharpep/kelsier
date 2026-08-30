@@ -125,7 +125,7 @@ which is precisely the false positive that makes people turn notifications off.
 
 **Gate:** none, but sequenced after #14.
 
-### 2. Fleet dashboard — `kel top`  ·  `[fits]`
+### 2. Fleet dashboard — `kel top`  ·  `[fits]`  ·  **shipped v0.6**
 
 One read-only view of the whole fleet. `kel ls` has the table but you must drop
 to a shell for it; the board is a *picker*, not a status view; `prefix k` is the
@@ -174,7 +174,7 @@ Folds in #3 and makes the raw `kel ls` table mostly a scripting interface.
 
 ~60 LOC.
 
-### 3. Waiting-duration + stall flag  ·  `[fits — folded into #2]`
+### 3. Waiting-duration + stall flag  ·  `[fits — folded into #2]`  ·  **FOR column shipped v0.6; stall flag still open**
 
 The `.state` epoch gives time-in-state for free — it's the `kel top` FOR column.
 Also flag an agent stuck on `working` with no state change in >N minutes: a soft
@@ -262,7 +262,7 @@ negative. Concretely:
 
 **Gate:** when you've felt the integration pile-up.
 
-### 7. Git dirty state — dashboard-only  ·  `[fits]`
+### 7. Git dirty state — dashboard-only  ·  `[fits]`  ·  **in the fleet document since v0.6**
 
 The DIRTY column in `kel top` (already in #2). Not on the status bar — a cramped
 bar is why grouping exists, and the principle above keeps it minimal.

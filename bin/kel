@@ -18,6 +18,7 @@
 #   kel restore [-c] [-s]      rebuild the workspace after a kill / reboot
 #                              (-c resume conversations, -s force the snapshot)
 #   kel restart [name] [-f]    relaunch a crashed agent in its existing window
+#   kel top                    the fleet dashboard (prefix t)
 #   kel prune [-f]             discard dead agent records
 #   kel doctor                 capability probe, cached
 #
@@ -40,6 +41,7 @@ LAST_GROUP_FILE="$STATE_DIR/last-group"
 SNAPSHOT="$STATE_DIR/snapshot.json"
 RESTORE_LOCK="$STATE_DIR/.restoring"
 KEL_FLEET_BIN="${KEL_FLEET_BIN:-$HOME/.local/bin/kel-fleet}"   # the Go seam (v0.6)
+KEL_TOP_BIN="${KEL_TOP_BIN:-$HOME/.local/bin/kel-top}"
 STATUSLINE_PREV="$HOME/.claude/statusline-prev"   # a statusLine kel displaced
 KEL_CTX_WARN="${KEL_CTX_WARN:-70}"                # show context on the bar from here up
 KEL_NOTIFY="${KEL_NOTIFY:-waiting}"               # states worth interrupting you for
@@ -1154,6 +1156,33 @@ cmd_restart() {
 }
 
 # --------------------------------------------------------------------------
+# kel top   (prefix t)  — the fleet dashboard
+# --------------------------------------------------------------------------
+# Go-only, unlike the fleet read: this is a new surface rather than a port, so
+# there is no bash version to fall back to.  Say so plainly instead of dying
+# with "command not found".
+cmd_top() {
+  if [ ! -x "$KEL_TOP_BIN" ]; then
+    warn "kel top needs the Go dashboard, which isn't built"
+    if command -v go >/dev/null 2>&1; then
+      die "run ./install.sh to build it"
+    else
+      die "install Go (install/20-user-tools.sh), then re-run ./install.sh"
+    fi
+  fi
+  # in tmux, open in a popup the way the board does; outside, run inline
+  if [ -n "${TMUX:-}" ] && [ -z "${KEL_IN_POPUP:-}" ]; then
+    local -a penv=( -e KEL_IN_POPUP=1 ) v
+    for v in KEL_SESSION KEL_CTX_WARN KEL_TOP_BIN XDG_STATE_HOME; do
+      [ -n "${!v:-}" ] && penv+=( -e "$v=${!v}" )
+    done
+    exec tmux display-popup "${penv[@]}" \
+      -w "${KEL_TOP_W:-90%}" -h "${KEL_TOP_H:-80%}" -T ' kel top ' -E "'$KEL_TOP_BIN'"
+  fi
+  exec "$KEL_TOP_BIN" "$@"
+}
+
+# --------------------------------------------------------------------------
 # kel doctor
 # --------------------------------------------------------------------------
 cmd_doctor() {
@@ -1178,6 +1207,11 @@ cmd_doctor() {
   r_claude=$(probe "claude on PATH"                   command -v claude)
   r_hooks=$(probe  "kel hooks wired in settings.json" bash -c 'jq -e "[.hooks[]?[]?.hooks[]?.command // empty] | any(test(\"kel hook|kel-hook\"))" "$HOME/.claude/settings.json" >/dev/null')
   r_sl=$(probe     "kel statusLine wired (context %)"  bash -c 'jq -e ".statusLine.command // \"\" | test(\"kel statusline\")" "$HOME/.claude/settings.json" >/dev/null')
+  if [ -x "$KEL_TOP_BIN" ]; then
+    printf '  \033[1;32m✓\033[0m %s\n' "kel top available (Go dashboard)" >&2
+  else
+    printf '  \033[2m·\033[0m %s\n' "kel top not built (optional)" >&2
+  fi
   if [ -x "$KEL_FLEET_BIN" ]; then
     printf '  \033[1;32m✓\033[0m %s\n' "fleet reader: kel-fleet (Go)" >&2; r_go=true
   else
@@ -1333,6 +1367,8 @@ cat <<'EOF'
     prefix g      pick a group                  prefix ( ) prev / next group
 
   ACT ON AN AGENT
+    prefix t      the fleet dashboard — every agent, sorted by who needs you
+                  (j/k scroll · s sort: triage/ctx/cost · / filter · q quit)
     prefix m      manage THIS agent — rename / move / kill / new sibling
     (in the board) TAB on any row — the same menu, for that agent
 
@@ -1369,6 +1405,8 @@ cat <<'EOF'
     kel move [group]   put THIS window in another group (cd first, then kel move)
     kel rename <new>   rename this window, keep metadata in sync
     kel kill <name>    close one      ·   kel prune  discard dead records
+    kel top            the fleet dashboard — every agent, sorted by who needs
+                       you  (prefix t; j/k scroll, s sort, / filter, q quit)
     kel restart [name] relaunch THIS agent after a crash (same window/worktree)
     kel restore [-c]   rebuild after a kill / reboot  (-c resumes conversations)
 
@@ -1743,6 +1781,7 @@ main() {
     _board_rename)   migrate_meta; cmd_board_rename "$@" ;;
     restore)      migrate_meta; cmd_restore "$@" ;;
     restart)      migrate_meta; cmd_restart "$@" ;;
+    top)          cmd_top "$@" ;;
     prune)        migrate_meta; cmd_prune "$@" ;;
     snapshot)     cmd_snapshot ;;
     doctor)       cmd_doctor "$@" ;;

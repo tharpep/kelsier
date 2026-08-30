@@ -146,6 +146,7 @@ Switching is one keystroke — never open-menu, find-row, press-enter.
 | `prefix 0`..`9` / `n` / `p` / `w` | native window nav (within a group) |
 | `` prefix ` `` | jump to the next `waiting` agent in **any** group — cycles, wraps |
 | `Ctrl+Space` / `prefix b` | the board — find an agent (`enter` jump, `tab` act) |
+| `prefix t` | the fleet dashboard (`kel top`) — read-only, sorted by triage |
 | `prefix m` | manage the current agent (rename / move / new sibling / kill) |
 | `prefix g` / `prefix (` `)` | pick / cycle groups |
 | `prefix ,` | rename this window (routes through `kel rename`) |
@@ -375,6 +376,12 @@ kel move [<group>]         relocate the current window to another group
 kel rename <newname>       rename the current window, keep the record in sync
 kel board                  the fleet browser — filter, preview  (Ctrl+Space or
                            prefix b); enter jumps, tab acts on the highlighted agent
+kel top                    the fleet dashboard — one read-only row per agent
+                           (group, state, time-in-state, context %, cost, last
+                           output), sorted so the row needing you is on top.
+                           j/k scroll · s cycles sort · / filter · q quit.
+                           Go only (Bubble Tea v2); no bash fallback, because
+                           it is a new surface rather than a port
 kel restart [name] [-f]    relaunch a crashed agent in its existing window —
                            same worktree, same branch, same conversation.
                            Refuses while a process is alive; -f overrides

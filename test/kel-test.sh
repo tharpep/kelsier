@@ -211,6 +211,32 @@ else
   echo "  skip  (no Go toolchain — bash implementation is the only one here)"
 fi
 
+section "kel top renders and sorts (#2)"
+GOBIN_TOP="$WORK/kel-top"
+if command -v go >/dev/null 2>&1 && (cd "$HERE/.." && go build -o "$GOBIN_TOP" ./cmd/kel-top) 2>/dev/null; then
+  reset
+  NEW api-gw idler
+  NEW api-gw blocked
+  NEW coppermind busy
+  hook "$(pane_of api-gw blocked)"   Notification permission_prompt "needs Bash"
+  hook "$(pane_of coppermind busy)"  UserPromptSubmit
+  printf '%s' '{"context_window":{"used_percentage":93,"context_window_size":200000,"total_input_tokens":9},"cost":{"total_cost_usd":18.7}}' \
+    | TMUX_PANE="$(pane_of coppermind busy)" "$KEL" statusline >/dev/null
+  frame() { COLUMNS="${1:-120}" "$GOBIN_TOP" --once 2>/dev/null | sed 's/\x1b\[[0-9;]*m//g'; }
+  ok "renders a header"                    '[[ "$(frame)" == *"GROUP"*"AGENT"*"STATE"* ]]'
+  ok "lists every agent"                   '[ "$(frame | grep -cE "^.? *(api-gw|coppermind) ")" = 3 ]'
+  ok "triage puts waiting first"           '[[ "$(frame | sed -n 2p)" == *blocked*waiting* ]]'
+  ok "  ...working above idle"             '[ "$(frame | grep -n busy | cut -d: -f1)" -lt "$(frame | grep -n idler | cut -d: -f1)" ]'
+  ok "shows context and cost"              '[[ "$(frame)" == *"93%"* && "$(frame)" == *"18.70"* ]]'
+  ok "draws the key hints"                 '[[ "$(frame)" == *"j/k scroll"*"q quit"* ]]'
+  ok "80 cols still fits the table"        '[ "$(frame 80 | head -1 | wc -L)" -le 80 ]'
+  ok "50 cols drops columns, not rows"     '[ "$(frame 50 | grep -cE "^.? *(api-gw|coppermind) ")" = 3 ]'
+  ok "  ...and stays within 50"            '[ "$(frame 50 | wc -L)" -le 50 ]'
+  ok "no trailing whitespace on any row"   '! frame | grep -q " $"'
+else
+  echo "  skip  (no Go toolchain)"
+fi
+
 # ---------------------------------------------------------------- restore
 section "restore rebuilds the workspace and keeps the snapshot"
 reset

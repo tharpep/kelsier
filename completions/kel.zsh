@@ -16,6 +16,7 @@ _kel() {
     'move:put the current window in another group'
     'rename:rename the current window (keeps metadata in sync)'
     'board:fzf fleet browser'
+    'top:fleet dashboard — sorted by who needs you'
     'restore:rebuild the workspace after a kill / reboot'
     'restart:relaunch a crashed agent in its existing window'
     'prune:discard dead agent records'
