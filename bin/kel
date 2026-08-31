@@ -33,6 +33,7 @@
 #   kel snapshot               save the workspace shape (hooks call this)
 #   kel cheat                  keybinding reference
 #   kel hook <EVENT>           Claude Code state hook
+#   kel _usage                 what you have actually reached for (prune pass)
 #   kel statusline             Claude Code statusLine — context % / cost
 set -uo pipefail
 
@@ -115,7 +116,19 @@ KEL_RESTORE_CMDS="${KEL_RESTORE_CMDS:-nvim vim hx nano lazygit lazydocker htop b
 
 # guarded: an unconditional mkdir -p of three existing dirs measured ~10ms,
 # and every kel invocation — including each status-bar redraw — paid it
-[ -d "$SESSIONS_DIR" ] && [ -d "$STASH_DIR" ] || mkdir -p "$STATE_DIR" "$SESSIONS_DIR" "$STASH_DIR"
+#
+# 0700, like ~/.ssh: the records carry repo paths, branch names and Claude
+# session ids, and <wid>.state carries Claude Code's notification text, which
+# is the agent quoting a command back at you — file paths and greps included.
+# None of that should be readable by another account on a shared or managed
+# machine.  The DIRECTORY mode is what does the work: no traverse, no reads,
+# whatever the modes inside.
+#
+# Deliberately not a global `umask 077`, which would also apply to the files
+# `git worktree add` creates in cmd_new — kel would silently start writing
+# your source at 0600, which is not its business.
+[ -d "$SESSIONS_DIR" ] && [ -d "$STASH_DIR" ] \
+  || { mkdir -p "$STATE_DIR" "$SESSIONS_DIR" "$STASH_DIR"; chmod 700 "$STATE_DIR" 2>/dev/null; }
 
 humanize_secs() {   # 45 -> 45s   400 -> 6m   3900 -> 1h05m
   local s="${1:-0}"
@@ -334,6 +347,11 @@ meta_write() { # name wid repo cwd isolation branch agent group
 # sit flat in sessions/ (file them under sessions/<group>/).
 migrate_meta() {
   local f nm repo grp dest
+  # Existing installs were created before the 0700 rule, so fixing it only in
+  # the mkdir branch above would never reach them.  This runs on every
+  # non-hot-path command; a chmod on an already-correct dir is one cheap
+  # syscall, and doing it here keeps the hot paths free of it.
+  chmod 700 "$STATE_DIR" 2>/dev/null
   for f in "$SESSIONS_DIR"/*.json; do
     [ -e "$f" ] || continue
     nm="$(basename "$f" .json)"
@@ -729,6 +747,12 @@ pr_cache_file() { # cwd -> cache path, or empty
 }
 
 pr_refresh() {  # cwd — refetch when the cache is stale; silent on any failure
+  # `pr = off` — the one call in kel that leaves the machine.  It sends a repo
+  # slug to github.com and gets branch names back, which is fine on a personal
+  # box and is a policy question on a work one.  Off means land falls back to
+  # local git, which already answers dirty / unpushed / merged / behind; only
+  # the open-PR and squash-merge cases are lost.
+  case "${KEL_PR:-on}" in 0|off|no|false) return 0 ;; esac
   local f slug age
   f="$(pr_cache_file "$1")"; [ -n "$f" ] || return 0
   slug="$(repo_slug "$1")"
@@ -1134,12 +1158,15 @@ cmd_adopt() {
   # isolation is "inplace": an adopted window edits the checkout it is standing
   # in, and kel did not create a worktree for it.
   #
-  # The `agent` field records $KEL_AGENT, carried over from when this lived
-  # inside cmd_move.  For a window running nvim or a shell that is optimistic —
-  # it is what `kel relaunch` would run, not what is running now.  Left as-is
-  # rather than widened here; recording the live pane command instead is a
-  # separate call.
-  meta_write "$KW_NAME" "$KW_WID" "$repo" "$KW_PCWD" "inplace" "" "$KEL_AGENT" "$KW_TARGET"
+  # `agent` records what is ACTUALLY running in the pane, not $KEL_AGENT.  The
+  # field is what `kel relaunch` re-runs, so claiming "claude" for an adopted
+  # nvim window would have relaunch type `claude --resume` into your editor.
+  # Same rule as invariant 3: a plausible default is worse than the truth.
+  # $KEL_AGENT only fills in when tmux cannot say.
+  local pcmd
+  pcmd="$(tmux display-message -p -t "$KW_WID" '#{pane_current_command}' 2>/dev/null || true)"
+  [ -n "$pcmd" ] || pcmd="$KEL_AGENT"
+  meta_write "$KW_NAME" "$KW_WID" "$repo" "$KW_PCWD" "inplace" "" "$pcmd" "$KW_TARGET"
   set_last_group "$KW_TARGET"
   [ "$KW_TARGET" != "$KW_GROUP" ] && _kel_drop_empty_group "$KW_GROUP"
 
@@ -2376,8 +2403,47 @@ cmd_attach() {
 usage() { awk 'NR>1 && /^#/ {sub(/^# ?/,""); print; next} NR>1 {exit}' "$0"; }
 
 # --------------------------------------------------------------------------
+# --------------------------------------------------------------------------
+# usage counter  —  scaffolding for the prune pass, meant to be removed with it
+# --------------------------------------------------------------------------
+# rollout.md gates the prune pass on "did I reach for it?", and nothing in kel
+# recorded an answer, so the gate could never be met from a chair.  One append
+# per user gesture turns the whole docket into a `sort | uniq -c`.
+#
+# NAME ONLY, never arguments: those carry agent names, branch names and repo
+# paths.  The log sits in the 0700 state dir with everything else.
+#
+# Excluded: everything that fires without you asking — the two hot paths, the
+# fleet read, the board's per-keystroke preview, snapshot (tmux hooks call it
+# in the background), and the test-only shims.  Counting those would drown the
+# signal and put a write on every status-bar redraw.
+#
+# `usage = off` disables it; deleting usage.log resets it.
+_usage_log() {   # cmd
+  case "${KEL_USAGE:-on}" in 0|off|no|false) return 0 ;; esac
+  case "$1" in
+    hook|statusline|status-line|snapshot|_fleet|_board_rows|_board_preview|_land|_prstate|_slug|_cfgdump|_usage)
+      return 0 ;;
+  esac
+  [ -d "$STATE_DIR" ] || return 0
+  printf '%s %s\n' "$(date +%s)" "$1" >> "$STATE_DIR/usage.log" 2>/dev/null || true
+}
+
+cmd_usage() {
+  local f="$STATE_DIR/usage.log"
+  [ -f "$f" ] || { say "nothing recorded yet — usage.log appears on the next command"; return 0; }
+  local first rest total
+  read -r first rest < "$f"
+  case "$first" in ''|*[!0-9]*) first="$(date +%s)" ;; esac
+  # grep -c, not wc -l: BSD wc pads its count with spaces
+  total="$(grep -c . "$f")"
+  printf '%s invocations over %s\n\n' "$total" "$(humanize_secs $(( $(date +%s) - first )))"
+  awk '{print $2}' "$f" | sort | uniq -c | sort -rn
+}
+
 main() {
   local cmd="${1:-}"; [ $# -gt 0 ] && shift
+  _usage_log "${cmd:-attach}"
   case "$cmd" in
     hook)         cmd_hook "$@" ;;                 # hot path — skip migrate
     new)          migrate_meta; cmd_new "$@" ;;
@@ -2409,6 +2475,7 @@ main() {
     _prstate)     pr_state_of "$@"; echo ;;            # for tests
     _slug)        repo_slug "$@"; echo ;;              # for tests
     _cfgdump)     printf 'ctx_warn=%s notify=%s group=%s\n' "${KEL_CTX_WARN:-}" "${KEL_NOTIFY:-}" "${KEL_GROUP:-}" ;;
+    _usage)       cmd_usage ;;                     # the prune pass's instrument
     statusline)   cmd_statusline ;;                # hot path — skip migrate
     jump)         cmd_jump ;;
     cheat)        cmd_cheat ;;

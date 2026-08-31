@@ -29,9 +29,20 @@
                                 # See docs/setup.md for WSL / macOS / Linux recipes.
 
 [fleet]
+# pr           = "on"           # "off" stops kel making ANY network call.
+                                # The `gh` PR lookup is the only one there is;
+                                # off leaves land on local git alone, which
+                                # still gives dirty / unpushed / merged / behind
 # pr_ttl       = 300            # seconds to cache a repo's PR state before re-asking gh
 # restore_cmds = "nvim vim hx nano lazygit lazydocker htop btop k9s"
                                 # pane commands `kel restore` will re-run
+
+[privacy]
+# usage        = "on"           # kel appends "<epoch> <subcommand>" to
+                                # usage.log on each command you run — the
+                                # input for the prune pass. Names only, never
+                                # arguments. `kel _usage` reads it back;
+                                # "off" records nothing.
 
 [go]
 # fleet_bin    = ""             # override the kel-fleet binary (default ~/.local/bin/kel-fleet)

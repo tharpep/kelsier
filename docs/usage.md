@@ -69,6 +69,20 @@ Internal (wired into tmux / Claude Code, you won't call these):
 `kel hook <EVENT>`, `kel statusline`, `kel _board_*`. `kel menu` is a deprecated alias for
 `kel board` — kept one release for muscle memory.
 
+**What kel writes, and where.** Everything lives in
+`${XDG_STATE_HOME:-~/.local/state}/kel/`, which kel keeps at mode `0700` — the
+records carry repo paths, branch names and Claude session ids, and a
+`<window>.state` file carries Claude Code's notification text, which is the
+agent quoting a command back at you.
+
+**What leaves the machine.** One call, `gh api repos/<slug>/pulls`, and only
+from `kel sweep`. It never fires for a repo whose `origin` is not on
+`github.com`, and `pr = "off"` disables it outright — `land` then runs on local
+git alone, which still answers dirty / unpushed / merged / behind. kel makes no
+other network call and never sends anything to an agent API: it does not wrap
+Claude Code, so your code reaches Anthropic by exactly the path it would from a
+bare terminal.
+
 **Shell completion.** `install.sh` drops a bash completion into
 `~/.local/share/bash-completion/completions/kel` and a zsh one on the zsh
 `fpath` (`~/.local/share/zsh/site-functions/_kel`, plus an `fpath+=` line in

@@ -536,7 +536,7 @@ decided by reading. Landed so far —
 That is the whole card. What it did **not** do is answer the docket below,
 which still wants use rather than reasoning.
 
-## v0.9 — the prune pass
+## The prune pass — after v1.0, gated on use
 
 **Theme:** subtract. Everything above was added on the strength of an argument.
 This is where each one has to survive contact with having actually been used.
@@ -586,9 +586,21 @@ Not a rewrite, not a redesign, and not an argument about the non-goals — those
 are settled. Only: remove what is not used, and simplify what is used but
 overbuilt.
 
-**Gate:** a stretch of ordinary use with the whole feature set present. This is
-the one card in the file that genuinely cannot be rushed, because its input is
-evidence rather than reasoning.
+**Gate:** a stretch of ordinary use with the whole feature set present, on both
+machines. This is the one card in the file that genuinely cannot be rushed,
+because its input is evidence rather than reasoning.
+
+**It is no longer a v0.9 card, and it no longer blocks v1.0.** It sat last in
+front of v1.0 while being gated on something no amount of work could produce,
+which pinned a product milestone to a wait. v0.9 shipped as the clarity pass;
+this runs when the evidence exists.
+
+**The instrument exists now.** `kel _usage` reads a counter that appends one
+line — epoch and subcommand name, never arguments — per command you actually
+run. Hot paths, the fleet read, the board preview and background snapshots are
+excluded, so the log is gestures rather than noise. `usage = "off"` disables
+it. Both the counter and `_usage` are scaffolding for this card and should be
+deleted along with it.
 
 ## v0.8 — someone else could install this  ·  **done**
 

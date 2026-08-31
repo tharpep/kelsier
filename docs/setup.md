@@ -187,16 +187,28 @@ about than three silent code paths.
 ```sh
 # ~/.local/bin/kel-toast    (chmod +x)
 #!/bin/sh
+# The body is Claude Code's notification text — the agent quoting a command
+# back at you — so it is untrusted input, not a label you wrote.  PowerShell
+# does no escape processing inside single quotes EXCEPT '' for a literal
+# quote, so doubling them is the whole fix; interpolating raw lets a quote in
+# the text close the string and run what follows.
+t=$(printf '%s' "$1" | sed "s/'/''/g")
+b=$(printf '%s' "$2" | sed "s/'/''/g")
 powershell.exe -NoProfile -Command \
-  "New-BurntToastNotification -Text '$1','$2'" >/dev/null 2>&1
+  "New-BurntToastNotification -Text '$t','$b'" >/dev/null 2>&1
 # needs:  Install-Module -Name BurntToast -Scope CurrentUser
 ```
 
-**macOS.**
+**macOS.** Same hazard, same reason — pass the text as arguments instead of
+building a script out of it, so AppleScript never parses it as code:
 
 ```sh
 #!/bin/sh
-osascript -e "display notification \"$2\" with title \"$1\""
+osascript - "$1" "$2" <<'APPLESCRIPT' >/dev/null 2>&1
+on run argv
+  display notification (item 2 of argv) with title (item 1 of argv)
+end run
+APPLESCRIPT
 ```
 
 **Linux desktop.** `notify-send "$1" "$2"`.

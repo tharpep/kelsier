@@ -148,6 +148,46 @@ ok "rename moves the record"            '[ -f "$SESSIONS/api-gw/beta.json" ] && 
 ok "  ...and leaves the other group"    '[ -f "$SESSIONS/coppermind/alpha.json" ]'
 ok "  ...and rewrites .name"            '[ "$(jq -r .name "$SESSIONS/api-gw/beta.json")" = beta ]'
 
+section "state is private, the network is optional, usage is counted"
+ok "the state dir is 0700"              '[ "$(ls -ld "$XDG_STATE_HOME/kel" | cut -c1-10)" = "drwx------" ]'
+# pr = off must stop the only call that leaves the machine.  Driven through
+# _land rather than through `sweep`: pr_refresh is only reachable for a repo
+# whose origin is on github.com, and none of the suite fixtures are — a sweep
+# here never calls gh either way, so asserting on it proves nothing.
+# %s, not a literal $WORK: single quotes would write the variable NAME into
+# the script, which then has no $WORK set and logs to /gh.calls
+mkdir -p "$WORK/nogh2"
+printf '#!/bin/sh\necho CALLED >> "%s/gh.calls"\nexit 1\n' "$WORK" > "$WORK/nogh2/gh"
+chmod +x "$WORK/nogh2/gh"
+GHR="$WORK/repos/ghrepo"; mkdir -p "$GHR"
+git -C "$GHR" init -q; git -C "$GHR" commit -q --allow-empty -m init 2>/dev/null
+git -C "$GHR" remote add origin https://github.com/example/ghrepo.git
+ok "a github remote yields a slug"      '[ "$("$KEL" _slug "$GHR")" = example/ghrepo ]'
+rm -f "$WORK/gh.calls"
+PATH="$WORK/nogh2:$PATH" "$KEL" _prstate "$GHR" main --pr >/dev/null 2>&1
+ok "pr on reaches gh"                   '[ -f "$WORK/gh.calls" ]'
+rm -f "$WORK/gh.calls" "$XDG_STATE_HOME/kel/pr-cache/"* 2>/dev/null
+PATH="$WORK/nogh2:$PATH" KEL_PR=off "$KEL" _prstate "$GHR" main --pr >/dev/null 2>&1
+ok "  ...and pr = off does not"         '[ ! -f "$WORK/gh.calls" ]'
+# local git answers first and short-circuits: a repo with unpushed work never
+# reaches the gh half at all, whatever pr is set to
+rm -f "$WORK/gh.calls"
+PATH="$WORK/nogh2:$PATH" "$KEL" _land "$GHR" main --pr >/dev/null 2>&1
+ok "  ...and land short-circuits local" '[ ! -f "$WORK/gh.calls" ]'
+ok "  ...still answering unpushed"      '[[ "$("$KEL" _land "$GHR" main)" == unpushed* ]]'
+# the usage counter: user gestures only, names only, never arguments
+rm -f "$XDG_STATE_HOME/kel/usage.log"
+"$KEL" ls >/dev/null 2>&1; "$KEL" go >/dev/null 2>&1
+ok "a command is counted"               '[ -n "$(awk "{print \$2}" "$XDG_STATE_HOME/kel/usage.log" | grep -x ls)" ]'
+ok "  ...with no arguments recorded"    '! grep -q "api-gw\|/" "$XDG_STATE_HOME/kel/usage.log"'
+U="$(grep -c . "$XDG_STATE_HOME/kel/usage.log")"
+"$KEL" status-line >/dev/null 2>&1; "$KEL" _fleet >/dev/null 2>&1; "$KEL" snapshot >/dev/null 2>&1
+printf '{}' | "$KEL" statusline >/dev/null 2>&1
+ok "  ...but hot paths are not counted" '[ "$(grep -c . "$XDG_STATE_HOME/kel/usage.log")" = "$U" ]'
+KEL_USAGE=off "$KEL" ls >/dev/null 2>&1
+ok "  ...and usage = off records none"  '[ "$(grep -c . "$XDG_STATE_HOME/kel/usage.log")" = "$U" ]'
+ok "_usage reads it back"               '[[ "$("$KEL" _usage)" == *invocations* ]]'
+
 section "adopt is its own verb, and move refuses to do its job"
 # move and adopt read the CURRENT window, so they only work from inside a pane
 # -- drive them with send-keys the way a user does, and assert on the record
@@ -174,26 +214,40 @@ in_win() {   # wid  command...  -> runs it in that window pane 0
   [ -n "$pane" ] || return 1
   shift; tmux send-keys -t "$pane" "$*" Enter
 }
+# send, then wait for the effect, and RESEND if it never came.  A shell that
+# has not yet drawn its prompt discards the keys silently, so a single
+# send + wait_until is a coin flip that reddens CI at random — this suite has
+# been bitten by exactly that before (see the wait_until comment above).
+in_win_until() {   # wid  'condition'  command...
+  local wid="$1" cond="$2"; shift 2
+  local try
+  for try in 1 2 3; do
+    in_win "$wid" "$@" || return 1
+    wait_until "$cond" 20 && return 0
+  done
+  return 1
+}
 
 PW="$(plain_win plainwin)"
 ok "the plain window keeps its name"     '[ "$(tmux display-message -p -t "$PW" "#{window_name}")" = plainwin ]'
 # WHERE is pad(11) because "(unmanaged)" is 11 chars; at 10 it rendered as
 # "(unmanaged" and the new column header made that obvious
 ok "  ...and reads (unmanaged), unclipped" '[ -n "$("$KEL" ls 2>/dev/null | grep -F "(unmanaged)")" ]'
-in_win "$PW" "'$KEL' adopt > '$WORK/adopt.out' 2>&1"
-wait_until '[ -f "$SESSIONS/api-gw/plainwin.json" ]'
+in_win_until "$PW" '[ -f "$SESSIONS/api-gw/plainwin.json" ]' "'$KEL' adopt > '$WORK/adopt.out' 2>&1"
 ok "adopt writes a record"              '[ -f "$SESSIONS/api-gw/plainwin.json" ]'
 ok "  ...in the pane repo group"        '[ "$(jq -r .group "$SESSIONS/api-gw/plainwin.json")" = api-gw ]'
 ok "  ...marked inplace"                '[ "$(jq -r .isolation "$SESSIONS/api-gw/plainwin.json")" = inplace ]'
+# agent = what is really in the pane, not $KEL_AGENT: relaunch re-runs this
+# field, and "claude" for an adopted editor would type into your editor
+ok "  ...and records the real command"  '[ "$(jq -r .agent "$SESSIONS/api-gw/plainwin.json")" != claude ]'
+ok "  ...which is the pane shell"       '[ -n "$(jq -r .agent "$SESSIONS/api-gw/plainwin.json" | grep -E "^(bash|sh|zsh|fish|dash)$")" ]'
 ok "  ...and ls stops saying unmanaged" '[ -z "$("$KEL" ls 2>/dev/null | awk "\$2==\"plainwin\"" | grep unmanaged)" ]'
-in_win "$PW" "'$KEL' adopt > '$WORK/a2.out' 2>&1"
-wait_until 'grep -q . "$WORK/a2.out" 2>/dev/null'
+in_win_until "$PW" 'grep -q . "$WORK/a2.out" 2>/dev/null' "'$KEL' adopt > '$WORK/a2.out' 2>&1"
 ok "adopting twice is refused"          'grep -q "already a kel agent" "$WORK/a2.out"'
 
 # move on an unmanaged window must refuse and point at adopt, not adopt silently
 OW="$(plain_win orphan)"
-in_win "$OW" "'$KEL' move coppermind > '$WORK/move.out' 2>&1"
-wait_until 'grep -q . "$WORK/move.out" 2>/dev/null'
+in_win_until "$OW" 'grep -q . "$WORK/move.out" 2>/dev/null' "'$KEL' move coppermind > '$WORK/move.out' 2>&1"
 ok "move refuses an unmanaged window"   'grep -q "kel adopt" "$WORK/move.out"'
 ok "  ...and writes no record for it"   '[ ! -f "$SESSIONS/coppermind/orphan.json" ] && [ ! -f "$SESSIONS/api-gw/orphan.json" ]'
 ok "  ...and leaves it where it was"    '[ "$(tmux display-message -p -t "$OW" "#{session_name}")" = keltest/api-gw ]'
@@ -201,8 +255,7 @@ ok "  ...and leaves it where it was"    '[ "$(tmux display-message -p -t "$OW" "
 # move still does its own job on an agent kel manages.  Driven from the window
 # adopted above rather than from agent `a`: `a` runs the fake agent (sleep
 # 9999), so send-keys there types into sleep, not into a shell.
-in_win "$PW" "'$KEL' move coppermind > '$WORK/mv2.out' 2>&1"
-wait_until '[ -f "$SESSIONS/coppermind/plainwin.json" ]'
+in_win_until "$PW" '[ -f "$SESSIONS/coppermind/plainwin.json" ]' "'$KEL' move coppermind > '$WORK/mv2.out' 2>&1"
 ok "move relocates a managed agent"     '[ -f "$SESSIONS/coppermind/plainwin.json" ] && [ ! -f "$SESSIONS/api-gw/plainwin.json" ]'
 ok "  ...and rewrites .group"           '[ "$(jq -r .group "$SESSIONS/coppermind/plainwin.json")" = coppermind ]'
 ok "  ...and the window followed it"    '[ "$(tmux display-message -p -t "$PW" "#{session_name}")" = keltest/coppermind ]'
