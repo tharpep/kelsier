@@ -38,6 +38,28 @@ jobs:
           bash -n install.sh
           bash -n test/kel-test.sh
           bash -n completions/kel.bash
+          for f in install/*.sh; do bash -n "$f"; done
+
+      # tmux/kel.conf was never parsed by CI, which is how a menu that bound
+      # `w` to two different items shipped: tmux takes the first match and the
+      # shadowed item silently never fires.  The suite now checks menu keys for
+      # uniqueness, but nothing checked that the file PARSES at all.
+      # Isolated socket, because kill-server on the default one is how this
+      # repo once killed a live workspace.
+      - name: tmux/kel.conf parses
+        run: |
+          export TMUX_TMPDIR="$(mktemp -d /tmp/kelci.XXXXXX)"
+          tmux -f /dev/null start-server \; source-file tmux/kel.conf \; kill-server
+          rm -rf "$TMUX_TMPDIR"
+
+      # A broken completion file is otherwise invisible until you press TAB on
+      # a machine you just set up.  Guarded rather than assumed: zsh is the
+      # macOS default but is not guaranteed on the Ubuntu image, and a missing
+      # interpreter should skip the check, not redden the build.
+      - name: zsh completion parses
+        run: |
+          command -v zsh >/dev/null || { echo "no zsh on this runner — skipped"; exit 0; }
+          zsh -n completions/kel.zsh
 
       # `#!/usr/bin/env bash` finds Homebrew's bash 5 on a macOS runner, which
       # would hide a bash-4 construct that the Mac's stock /bin/bash (3.2,
