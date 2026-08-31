@@ -198,7 +198,8 @@ your last group.
 ## Isolation
 
 `inplace` (default) — the agent edits your actual checkout. Right for most
-tasks.
+tasks. `kel ls` shows this as **`repo`** in the WHERE column; `inplace` is the
+word stored on disk, kept so the record format does not change.
 
 `--worktree` — a linked git worktree on a new branch, so two agents can work the
 same repo without colliding. kel then runs the repo's **`.kel/setup`** if

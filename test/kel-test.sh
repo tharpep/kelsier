@@ -123,6 +123,11 @@ NEW coppermind docs
 ok "the same name works in two repos"   '[ "$(wins)" = 2 ]'
 ok "one record per group"               '[ -f "$SESSIONS/api-gw/docs.json" ] && [ -f "$SESSIONS/coppermind/docs.json" ]'
 ok "ls shows both"                      '[ "$("$KEL" ls 2>/dev/null | grep -c "  docs")" = 2 ]'
+# the WHERE column is a render-time rename; the record keeps saying "inplace"
+ok "ls prints a column header"           '[ -n "$("$KEL" ls 2>/dev/null | grep "IDX .*NAME .*STATE .*WHERE .*BRANCH")" ]'
+ok "  ...and an in-place agent is repo"  '[ -n "$("$KEL" ls 2>/dev/null | awk "\$2==\"docs\"" | grep -w repo)" ]'
+ok "  ...while the record says inplace"  '[ "$(jq -r .isolation "$SESSIONS/api-gw/docs.json")" = inplace ]'
+ok "  ...and piped output has no ANSI"   '! "$KEL" ls 2>/dev/null | grep -q "$(printf "\033")"'
 
 section "ambiguity is reported, never guessed"
 out="$("$KEL" kill docs 2>&1)"

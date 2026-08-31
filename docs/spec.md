@@ -198,7 +198,7 @@ name           slug, the tmux window name
 window_id      tmux window id, e.g. @7 — stable; state is keyed by this, not name
 repo           the origin repository (may be empty)
 cwd            where the agent runs
-isolation      inplace | worktree
+isolation      inplace | worktree   (kel ls renders inplace as "repo")
 branch         worktree only
 agent          command run in the window (default: claude)
 group          repo basename (or --group, or misc); tmux session is kel/<group>
@@ -221,6 +221,12 @@ old flat `kel` session until recreated.
 **Isolation is opt-in.** Default `inplace`: the agent edits your actual
 checkout. `--worktree` creates a linked worktree on a new branch so two agents
 can work one repo without colliding.
+
+`kel ls` prints this column as **`repo`** / **`worktree`**: `inplace` is a term
+you have to be taught, and it sits next to `worktree` where it should read as
+the other half of a pair. The rename is render-time only — the field on disk
+stays `inplace`, because a column unwinds in one commit and a format change
+needs a migration.
 
 **Worktree provisioning.** A fresh worktree has no untracked files. After
 creating one, `kel new -w` runs the repo's setup hook if present:

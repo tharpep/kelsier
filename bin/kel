@@ -948,10 +948,22 @@ cmd_ls() {
     return 0
   fi
 
-  printf '%s' "$doc" | jq -r --arg home "$HOME" '
+  # dim the header only on a terminal: `kel ls` is piped by scripts and by the
+  # suite, and escapes in that stream are noise at best.
+  local hdim='' hoff=''
+  [ -t 1 ] && { hdim=$'\033[2m'; hoff=$'\033[0m'; }
+  printf '%s' "$doc" | jq -r --arg home "$HOME" --arg hd "$hdim" --arg ho "$hoff" '
     def money: (. * 100 | round) as $c | "\($c / 100 | floor).\((($c % 100) | tostring) | if length == 1 then "0" + . else . end)";
     def pad($n): (. // "-") | tostring | . + (" " * ($n - length)) | .[0:$n];
-    .agents
+    # WHERE is the on-disk `isolation` field renamed at RENDER time only:
+    # "inplace" is the kel term for "the agent edits your checkout", which tells
+    # a reader nothing next to "worktree".  Deliberately not migrated on disk —
+    # a column unwinds in one commit, a format change needs a migration.
+    def where: if . == "inplace" then "repo" else (. // "-") end;
+    ( $hd + "  " + ("IDX" | pad(4)) + " " + ("NAME" | pad(24)) + " "
+      + ("STATE" | pad(10)) + " " + ("CTX" | pad(5)) + " " + ("WHERE" | pad(10))
+      + " " + ("BRANCH" | pad(12)) + "  PATH" + $ho ),
+    ( .agents
     | sort_by(.group, (.index // 9999))
     | group_by(.group)[]
     | (.[0].group), ( .[] |
@@ -959,12 +971,12 @@ cmd_ls() {
       | ( .name + (if (.panes | length) > 1 then " (" + (.panes | join("|")) + ")" else "" end) | pad(24) ) as $nm
       | ( (.state // "-") | pad(10) ) as $st
       | ( (if .context.pct == null then "-" else "\(.context.pct)%" end) | pad(5) ) as $cx
-      | ( (if .managed then .isolation else "(unmanaged)" end) | pad(10) ) as $iso
+      | ( (if .managed then (.isolation | where) else "(unmanaged)" end) | pad(10) ) as $iso
       | ( (.branch // "-") | pad(12) ) as $br
       | ( (.cwd // "") | sub("^" + $home; "~") ) as $cw
       | ( if (.context.cost_usd // 0) > 0 then "  $" + (.context.cost_usd | money) else "" end ) as $cost
       | "  \($ix) \($nm) \($st) \($cx) \($iso) \($br)  \($cw)\($cost)" ),
-      ""' | sed '$d'
+      "" )' | sed '$d'
 
   if [ -n "$(printf '%s' "$doc" | jq -r '.agents[] | select(.window_id == null) | .name')" ]; then
     echo "  dead = window gone.  kel restore [-c] rebuilds  ·  kel prune discards"
