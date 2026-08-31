@@ -71,7 +71,10 @@ Internal (wired into tmux / Claude Code, you won't call these):
 `kel kill <TAB>` completes agent names; `kel go <TAB>` / `kel move <TAB>`
 complete group names.
 
-Env knobs: `KEL_NOTIFY` (states worth interrupting you for, default `waiting`;
+Settings live in `~/.config/kel/config.toml`, overridden by a per-repo
+`.kel/config.toml`, overridden by the env vars below. Copy
+`examples/config.toml` to get started — every key is listed there with its
+default. Env knobs: `KEL_NOTIFY` (states worth interrupting you for, default `waiting`;
 e.g. `"waiting dead"`), `KEL_NOTIFY_CMD` (a command taking title + body — see
 `setup.md`; kel always does a `tmux display-message` regardless),
 `KEL_CTX_WARN` (context % at which the bar starts showing it, default `70`),

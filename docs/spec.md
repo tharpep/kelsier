@@ -494,9 +494,13 @@ or `jq` is missing.
 - **`tmux`** as the required substrate.
 - **State:** `~/.local/state/kel/` — `tmux` is the source of truth for what's
   alive; these files hold the metadata `tmux` doesn't know.
-- **Config (v1.0):** `~/.config/kel/config.toml` + per-repo `.kel/config.toml`.
-  Today the only knobs are env vars: `KEL_SESSION`, `KEL_AGENT`, `KEL_GROUP`,
-  `KEL_WORKTREES`, `KEL_RESTORE_CMDS`.
+- **Config (v0.8):** `~/.config/kel/config.toml`, overridden by a per-repo
+  `.kel/config.toml`, overridden by an exported `KEL_*` env var — env wins
+  because you typed it for this shell on purpose. A flat `key = value` subset
+  of TOML, not a parser: every knob is a scalar and `[sections]` are
+  decoration. It runs on every invocation including each bar redraw, so it
+  forks nothing unless a config file exists — the search is bash builtins.
+  `examples/config.toml` lists every key.
 
 Portability rule: nothing machine-specific in the script or the schema.
 

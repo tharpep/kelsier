@@ -320,6 +320,26 @@ ok "keeps the dirty one"                 '[ -d "$SWT/sw-messy" ] && [ -f "$SESSI
 ok "  ...and says why for each"          'o="$("$KEL" sweep 2>&1)"; [[ "$o" == *"uncommitted work"* ]]'
 ok "-f still refuses uncommitted work"   '"$KEL" sweep -f >/dev/null 2>&1; [ -d "$SWT/sw-messy" ]'
 
+section "config.toml (#10-adjacent, v0.8)"
+reset
+CH="$WORK/cfghome"; mkdir -p "$CH/.config/kel" "$WORK/repos/api-gw/.kel"
+printf 'ctx_warn = 55\nnotify = "waiting dead"\n' > "$CH/.config/kel/config.toml"
+CFG() { HOME="$CH" XDG_CONFIG_HOME="$CH/.config" bash -c "cd '$1' && '$KEL' _cfgdump"; }
+ok "the user config is read"             '[[ "$(CFG "$CH")" == *"ctx_warn=55"* ]]'
+ok "  ...including multi-word values"    '[[ "$(CFG "$CH")" == *"notify=waiting dead"* ]]'
+printf 'ctx_warn = 80\n' > "$WORK/repos/api-gw/.kel/config.toml"
+ok "a repo config outranks the user one" '[[ "$(CFG "$WORK/repos/api-gw")" == *"ctx_warn=80"* ]]'
+ok "  ...and inherits what it omits"     '[[ "$(CFG "$WORK/repos/api-gw")" == *"notify=waiting dead"* ]]'
+mkdir -p "$WORK/repos/api-gw/a/b"
+ok "  ...and applies in subdirectories"  '[[ "$(CFG "$WORK/repos/api-gw/a/b")" == *"ctx_warn=80"* ]]'
+ok "an exported var outranks both"       '[[ "$(HOME="$CH" XDG_CONFIG_HOME="$CH/.config" KEL_CTX_WARN=99 bash -c "cd $WORK/repos/api-gw && \"$KEL\" _cfgdump")" == *"ctx_warn=99"* ]]'
+printf '[section]\n# a comment\n\n  ctx_warn   =   42   # trailing\n' > "$CH/.config/kel/config.toml"
+rm -f "$WORK/repos/api-gw/.kel/config.toml"
+ok "sections, comments and spacing"      '[[ "$(CFG "$CH")" == *"ctx_warn=42"* ]]'
+printf 'nonsense line with no equals\nBAD_KEY = 1\nctx_warn = 7\n' > "$CH/.config/kel/config.toml"
+ok "junk lines are skipped, not fatal"   '[[ "$(CFG "$CH")" == *"ctx_warn=7"* ]]'
+ok "the shipped example parses"          'HOME="$CH" XDG_CONFIG_HOME="$CH/.config" bash -c "mkdir -p $CH/.config/kel && cp $HERE/../examples/config.toml $CH/.config/kel/config.toml && cd $CH && \"$KEL\" _cfgdump" >/dev/null'
+
 # ---------------------------------------------------------------- restore
 section "restore rebuilds the workspace and keeps the snapshot"
 reset

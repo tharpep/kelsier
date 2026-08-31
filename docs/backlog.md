@@ -366,7 +366,7 @@ recorded session id) in the existing window, touching nothing else.
   versioned — a real interface, not a scrape. `kel statusline` records it to
   `<wid>.ctx`; the bar, `kel ls --json` and the board read it. The lesson worth
   keeping: this sat parked for a release because the search was for a *hook*.
-- ~~**Config file / theming**~~ — **un-parked, scheduled for v0.8.**
+- ~~**Config file / theming**~~ — **shipped v0.8.**
   (`~/.config/kel/config.toml` + `.kel/config.toml`): status-line format,
   colours, state glyphs, board size, keybind opt-outs, the `KEL_*` env vars
   migrated in. It was parked behind "the v1.0 Go rewrite", which no longer

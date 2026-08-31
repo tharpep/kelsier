@@ -32,6 +32,59 @@
 #   kel statusline             Claude Code statusLine — context % / cost
 set -uo pipefail
 
+# --------------------------------------------------------------------------
+# config  —  ~/.config/kel/config.toml, and a per-repo .kel/config.toml
+# --------------------------------------------------------------------------
+# Deliberately a flat `key = value` subset of TOML, not a parser: every knob
+# kel has is a scalar, and a real parser would be a dependency for nothing.
+# Sections are ignored, so `[ui]` above a key is decoration.
+#
+# Precedence: an exported KEL_* env var  >  repo .kel/config.toml  >  user
+# config.toml  >  built-in default. Env wins because it is the more explicit
+# statement — you typed it for this shell, on purpose.
+#
+# This runs on EVERY invocation including each status-bar redraw, so it forks
+# nothing unless a config file actually exists: the search is bash builtins,
+# and awk is spawned only for a file that is really there. A first cut used
+# `git rev-parse` to find the repo root and cost 5ms on every single call.
+kel_config_read() {   # file
+  local line
+  while IFS= read -r line || [ -n "$line" ]; do
+    # trim leading whitespace FIRST: an indented key would otherwise parse as
+    # empty, and an indented comment would not be recognised as one
+    line="${line#"${line%%[![:space:]]*}"}"
+    case "$line" in ''|\#*|\[*) continue ;; esac
+    [ -n "${line##*=*}" ] && continue
+    local key="${line%%=*}" val="${line#*=}"
+    key="${key%%[[:space:]]*}"
+    val="${val%%#*}"
+    val="${val#"${val%%[![:space:]]*}"}"; val="${val%"${val##*[![:space:]]}"}"
+    val="${val%\"}"; val="${val#\"}"
+    val="${val%\'}"; val="${val#\'}"
+    case "$key" in ''|*[!a-z0-9_]*) continue ;; esac
+    local up=''
+    case "$key" in *) up="$(printf '%s' "$key" | tr '[:lower:]' '[:upper:]')" ;; esac
+    local envname="KEL_$up"
+    [ -n "${!envname:-}" ] && continue        # never override an exported var
+    export "$envname=$val"
+  done < "$1"
+}
+
+kel_config_load() {
+  local user="${XDG_CONFIG_HOME:-$HOME/.config}/kel/config.toml"
+  # walk up for a repo config using builtins only — no git, no forks
+  local d="$PWD" repo=''
+  while [ -n "$d" ] && [ "$d" != / ] && [ "$d" != "$HOME" ]; do
+    [ -f "$d/.kel/config.toml" ] && { repo="$d/.kel/config.toml"; break; }
+    d="${d%/*}"
+  done
+  # Highest precedence first: the "already set" guard makes this first-write-
+  # wins, so the repo config has to be read BEFORE the user one, not after.
+  [ -n "$repo" ] && kel_config_read "$repo"
+  [ -f "$user" ] && kel_config_read "$user"
+}
+kel_config_load
+
 KEL_PREFIX="${KEL_SESSION:-kel}"          # tmux sessions are  <prefix>/<group>
 KEL_AGENT="${KEL_AGENT:-claude}"
 STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/kel"
@@ -2106,6 +2159,7 @@ main() {
     _land)        land_of "$@"; echo ;;                # for tests
     _prstate)     pr_state_of "$@"; echo ;;            # for tests
     _slug)        repo_slug "$@"; echo ;;              # for tests
+    _cfgdump)     printf 'ctx_warn=%s notify=%s group=%s\n' "${KEL_CTX_WARN:-}" "${KEL_NOTIFY:-}" "${KEL_GROUP:-}" ;;
     statusline)   cmd_statusline ;;                # hot path — skip migrate
     jump)         cmd_jump ;;
     cheat)        cmd_cheat ;;

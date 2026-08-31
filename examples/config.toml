@@ -1,0 +1,38 @@
+# kelsier config — copy to ~/.config/kel/config.toml
+#
+# Every setting here is optional; the value shown is the default. A per-repo
+# .kel/config.toml overrides this file, and an exported KEL_* environment
+# variable overrides both — env wins because you typed it for this shell on
+# purpose.
+#
+# Section headers are decoration. kel reads flat `key = value` pairs and
+# ignores [sections], so group things however reads best to you.
+
+[workspace]
+# session      = "kel"          # tmux session prefix: sessions are <prefix>/<group>
+# agent        = "claude"       # what `kel new` launches
+# group        = ""             # force every new agent into ONE group, ignoring the repo
+# worktrees    = ""             # where `kel new -w` puts worktrees
+                                # (default: <parent-of-repo>/.kel-worktrees)
+
+[ui]
+# ctx_warn     = 70             # context % at which the status bar starts showing it
+# board_w      = "90%"          # the board popup
+# board_h      = "85%"
+# top_w        = "90%"          # the kel top popup
+# top_h        = "80%"
+
+[notify]
+# notify       = "waiting"      # states worth interrupting you for, space separated
+                                # e.g. "waiting dead"
+# notify_cmd   = ""             # a command taking title + body; run in the background.
+                                # See docs/setup.md for WSL / macOS / Linux recipes.
+
+[fleet]
+# pr_ttl       = 300            # seconds to cache a repo's PR state before re-asking gh
+# restore_cmds = "nvim vim hx nano lazygit lazydocker htop btop k9s"
+                                # pane commands `kel restore` will re-run
+
+[go]
+# fleet_bin    = ""             # override the kel-fleet binary (default ~/.local/bin/kel-fleet)
+# top_bin      = ""             # override the kel-top binary
