@@ -321,7 +321,7 @@ loader can absorb, not a sourced bash fragment.
 **Gate:** when you type the same `kel new … && tmux split … && …` twice.
 ~50 LOC.
 
-### 11. `install.sh --uninstall`  ·  `[fits — release blocker]`
+### 11. `install.sh --uninstall`  ·  `[fits — release blocker]`  ·  **shipped v0.8**
 
 Unwind the symlink, the `.tmux.conf` source line, and the `settings.json` hook
 merge — the `.kel-bak.*` copies make it safe. Not urgent (this is a personal

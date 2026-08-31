@@ -22,6 +22,85 @@ say() { printf '\033[1;33m>>> %s\033[0m\n' "$*"; }
 command -v jq   >/dev/null || { echo "kel: jq is required"   >&2; exit 1; }
 command -v tmux >/dev/null || { echo "kel: tmux is required" >&2; exit 1; }
 
+# --------------------------------------------------------------------------
+# --uninstall  —  put the machine back
+# --------------------------------------------------------------------------
+# Every line install.sh writes outside this repo has an inverse here. Your
+# agents and their records are NOT touched unless you also pass --purge:
+# uninstalling the tool should never be able to lose work.
+if [ "${1:-}" = "--uninstall" ]; then
+  purge=0; [ "${2:-}" = "--purge" ] && purge=1
+  say "uninstalling kelsier"
+
+  for f in "$BIN_DIR/kel" "$BIN_DIR/kel-fleet" "$BIN_DIR/kel-top"; do
+    [ -e "$f" ] || [ -L "$f" ] || continue
+    rm -f "$f" && echo "  removed $f"
+  done
+
+  BASH_COMPDIR="${XDG_DATA_HOME:-$HOME/.local/share}/bash-completion/completions"
+  ZSH_FPATH_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/zsh/site-functions"
+  for f in "$BASH_COMPDIR/kel" "$ZSH_FPATH_DIR/_kel"; do
+    [ -e "$f" ] || [ -L "$f" ] || continue
+    rm -f "$f" && echo "  removed $f"
+  done
+  if [ -f "$HOME/.zshrc" ] && grep -qF "$ZSH_FPATH_DIR" "$HOME/.zshrc"; then
+    cp "$HOME/.zshrc" "$HOME/.zshrc.kel-bak.$(date +%s)"
+    grep -vF -e "# kelsier completion" -e "fpath+=($ZSH_FPATH_DIR)" "$HOME/.zshrc" > "$HOME/.zshrc.new" \
+      && mv "$HOME/.zshrc.new" "$HOME/.zshrc"
+    echo "  removed the fpath line from ~/.zshrc (backed up)"
+  fi
+
+  if [ -f "$HOME/.config/tmux/tmux.conf" ]; then TMUX_CONF="$HOME/.config/tmux/tmux.conf"; else TMUX_CONF="$HOME/.tmux.conf"; fi
+  SRC_LINE="source-file $KEL_DIR/tmux/kel.conf"
+  if [ -f "$TMUX_CONF" ] && grep -qF "$SRC_LINE" "$TMUX_CONF"; then
+    cp "$TMUX_CONF" "$TMUX_CONF.kel-bak.$(date +%s)"
+    grep -vF -e "# kelsier" -e "$SRC_LINE" "$TMUX_CONF" > "$TMUX_CONF.new" && mv "$TMUX_CONF.new" "$TMUX_CONF"
+    echo "  removed the source-file line from $TMUX_CONF (backed up)"
+  fi
+
+  if [ -f "$SETTINGS" ]; then
+    cp "$SETTINGS" "$SETTINGS.kel-bak.$(date +%s)"
+    tmp="$(mktemp)"
+    # drop kel's hook entries and, if kel displaced one, restore the statusLine
+    # it replaced rather than just deleting ours
+    PREV_FILE="$HOME/.claude/statusline-prev"
+    PREV=''
+    [ -f "$PREV_FILE" ] && PREV="$(grep -v '^#' "$PREV_FILE" | grep -v '^$' | head -1)"
+    jq --arg prev "$PREV" '
+      def strip_kel:
+        map(.hooks |= map(select((.command // "") | test("kel[ -]hook|kel-hook\\.sh") | not)))
+        | map(select((.hooks | length) > 0));
+      (if .hooks then .hooks |= with_entries(.value |= strip_kel) else . end)
+      | (if .hooks then .hooks |= with_entries(select((.value | length) > 0)) else . end)
+      | (if (.hooks // {}) == {} then del(.hooks) else . end)
+      | if ((.statusLine.command // "") | test("kel statusline"))
+        then (if $prev == "" then del(.statusLine)
+              else .statusLine = {type:"command", command:$prev} end)
+        else . end
+    ' "$SETTINGS" > "$tmp" && mv "$tmp" "$SETTINGS"
+    echo "  unwired hooks + statusLine from $SETTINGS (backed up)"
+    if [ -n "$PREV" ]; then
+      echo "  restored the statusLine kel displaced: $PREV"
+      rm -f "$PREV_FILE"
+    fi
+  fi
+
+  if [ "$purge" = 1 ]; then
+    printf '\033[1;31m>>> purge: delete %s and every agent record in it? [y/N] \033[0m' "$STATE_DIR"
+    read -r a || a=n
+    case "$a" in
+      y|Y|yes) rm -rf "$STATE_DIR"; echo "  removed $STATE_DIR" ;;
+      *)       echo "  kept $STATE_DIR" ;;
+    esac
+  else
+    echo "  kept $STATE_DIR  (your agents and records — --purge also removes it)"
+  fi
+
+  say "done — kel is gone. Nothing in this repo was changed."
+  echo "  running tmux sessions are untouched; 'tmux kill-server' when you're ready."
+  exit 0
+fi
+
 say "directories"
 mkdir -p "$BIN_DIR" "$STATE_DIR" "$STATE_DIR/sessions" "$STATE_DIR/.stash"
 

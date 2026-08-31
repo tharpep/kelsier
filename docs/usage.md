@@ -12,8 +12,12 @@ tmux source-file ~/.tmux.conf     # pick up kel.conf changes
 ```
 
 `install.sh` symlinks `bin/kel` to `~/.local/bin`, makes `~/.tmux.conf` source
-`tmux/kel.conf`, and merges the 5 state hooks + the `statusLine` into
-`~/.claude/settings.json`
+`tmux/kel.conf`, and merges the 7 state hooks + the `statusLine` into
+`~/.claude/settings.json`. **`./install.sh --uninstall` reverses all of it** —
+symlinks, completions, the `~/.tmux.conf` line, the `~/.zshrc` fpath line and
+the `settings.json` merge, restoring any `statusLine` kel displaced. It leaves
+`~/.local/state/kel` alone, because uninstalling the tool must not be able to
+lose your work; `--uninstall --purge` removes that too, after asking
 (non-clobbering, idempotent — a `.kel-bak.<epoch>` copy is kept each run).
 
 ## Commands
