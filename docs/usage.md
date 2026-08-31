@@ -39,6 +39,8 @@ kel board              the fleet browser — fuzzy filter + preview  (Ctrl+Space
                        or prefix b).  enter jumps; tab = act on the highlighted
                        agent (jump / new here / rename / go to group / kill)
 kel top                the fleet dashboard (also prefix t) — every agent, sorted
+                       with a LAND column naming what each branch still needs
+                       (dirty / unpushed / behind / no PR / in review / merged)
                        by who needs you. j/k scroll, s cycles sort
                        (triage/ctx/cost), / filters, q quits. Needs the Go
                        build; `kel doctor` says whether you have it

@@ -195,7 +195,7 @@ if command -v go >/dev/null 2>&1 && (cd "$HERE/.." && go build -o "$GOBIN_FLEET"
   cp "$SESSIONS/coppermind/sazed.json" "$SESSIONS/coppermind/ghost.json"
   jq '.name="ghost"' "$SESSIONS/coppermind/ghost.json" > "$WORK/g" && mv "$WORK/g" "$SESSIONS/coppermind/ghost.json"
   norm() { jq -S 'del(.generated_at)'; }
-  for flag in "" "--dirty"; do
+  for flag in "" "--dirty" "--land"; do
     "$KEL" _fleet $flag | norm > "$WORK/bash.json"
     KEL_FLEET_BIN=/nonexistent "$KEL" _fleet $flag | norm > "$WORK/bash2.json"
     "$GOBIN_FLEET" $flag       | norm > "$WORK/go.json"
@@ -236,6 +236,31 @@ if command -v go >/dev/null 2>&1 && (cd "$HERE/.." && go build -o "$GOBIN_TOP" .
 else
   echo "  skip  (no Go toolchain)"
 fi
+
+section "land: one verb per row, degrading without gh (#6)"
+reset
+NEW api-gw solo
+L() { "$KEL" _land "$1" "${2:-}" | tr '\t' '/'; }
+ok "a repo with no remote is clean"      '[ "$(L "$WORK/repos/api-gw")" = "clean/" ]'
+echo wip > "$WORK/repos/api-gw/wip.txt"
+ok "uncommitted work -> dirty N"         '[ "$(L "$WORK/repos/api-gw")" = "dirty/1" ]'
+( cd "$WORK/repos/api-gw" && git add -A && git -c user.email=t@t -c user.name=t commit -qm w ) >/dev/null 2>&1
+ok "committed, no remote -> clean"       '[ "$(L "$WORK/repos/api-gw")" = "clean/" ]'
+ok "a non-git directory is clean"        '[ "$(L /tmp)" = "clean/" ]'
+ok "a missing directory is clean"        '[ "$(L "$WORK/nope")" = "clean/" ]'
+# a remote makes unpushed meaningful
+git -C "$WORK/repos/coppermind" remote add origin "$WORK/repos/api-gw" 2>/dev/null
+echo z > "$WORK/repos/coppermind/z.txt"
+( cd "$WORK/repos/coppermind" && git add -A && git -c user.email=t@t -c user.name=t commit -qm z ) >/dev/null 2>&1
+ok "commits no remote has -> unpushed N" '[[ "$(L "$WORK/repos/coppermind")" == unpushed/* ]]'
+ok "a non-GitHub remote is never unknown" '[[ "$(L "$WORK/repos/coppermind")" != unknown/* ]]'
+ok "--land fills the document"           '[ "$("$KEL" _fleet --land | jq -r ".agents[0].land.code")" != null ]'
+ok "  ...and plain _fleet leaves it null" '[ "$("$KEL" _fleet | jq -r ".agents[0].land")" = null ]'
+ok "  ...and costs no network"           'KEL_PR_TTL=0 timeout 5 "$KEL" _fleet --land >/dev/null'
+# bin/kel updates on pull; kel-fleet only on install.sh, so a stale binary that
+# rejects a new flag is a normal transient state and must not break the command
+printf '#!/bin/sh\nexit 2\n' > "$WORK/stale"; chmod +x "$WORK/stale"
+ok "a broken kel-fleet falls back to bash" 'KEL_FLEET_BIN="$WORK/stale" "$KEL" _fleet --land | jq -e ".agents" >/dev/null'
 
 # ---------------------------------------------------------------- restore
 section "restore rebuilds the workspace and keeps the snapshot"

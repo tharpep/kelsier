@@ -156,6 +156,35 @@ func humanizeSecs(s int64) string {
 
 func money(v float64) string { return fmt.Sprintf("$%.2f", v) }
 
+// landCell turns the land code into the verb it implies. Blank for clean —
+// a row with nothing to do should be quiet, not say "clean" in every line.
+func landCell(l *fleet.Land) (text, colour string) {
+	if l == nil {
+		return "", ""
+	}
+	n := 0
+	if l.N != nil {
+		n = int(*l.N)
+	}
+	switch l.Code {
+	case "dirty":
+		return fmt.Sprintf("dirty %d", n), yellow
+	case "unpushed":
+		return fmt.Sprintf("unpushed %d", n), yellow
+	case "behind":
+		return fmt.Sprintf("behind %d", n), yellow
+	case "merged":
+		return "merged", green + bold
+	case "review":
+		return "in review", cyan
+	case "no_pr":
+		return "no PR", purple
+	case "unknown":
+		return "?", dim
+	}
+	return "", ""
+}
+
 func truncate(s string, n int) string {
 	if n <= 0 {
 		return ""
@@ -168,6 +197,24 @@ func truncate(s string, n int) string {
 		return "…"
 	}
 	return string(r[:n-1]) + "…"
+}
+
+// tidy strips trailing blanks from a rendered row. A plain TrimRight is not
+// enough: a padded coloured cell puts its spaces BEFORE the reset sequence, so
+// they hide at the end of the line behind an escape.
+func tidy(s string) string {
+	for {
+		if strings.HasSuffix(s, reset) {
+			s = strings.TrimSuffix(s, reset)
+			continue
+		}
+		if strings.HasSuffix(s, " ") {
+			s = strings.TrimRight(s, " ")
+			continue
+		}
+		break
+	}
+	return s + reset
 }
 
 func pad(s string, n int) string {
@@ -201,7 +248,7 @@ func refresh() tea.Cmd {
 func (m model) Init() tea.Cmd { return refresh() }
 
 func (m *model) reload() {
-	doc := fleet.Load(true)
+	doc := fleet.Load(fleet.Options{Dirty: true, Land: true})
 	m.agents = doc.Agents
 	sortAgents(m.agents, m.mode, time.Now().Unix())
 	ids := make([]string, 0, len(m.agents))
@@ -306,12 +353,26 @@ func (m model) render() string {
 		wFor   = 6
 		wCtx   = 7
 		wCost  = 8
+		wLand  = 11
 	)
-	fixed := 2 + wGroup + 1 + wAgent + 1 + wState + 1 + wFor + 1 + wCtx + 1 + wCost + 1
+	// Column priority as the window narrows. LAND outranks LAST OUTPUT
+	// deliberately: it names an action, where a truncated prompt string mostly
+	// does not. Whatever is dropped gives its width back to what remains.
+	showCtx := w >= 58
+	showCost := w >= 66
+	showLand := w >= 74
+	fixed := 2 + wGroup + 1 + wAgent + 1 + wState + 1 + wFor + 1
+	if showCtx {
+		fixed += wCtx + 1
+	}
+	if showCost {
+		fixed += wCost + 1
+	}
+	if showLand {
+		fixed += wLand + 1
+	}
 	wLast := w - fixed
 	showLast := wLast >= 12
-	showCost := w >= 66
-	showCtx := w >= 58
 
 	var b strings.Builder
 	hdr := "  " + pad("GROUP", wGroup) + " " + pad("AGENT", wAgent) + " " +
@@ -321,6 +382,9 @@ func (m model) render() string {
 	}
 	if showCost {
 		hdr += " " + pad("$", wCost)
+	}
+	if showLand {
+		hdr += " " + pad("LAND", wLand)
 	}
 	if showLast {
 		hdr += " " + "LAST OUTPUT"
@@ -388,6 +452,14 @@ func (m model) render() string {
 			}
 			line += " " + pad(c, wCost)
 		}
+		if showLand {
+			lt, lc := landCell(a.Land)
+			if lc != "" {
+				line += " " + lc + pad(lt, wLand) + reset
+			} else {
+				line += " " + pad(lt, wLand)
+			}
+		}
 		if showLast {
 			out := ""
 			if a.WindowID != nil {
@@ -395,7 +467,7 @@ func (m model) render() string {
 			}
 			line += " " + dim + truncate(out, wLast) + reset
 		}
-		b.WriteString(strings.TrimRight(line, " ") + "\n")
+		b.WriteString(tidy(line) + "\n")
 	}
 
 	// footer

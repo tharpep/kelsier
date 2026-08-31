@@ -288,6 +288,37 @@ record says `working` / `waiting` but the window's only live process is a bare
 shell, the effective state becomes `dead` (bar suffix `x`, red). `kel ls` shows
 `dead`; the board still lists it so you can kill or restart it.
 
+### 9d. Land state (v0.7)
+
+`land` answers *what would it take to land this branch?* as one code naming the
+next action — not a ready/not-ready boolean, which would collapse five
+situations that each need something different done to them.
+
+| code | means | you |
+|---|---|---|
+| `dirty N` | uncommitted work | commit it |
+| `unpushed N` | commits only you have | push |
+| `merged` | its PR landed | sweep it |
+| `review` | PR open | wait, or nudge |
+| `behind N` | base moved under you | rebase |
+| `no_pr` | pushed, nothing opened | open one |
+| `clean` | nothing to say (incl. on the base branch, or 0 commits ahead) | — |
+| `unknown` | `gh` could not answer the PR half | — |
+
+Precedence is that order. It stops at *which* action, never *what changed* —
+the moment you want the diff that is `lazygit` (`backlog.md` R5).
+
+`dirty` / `unpushed` / `behind` are pure local git, so an unusable token costs
+the three PR states and leaves the rest honest: the column degrades, it does
+not go dark. A repo with no GitHub remote reads `clean`, not `unknown` — there
+is no PR question to fail at.
+
+**Cost.** `gh pr status` is ~2s and answers for one branch; the pulls endpoint
+is ~0.6s and answers for all of them, so it is **one request per repo**, cached
+under `pr-cache/` for `KEL_PR_TTL` (default 300s). `--land` reads that cache and
+never touches the network; only `--pr` may refresh it, and nothing on a refresh
+path passes `--pr`.
+
 ### 9c. The fleet document (v0.6)
 
 `kel _fleet [--dirty]` computes the whole fleet **once** and prints it as one

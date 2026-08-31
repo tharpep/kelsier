@@ -48,6 +48,7 @@ type Agent struct {
 	ClaudeSession *string  `json:"claude_session"`
 	Compactions   *float64 `json:"compactions"`
 	Dirty         *float64 `json:"dirty"`
+	Land          *Land    `json:"land"`
 	Panes         []string `json:"panes"`
 	Activity      *float64 `json:"activity"`
 	Context       *Context `json:"context"`
@@ -144,9 +145,17 @@ func groupOf(session, pfx string) (string, bool) {
 	return "", false
 }
 
-// Load assembles the fleet document. withDirty runs `git status` per distinct
-// worktree, which is the expensive part — the status bar never asks for it.
-func Load(withDirty bool) Doc {
+// Options selects the expensive extras. The status bar asks for none of them;
+// `kel top` asks for Dirty+Land; only PR may touch the network.
+type Options struct {
+	Dirty bool
+	Land  bool
+	PR    bool // may refresh the PR cache — never on a refresh path
+}
+
+// Load assembles the fleet document.
+func Load(o Options) Doc {
+	withDirty := o.Dirty || o.Land || o.PR
 	sd := stateDir()
 	sessionsDir := filepath.Join(sd, "sessions")
 	pfx := prefix()
@@ -258,6 +267,11 @@ func Load(withDirty bool) Doc {
 		recMap[recGroup(r)+" "+r.Name] = r
 	}
 
+	lands := map[string]*Land{}
+	if o.Land || o.PR {
+		lands = landMap(records, o.PR)
+	}
+
 	// dirty is a property of the directory, not the window
 	dirtyMap := map[string]*float64{}
 	if withDirty {
@@ -328,6 +342,7 @@ func Load(withDirty bool) Doc {
 			a.AgentCmd, a.ClaudeSession, a.Compactions = rec.Agent, rec.ClaudeSession, rec.Compactions
 			if rec.Cwd != nil {
 				a.Dirty = dirtyMap[*rec.Cwd]
+				a.Land = lands[*rec.Cwd]
 			}
 		}
 		agents = append(agents, a)
@@ -355,6 +370,7 @@ func Load(withDirty bool) Doc {
 		}
 		if r.Cwd != nil {
 			a.Dirty = dirtyMap[*r.Cwd]
+			a.Land = lands[*r.Cwd]
 		}
 		agents = append(agents, a)
 	}

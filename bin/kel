@@ -527,6 +527,143 @@ cmd_prune() {
 # kel ls
 # --------------------------------------------------------------------------
 # --------------------------------------------------------------------------
+# land state  —  "what would it take to land this branch?"  (#6)
+# --------------------------------------------------------------------------
+# One column, one verb per row.  ready/not-ready would collapse five different
+# situations that each imply a different next action; naming the action is the
+# whole point of a fleet glance.  It stops at *which* action — never what
+# changed.  The moment you want the diff, that is lazygit (backlog R5).
+#
+# Precedence, most-blocking first:
+#   dirty N    uncommitted work                 -> commit it
+#   unpushed N commits only you have            -> push
+#   merged     its PR landed                    -> sweepable
+#   review     PR open                          -> wait, or nudge
+#   behind N   base moved under you             -> rebase
+#   no_pr      pushed, no PR                    -> open one
+#   clean      nothing to say
+#   unknown    gh could not answer the PR half
+#
+# The first two and `behind` are pure local git: no network, no token. Only the
+# PR states need gh, so an expired token costs you those three and leaves the
+# rest honest — the column degrades, it does not go dark.
+base_ref() {   # repo-dir -> the branch this one is trying to land on
+  local d="$1" b
+  b="$(git -C "$d" symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null)" && { printf '%s' "$b"; return; }
+  for b in origin/main origin/master main master; do
+    git -C "$d" rev-parse --verify --quiet "$b" >/dev/null 2>&1 && { printf '%s' "$b"; return; }
+  done
+}
+
+land_of() {   # cwd [branch] [--pr]  ->  code	n
+  local d="$1" br="${2:-}" want_pr="${3:-}" n
+  [ -n "$d" ] && git -C "$d" rev-parse --git-dir >/dev/null 2>&1 || { printf 'clean	'; return; }
+  # an inplace agent has no recorded branch — ask the worktree
+  [ -n "$br" ] && [ "$br" != "-" ] || br="$(git -C "$d" rev-parse --abbrev-ref HEAD 2>/dev/null)"
+
+  n="$(git -C "$d" status --porcelain 2>/dev/null | grep -c . || true)"
+  [ "${n:-0}" -gt 0 ] && { printf 'dirty	%s' "$n"; return; }
+
+  if has_remote "$d"; then
+    n="$(git -C "$d" log --oneline HEAD --not --remotes 2>/dev/null | grep -c . || true)"
+    [ "${n:-0}" -gt 0 ] && { printf 'unpushed	%s' "$n"; return; }
+  fi
+
+  # PR state outranks `behind`: a merged branch is sweepable regardless, and an
+  # open PR is someone else's turn.  Falls through when gh can't answer.
+  local pr; pr="$(pr_state_of "$d" "$br" "$want_pr")"
+  case "$pr" in
+    merged) printf 'merged	';  return ;;
+    open)   printf 'review	';  return ;;
+  esac
+
+  local base behind
+  base="$(base_ref "$d")"
+  # standing on the base branch itself: nothing to land, and "no PR" would be
+  # suggesting an action that does not exist
+  [ -n "$base" ] && [ "$br" = "${base#origin/}" ] && { printf 'clean\t'; return; }
+  if [ -n "$base" ]; then
+    behind="$(git -C "$d" rev-list --count "HEAD...$base" --right-only 2>/dev/null || true)"
+    [ "${behind:-0}" -gt 0 ] && { printf 'behind	%s' "$behind"; return; }
+    # nothing ahead of base means there is nothing to land: a freshly created
+    # worktree branch should not nag you to open a PR for zero commits
+    local ahead; ahead="$(git -C "$d" rev-list --count "$base...HEAD" --right-only 2>/dev/null || true)"
+    [ "${ahead:-0}" -eq 0 ] 2>/dev/null && { printf 'clean	'; return; }
+  fi
+
+  case "$pr" in
+    none)    printf 'no_pr	' ;;
+    unknown) printf 'unknown	' ;;
+    *)       printf 'clean	' ;;   # na, or nothing left to say
+  esac
+}
+
+# --- the PR half: ONE gh call per repo, cached ------------------------------
+# `gh pr status` costs ~2s and answers for one branch; `gh api .../pulls`
+# costs ~0.6s and answers for all of them.  With six worktrees off one repo
+# that is one request instead of six, and it is cached besides.  Nothing on a
+# refresh path ever fetches: without --pr this reads the cache or says unknown.
+PR_CACHE_DIR="$STATE_DIR/pr-cache"
+PR_CACHE_TTL="${KEL_PR_TTL:-300}"
+
+repo_slug() {   # cwd -> owner/repo, or empty when it isn't a GitHub remote
+  local u; u="$(git -C "$1" remote get-url origin 2>/dev/null)" || return 0
+  case "$u" in
+    *github.com[:/]*) ;;
+    *) return 0 ;;
+  esac
+  u="${u##*github.com}"; u="${u#:}"; u="${u#/}"; u="${u%.git}"
+  case "$u" in */*) printf '%s' "$u" ;; esac
+}
+
+pr_cache_file() { # cwd -> cache path, or empty
+  local slug; slug="$(repo_slug "$1")"; [ -n "$slug" ] || return 0
+  printf '%s/%s.json' "$PR_CACHE_DIR" "${slug//\//__}"
+}
+
+pr_refresh() {  # cwd — refetch when the cache is stale; silent on any failure
+  local f slug age
+  f="$(pr_cache_file "$1")"; [ -n "$f" ] || return 0
+  slug="$(repo_slug "$1")"
+  if [ -f "$f" ]; then
+    local ts=0; read -r ts < "$f.at" 2>/dev/null || ts=0
+    case "$ts" in ''|*[!0-9]*) ts=0 ;; esac
+    age=$(( $(date +%s) - ts ))
+    [ "$age" -lt "$PR_CACHE_TTL" ] && return 0
+  fi
+  command -v gh >/dev/null 2>&1 || return 0
+  mkdir -p "$PR_CACHE_DIR"
+  local tmp; tmp="$(mktemp "$PR_CACHE_DIR/.p.XXXXXX")" || return 0
+  if gh api "repos/$slug/pulls?state=all&per_page=100" \
+       --jq '[.[] | {branch: .head.ref, merged: (.merged_at != null), state: .state}]' \
+       > "$tmp" 2>/dev/null && [ -s "$tmp" ]; then
+    mv -f "$tmp" "$f"; date +%s > "$f.at"
+  else
+    # an empty array is a legitimate answer (no PRs); a failure is not
+    if [ -f "$tmp" ] && [ "$(cat "$tmp")" = "[]" ]; then
+      printf '[]' > "$f"; date +%s > "$f.at"
+    fi
+    rm -f "$tmp"
+  fi
+}
+
+pr_state_of() { # cwd branch [--pr] -> merged | open | none | unknown | na
+  # `na` is not `unknown`: a repo with no GitHub remote has no PR question to
+  # answer, so it should read clean rather than as a failure to find out.
+  local d="$1" br="${2:-}" want="${3:-}" f
+  [ -n "$(repo_slug "$d")" ] || { printf 'na'; return; }
+  [ -n "$br" ] && [ "$br" != "-" ] || { printf 'unknown'; return; }
+  [ "$want" = "--pr" ] && pr_refresh "$d"
+  f="$(pr_cache_file "$d")"
+  [ -n "$f" ] && [ -f "$f" ] || { printf 'unknown'; return; }
+  jq -r --arg b "$br" '
+    [.[] | select(.branch == $b)] as $m
+    | if   ($m | length) == 0             then "none"
+      elif ($m | any(.merged))            then "merged"
+      elif ($m | any(.state == "open" or .state == "OPEN")) then "open"
+      else "none" end' "$f" 2>/dev/null || printf 'unknown'
+}
+# --------------------------------------------------------------------------
 # kel _fleet [--dirty]   —  ONE computed view of the whole fleet, as JSON
 # --------------------------------------------------------------------------
 # Every surface used to derive this for itself: gather_rows fed ls / --json /
@@ -541,8 +678,14 @@ cmd_prune() {
 # `git status` per worktree is the expensive part and the bar never shows it.
 _fleet_bash() {
   command -v jq >/dev/null 2>&1 || { printf '{"agents":[]}\n'; return 0; }
-  local want_dirty=0
-  [ "${1:-}" = "--dirty" ] && want_dirty=1
+  local want_dirty=0 want_land=0 want_pr=''
+  for a in "$@"; do
+    case "$a" in
+      --dirty) want_dirty=1 ;;
+      --land)  want_land=1; want_dirty=1 ;;
+      --pr)    want_pr=--pr; want_land=1; want_dirty=1 ;;
+    esac
+  done
 
   local wins panes cur_sess='' cur_wid=
   wins="$(tmux list-windows -a -F '#{session_name}	#{window_index}	#{window_id}	#{window_name}	#{window_activity}' 2>/dev/null || true)"
@@ -581,9 +724,24 @@ _fleet_bash() {
     done < <(cat "${rf[@]}" 2>/dev/null | jq -r '.cwd // empty')
   fi
 
+  # land: one row per distinct worktree.  --pr may refresh the PR cache (one
+  # gh call per repo); without it this is pure local git and never touches the
+  # network, which is what keeps it safe on a refresh path.
+  local land=''
+  if [ "$want_land" = 1 ]; then
+    local lcwd lbr seenl='' lres
+    while IFS=$'	' read -r lcwd lbr; do
+      [ -n "$lcwd" ] || continue
+      case "$seenl" in *"|$lcwd|"*) continue ;; esac
+      seenl="$seenl|$lcwd|"
+      lres="$(land_of "$lcwd" "$lbr" $want_pr)"
+      land="$land$lcwd	$lres"$'\n'
+    done < <(cat "${rf[@]}" 2>/dev/null | jq -r '[.cwd // "", .branch // ""] | @tsv')
+  fi
+
   jq -n --slurpfile records <(cat "${rf[@]}" 2>/dev/null) \
         --arg wins "$wins" --arg panes "$panes" --arg states "$states" \
-        --arg ctxs "$ctxs" --arg dirtyraw "$dirty" \
+        --arg ctxs "$ctxs" --arg dirtyraw "$dirty" --arg landraw "$land" \
         --arg prefix "$KEL_PREFIX" --arg cur_sess "$cur_sess" --arg cur_wid "$cur_wid" '
     def rows($s): ($s // "") | split("\n") | map(select(length > 0) | split("\t"));
     def num: (tonumber? // null);
@@ -594,7 +752,7 @@ _fleet_bash() {
       else null end;
 
     rows($wins) as $W | rows($panes) as $P | rows($states) as $S
-    | rows($ctxs) as $C | rows($dirtyraw) as $DR
+    | rows($ctxs) as $C | rows($dirtyraw) as $DR | rows($landraw) as $LR
     | (reduce $P[]  as $p ({}; .[$p[0]] += [$p[1]]))  as $panemap
     | (reduce $S[]  as $s ({}; .[$s[0]] = {state:$s[1], since:($s[2]|num),
         note:(if ($s[3] // "") == "" then null else $s[3] end)}))  as $statemap
@@ -603,6 +761,7 @@ _fleet_bash() {
         rate_5h:(($c[5]|num) | if . == -1 then null else . end),
         at:($c[6]|num), model:(if ($c[7] // "") == "" then null else $c[7] end)}))  as $ctxmap
     | (reduce $DR[] as $d ({}; .[$d[0]] = ($d[1]|num)))  as $dirtymap
+    | (reduce $LR[] as $l ({}; .[$l[0]] = {code:$l[1], n:($l[2]|num)}))  as $landmap
     | (reduce $records[] as $r ({}; .[(($r.group // "misc") + " " + $r.name)] = $r))  as $recmap
     | [ $W[]
         | groupof(.[0]) as $g | select($g != null)
@@ -623,6 +782,7 @@ _fleet_bash() {
             agent:($rec.agent // null), claude_session:($rec.claude_session // null),
             compactions:($rec.compactions // null),
             dirty:($dirtymap[($rec.cwd // "")] // null),
+            land:($landmap[($rec.cwd // "")] // null),
             panes:$pl, activity:(.[4]|num), context:($ctxmap[$wid] // null) } ]
       # records with no live window. Same liveness rule as meta_is_live: the
       # window must match BOTH the recorded id and the recorded name.
@@ -636,6 +796,7 @@ _fleet_bash() {
               agent:($r.agent // null), claude_session:($r.claude_session // null),
               compactions:($r.compactions // null),
               dirty:($dirtymap[($r.cwd // "")] // null),
+              land:($landmap[($r.cwd // "")] // null),
               panes:[], activity:null, context:null } ]
     | { generated_at:(now|todate),
         current:{ group:(if $cur_sess == "" then null else groupof($cur_sess) end),
@@ -649,7 +810,17 @@ _fleet_bash() {
 # directories under /mnt/c — that miss measured 62ms, six times the cost of
 # everything else this function does put together.
 fleet_json() {
-  if [ -x "$KEL_FLEET_BIN" ]; then "$KEL_FLEET_BIN" "$@"; else _fleet_bash "$@"; fi
+  # Fall back on ANY failure, not just a missing binary.  bin/kel updates the
+  # moment you pull; kel-fleet only updates when you re-run install.sh, so a
+  # stale binary that rejects a newly-added flag is the normal state of things
+  # for a minute — and it must degrade to bash rather than break the command.
+  if [ -x "$KEL_FLEET_BIN" ]; then
+    local out
+    if out="$("$KEL_FLEET_BIN" "$@" 2>/dev/null)" && [ -n "$out" ]; then
+      printf '%s\n' "$out"; return 0
+    fi
+  fi
+  _fleet_bash "$@"
 }
 
 
@@ -1213,7 +1384,7 @@ cmd_doctor() {
     fi
   }
   echo "kel doctor" >&2
-  local r_tmux r_ver r_popup r_wt r_jq r_node r_claude r_hooks r_sl r_pass r_go
+  local r_tmux r_ver r_popup r_wt r_jq r_node r_claude r_hooks r_sl r_pass r_go r_gh
   r_tmux=$(probe   "tmux present"                     command -v tmux)
   r_ver=$(probe    "tmux >= 3.0"                      bash -c 'v=$(tmux -V | grep -oE "[0-9]+\.[0-9]+" | head -1); [ -n "$v" ] || exit 1; [ "${v%%.*}" -gt 3 ] || { [ "${v%%.*}" -eq 3 ] && [ "${v#*.}" -ge 0 ]; }')
   r_popup=$(probe  "display-popup available"          bash -c 'tmux list-commands 2>/dev/null | grep -q display-popup')
@@ -1222,6 +1393,7 @@ cmd_doctor() {
   r_fzf=$(probe    "fzf present (kel board)"           command -v fzf)
   r_node=$(probe   "node on PATH"                     command -v node)
   r_claude=$(probe "claude on PATH"                   command -v claude)
+  r_gh=$(probe     "gh authenticated (PR state in kel top)" gh auth status)
   r_hooks=$(probe  "kel hooks wired in settings.json" bash -c 'jq -e "[.hooks[]?[]?.hooks[]?.command // empty] | any(test(\"kel hook|kel-hook\"))" "$HOME/.claude/settings.json" >/dev/null')
   r_sl=$(probe     "kel statusLine wired (context %)"  bash -c 'jq -e ".statusLine.command // \"\" | test(\"kel statusline\")" "$HOME/.claude/settings.json" >/dev/null')
   if [ -x "$KEL_TOP_BIN" ]; then
@@ -1240,10 +1412,10 @@ cmd_doctor() {
     --argjson tmux "$r_tmux" --argjson ver "$r_ver" --argjson popup "$r_popup" \
     --argjson wt "$r_wt" --argjson jq "$r_jq" --argjson fzf "$r_fzf" --argjson node "$r_node" \
     --argjson claude "$r_claude" --argjson hooks "$r_hooks" --argjson sl "$r_sl" \
-    --argjson go "$r_go" --argjson pass "$r_pass" \
+    --argjson go "$r_go" --argjson gh "$r_gh" --argjson pass "$r_pass" \
     '{checked_at:$d, tmux:$tmux, "tmux>=3.0":$ver, display_popup:$popup,
       git_worktree:$wt, jq:$jq, fzf:$fzf, node:$node, claude:$claude,
-      hooks_wired:$hooks, statusline_wired:$sl, go_fleet:$go,
+      hooks_wired:$hooks, statusline_wired:$sl, go_fleet:$go, gh_auth:$gh,
       allow_passthrough:$pass}' \
     > "$DOCTOR_CACHE"
   printf '  cached -> %s\n' "${DOCTOR_CACHE/#$HOME/\~}" >&2
@@ -1809,6 +1981,9 @@ main() {
     doctor)       cmd_doctor "$@" ;;
     status-line)  cmd_status_line "$@" ;;
     _fleet)       fleet_json "$@" ;;
+    _land)        land_of "$@"; echo ;;                # for tests
+    _prstate)     pr_state_of "$@"; echo ;;            # for tests
+    _slug)        repo_slug "$@"; echo ;;              # for tests
     statusline)   cmd_statusline ;;                # hot path — skip migrate
     jump)         cmd_jump ;;
     cheat)        cmd_cheat ;;

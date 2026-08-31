@@ -16,13 +16,17 @@ import (
 )
 
 func main() {
-	dirty := false
+	var opt fleet.Options
 	for _, a := range os.Args[1:] {
 		switch a {
 		case "--dirty":
-			dirty = true
+			opt.Dirty = true
+		case "--land":
+			opt.Land = true
+		case "--pr":
+			opt.PR = true
 		case "-h", "--help":
-			fmt.Fprintln(os.Stderr, "usage: kel-fleet [--dirty]")
+			fmt.Fprintln(os.Stderr, "usage: kel-fleet [--dirty] [--land] [--pr]")
 			return
 		default:
 			fmt.Fprintf(os.Stderr, "kel-fleet: unknown flag %s\n", a)
@@ -31,7 +35,7 @@ func main() {
 	}
 
 	enc := json.NewEncoder(os.Stdout)
-	if err := enc.Encode(fleet.Load(dirty)); err != nil {
+	if err := enc.Encode(fleet.Load(opt)); err != nil {
 		fmt.Fprintf(os.Stderr, "kel-fleet: %v\n", err)
 		os.Exit(1)
 	}
