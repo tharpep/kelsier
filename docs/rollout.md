@@ -412,6 +412,60 @@ and does nothing for the five branches that need to land.
 - **#8** `kel sweep` — batch teardown of merged, clean, pushed agents.
 - **#12** `.kel/group` per-directory override.
 
+## v0.9 — the prune pass
+
+**Theme:** subtract. Everything above was added on the strength of an argument.
+This is where each one has to survive contact with having actually been used.
+
+Go through every shipped surface and give it a verdict — **keep**,
+**simplify**, or **cut** — on one question: *did I reach for it?* Not "is it
+defensible", which everything here is, but whether it earned its place. peek
+was cut before it was built (`backlog.md` R6) and cost nothing; cutting
+something already built costs a commit and a docs edit, which is still almost
+nothing.
+
+There is no deprecation contract to honour — one user, no installs to break —
+so the only question is what v1.0 should contain. Shipping v1.0 carrying dead
+weight is a worse mistake than having built something that later gets cut.
+
+**Not everything unwinds equally, and that should bias what gets built:**
+
+| cheap to remove | sticky |
+|---|---|
+| a column, a sort mode, a subcommand, a `--flag` | a **keybinding** — muscle memory outlives the feature |
+| anything computed at read time | the **on-disk format** — needs a migration |
+
+Prefer a column over a keybinding, and a flag over a format change. `land` is a
+column and could vanish in one commit; `prefix t` is stickier; `<wid>.ctx` is
+the stickiest thing in the tool.
+
+### The docket
+
+Named now so the pass does not start from a blank page. Each needs a verdict,
+not a defence.
+
+| | the question |
+|---|---|
+| `kel top` sort modes | Does anything but triage get used? If `s` never gets pressed, three modes are two too many. |
+| `throttled` as its own state | Distinct glyph, distinct colour, its own branch in the hook. Did knowing "quota, not you" ever change what you did? |
+| compaction counter | `×3` beside CTX. Is it signal, or is context % already enough? |
+| `⟨api·1 infra·1⟩` badge | Richer than the old `+N waiting`. Do you read the group names, or just notice that the badge is there? |
+| `kel restart` | `sweep` now clears the graveyard. Is restart-in-place still reached for, or is `kel new` fine? |
+| `kel move` | Shipped in v0.2 and barely mentioned since. |
+| `config.toml` | Newest and least proven. If every setting stayed default for a month, it is a file nobody edits. |
+| `--pr` / land's gh half | The only part that touches the network. Local git covers four of the eight codes. |
+| `prefix k` primer | Written for a newcomer. There is one user and he wrote it. |
+
+### What is out of scope here
+
+Not a rewrite, not a redesign, and not an argument about the non-goals — those
+are settled. Only: remove what is not used, and simplify what is used but
+overbuilt.
+
+**Gate:** a stretch of ordinary use with the whole feature set present. This is
+the one card in the file that genuinely cannot be rushed, because its input is
+evidence rather than reasoning.
+
 ## v0.8 — someone else could install this  ·  **done**
 
 - ~~**#11** `install.sh --uninstall`~~ — **done**. Every line install.sh
