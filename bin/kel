@@ -19,10 +19,12 @@
 #                              (Ctrl+Space or prefix b; enter jumps, tab = actions)
 #   kel restore [-c] [-s]      rebuild the workspace after a kill / reboot
 #                              (-c resume conversations, -s force the snapshot)
-#   kel restart [name] [-f]    relaunch a crashed agent in its existing window
+#   kel relaunch [name] [-f]   relaunch a crashed agent in its existing window
+#                              (one agent — `kel restore` rebuilds the workspace)
 #   kel top                    the fleet dashboard (prefix t)
-#   kel sweep [-n] [-f]        close out every finished agent that has landed
-#   kel prune [-f]             discard dead agent records
+#   kel sweep [-n] [-f]        close every finished agent whose work has merged
+#                              (closes windows; -n shows the plan first)
+#   kel prune [-f]             forget dead agent records (closes nothing)
 #   kel doctor                 capability probe, cached
 #
 # internal (wired by install.sh):
@@ -1507,18 +1509,24 @@ cmd_restore() {
 }
 
 # --------------------------------------------------------------------------
-# kel restart [name] [-f]  — relaunch a crashed agent in its existing window
+# kel relaunch [name] [-f]  — relaunch a crashed agent in its existing window
+# --------------------------------------------------------------------------
+# Named `restart` until v0.9. Two letters from `restore`, and both are about
+# recovery, so the pair had to be read carefully every time to tell "this one
+# agent, its existing window" from "the whole workspace, from the snapshot".
+# `kel res<TAB>` completed to neither; now `kel rel<TAB>` and `kel res<TAB>`
+# each resolve uniquely.
 # --------------------------------------------------------------------------
 # v0.4 made a crashed agent visible (`dead`) but gave no way out of it short of
 # a workspace-wide `kel restore`.  This is the exit: same window, same worktree,
 # same branch, same conversation — nothing else touched.
-cmd_restart() {
+cmd_relaunch() {
   need tmux; need jq
   local name='' force=0
   while [ $# -gt 0 ]; do
     case "$1" in
       -f|--force) force=1 ;;
-      -*)         die "kel restart: unknown flag $1" ;;
+      -*)         die "kel relaunch: unknown flag $1" ;;
       *)          name="$1" ;;
     esac
     shift
@@ -1526,14 +1534,14 @@ cmd_restart() {
 
   local group meta wid rr rc=0
   if [ -z "$name" ]; then
-    [ -n "${TMUX:-}" ] || die "usage: kel restart <name>   (or run it from inside the agent's window)"
+    [ -n "${TMUX:-}" ] || die "usage: kel relaunch <name>   (or run it from inside the agent's window)"
     wid="$(tmux display-message -p '#{window_id}' 2>/dev/null)"
     rr="$(meta_by_wid "$wid" || true)"
     [ -n "$rr" ] || die "this window isn't a managed agent"
     IFS=$'\t' read -r group name meta <<< "$rr"
   else
     rr="$(resolve_agent "$name")" || rc=$?
-    [ "$rc" = 2 ] && die "'$name' is ambiguous — say which: kel restart <group>/<name>"
+    [ "$rc" = 2 ] && die "'$name' is ambiguous — say which: kel relaunch <group>/<name>"
     [ -n "$rr" ] || die "no agent '$name'"
     IFS=$'\t' read -r group name meta <<< "$rr"
     wid="$(jq -r '.window_id' "$meta")"
@@ -1551,20 +1559,20 @@ cmd_restart() {
   tmux list-panes -t "$wid" -F '#{pane_current_command}' 2>/dev/null \
     | grep -qvxE 'bash|zsh|fish|sh|dash|tmux' && alive=1
   if [ "$alive" = 1 ] && [ "$force" != 1 ]; then
-    die "'$group/$name' still has a live process (state: ${st:-unknown}) — kel restart $name -f to relaunch anyway"
+    die "'$group/$name' still has a live process (state: ${st:-unknown}) — kel relaunch $name -f to force it"
   fi
 
   local agent cid pane
   agent="$(jq -r '.agent // "claude"' "$meta")"
   cid="$(jq -r '.claude_session // ""' "$meta")"
   pane="$(tmux list-panes -t "$wid" -F '#{pane_id}' 2>/dev/null | head -1)"
-  [ -n "$pane" ] || die "'$group/$name' has no pane to restart in"
+  [ -n "$pane" ] || die "'$group/$name' has no pane to relaunch in"
 
   # drop the stale reading; the relaunched agent's SessionStart sets it again
   rm -f "$STATE_DIR/$wid.state" "$STATE_DIR/$wid.ctx"
   tmux send-keys -t "$pane" "$(agent_resume_cmd "$agent" "$cid")" Enter
   tmux refresh-client -S 2>/dev/null || true
-  say "restarting $group/$name${cid:+  (resuming $cid)}"
+  say "relaunching $group/$name${cid:+  (resuming $cid)}"
 }
 
 # --------------------------------------------------------------------------
@@ -1954,16 +1962,19 @@ cat <<'EOF'
     kel adopt [group]  make THIS window a kel agent (a plain `prefix c` window,
                        your editor, lazygit — anything kel shows as unmanaged)
     kel rename <new>   rename this window, keep metadata in sync
-    kel kill <name>    close one      ·   kel prune  discard dead records
+    kel kill <name>    close one window
+    kel sweep          close every finished agent whose work has merged
+    kel prune          forget dead records — closes nothing
     kel top            the fleet dashboard — every agent, sorted by who needs
                        you  (prefix t; j/k scroll, s sort, / filter, q quit)
-    kel restart [name] relaunch THIS agent after a crash (same window/worktree)
+    kel relaunch [name]  relaunch THIS agent after a crash — same window,
+                       same worktree, same conversation
     kel restore [-c]   rebuild after a kill / reboot  (-c resumes conversations)
 
   STATUS BAR
     1:name*  working   1:name?  waiting-on-you   1:name!  done   1:name  idle
     1:name~  throttled — waiting on quota, not on you (it resumes itself)
-    1:namex  the agent process died (no clean exit) — kel kill or restart it
+    1:namex  the agent process died (no clean exit) — kel kill or relaunch it
 
   PANE BORDERS carry the same state, so a full-screen agent still signals
     orange waiting on you   ·   purple throttled   ·   red died   ·   green done
@@ -1972,7 +1983,7 @@ cat <<'EOF'
     1:name·84%  context window used — only shown from KEL_CTX_WARN (70%) up.
                 Claude Code's own row has the full picture: model, bar, cost.
 
-  prefix ?   tmux's full key list      prefix k   the beginner menu
+  prefix ?   tmux's full key list      prefix k   the kel menu
 
 EOF
 }
@@ -2383,7 +2394,7 @@ main() {
     _board_actions)  cmd_board_actions "$@" ;;
     _board_rename)   migrate_meta; cmd_board_rename "$@" ;;
     restore)      migrate_meta; cmd_restore "$@" ;;
-    restart)      migrate_meta; cmd_restart "$@" ;;
+    relaunch)     migrate_meta; cmd_relaunch "$@" ;;
     top)          cmd_top "$@" ;;
     sweep)        migrate_meta; cmd_sweep "$@" ;;
     _run)         cmd_run_popup "$@" ;;

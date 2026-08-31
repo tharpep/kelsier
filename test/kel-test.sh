@@ -565,7 +565,34 @@ ok "PostCompact does not double-count"      'hook "$P" PostCompact; [ "$(jq -r .
 ok "--json exposes it"                      '[ "$("$KEL" ls --json | jq -r ".agents[0].compactions")" = 3 ]'
 ok "the board preview shows it"             '[[ "$("$KEL" _board_preview a api-gw)" == *"compacted  3"* ]]'
 
-section "restart-in-place (#13)"
+section "no display-menu binds a key twice"
+# prefix k bound `w` to both "new WORKTREE agent" and "switch to a window";
+# display-menu takes the first match, so the second item could never fire and
+# nothing said so.  A duplicate key is silent by nature — hence a test.
+cat > "$WORK/menukeys.awk" <<'AWK'
+/display-menu/ { menu = $0; sub(/^bind-key[ \t]+/, "", menu); sub(/[ \t].*$/, "", menu); inmenu = 1; next }
+inmenu {
+  line = $0
+  sub(/^[ \t]+/, "", line)
+  if (line ~ /^""/) { }
+  else if (sub(/^"[^"]*"[ \t]+/, "", line)) {
+    key = line
+    sub(/[ \t].*$/, "", key)
+    gsub(/"/, "", key); gsub(/\\/, "", key)
+    if (key != "") printf "%s\t%s\n", menu, key
+  }
+  if ($0 !~ /\\[ \t]*$/) inmenu = 0
+}
+AWK
+MENUKEYS() { awk -f "$WORK/menukeys.awk" "$HERE/../tmux/kel.conf"; }
+ok "the extractor finds both menus"     '[ "$(MENUKEYS | cut -f1 | sort -u | grep -c .)" = 2 ]'
+ok "  ...and every menu key is unique"  '[ "$(MENUKEYS | grep -c .)" = "$(MENUKEYS | sort -u | grep -c .)" ]'
+# and it must actually catch one: same menu, same key, different item
+ok "  ...a planted duplicate is caught" 'sed "s|^  \"switch to a window\".*W |  \"switch to a window\"            w |" "$HERE/../tmux/kel.conf" > "$WORK/dup.conf"; [ "$(awk -f "$WORK/menukeys.awk" "$WORK/dup.conf" | grep -c .)" != "$(awk -f "$WORK/menukeys.awk" "$WORK/dup.conf" | sort -u | grep -c .)" ]'
+# keys shared between the two menus must mean the same thing
+ok "  ...w is worktree in both menus"   '[ "$(MENUKEYS | awk -F"\t" "\$2==\"w\"" | grep -c .)" = 2 ]'
+
+section "relaunch-in-place (#13)"
 reset
 NEW api-gw a
 W0="$(window_of api-gw a)"
@@ -573,19 +600,20 @@ M="$SESSIONS/api-gw/a.json"
 P="$(tmux list-panes -t "$W0" -F '#{pane_id}')"
 hook "$P" UserPromptSubmit
 before="$(jq -Sc 'del(.compactions)' "$M")"
-out="$("$KEL" restart api-gw/a 2>&1)"
+out="$("$KEL" relaunch api-gw/a 2>&1)"
 ok "refuses while a process is alive"       '[[ "$out" == *"live process"* ]]'
 ok "  ...even though state says working"    '[ "$(state_of a)" = working ]'
 tmux send-keys -t "$P" C-c 2>/dev/null
 wait_until '[ "$(state_of a)" = dead ]'
 ok "  ...the agent now reads dead"          '[ "$(state_of a)" = dead ]'
-"$KEL" restart api-gw/a >/dev/null 2>&1
+"$KEL" relaunch api-gw/a >/dev/null 2>&1
 wait_until '[ "$(wins)" = 1 ]'
-ok "restart reuses the SAME window"         '[ "$(tmux list-windows -a -F "#{window_id}" | head -1)" = "$W0" ]'
+ok "relaunch reuses the SAME window"         '[ "$(tmux list-windows -a -F "#{window_id}" | head -1)" = "$W0" ]'
 ok "  ...creates no extra window"           '[ "$(wins)" = 1 ]'
 ok "  ...creates no worktree"               '[ ! -d "$WORK/repos/.kel-worktrees" ]'
 ok "  ...leaves the record otherwise as-is" '[ "$(jq -Sc "del(.compactions)" "$M")" = "$before" ]'
-ok "an unknown name is refused"             '! "$KEL" restart nope-not-here >/dev/null 2>&1'
+ok "an unknown name is refused"             '! "$KEL" relaunch nope-not-here >/dev/null 2>&1'
+ok "the old 'restart' name is gone"        '! "$KEL" restart api-gw/a >/dev/null 2>&1'
 
 section "fleet notifications (#1)"
 reset

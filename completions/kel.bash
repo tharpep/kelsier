@@ -18,7 +18,7 @@ _kel() {
     cword=$COMP_CWORD
   }
 
-  local subcmds="new kill ls go move adopt rename board top restore restart sweep prune doctor cheat help"
+  local subcmds="new kill ls go move adopt rename board top restore relaunch sweep prune doctor cheat help"
 
   if [ "$cword" -eq 1 ]; then
     COMPREPLY=( $(compgen -W "$subcmds" -- "$cur") )
@@ -47,7 +47,7 @@ _kel() {
     restore)
       COMPREPLY=( $(compgen -W "-c -s" -- "$cur") )
       ;;
-    restart)
+    relaunch)
       case "$cur" in
         -*) COMPREPLY=( $(compgen -W "-f" -- "$cur") ) ;;
         *)  COMPREPLY=( $(compgen -W "$(_kel_names '.agents[] | .name, "\(.group)/\(.name)"')" -- "$cur") ) ;;

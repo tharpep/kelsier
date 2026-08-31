@@ -24,7 +24,7 @@ _kel() {
     'board:fzf fleet browser'
     'top:fleet dashboard — sorted by who needs you'
     'restore:rebuild the workspace after a kill / reboot'
-    'restart:relaunch a crashed agent in its existing window'
+    'relaunch:relaunch ONE crashed agent in its existing window'
     'sweep:close finished agents whose work has merged'
     'prune:discard dead agent records'
     'doctor:capability probe'
@@ -55,7 +55,7 @@ _kel() {
       esac
       ;;
     restore) compadd -- -c -s ;;
-    restart)
+    relaunch)
       _alternative 'flags:flag:(-f)' \
         "agents:agent:($(_kel_names '.agents[] | .name, "\(.group)/\(.name)"'))"
       ;;

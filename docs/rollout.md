@@ -504,7 +504,7 @@ Code's supervisor and leaves the kel window holding a dead pane. Same class as
 the Agent Teams entry in `backlog.md`. Recorded so it is recognised rather than
 debugged.
 
-## v0.9-clarity — the pass that did not need evidence  ·  **in progress**
+## v0.9-clarity — the pass that did not need evidence  ·  **done**
 
 Split out of v0.9 below. The prune pass asks *did I reach for it*, and that
 question has no data yet: on 2026-08-31 the state dir held one record ever, no
@@ -528,7 +528,13 @@ decided by reading. Landed so far —
   their group from `#{client_session}` rather than from the window's own
   session.
 
-Still to come: `restart` → `relaunch`, and reconciling the two menus.
+- **`restart` → `relaunch`**, no alias, and the two menus reconciled: `w`, `n`,
+  `g`, `r` and `x` now mean the same thing in `prefix m` and `prefix k`, and `s`
+  is unambiguously sweep. Menu labels state what each command *touches* —
+  sweep closes windows, prune only forgets records.
+
+That is the whole card. What it did **not** do is answer the docket below,
+which still wants use rather than reasoning.
 
 ## v0.9 — the prune pass
 

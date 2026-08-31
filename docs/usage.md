@@ -56,7 +56,7 @@ kel top                the fleet dashboard (also prefix t) — every agent, sort
                        by who needs you. j/k scroll, s cycles sort
                        (triage/ctx/cost), / filters, q quits. Needs the Go
                        build; `kel doctor` says whether you have it
-kel restart [name]     relaunch a crashed agent in its existing window (-f to
+kel relaunch [name]    relaunch ONE crashed agent in its existing window (-f to
                        force while something is still running there)
 kel restore [-c] [-s]  rebuild the workspace after a kill / reboot
                        (-c resume conversations; -s force the snapshot)
@@ -157,7 +157,7 @@ reachable only if you happened to run the wrong command on the right window;
 ```
 
 `?` waiting on you · `*` working · `!` done · `x` = the agent process died
-without a clean exit (SIGKILL / OOM / crash — `kel kill` or restart it) · bare =
+without a clean exit (SIGKILL / OOM / crash — `kel kill` or `kel relaunch` it) · bare =
 idle · `[ ]` = current window · `⟨infra·1 web·2⟩` = other groups with agents
 blocked on you, busiest first, capped at three then `+N` (hit `` ` `` to reach
 them). In a non-kel tmux session the bar shows a compact

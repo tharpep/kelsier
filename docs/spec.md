@@ -292,7 +292,7 @@ name keying would collide. Stale files are pruned on `kel ls` / `kel`.
 *read* time, not with a new hook: in `gather_rows` and `kel status-line`, if the
 record says `working` / `waiting` but the window's only live process is a bare
 shell, the effective state becomes `dead` (bar suffix `x`, red). `kel ls` shows
-`dead`; the board still lists it so you can kill or restart it.
+`dead`; the board still lists it so you can kill or relaunch it.
 
 ### 9d. Land state (v0.7)
 
@@ -432,7 +432,7 @@ kel sweep [-n] [-f]        close out every finished agent whose work has
                            reported with its reason, never touched; -f widens
                            what counts as landed but still refuses uncommitted
                            or unpushed work. -n shows the plan first
-kel restart [name] [-f]    relaunch a crashed agent in its existing window —
+kel relaunch [name] [-f]   relaunch ONE crashed agent in its existing window —
                            same worktree, same branch, same conversation.
                            Refuses while a process is alive; -f overrides
 kel restore [-c] [-s]      rebuild the workspace after a kill / reboot — groups,

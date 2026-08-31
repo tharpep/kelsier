@@ -85,7 +85,7 @@ kel new <name> [-w]  new window + agent, optionally in a git worktree
 kel ls [--json]      every agent, grouped by repo
 kel top              the fleet dashboard                        (prefix t)
 kel board            find an agent — filter, preview, act       (Ctrl+Space)
-kel restart [name]   relaunch a crashed agent in place
+kel relaunch [name]  relaunch one crashed agent in place
 kel sweep [-n]       close out every finished agent that landed
 kel kill <name>      close one       ·  kel prune    discard dead records
 kel go [group]       switch group    ·  kel move     regroup this agent
