@@ -37,7 +37,7 @@
 #   kel status-line [group]    render tmux status-left
 #   kel jump                   jump to the next waiting agent, any group (prefix `)
 #   kel snapshot               save the workspace shape (hooks call this)
-#   kel cheat                  keybinding reference (also: prefix ?)
+#   kel cheat                  keybinding reference (also: prefix k, prefix ?)
 #   kel hook <EVENT>           Claude Code state hook
 #   kel statusline             Claude Code statusLine — context % / cost
 set -uo pipefail
@@ -1303,20 +1303,63 @@ cmd_board_kill() {   # group name
 # (the board closes behind it, same as pressing enter to jump)
 # display-menu needs an explicit -c client here — invoked via fzf `become`, not
 # from a key binding, tmux can't resolve the "current" client on its own.
-cmd_board_actions() {   # wid name group cwd
+cmd_board_actions() {   # wid name group cwd [here]
   need tmux
-  local wid="$1" name="$2" group="$3" cwd="$4" cl sn
+  local wid="$1" name="$2" group="$3" cwd="$4" here="${5:-}" cl sn
   sn="$(tmux display-message -p -t "${TMUX_PANE:-}" '#{session_name}' 2>/dev/null || true)"
   cl="$(tmux list-clients ${sn:+-t "$sn"} -F '#{client_name}' 2>/dev/null | head -1)"
   [ -n "$cl" ] || cl="$(tmux list-clients -F '#{client_name}' 2>/dev/null | head -1)"
-  tmux display-menu ${cl:+-c $cl} -x C -y C -T " $name " -- \
-    "jump to it"                j  "run-shell \"$SELF _board_jump '$wid' '$group'\"" \
-    "new agent in its folder"   n  "command-prompt -p 'name:' { run-shell \"cd '$cwd' && $SELF new %%\" }" \
-    "new WORKTREE agent there"  w  "command-prompt -p 'branch/name:' { run-shell \"cd '$cwd' && $SELF new %% -w\" }" \
-    "rename it"                  r  "command-prompt -p 'new name:' { run-shell \"$SELF _board_rename '$wid' %%\" }" \
-    "go to its group"           g  "run-shell \"$SELF go '$group'\"" \
-    "" \
+  local -a items=(
+    "jump to it"                j  "run-shell \"$SELF _board_jump '$wid' '$group'\""
+    "new agent in its folder"   n  "command-prompt -p 'name:' { run-shell \"cd '$cwd' && $SELF new %%\" }"
+    "new WORKTREE agent there"  w  "command-prompt -p 'branch/name:' { run-shell \"cd '$cwd' && $SELF new %% -w\" }"
+    "rename it"                  r  "command-prompt -p 'new name:' { run-shell \"$SELF _board_rename '$wid' %%\" }"
+  )
+  # move / adopt / relaunch all act on "whichever pane I was invoked from" —
+  # none takes an explicit wid — which is correct when $here says this window
+  # IS where you are standing (prefix m, via cmd_here_actions, always is
+  # that), and would be WRONG for an arbitrary highlighted board row that
+  # might be a different window entirely. The board's tab key never passes
+  # $here, so these three stay off the board's own menu.
+  if [ "$here" = here ]; then
+    items+=(
+      "move it to another group"    m  "command-prompt -p 'group:' { run-shell \"$SELF move %%\" }"
+      "adopt this window into kel"  a  "run-shell \"$SELF adopt\""
+      "relaunch it (after a crash)" l  "run-shell \"$SELF relaunch '$group/$name'\""
+    )
+  fi
+  items+=(
+    "go to its group"           g  "run-shell \"$SELF go '$group'\""
+    ""
     "kill it"                   k  "run-shell \"$SELF _board_kill '$group' '$name'\""
+  )
+  _kel_menu_or_dump "$cl" " $name " "${items[@]}"
+}
+
+# Shared by every tmux display-menu this file builds from a bash array:
+# dumps "key<TAB>label" instead of opening the menu when KEL_DUMP_ITEMS is
+# set, for the regression suite's duplicate-key check — exercising the REAL
+# array a function built (including any conditional branch above the call),
+# not a static guess at its shape parsed out of the source text.
+_kel_menu_or_dump() {   # client title item...
+  local cl="$1" title="$2"; shift 2
+  local -a items=( "$@" )
+  if [ -n "${KEL_DUMP_ITEMS:-}" ]; then
+    # a separator is ONE array element ("", no key/command), not a triple —
+    # advance by 1 there, or the walk misaligns for every item after it
+    local i=0 lbl
+    while [ "$i" -lt "${#items[@]}" ]; do
+      lbl="${items[$i]}"
+      if [ -z "$lbl" ]; then
+        i=$((i + 1))
+      else
+        printf '%s\t%s\n' "${items[$((i+1))]}" "$lbl"
+        i=$((i + 3))
+      fi
+    done
+    return 0
+  fi
+  tmux display-menu ${cl:+-c $cl} -x C -y C -T "$title" -- "${items[@]}"
 }
 
 # ctrl-f in the board: everything that is NOT about one agent — the
@@ -1330,22 +1373,48 @@ cmd_board_fleet_actions() {
   sn="$(tmux display-message -p -t "${TMUX_PANE:-}" '#{session_name}' 2>/dev/null || true)"
   cl="$(tmux list-clients ${sn:+-t "$sn"} -F '#{client_name}' 2>/dev/null | head -1)"
   [ -n "$cl" ] || cl="$(tmux list-clients -F '#{client_name}' 2>/dev/null | head -1)"
-  tmux display-menu ${cl:+-c $cl} -x C -y C -T ' kel ' -- \
-    "the fleet dashboard (kel top)"                 t  "run-shell -b \"$SELF top\"" \
-    "edit config.toml"                              c  "run-shell -b \"$SELF config\"" \
-    "" \
-    "sweep — close agents whose work merged"        s  "run-shell -b \"$SELF _run sweep\"" \
-    "restore — rebuild the WHOLE workspace"         R  "run-shell -b \"$SELF _run restore\"" \
-    "prune — forget dead records (closes nothing)"  p  "run-shell -b \"$SELF _run prune\"" \
-    "check the machine (doctor)"                    D  "run-shell -b \"$SELF _run doctor\"" \
-    "" \
+  local -a items=(
+    "the fleet dashboard (kel top)"                 t  "run-shell -b \"$SELF top\""
+    "edit config.toml"                              c  "run-shell -b \"$SELF config\""
+    ""
+    "sweep — close agents whose work merged"        s  "run-shell -b \"$SELF _run sweep\""
+    "restore — rebuild the WHOLE workspace"         R  "run-shell -b \"$SELF _run restore\""
+    "prune — forget dead records (closes nothing)"  p  "run-shell -b \"$SELF _run prune\""
+    "check the machine (doctor)"                    D  "run-shell -b \"$SELF _run doctor\""
+    ""
     "kel keys (cheat sheet)"                        "?" "display-popup -w 84 -h 85% -T ' kel keys ' -E \"$SELF cheat | less -R\""
+  )
+  _kel_menu_or_dump "$cl" ' kel ' "${items[@]}"
 }
 
 cmd_board_rename() {   # wid new
   need tmux; need jq
   slug_ok "${2:-}" || { warn "name must be a slug (A-Z a-z 0-9 . _ -)"; return 1; }
   rename_agent "$1" "$2"
+}
+
+# prefix m — the per-agent menu for the window you're standing in RIGHT NOW,
+# without opening the board first. This is not a second copy of that menu:
+# it gathers this window's own wid/name/group/cwd and calls the exact same
+# cmd_board_actions the board's tab key calls, so there is one action list,
+# reachable two ways, rather than two lists that drift.
+#
+# Same ${TMUX_PANE:+-t "$TMUX_PANE"} shape as _kel_window_target (kel move /
+# kel adopt): a bare `display-message -p` resolves against the CLIENT's
+# active window, not necessarily the pane the key was pressed in.
+cmd_here_actions() {
+  need tmux
+  local tp="${TMUX_PANE:-}" wid name cwd group
+  wid="$(tmux display-message -p ${tp:+-t "$tp"} '#{window_id}')"
+  name="$(tmux display-message -p ${tp:+-t "$tp"} '#{window_name}')"
+  cwd="$(tmux display-message -p ${tp:+-t "$tp"} '#{pane_current_path}')"
+  local sess; sess="$(tmux display-message -p ${tp:+-t "$tp"} '#{session_name}')"
+  case "$sess" in
+    "$KEL_PREFIX")   group="$KEL_PREFIX" ;;
+    "$KEL_PREFIX"/*) group="${sess#"$KEL_PREFIX"/}" ;;
+    *) die "this window isn't in a kel group" ;;
+  esac
+  cmd_board_actions "$wid" "$name" "$group" "$cwd" here
 }
 
 cmd_board() {
@@ -2056,7 +2125,8 @@ cat <<'EOF'
                   (j/k scroll · s sort: triage/ctx/cost · / filter · q quit)
                   same place ctrl-f → "the fleet dashboard" in the board goes
     prefix m      manage THIS agent — rename / move / adopt / relaunch / kill
-    (in the board) TAB on any row — the same menu, for that agent
+                  (the SAME menu as the board's TAB, for wherever you're standing)
+    (in the board) TAB on any row — the shared per-agent menu, for that row
 
   SCROLL an agent's conversation
     mouse wheel                (kel turns this into PageUp/PageDown for you)
@@ -2069,8 +2139,8 @@ cat <<'EOF'
     prefix ,   rename (kel rename)   prefix ↑↓←→    focus a pane (or click it)
     prefix &   close (confirms)      prefix z       zoom a pane (toggle)
                                      prefix x       close a pane
-    prefix k   the kel menu — new agent (plain or worktree), browse, and the
-               fleet commands: sweep, restore, prune, doctor
+    prefix k   this page — kel cheat. New agent / worktree / rename / adopt /
+               relaunch: ctrl-f→board or prefix m. Fleet: ctrl-f→board.
 
   GROUP
     prefix d   detach — "exit kel". Agents keep running; snapshot is saved;
@@ -2115,7 +2185,7 @@ cat <<'EOF'
     1:name·84%  context window used — only shown from KEL_CTX_WARN (70%) up.
                 Claude Code's own row has the full picture: model, bar, cost.
 
-  prefix ?   tmux's full key list      prefix k   the kel menu
+  prefix ?   tmux's full key list      prefix k   this page (kel cheat)
 
 EOF
 }
@@ -2414,11 +2484,10 @@ quickstart() {
 
   kel new <name>     start an agent in the current repo
   prefix `           jump to whichever agent is waiting on you
-  Ctrl+Space         the board — find any agent (enter jumps, tab acts)
-  prefix m           manage the agent you're on — rename / move / relaunch /
-                     kill, plus adopt to track a plain window as an agent
-  prefix k           the kel menu — everything, including worktree agents and
-                     sweep / restore / prune / doctor
+  Ctrl+Space         the board — find any agent; tab acts, ctrl-f is
+                     everything else (dashboard, config, sweep, restore…)
+  prefix m           the same actions as tab, for wherever you're standing
+  prefix k           kel cheat — the full keybinding + command reference
 
 EOF
 }
@@ -2566,6 +2635,7 @@ main() {
     _board_actions)  cmd_board_actions "$@" ;;
     _board_fleet)    cmd_board_fleet_actions ;;
     _board_rename)   migrate_meta; cmd_board_rename "$@" ;;
+    _here)           cmd_here_actions ;;                  # prefix m
     restore)      migrate_meta; cmd_restore "$@" ;;
     relaunch)     migrate_meta; cmd_relaunch "$@" ;;
     top)          cmd_top "$@" ;;

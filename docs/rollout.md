@@ -565,6 +565,56 @@ staleness; only actually running the tool catches behaviour. Doing that — bare
   bug — `clean` is also the fallback for "not a git repo at all", so treating
   it as automatically safe is not obviously right either.
 
+**Second addendum: the board becomes the hub.** Different in kind from
+everything above — not a bug found by using the tool, but a redesign proposed
+by the user after using it: three menus (`prefix k`, `prefix m`, board `tab`)
+covering overlapping ground, `prefix k` acting like a menu while `kel cheat`
+(the actual reference) sat one level down inside it as a single item, and the
+board only ever able to *select* an agent — no path from it to the dashboard,
+to config, or to sweep/restore/prune/doctor.
+
+The shape that came out of that discussion: the board is the hub, with a
+second action layer for everything that isn't about one agent, and dedicated
+prefixes stay as fast, direct doors to the same destinations rather than being
+removed.
+
+- **`kel config`** — config.toml had no path into it from inside the tool at
+  all (this was true before the board work started; found the same way as the
+  idle/dead bug, by trying to use the feature). Opens it in `$VISUAL`/
+  `$EDITOR`, seeded from `examples/config.toml` the first time. Needed a small
+  fix to get right: `$SELF` stays a symlink (kel is always symlinked, never
+  copied), so a naive relative path from it looks in the wrong place —
+  confirmed by testing through the real installed symlink, not just reasoning
+  about it. `readlink -f` would resolve it in one call; that flag is GNU-only,
+  so `_real_self` walks the chain by hand.
+- **The board gains `ctrl-f`** — a second `tmux display-menu`, not scoped to
+  any row: the dashboard, `kel config`, and sweep/restore/prune/doctor. The
+  same `become()`-into-a-menu mechanism `tab` already used, applied to
+  something that isn't per-agent.
+- **`prefix m` and the board's `tab` are now the SAME menu.** `cmd_here_actions`
+  gathers the current window's own wid/name/group/cwd and calls the exact
+  function `tab` calls, with an extra that turns on three items — move,
+  adopt, relaunch — that only know how to act on "whichever pane I was
+  invoked from," which is correct for `prefix m` (always the window you're
+  standing in) and would be wrong for an arbitrary highlighted board row.
+  One action list, reachable two ways, instead of two that drift.
+- **`prefix k` reverts to `kel cheat`, no menu.** Checked item by item: every
+  single thing the old menu offered was already reachable somewhere else — a
+  native tmux default it was silently wrapping (`prefix w`/`[`/`z`/`&`/`d`
+  were never touched by kel), an existing kel binding (`prefix |`/`-`/`,`),
+  or now `ctrl-f` / `prefix m`. Wrapping "press prefix, then press the native
+  key" in a submenu was strictly more steps than pressing the native key.
+
+Fourteen new tests. The menu-key-uniqueness guard from the first addendum
+moved with the menus: `prefix k`/`prefix m` no longer live in `tmux.conf`, so
+a text-parsing extractor over that file can no longer see them at all. It now
+runs the real `cmd_board_actions` / `cmd_board_fleet_actions` functions with a
+`KEL_DUMP_ITEMS` flag that prints the menu's items instead of opening it —
+exercising the actual conditional logic (the move/adopt/relaunch branch),
+not a static guess at its shape. Verified against the tool itself, not just
+the test suite: planted a real duplicate key in `bin/kel`, confirmed the
+suite caught it, reverted.
+
 That is the whole card. What it did **not** do is answer the docket below,
 which still wants use rather than reasoning.
 

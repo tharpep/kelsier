@@ -260,23 +260,32 @@ tmux session per repo.**
 `prefix` is `Ctrl+b`. Four keys carry the whole tool:
 
 - **`` prefix ` ``** — jump to whoever's waiting on you (any group)
-- **`Ctrl+Space`** (or `prefix b`) — the board: *find* an agent. `enter` jumps
-  to it; `tab` opens a labelled menu to *act* on it (jump / new here / rename /
-  go to its group / kill)
-- **`prefix m`** — *manage* the agent you're on: rename / move to a group /
-  new sibling / kill
-- **`prefix k`** — "new to kel/tmux?" primer of the common moves; `prefix k`
-  → `?` (or `kel cheat`) shows the full reference
+- **`Ctrl+Space`** (or `prefix b`) — the board, and the hub for everything
+  else (v0.9). `enter` jumps to the highlighted agent; `tab` opens a labelled
+  menu to *act* on it (jump / new here / new worktree / rename / go to its
+  group / kill); `ctrl-f` opens a SECOND menu that is not about any one
+  agent — the dashboard, `kel config`, and sweep/restore/prune/doctor. Before
+  v0.9 the board could only ever select an agent; those five commands lived
+  solely in `prefix k`, with no relation to the highlighted row.
+- **`prefix m`** — the exact same per-agent menu as the board's `tab`, for
+  whichever window you're standing in, without opening the board first — plus
+  three items that only make sense standing in the window they act on: move
+  to a group, adopt (if it isn't a kel agent yet), relaunch after a crash.
+- **`prefix k`** — `kel cheat`, the full keybinding + command reference.
+  Before v0.9 this was an action menu; every item in it turned out to already
+  be reachable elsewhere (a native tmux default, an existing kel binding, or
+  now `ctrl-f` / `prefix m`), so it reverted to being what its own "show me
+  around" item already pointed at.
 
 | | |
 |---|---|
-| `Ctrl+Space` / `prefix b` | the board — filter, preview; `enter` jump, `tab` act |
-| `prefix m` | manage this agent — rename / move / new sibling / kill |
+| `Ctrl+Space` / `prefix b` | the board — filter, preview; `enter` jump, `tab` agent actions, `ctrl-f` fleet actions |
+| `prefix m` | the board's `tab` menu, for wherever you're standing, plus move / adopt / relaunch |
 | `prefix 0..9` / `n` / `p` / `w` | move between agents in the group |
 | `` prefix ` `` | jump to the next agent **waiting** on you — any group |
 | `prefix g` / `prefix (` `)` | pick / cycle groups |
 | `prefix ,` | rename this window (routes through `kel rename`) |
-| `prefix k` | "new to kel?" primer — new agent, browse, split, scroll, zoom, rename, close, detach, "show me around" |
+| `prefix k` | `kel cheat` — this reference |
 | `prefix [` | tmux scroll mode for a shell pane (`q` to leave) |
 | mouse wheel / PgUp PgDn | scroll an agent's conversation (kel maps the wheel to PageUp/Down) |
 | `prefix \|` / `-` | split a window (agent + editor); arrows or click to focus; `z` zoom |

@@ -95,8 +95,8 @@ test-runner strip — split with `prefix |` / `prefix -` (or the defaults `%` /
 panes.
 
 **The fleet view is the status line** (§7), backed by `kel status-line`. It
-replaces tmux's own window list. The board (§5b) is the interactive navigator;
-`prefix k` is a "new to kel?" menu of the common tmux moves for newcomers.
+replaces tmux's own window list. The board (§5b) is the interactive navigator
+and, since v0.9, the hub for everything else too; `prefix k` is `kel cheat`.
 
 ### 5a. Grouping (v0.2, built)
 
@@ -153,12 +153,12 @@ Switching is one keystroke — never open-menu, find-row, press-enter.
 |---|---|
 | `prefix 0`..`9` / `n` / `p` / `w` | native window nav (within a group) |
 | `` prefix ` `` | jump to the next `waiting` agent in **any** group — cycles, wraps |
-| `Ctrl+Space` / `prefix b` | the board — find an agent (`enter` jump, `tab` act) |
+| `Ctrl+Space` / `prefix b` | the board — find an agent (`enter` jump, `tab` agent actions, `ctrl-f` fleet actions) |
 | `prefix t` | the fleet dashboard (`kel top`) — read-only, sorted by triage |
-| `prefix m` | manage the current agent (rename / move / new sibling / kill) |
+| `prefix m` | the board's `tab` menu, for wherever you're standing, plus move / adopt / relaunch |
 | `prefix g` / `prefix (` `)` | pick / cycle groups |
 | `prefix ,` | rename this window (routes through `kel rename`) |
-| `prefix k` | "new to kel?" primer (new, browse, split, scroll, rename, close, detach, show me around) |
+| `prefix k` | `kel cheat` — the keybinding + command reference |
 
 The `` ` `` binding is the capability terminal tabs cannot offer: not "go to
 window 3" but "go to whoever is blocked on me," and it ignores group
@@ -499,7 +499,7 @@ or `jq` is missing.
 | Probe | Why |
 |---|---|
 | `tmux` present, `>= 3.0` | the substrate |
-| `display-popup` available | the board and the `prefix k` / `prefix m` menus |
+| `display-popup` available | the board, `kel top`, `kel config`, `prefix k` |
 | `fzf` present | `kel board` |
 | `git worktree` available | `kel new -w` |
 | `jq` present | metadata + the hook merge |

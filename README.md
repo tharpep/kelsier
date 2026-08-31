@@ -92,11 +92,14 @@ kel go [group]       switch group    ·  kel move     regroup this agent
 kel adopt [group]    track a window kel does not manage yet
 kel restore [-c]     rebuild after a reboot
 kel doctor           check the machine
+kel config           edit config.toml (seeds it from the example, once)
 ```
 
 Four keys carry it: `` prefix ` `` jump-to-blocked · **`Ctrl+Space`** the board
-(`enter` jumps, `tab` acts) · **`prefix t`** the dashboard · **`prefix m`**
-manage the agent you're on. `prefix k` is a "new to kel?" primer.
+— find an agent, `tab` acts on it, `ctrl-f` reaches everything else (the
+dashboard, config, sweep/restore/prune/doctor) · **`prefix m`** the same
+per-agent actions as `tab`, for wherever you're standing · **`prefix k`** is
+`kel cheat`, the full reference.
 
 ## How it knows
 

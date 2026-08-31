@@ -683,31 +683,29 @@ ok "--json exposes it"                      '[ "$("$KEL" ls --json | jq -r ".age
 ok "the board preview shows it"             '[[ "$("$KEL" _board_preview a api-gw)" == *"compacted  3"* ]]'
 
 section "no display-menu binds a key twice"
-# prefix k bound `w` to both "new WORKTREE agent" and "switch to a window";
-# display-menu takes the first match, so the second item could never fire and
-# nothing said so.  A duplicate key is silent by nature — hence a test.
-cat > "$WORK/menukeys.awk" <<'AWK'
-/display-menu/ { menu = $0; sub(/^bind-key[ \t]+/, "", menu); sub(/[ \t].*$/, "", menu); inmenu = 1; next }
-inmenu {
-  line = $0
-  sub(/^[ \t]+/, "", line)
-  if (line ~ /^""/) { }
-  else if (sub(/^"[^"]*"[ \t]+/, "", line)) {
-    key = line
-    sub(/[ \t].*$/, "", key)
-    gsub(/"/, "", key); gsub(/\\/, "", key)
-    if (key != "") printf "%s\t%s\n", menu, key
-  }
-  if ($0 !~ /\\[ \t]*$/) inmenu = 0
-}
-AWK
-MENUKEYS() { awk -f "$WORK/menukeys.awk" "$HERE/../tmux/kel.conf"; }
-ok "the extractor finds both menus"     '[ "$(MENUKEYS | cut -f1 | sort -u | grep -c .)" = 2 ]'
-ok "  ...and every menu key is unique"  '[ "$(MENUKEYS | grep -c .)" = "$(MENUKEYS | sort -u | grep -c .)" ]'
-# and it must actually catch one: same menu, same key, different item
-ok "  ...a planted duplicate is caught" 'sed "s|^  \"switch to a window\".*W |  \"switch to a window\"            w |" "$HERE/../tmux/kel.conf" > "$WORK/dup.conf"; [ "$(awk -f "$WORK/menukeys.awk" "$WORK/dup.conf" | grep -c .)" != "$(awk -f "$WORK/menukeys.awk" "$WORK/dup.conf" | sort -u | grep -c .)" ]'
-# keys shared between the two menus must mean the same thing
-ok "  ...w is worktree in both menus"   '[ "$(MENUKEYS | awk -F"\t" "\$2==\"w\"" | grep -c .)" = 2 ]'
+# prefix k used to bind `w` to both "new WORKTREE agent" and "switch to a
+# window"; display-menu takes the first match, so the second item could never
+# fire and nothing said so. A duplicate key is silent by nature -- hence a
+# test. v0.9's board-hub pass moved both menus (per-agent, fleet) out of
+# tmux.conf and into bin/kel as bash arrays with a conditional branch
+# (cmd_board_actions' $here extra), which a text-parsing extractor over
+# tmux.conf can no longer see at all. KEL_DUMP_ITEMS makes the REAL functions
+# print "key<TAB>label" instead of opening the menu, so this exercises the
+# actual conditional logic rather than a static guess at its shape.
+DUMP() { KEL_DUMP_ITEMS=1 "$KEL" "$@"; }
+keys_unique() { local f; f="$(cat)"; [ "$(printf '%s' "$f" | cut -f1 | grep -c .)" = "$(printf '%s' "$f" | cut -f1 | sort -u | grep -c .)" ]; }
+
+ok "board tab menu: keys are unique"        'DUMP _board_actions w1 n1 g1 /tmp | keys_unique'
+ok "  ...6 items (no move/adopt/relaunch)"  '[ "$(DUMP _board_actions w1 n1 g1 /tmp | grep -c .)" = 6 ]'
+ok "prefix m menu ("here"): keys unique"    'DUMP _board_actions w1 n1 g1 /tmp here | keys_unique'
+ok "  ...9 items (+ move/adopt/relaunch)"   '[ "$(DUMP _board_actions w1 n1 g1 /tmp here | grep -c .)" = 9 ]'
+ok "ctrl-f fleet menu: keys are unique"     'DUMP _board_fleet | keys_unique'
+ok "  ...and dashboard/config/sweep/etc are all there" \
+  '[[ "$(DUMP _board_fleet | cut -f1 | tr -d "\n")" == *t*c*s*R*p*D* ]]'
+# prove keys_unique actually bites, on a hand-built duplicate -- not a
+# tautology that would pass on anything
+ok "  ...and the check itself catches a duplicate" \
+  '! printf "a\tone\nb\ttwo\na\tthree\n" | keys_unique'
 
 section "relaunch-in-place (#13)"
 reset
