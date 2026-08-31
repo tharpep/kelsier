@@ -373,6 +373,25 @@ ok "_run refuses anything not allowed"   '! "$KEL" _run kill >/dev/null 2>&1'
 ok "_run doctor runs"                    'KEL_IN_POPUP=1 "$KEL" _run doctor >/dev/null 2>&1'
 ok "_sweepui needs an explicit yes"      'printf "n\n" | KEL_IN_POPUP=1 "$KEL" _sweepui 2>&1 | grep -q "nothing swept"'
 
+# the completion scripts' own jq filters, run against a real document.
+# These broke silently in v0.6 (bare array -> {generated_at,current,agents})
+# and stayed broken because _kel_names swallows jq's error with 2>/dev/null.
+section "shell completions read the fleet document"
+# The completion scripts' own jq filters, run against a real document.  Two
+# separate breakages hid here: v0.6 changed `ls --json` from a bare array to
+# {generated_at,current,agents}, and the `group/name` half was ALWAYS applied
+# to the document rather than to each agent (yielding "null/null").  Both were
+# invisible because _kel_names swallows jq's error with 2>/dev/null.
+CFILT() { "$KEL" ls --json 2>/dev/null | jq -r "$1" 2>/dev/null | sort -u; }
+NAMEFILT='.agents[] | .name, "\(.group)/\(.name)"'
+ok "the name filter returns bare names"  '[ -n "$(CFILT "$NAMEFILT" | grep -x agent1)" ]'
+ok "  ...and qualified group/name"       '[ -n "$(CFILT "$NAMEFILT" | grep -x "api-gw/agent1")" ]'
+ok "  ...never a null/null row"          '[ -z "$(CFILT "$NAMEFILT" | grep null)" ]'
+ok "the group filter returns groups"     '[ -n "$(CFILT ".agents[].group" | grep -x api-gw)" ]'
+ok "both completion files use it"        'for f in bash zsh; do grep -q "agents\[\] | .name" "$HERE/../completions/kel.$f" || exit 1; done'
+# an empty fleet must still answer --json with JSON, not an English sentence
+ok "--json is JSON with an empty fleet"  'E="$(mktemp -d "$WORK/empty.XXXX")"; XDG_STATE_HOME="$E" KEL_SESSION=nosuchprefix "$KEL" ls --json | jq -e ".agents | length == 0" >/dev/null'
+
 # F — kel's chosen name is handed to Claude Code
 ( cd "$WORK/repos/coppermind" && KEL_AGENT=claude "$KEL" new named --no-agent ) >/dev/null 2>&1
 ok "claude is launched with --name"      '[ "$(jq -r .agent "$SESSIONS/coppermind/named.json")" = "claude --name named" ]'

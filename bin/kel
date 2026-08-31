@@ -933,14 +933,18 @@ cmd_ls() {
   local doc
   if [ "${1:-}" = "--json" ]; then doc="$(fleet_json --dirty)"; else doc="$(fleet_json)"; fi
   [ "${1:-}" = "--json" ] || repaint_all "$doc"
-  if [ "$(printf '%s' "$doc" | jq '.agents | length')" = 0 ]; then
-    echo "no agents yet — 'kel new <name>' to start one"
-    return 0
-  fi
 
+  # --json is answered BEFORE the empty check: a consumer asked for JSON and
+  # must get JSON, even when the fleet is empty (`agents: []`).  The completion
+  # scripts are that consumer, and an English sentence here broke them silently.
   if [ "${1:-}" = "--json" ]; then
     # v0.6: the whole document, not a bare array — .agents is the list
     printf '%s\n' "$doc" | jq .
+    return 0
+  fi
+
+  if [ "$(printf '%s' "$doc" | jq '.agents | length')" = 0 ]; then
+    echo "no agents yet — 'kel new <name>' to start one"
     return 0
   fi
 
@@ -1647,7 +1651,7 @@ cmd_doctor() {
   r_fzf=$(probe    "fzf present (kel board)"           command -v fzf)
   r_node=$(probe   "node on PATH"                     command -v node)
   r_claude=$(probe "claude on PATH"                   command -v claude)
-  r_gh=$(probe     "gh authenticated (PR state in kel top)" gh auth status)
+  r_gh=$(probe     "gh authenticated (PR state for kel sweep / top)" gh auth status)
   r_hooks=$(probe  "kel hooks wired in settings.json" bash -c 'jq -e "[.hooks[]?[]?.hooks[]?.command // empty] | any(test(\"kel hook|kel-hook\"))" "$HOME/.claude/settings.json" >/dev/null')
   r_sl=$(probe     "kel statusLine wired (context %)"  bash -c 'jq -e ".statusLine.command // \"\" | test(\"kel statusline\")" "$HOME/.claude/settings.json" >/dev/null')
   if [ -x "$KEL_TOP_BIN" ]; then
@@ -1861,7 +1865,8 @@ cat <<'EOF'
 
   PANE BORDERS carry the same state, so a full-screen agent still signals
     orange waiting on you   ·   purple throttled   ·   red died   ·   green done
-    [1:name] current window   1:name·3 = 3 panes   ⟨+N waiting⟩ in other groups
+    [1:name] current window   1:name·3 = 3 panes
+    ⟨api·2 docs·1⟩  other groups with agents waiting on you (top 3, then +N)
     1:name·84%  context window used — only shown from KEL_CTX_WARN (70%) up.
                 Claude Code's own row has the full picture: model, bar, cost.
 

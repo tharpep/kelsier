@@ -104,7 +104,7 @@ One `tmux` session per repo — `kel/<group>`, group = repo basename (or
 `--group`, or `misc`). Inside a group, agents are windows and native nav is
 untouched. Between groups: native `prefix (` / `)`, `prefix g` (group tree),
 `kel go <group>`. **`kel jump` is global** — it crosses groups. The status line
-shows the current group in full plus `⟨+N waiting⟩` for the rest.
+shows the current group in full plus `⟨api·1 infra·1⟩` for the rest.
 
 ### 5b. The board (v0.3, built; navigator in v0.4)
 

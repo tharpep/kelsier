@@ -125,8 +125,8 @@ nothing restarts. `kel move <group>` for an explicit target. A hand-made
   root (or `--group` / `KEL_GROUP`), once. kel does not watch `cd`; a window
   never changes group on its own.
 
-- The status bar shows only the current group's windows, plus `⟨+N waiting⟩`
-  for agents blocked elsewhere. Inside a group: native `prefix 1-9` / `n` / `p`
+- The status bar shows only the current group's windows, plus `⟨api·1 web·2⟩`
+  naming the other groups that have agents blocked on you. Inside a group: native `prefix 1-9` / `n` / `p`
   / `w`.
 - Between groups: native `prefix (` / `)` cycle, `prefix g` group tree,
   `kel go <group>`, or the board (`Ctrl+Space`) → `enter` (jump) / `tab` → "go
@@ -143,13 +143,14 @@ nothing restarts. `kel move <group>` for an explicit target. A hand-made
 **Status line.** The group you're in, in full, plus a badge for the rest:
 
 ```
-[api] 0:auth-fix? [1:rate-limit*] 2:docs   ⟨+2 waiting⟩
+[api] 0:auth-fix? [1:rate-limit*] 2:docs   ⟨infra·1 web·2⟩
 ```
 
 `?` waiting on you · `*` working · `!` done · `x` = the agent process died
 without a clean exit (SIGKILL / OOM / crash — `kel kill` or restart it) · bare =
-idle · `[ ]` = current window · `⟨+N waiting⟩` = agents blocked in other groups
-(hit `` ` `` to reach them). In a non-kel tmux session the bar shows a compact
+idle · `[ ]` = current window · `⟨infra·1 web·2⟩` = other groups with agents
+blocked on you, busiest first, capped at three then `+N` (hit `` ` `` to reach
+them). In a non-kel tmux session the bar shows a compact
 `[kel] N agents · M waiting`.
 
 The `x` / `dead` state is a read-time check, not a hook: if the record says
