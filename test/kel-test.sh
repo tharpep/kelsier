@@ -160,7 +160,12 @@ mkdir -p "$WORK/nogh2"
 printf '#!/bin/sh\necho CALLED >> "%s/gh.calls"\nexit 1\n' "$WORK" > "$WORK/nogh2/gh"
 chmod +x "$WORK/nogh2/gh"
 GHR="$WORK/repos/ghrepo"; mkdir -p "$GHR"
-git -C "$GHR" init -q; git -C "$GHR" commit -q --allow-empty -m init 2>/dev/null
+# -b main and an explicit identity, like every other fixture here: a CI runner
+# has no git user configured, so a bare `git commit` fails and leaves no HEAD —
+# which then reads as "clean" rather than "unpushed" and fails two assertions
+# for a reason that looks nothing like the cause.
+git -C "$GHR" init -q -b main
+git -C "$GHR" -c user.email=t@t -c user.name=t commit -q --allow-empty -m init
 git -C "$GHR" remote add origin https://github.com/example/ghrepo.git
 ok "a github remote yields a slug"      '[ "$("$KEL" _slug "$GHR")" = example/ghrepo ]'
 rm -f "$WORK/gh.calls"
