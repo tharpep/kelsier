@@ -45,7 +45,7 @@ internal/fleet/      the fleet document, ported from _fleet_bash
 tmux/kel.conf        keybindings, status line, hooks; sourced from ~/.tmux.conf
 install.sh           symlinks kel, sources kel.conf, merges hooks + statusLine
                      into ~/.claude/settings.json (jq, non-clobbering, backs up)
-install/             machine provisioning (apt — Debian/Ubuntu only, see Portability)
+install/             machine provisioning (apt + Homebrew, see Portability)
 completions/         bash + zsh completion
 test/kel-test.sh     the regression suite — run it before every commit
 docs/spec.md         design and rationale
@@ -208,8 +208,9 @@ a GNU flag for a BSD one:
 | `timeout` (GNU coreutils; absent on macOS) | prove the property directly instead of by elapsed time |
 | relying on `sort` ordering across implementations | compute what you need explicitly (two-pass awk) |
 
-`install/` is still apt-only — provisioning a Mac is a separate, larger job and
-is not scheduled.
+`install/` covers both: `10-system-tools.sh` + `20-user-tools.sh` for
+Debian/Ubuntu, `macos-tools.sh` (Homebrew, one script, no sudo) for the Mac.
+Keep them in step when the toolchain changes.
 
 **Do not solve portability with containers.** kel drives the *host's* tmux
 server and spawns agents that edit the host's repos with the host's `claude`

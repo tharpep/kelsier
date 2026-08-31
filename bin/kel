@@ -1645,27 +1645,48 @@ cmd_sweep_ui() {
 # --------------------------------------------------------------------------
 cmd_doctor() {
   need jq
-  probe() {
-    local label="$1"; shift
+  # A failed probe used to name the problem and stop there, which on a fresh
+  # machine is the least useful moment to withhold the fix.  Each probe now
+  # carries a remediation, printed only when it fails.  The package manager is
+  # resolved once: kel runs on Linux, WSL2 and macOS, and `apt install fzf` is
+  # actively wrong advice on the Mac.
+  # node and gh get their own hints rather than "$pm <name>": the Debian
+  # package for node is `nodejs`, and stock Ubuntu has no `gh` at all until you
+  # add the GitHub CLI apt repo (install/10-system-tools.sh does).  A hint that
+  # does not work is worse than no hint — same rule as the status bar.
+  local pm h_node h_gh
+  case "$(uname -s)" in
+    Darwin) pm="brew install"
+            h_node="brew install node"
+            h_gh="brew install gh, then gh auth login" ;;
+    *)      pm="sudo apt install"
+            h_node="fnm, or docs/setup.md §3b"
+            h_gh="gh auth login  (gh itself: docs/setup.md §3a, needs its own apt repo)" ;;
+  esac
+
+  probe() {   # LABEL HINT CMD...
+    local label="$1" hint="$2"; shift 2
     if "$@" >/dev/null 2>&1; then
       printf '  \033[1;32m✓\033[0m %s\n' "$label" >&2; printf 'true'
     else
-      printf '  \033[1;31m✗\033[0m %s\n' "$label" >&2; printf 'false'
+      printf '  \033[1;31m✗\033[0m %s\n' "$label" >&2
+      [ -n "$hint" ] && printf '      \033[2m%s\033[0m\n' "$hint" >&2
+      printf 'false'
     fi
   }
   echo "kel doctor" >&2
   local r_tmux r_ver r_popup r_wt r_jq r_node r_claude r_hooks r_sl r_pass r_go r_gh
-  r_tmux=$(probe   "tmux present"                     command -v tmux)
-  r_ver=$(probe    "tmux >= 3.0"                      bash -c 'v=$(tmux -V | grep -oE "[0-9]+\.[0-9]+" | head -1); [ -n "$v" ] || exit 1; [ "${v%%.*}" -gt 3 ] || { [ "${v%%.*}" -eq 3 ] && [ "${v#*.}" -ge 0 ]; }')
-  r_popup=$(probe  "display-popup available"          bash -c 'tmux list-commands 2>/dev/null | grep -q display-popup')
-  r_wt=$(probe     "git worktree available"           bash -c 'git worktree -h 2>&1 | grep -q "add"')
-  r_jq=$(probe     "jq present"                       command -v jq)
-  r_fzf=$(probe    "fzf present (kel board)"           command -v fzf)
-  r_node=$(probe   "node on PATH"                     command -v node)
-  r_claude=$(probe "claude on PATH"                   command -v claude)
-  r_gh=$(probe     "gh authenticated (PR state for kel sweep / top)" gh auth status)
-  r_hooks=$(probe  "kel hooks wired in settings.json" bash -c 'jq -e "[.hooks[]?[]?.hooks[]?.command // empty] | any(test(\"kel hook|kel-hook\"))" "$HOME/.claude/settings.json" >/dev/null')
-  r_sl=$(probe     "kel statusLine wired (context %)"  bash -c 'jq -e ".statusLine.command // \"\" | test(\"kel statusline\")" "$HOME/.claude/settings.json" >/dev/null')
+  r_tmux=$(probe   "tmux present"                     "$pm tmux" command -v tmux)
+  r_ver=$(probe    "tmux >= 3.0"                      "$pm tmux   (kel needs display-popup)" bash -c 'v=$(tmux -V | grep -oE "[0-9]+\.[0-9]+" | head -1); [ -n "$v" ] || exit 1; [ "${v%%.*}" -gt 3 ] || { [ "${v%%.*}" -eq 3 ] && [ "${v#*.}" -ge 0 ]; }')
+  r_popup=$(probe  "display-popup available"          "needs tmux 3.0+ — $pm tmux" bash -c 'tmux list-commands 2>/dev/null | grep -q display-popup')
+  r_wt=$(probe     "git worktree available"           "$pm git" bash -c 'git worktree -h 2>&1 | grep -q "add"')
+  r_jq=$(probe     "jq present"                       "$pm jq" command -v jq)
+  r_fzf=$(probe    "fzf present (kel board)"          "$pm fzf" command -v fzf)
+  r_node=$(probe   "node on PATH"                     "$h_node" command -v node)
+  r_claude=$(probe "claude on PATH"                   "install Claude Code — docs/setup.md" command -v claude)
+  r_gh=$(probe     "gh authenticated (PR state for kel sweep / top)" "$h_gh" gh auth status)
+  r_hooks=$(probe  "kel hooks wired in settings.json" "./install.sh   (from the kelsier repo)" bash -c 'jq -e "[.hooks[]?[]?.hooks[]?.command // empty] | any(test(\"kel hook|kel-hook\"))" "$HOME/.claude/settings.json" >/dev/null')
+  r_sl=$(probe     "kel statusLine wired (context %)" "./install.sh   (from the kelsier repo)" bash -c 'jq -e ".statusLine.command // \"\" | test(\"kel statusline\")" "$HOME/.claude/settings.json" >/dev/null')
   if [ -x "$KEL_TOP_BIN" ]; then
     printf '  \033[1;32m✓\033[0m %s\n' "kel top available (Go dashboard)" >&2
   else
@@ -1676,7 +1697,7 @@ cmd_doctor() {
   else
     printf '  \033[2m·\033[0m %s\n' "fleet reader: bash (build kel-fleet for a faster one)" >&2; r_go=false
   fi
-  r_pass=$(probe   "tmux allow-passthrough on"        bash -c 'tmux start-server \; show -gv allow-passthrough 2>/dev/null | grep -qx on')
+  r_pass=$(probe   "tmux allow-passthrough on"        "tmux/kel.conf sets it — tmux source-file ~/.tmux.conf" bash -c 'tmux start-server \; show -gv allow-passthrough 2>/dev/null | grep -qx on')
 
   jq -n --arg d "$(date -u +%FT%TZ)" \
     --argjson tmux "$r_tmux" --argjson ver "$r_ver" --argjson popup "$r_popup" \

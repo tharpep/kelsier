@@ -376,6 +376,14 @@ ok "a plain window appears as well"      '[ -n "$(rows | grep plainwin)" ]'
 ok "kel new -w still makes a worktree"   'NEW_W() { ( cd "$WORK/repos/api-gw" && "$KEL" new wt1 -w --agent "sleep 9999" ) >/dev/null 2>&1; }; NEW_W; [ "$(jq -r .isolation "$SESSIONS/api-gw/wt1.json")" = worktree ]'
 ok "_run refuses anything not allowed"   '! "$KEL" _run kill >/dev/null 2>&1'
 ok "_run doctor runs"                    'KEL_IN_POPUP=1 "$KEL" _run doctor >/dev/null 2>&1'
+# doctor hints go to stderr only — the cached JSON schema must not gain a field
+"$KEL" doctor >/dev/null 2>&1
+ok "doctor caches the same schema"       '[ "$(jq -Sr "keys | join(\",\")" "$XDG_STATE_HOME/kel/doctor.json")" = "allow_passthrough,checked_at,claude,display_popup,fzf,gh_auth,git_worktree,go_fleet,hooks_wired,jq,node,statusline_wired,tmux,tmux>=3.0" ]'
+# capture, do not pipe: doctor exits non-zero when a required probe fails, and
+# `set -o pipefail` would then fail this test even though the hint was printed
+dout="$(PATH="$WORK/nogh:$PATH" "$KEL" doctor 2>&1 || true)"
+ok "  ...and a failed probe prints a fix" '[[ "$dout" == *"gh auth login"* ]]'
+
 ok "_sweepui needs an explicit yes"      'printf "n\n" | KEL_IN_POPUP=1 "$KEL" _sweepui 2>&1 | grep -q "nothing swept"'
 
 # the completion scripts' own jq filters, run against a real document.

@@ -68,7 +68,15 @@ the Linux filesystem.
 
 ## 3. Packages
 
-### 3a. From apt
+**On macOS, skip 3a–3c entirely** and run `bash install/macos-tools.sh` — one
+Homebrew script that covers everything those three sections do. Homebrew has no
+root/user split, so it needs no sudo and is not two scripts. Then continue at
+3d (Claude Code). Two differences worth knowing: Homebrew installs `fd` and
+`bat` under their real names, so the Debian rename aliases must **not** be
+carried over; and the shell rc block goes in `~/.zshrc`, since macOS defaults
+to zsh. `install/` is otherwise Debian/Ubuntu only.
+
+### 3a. From apt  (Linux / WSL2)
 
 ```
 sudo apt update && sudo apt install -y \
@@ -201,6 +209,9 @@ export KEL_NOTIFY="waiting"        # or "waiting dead"
 ```
 
 ## 6. Second machine
+
+On a Mac, steps 1–2 are `bash install/macos-tools.sh` (see §3); 3–5 are the
+same. `install.sh` itself is portable and needs no change.
 
 1. `wsl --install -d Ubuntu-24.04`, set user.
 2. Install `fnm` + Node, Claude Code.

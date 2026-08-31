@@ -9,15 +9,26 @@ These are the exact steps that provisioned the first machine (WSL2 Ubuntu 24.04,
 2026-08-28), kept as a known-good starting point and so a second machine can be
 brought up by hand.
 
-| Script | Runs as | Installs |
-|---|---|---|
-| `10-system-tools.sh` | root | neovim (tarball), lazygit, yazi, git-delta, gh, win32yank, tealdeer |
-| `20-user-tools.sh` | your user | zoxide, fzf, fnm + Node LTS, the `~/.bashrc` env block |
+| Script | Platform | Runs as | Installs |
+|---|---|---|---|
+| `10-system-tools.sh` | Debian/Ubuntu | root | neovim (tarball), lazygit, yazi, git-delta, gh, win32yank, tealdeer |
+| `20-user-tools.sh` | Debian/Ubuntu | your user | zoxide, fzf, fnm + Node LTS, the `~/.bashrc` env block |
+| `macos-tools.sh` | macOS | your user | all of the above via Homebrew, minus win32yank |
 
 The apt packages (`tmux git build-essential curl wget unzip tar ripgrep fd-find
 bat btop jq` + yazi's preview stack) install separately — `docs/setup.md` §3a.
 
+**macOS is one script, not two**, because Homebrew installs into a prefix you
+already own and so has no root/user split. It also skips `win32yank`, which is
+a WSL clipboard shim, and writes its shell block to `~/.zshrc` without the
+`fd=fdfind` / `bat=batcat` aliases — those exist only to undo Debian renames,
+and on Homebrew they would break both tools.
+
 ## Order on a fresh machine
+
+**macOS:** `bash macos-tools.sh`, then steps 4-6 below.
+
+**Debian / Ubuntu / WSL2:**
 
 1. apt packages — `docs/setup.md` §3a
 2. `sudo bash 10-system-tools.sh`
