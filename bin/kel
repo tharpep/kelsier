@@ -47,7 +47,12 @@ SNAPSHOT_DECLINED="$STATE_DIR/snapshot-declined"   # a snapshot you said no to
 STATUSLINE_PREV="$HOME/.claude/statusline-prev"   # a statusLine kel displaced
 KEL_CTX_WARN="${KEL_CTX_WARN:-70}"                # show context on the bar from here up
 KEL_NOTIFY="${KEL_NOTIFY:-waiting}"               # states worth interrupting you for
-SELF="$(command -v kel 2>/dev/null || printf '%s' "$HOME/.local/bin/kel")"
+# The running script's own absolute path, preferred over a PATH lookup: kel
+# re-invokes itself (sweep, the board menus, tmux bindings) and resolving that
+# through PATH breaks whenever kel is not installed — a fresh clone, or CI.
+# That failed silently, because the re-invocation just did nothing.
+SELF="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)/$(basename "${BASH_SOURCE[0]}")"
+[ -x "$SELF" ] || SELF="$(command -v kel 2>/dev/null || printf '%s' "$HOME/.local/bin/kel")"
 # commands worth re-running per pane on restore (agents handled separately)
 KEL_RESTORE_CMDS="${KEL_RESTORE_CMDS:-nvim vim hx nano lazygit lazydocker htop btop k9s}"
 

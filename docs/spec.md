@@ -308,9 +308,12 @@ situations that each need something different done to them.
 Precedence is that order. It stops at *which* action, never *what changed* —
 the moment you want the diff that is `lazygit` (`backlog.md` R5).
 
-`dirty` / `unpushed` / `behind` are pure local git, so an unusable token costs
-the three PR states and leaves the rest honest: the column degrades, it does
-not go dark. A repo with no GitHub remote reads `clean`, not `unknown` — there
+`merged` asks **git first**: if HEAD is already an ancestor of the base, the
+work is in — true for a local remote, a non-GitHub remote, and offline. `gh`
+only adds the squash-merge case, where the commit is rewritten and ancestry
+cannot see it. So `dirty` / `unpushed` / `behind` / `merged` all work with no
+token at all, and an unusable one costs only `review` / `no_pr`: the column
+degrades, it does not go dark. A repo with no GitHub remote reads `clean`, not `unknown` — there
 is no PR question to fail at.
 
 **Cost.** `gh pr status` is ~2s and answers for one branch; the pulls endpoint
@@ -413,6 +416,11 @@ kel top                    the fleet dashboard — one read-only row per agent
                            j/k scroll · s cycles sort · / filter · q quit.
                            Go only (Bubble Tea v2); no bash fallback, because
                            it is a new surface rather than a port
+kel sweep [-n] [-f]        close out every finished agent whose work has
+                           landed (`land == merged`). Everything else is
+                           reported with its reason, never touched; -f widens
+                           what counts as landed but still refuses uncommitted
+                           or unpushed work. -n shows the plan first
 kel restart [name] [-f]    relaunch a crashed agent in its existing window —
                            same worktree, same branch, same conversation.
                            Refuses while a process is alive; -f overrides

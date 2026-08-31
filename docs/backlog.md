@@ -28,7 +28,7 @@ rollout wins.
 |---|---|
 | ~~v0.5~~ **done** | ~~#14~~ · ~~#15~~ · ~~#13~~ · ~~#1~~ · ~~#4~~ · macOS fixes · CI |
 | ~~v0.6~~ **done** | ~~`_fleet --json`~~ · ~~#2~~ (folds #3, #7) · Go seam · ~~#5~~ **cut, see R6** |
-| v0.7 | #6 · #8 · #12 |
+| ~~v0.7~~ **done** | ~~#6~~ · ~~#8~~ · ~~#12~~ |
 | v0.8 | #11 · config file (un-parked below) |
 | unscheduled | #9 · #10 · #16 · everything under *Parked* |
 
@@ -236,7 +236,7 @@ bar is why grouping exists, and the principle above keeps it minimal.
 
 **Gate:** ships with #2; nothing extra to build.
 
-### 8. Batch teardown — `kel sweep`  ·  `[fits]`
+### 8. Batch teardown — `kel sweep`  ·  `[fits]`  ·  **shipped v0.7**
 
 `kel kill` and `kel prune` are one-at-a-time. Run five worktree agents, they all
 finish, and `kel top` is a graveyard you clear one command at a time.
@@ -329,7 +329,7 @@ tool), but it blocks any public release.
 
 **Gate:** before showing anyone.
 
-### 12. `.kel/group` per-directory override  ·  `[fits]`
+### 12. `.kel/group` per-directory override  ·  `[fits]`  ·  **shipped v0.7**
 
 Already noted in `usage.md` / `rollout.md`. A file that pins a directory's
 group, for monorepos that don't split cleanly on git root.

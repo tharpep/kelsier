@@ -38,6 +38,9 @@ kel rename <newname>   rename THIS window and keep its metadata record in sync
 kel board              the fleet browser — fuzzy filter + preview  (Ctrl+Space
                        or prefix b).  enter jumps; tab = act on the highlighted
                        agent (jump / new here / rename / go to group / kill)
+kel sweep [-n] [-f]    close out every finished agent whose branch has landed;
+                       reports anything dirty, unpushed or unmerged instead of
+                       touching it. -n shows what it would do
 kel top                the fleet dashboard (also prefix t) — every agent, sorted
                        with a LAND column naming what each branch still needs
                        (dirty / unpushed / behind / no PR / in review / merged)
@@ -69,7 +72,9 @@ e.g. `"waiting dead"`), `KEL_NOTIFY_CMD` (a command taking title + body — see
 `setup.md`; kel always does a `tmux display-message` regardless),
 `KEL_CTX_WARN` (context % at which the bar starts showing it, default `70`),
 `KEL_BOARD_W` / `KEL_BOARD_H` (board popup size),
-`KEL_GROUP` (force every `kel new` into one group — see below),
+`KEL_GROUP` (force every `kel new` into one group — see below; a `.kel/group`
+file pins a directory and everything under it, for monorepos that don't split
+on git root, and `KEL_GROUP` still outranks it),
 `KEL_SESSION` (session-name prefix, default `kel`), `KEL_AGENT` (default
 `claude`), `KEL_WORKTREES` (default `<repo>/../.kel-worktrees`),
 `KEL_RESTORE_CMDS` (pane commands to re-run on restore).
