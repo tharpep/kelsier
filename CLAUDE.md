@@ -204,6 +204,9 @@ a GNU flag for a BSD one:
 | `sort -V` (absent from BSD sort) | compare `${v%%.*}` / `${v#*.}` arithmetically |
 | `setsid` (absent on macOS) | `( cmd & )` |
 | `script -qfc CMD file` (BSD wants `script -q file CMD`) | avoid; don't put it in tests |
+| `wc -l` (BSD pads the count with spaces: `       1`) | `grep -c .`, or trim before comparing |
+| `timeout` (GNU coreutils; absent on macOS) | prove the property directly instead of by elapsed time |
+| relying on `sort` ordering across implementations | compute what you need explicitly (two-pass awk) |
 
 `install/` is still apt-only — provisioning a Mac is a separate, larger job and
 is not scheduled.

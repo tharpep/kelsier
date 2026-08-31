@@ -363,8 +363,8 @@ rows() { "$KEL" _board_rows | sed 's/\x1b\[[0-9;]*m//g'; }
 ok "the board still lists the agent"     '[ -n "$(rows | awk -F"\t" "\$2==\"agent1\"")" ]'
 ok "  ...and now its other pane too"     '[ -n "$(rows | awk -F"\t" "\$3==\"pane\"")" ]'
 ok "  ...targeted by pane id"            '[[ "$(rows | awk -F"\t" "\$3==\"pane\"{print \$6; exit}")" == %* ]]'
-ok "an agent is never listed twice"      '[ "$(rows | awk -F"\t" "\$2==\"agent1\"" | wc -l)" = 1 ]'
-[ "$(rows | awk -F"\t" '$2=="agent1"' | wc -l)" = 1 ] || rows | sed "s/^/       /"
+ok "an agent is never listed twice"      '[ "$(rows | awk -F"\t" "\$2==\"agent1\"" | grep -c .)" = 1 ]'
+[ "$(rows | awk -F"\t" '$2=="agent1"' | grep -c .)" = 1 ] || rows | sed "s/^/       /"
 ok "a plain window appears as well"      '[ -n "$(rows | grep plainwin)" ]'
 
 # B' — worktree reachable from a menu, and the stranded commands guarded
