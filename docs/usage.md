@@ -39,7 +39,8 @@ kel ls [--json]        list every agent, grouped by repo (state, context %, cost
 kel go [<group>]       switch to a group  (no arg: list the groups)
 kel move [<group>]     put THIS window in another group (cd there first, then kel move)
 kel rename <newname>   rename THIS window and keep its metadata record in sync
-kel board              the fleet browser — fuzzy filter + preview  (Ctrl+Space
+kel board              browse agents AND panes — your editor, lazygit, a shell;
+                       enter jumps to the pane itself  (Ctrl+Space
                        or prefix b).  enter jumps; tab = act on the highlighted
                        agent (jump / new here / rename / go to group / kill)
 kel sweep [-n] [-f]    close out every finished agent whose branch has landed;

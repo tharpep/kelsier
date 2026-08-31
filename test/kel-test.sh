@@ -340,6 +340,44 @@ printf 'nonsense line with no equals\nBAD_KEY = 1\nctx_warn = 7\n' > "$CH/.confi
 ok "junk lines are skipped, not fatal"   '[[ "$(CFG "$CH")" == *"ctx_warn=7"* ]]'
 ok "the shipped example parses"          'HOME="$CH" XDG_CONFIG_HOME="$CH/.config" bash -c "mkdir -p $CH/.config/kel && cp $HERE/../examples/config.toml $CH/.config/kel/config.toml && cd $CH && \"$KEL\" _cfgdump" >/dev/null'
 
+section "the system around the agent (v0.9a)"
+reset
+NEW api-gw agent1
+W1="$(window_of api-gw agent1)"; P1="$(pane_of api-gw agent1)"
+# A — state on the pane border, so a full-screen agent still signals
+border() { tmux show-options -w -t "$W1" pane-border-style 2>/dev/null | awk '{print $2}'; }
+hook "$P1" UserPromptSubmit
+ok "working leaves the border alone"     '[ -z "$(border)" ]'
+hook "$P1" Notification permission_prompt "x"
+ok "waiting paints the border"           '[ -n "$(border)" ]'
+hook "$P1" Notification quota_auto_resume_fired "q"
+ok "  ...a different colour when throttled" '[ "$(border)" != "" ]'
+hook "$P1" SessionEnd
+ok "session end clears it"               '[ -z "$(border)" ]'
+
+# B — the board lists panes, not only agents
+tmux split-window -d -t "$W1" -c "$WORK" 'sleep 9999'
+tmux new-window  -d -t '=keltest/api-gw' -n plainwin -c "$WORK"
+wait_until '[ "$(tmux list-panes -a -F x | grep -c x)" -ge 3 ]'
+rows() { "$KEL" _board_rows | sed 's/\x1b\[[0-9;]*m//g'; }
+ok "the board still lists the agent"     '[ -n "$(rows | awk -F"\t" "\$2==\"agent1\"")" ]'
+ok "  ...and now its other pane too"     '[ -n "$(rows | awk -F"\t" "\$3==\"pane\"")" ]'
+ok "  ...targeted by pane id"            '[[ "$(rows | awk -F"\t" "\$3==\"pane\"{print \$6; exit}")" == %* ]]'
+ok "an agent is never listed twice"      '[ "$(rows | awk -F"\t" "\$2==\"agent1\"" | wc -l)" = 1 ]'
+ok "a plain window appears as well"      '[ -n "$(rows | grep plainwin)" ]'
+
+# B' — worktree reachable from a menu, and the stranded commands guarded
+ok "kel new -w still makes a worktree"   'NEW_W() { ( cd "$WORK/repos/api-gw" && "$KEL" new wt1 -w --agent "sleep 9999" ) >/dev/null 2>&1; }; NEW_W; [ "$(jq -r .isolation "$SESSIONS/api-gw/wt1.json")" = worktree ]'
+ok "_run refuses anything not allowed"   '! "$KEL" _run kill >/dev/null 2>&1'
+ok "_run doctor runs"                    'KEL_IN_POPUP=1 "$KEL" _run doctor >/dev/null 2>&1'
+ok "_sweepui needs an explicit yes"      'printf "n\n" | KEL_IN_POPUP=1 "$KEL" _sweepui 2>&1 | grep -q "nothing swept"'
+
+# F — kel's chosen name is handed to Claude Code
+( cd "$WORK/repos/coppermind" && KEL_AGENT=claude "$KEL" new named --no-agent ) >/dev/null 2>&1
+ok "claude is launched with --name"      '[ "$(jq -r .agent "$SESSIONS/coppermind/named.json")" = "claude --name named" ]'
+( cd "$WORK/repos/coppermind" && "$KEL" new other --agent 'sleep 9999' ) >/dev/null 2>&1
+ok "  ...and other agents are untouched" '[ "$(jq -r .agent "$SESSIONS/coppermind/other.json")" = "sleep 9999" ]'
+
 # ---------------------------------------------------------------- restore
 section "restore rebuilds the workspace and keeps the snapshot"
 reset

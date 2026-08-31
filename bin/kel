@@ -450,6 +450,14 @@ cmd_new() {
     cwd="${repo:-$PWD}"
   fi
 
+  # F: give Claude Code the name YOU chose, so /list-agents, @mentions and
+  # kel ls all agree. Claude's own name is auto-generated unless set, so kel's
+  # is the more meaningful one. Only for claude — another agent may not take
+  # the flag, and guessing would break it.
+  case "${agent%% *}" in
+    claude|*/claude) agent="$agent --name $name" ;;
+  esac
+
   local wid
   wid="$(open_window "$name" "$cwd" "$group")"
   [ -n "$wid" ] || die "failed to create tmux window"
@@ -924,6 +932,7 @@ cmd_ls() {
   prune_state
   local doc
   if [ "${1:-}" = "--json" ]; then doc="$(fleet_json --dirty)"; else doc="$(fleet_json)"; fi
+  [ "${1:-}" = "--json" ] || repaint_all "$doc"
   if [ "$(printf '%s' "$doc" | jq '.agents | length')" = 0 ]; then
     echo "no agents yet — 'kel new <name>' to start one"
     return 0
@@ -1057,7 +1066,13 @@ cmd_move() {
 # --------------------------------------------------------------------------
 # rows for fzf:  group <T> name <T> state <T> dirty <T> path <T> wid
 cmd_board_rows() {
-  fleet_json --dirty | jq -r '
+  # Agents first, then every OTHER pane — your editor, lazygit, a shell. The
+  # board used to know only agents, which is the literal "can't get from Claude
+  # Code to anything else" problem. Field 6 is the jump target: a window id for
+  # an agent, a pane id (%N) for a pane; _board_jump handles both.
+  local doc; doc="$(fleet_json --dirty)"
+  {
+  printf '%s' "$doc" | jq -r '
     def colour:
       if   . == "waiting"   then "\u001b[1;33m"
       elif . == "working"   then "\u001b[1;36m"
@@ -1072,7 +1087,24 @@ cmd_board_rows() {
     | [ .group, .name, ($st | colour) + $st + "\u001b[0m",
         (if (.dirty // 0) > 0 then "\(.dirty) dirty" else "" end),
         (.cwd // ""), .window_id ]
-    | @tsv' | sort
+    | @tsv'
+
+  # Every pane EXCEPT the one already represented by its window's own row.
+  # Every window has a row above (agents and unmanaged alike), so the rule is
+  # simply "skip each window's lowest pane index" — not "skip agents", which
+  # left an agent's own pane listed twice.
+  tmux list-panes -a -F '#{session_name}	#{window_id}	#{window_name}	#{pane_id}	#{pane_index}	#{pane_current_command}	#{pane_current_path}' 2>/dev/null \
+  | sort -t"$(printf '	')" -k2,2 -k5,5n \
+  | awk -F'	' -v pfx="$KEL_PREFIX" '
+      {
+        sn=$1; wid=$2; wname=$3; pid=$4; pidx=$5; cmd=$6; path=$7
+        if (sn == pfx)                     g = pfx
+        else if (index(sn, pfx "/") == 1)  g = substr(sn, length(pfx)+2)
+        else                               next
+        if (!(wid in seen)) { seen[wid] = 1; next }   # the window own row covers it
+        printf "%s\t%s\t\033[2mpane\033[0m\t\t%s\t%s\n", g, wname "/" cmd, path, pid
+      }'
+  } | sort
 }
 
 cmd_board_preview() {   # name group
@@ -1106,10 +1138,14 @@ cmd_board_preview() {   # name group
   fi
 }
 
-cmd_board_jump() {   # wid group
+cmd_board_jump() {   # target group     (target is @window or %pane)
   [ -n "${1:-}" ] || return 0
   tmux switch-client -t "=$(sess "$2")" 2>/dev/null || true
-  tmux select-window -t "$1" 2>/dev/null || true
+  case "$1" in
+    %*) tmux select-window -t "$1" 2>/dev/null || true
+        tmux select-pane   -t "$1" 2>/dev/null || true ;;
+    *)  tmux select-window -t "$1" 2>/dev/null || true ;;
+  esac
   set_last_group "$2"
 }
 
@@ -1134,6 +1170,7 @@ cmd_board_actions() {   # wid name group cwd
   tmux display-menu ${cl:+-c $cl} -x C -y C -T " $name " -- \
     "jump to it"                j  "run-shell \"$SELF _board_jump '$wid' '$group'\"" \
     "new agent in its folder"   n  "command-prompt -p 'name:' { run-shell \"cd '$cwd' && $SELF new %%\" }" \
+    "new WORKTREE agent there"  w  "command-prompt -p 'branch/name:' { run-shell \"cd '$cwd' && $SELF new %% -w\" }" \
     "rename it"                  r  "command-prompt -p 'new name:' { run-shell \"$SELF _board_rename '$wid' %%\" }" \
     "go to its group"           g  "run-shell \"$SELF go '$group'\"" \
     "" \
@@ -1545,6 +1582,40 @@ cmd_sweep() {
 }
 
 # --------------------------------------------------------------------------
+# _run  —  a fleet command in a popup, so it is reachable from inside tmux
+# --------------------------------------------------------------------------
+# sweep / restore / prune / doctor were shell-only, which in practice meant
+# unavailable: kel is entered once and then lived in from inside tmux. These
+# are rare enough not to deserve keybindings of their own, so they hang off the
+# prefix-k menu and print into a popup you dismiss.
+cmd_run_popup() {   # subcommand [args...]
+  local sub="${1:-}"; shift || true
+  case "$sub" in
+    sweep|restore|prune|doctor) ;;
+    *) die "kel _run: not a popup command: $sub" ;;
+  esac
+  if [ -n "${TMUX:-}" ] && [ -z "${KEL_IN_POPUP:-}" ]; then
+    local -a penv=( -e KEL_IN_POPUP=1 ) v
+    for v in KEL_SESSION KEL_GROUP XDG_STATE_HOME KEL_FLEET_BIN; do
+      [ -n "${!v:-}" ] && penv+=( -e "$v=${!v}" )
+    done
+    exec tmux display-popup "${penv[@]}" -w 80% -h 60% -T " kel $sub " -E \
+      "'$SELF' _run $sub $* ; printf '\n  [any key]'; read -rsn1"
+  fi
+  # from a menu, sweep always shows the dry run and asks first
+  if [ "$sub" = sweep ]; then "$SELF" _sweepui; else "$SELF" "$sub" "$@"; fi
+}
+
+# sweep is the one that removes things, so from a menu it always shows the
+# dry run first and asks. The -f path stays shell-only on purpose.
+cmd_sweep_ui() {
+  "$SELF" sweep -n
+  printf '\n  run it for real? [y/N] '
+  local a=''; read -r a || a=n   # in a popup stdin IS the pty; no /dev/tty needed
+  case "$a" in y|Y|yes) echo; "$SELF" sweep ;; *) echo "  nothing swept" ;; esac
+}
+
+# --------------------------------------------------------------------------
 # kel doctor
 # --------------------------------------------------------------------------
 cmd_doctor() {
@@ -1722,7 +1793,7 @@ cat <<'EOF'
     copy text: hold SHIFT while you drag (mouse mode owns a plain drag)
 
   MOVE AROUND
-    Ctrl+Space    the board — find any agent; enter jumps, TAB = act on it
+    Ctrl+Space    the board — find any agent OR pane; enter jumps, TAB = act
     (prefix b)    the same board
     prefix `      jump to the next agent WAITING on you — any group
     prefix 1-9    window (agent) N in this group
@@ -1746,7 +1817,8 @@ cat <<'EOF'
     prefix ,   rename (kel rename)   prefix ↑↓←→    focus a pane (or click it)
     prefix &   close (confirms)      prefix z       zoom a pane (toggle)
                                      prefix x       close a pane
-    prefix k   "new to kel/tmux?" menu — the common moves, spelled out
+    prefix k   the kel menu — new agent (plain or worktree), browse, and the
+               fleet commands: sweep, restore, prune, doctor
 
   GROUP
     prefix d   detach — "exit kel". Agents keep running; snapshot is saved;
@@ -1777,6 +1849,9 @@ cat <<'EOF'
     1:name*  working   1:name?  waiting-on-you   1:name!  done   1:name  idle
     1:name~  throttled — waiting on quota, not on you (it resumes itself)
     1:namex  the agent process died (no clean exit) — kel kill or restart it
+
+  PANE BORDERS carry the same state, so a full-screen agent still signals
+    orange waiting on you   ·   purple throttled   ·   red died   ·   green done
     [1:name] current window   1:name·3 = 3 panes   ⟨+N waiting⟩ in other groups
     1:name·84%  context window used — only shown from KEL_CTX_WARN (70%) up.
                 Claude Code's own row has the full picture: model, bar, cost.
@@ -1784,6 +1859,46 @@ cat <<'EOF'
   prefix ?   tmux's full key list      prefix k   the beginner menu
 
 EOF
+}
+
+# --------------------------------------------------------------------------
+# paint_state  —  put the state where you can see it without looking (v0.9a)
+# --------------------------------------------------------------------------
+# The status bar is one line at the bottom. With a full-screen agent that is a
+# place you have to look AT; a coloured pane border is peripheral vision, and
+# the window name carries the same colour so it reads from the bar too.
+#
+# Set per-window (-w), so windows keep their own colour rather than the last
+# hook to fire repainting the whole server. Calm states clear back to the
+# default, so a workspace at rest is not a christmas tree.
+paint_state() {   # wid state
+  local wid="$1" col=''
+  case "${2:-}" in
+    waiting)   col=colour214 ;;   # blocked on you — the one that matters
+    throttled) col=colour141 ;;
+    dead)      col=colour167 ;;
+    done)      col=colour114 ;;
+    *)         col='' ;;          # working / idle: stay quiet
+  esac
+  if [ -n "$col" ]; then
+    tmux set-option -w -t "$wid" pane-border-style        "fg=$col" 2>/dev/null || true
+    tmux set-option -w -t "$wid" pane-active-border-style "fg=$col" 2>/dev/null || true
+  else
+    tmux set-option -wu -t "$wid" pane-border-style        2>/dev/null || true
+    tmux set-option -wu -t "$wid" pane-active-border-style 2>/dev/null || true
+  fi
+}
+
+# Repaint every window from the fleet document. `dead` is computed at read
+# time rather than reported by a hook, so a crashed agent has nothing to paint
+# its border — this catches it. Called from `kel ls`, never from the bar: the
+# bar redraws constantly and this is N tmux calls.
+repaint_all() {   # fleet-json
+  local wid st
+  while IFS=$'\t' read -r wid st; do
+    [ -n "$wid" ] && paint_state "$wid" "$st"
+  done < <(printf '%s' "$1" | jq -r '.agents[] | select(.window_id != null)
+                                      | [.window_id, (.state // "")] | @tsv')
 }
 
 # --------------------------------------------------------------------------
@@ -2007,6 +2122,7 @@ cmd_hook() {
       exit 0 ;;
     SessionEnd)
       rm -f "$STATE_DIR/$wid.state" "$STATE_DIR/$wid.ctx"
+      paint_state "$wid" ''
       [ -n "$sid" ] && rm -f "$STASH_DIR/$sid"
       tmux refresh-client -S 2>/dev/null || true
       exit 0 ;;
@@ -2016,6 +2132,7 @@ cmd_hook() {
   tmp="$(mktemp "$STATE_DIR/.${wid#@}.XXXXXX" 2>/dev/null)" || exit 0
   printf '%s %s %s\n' "$state" "$(date +%s)" "$ntext" > "$tmp"
   mv -f "$tmp" "$STATE_DIR/$wid.state"
+  paint_state "$wid" "$(effective_state "$wid")"
   tmux refresh-client -S 2>/dev/null || true
 
   # Only on a transition *into* a notifying state, and only when you are not
@@ -2040,7 +2157,8 @@ quickstart() {
   prefix `           jump to whichever agent is waiting on you
   Ctrl+Space         the board — find any agent (enter jumps, tab acts)
   prefix m           manage the agent you're on — rename / move / kill
-  prefix k           new to tmux? the "what can I do here" menu
+  prefix k           the kel menu — everything, including worktree agents and
+                     sweep / restore / prune / doctor
 
 EOF
 }
@@ -2151,6 +2269,8 @@ main() {
     restart)      migrate_meta; cmd_restart "$@" ;;
     top)          cmd_top "$@" ;;
     sweep)        migrate_meta; cmd_sweep "$@" ;;
+    _run)         cmd_run_popup "$@" ;;
+    _sweepui)     migrate_meta; cmd_sweep_ui ;;
     prune)        migrate_meta; cmd_prune "$@" ;;
     snapshot)     cmd_snapshot ;;
     doctor)       cmd_doctor "$@" ;;
