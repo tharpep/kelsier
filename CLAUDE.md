@@ -242,12 +242,16 @@ under its own work dir.
 
 ## Where things stand
 
-**v0.6 is nearly done.** Phase A (`kel _fleet --json`), Phase B (the Go
-`kel-fleet` behind the fallback seam) and Phase C (`kel top`) are shipped.
-Bubble Tea is **v2** — `charm.land/bubbletea/v2`, `View() tea.View`,
-`tea.KeyPressMsg`; almost every tutorial online is v1 and will not compile.
-Next is
-`#5` peek. Go is a strangler fig on `main`
-(`kel _fleet --json` first, then `kel top` in Bubble Tea **v2**), with bash
-retained as the fallback and as the differential-test oracle. `rollout.md`
-§ v0.6 has the rules; follow them rather than re-deriving the strategy.
+**v0.6 is done** — `kel _fleet --json` (one computed view), the Go `kel-fleet`
+behind the fallback seam, and `kel top`. `#5` peek was cut; the reasoning is in
+`backlog.md` R6.
+
+Go is a strangler fig on `main`: bash stays the permanent fallback *and* the
+differential-test oracle, read surfaces port first, mutating commands last or
+never. `rollout.md` § v0.6 has the rules — follow them rather than re-deriving
+the strategy. Bubble Tea is **v2** (`charm.land/bubbletea/v2`, `View() tea.View`,
+`tea.KeyPressMsg`); almost every tutorial online is v1 and will not compile.
+
+Next is **v0.7**: `#6` merge-readiness via `gh` (three-valued —
+ready/not-ready/**unknown**, because an expired token must never render as "no
+PR"), `#8` `kel sweep`, `#12` `.kel/group`.

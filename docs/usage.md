@@ -160,7 +160,10 @@ the record, `kel kill` / `kel prune` discard it.
 **A reboot / crash** takes down everything. kel snapshots the whole workspace —
 every group, window, pane layout, and per-pane directory — on detach and
 whenever the shape changes (`~/.local/state/kel/snapshot.json`, with one
-generation kept as `snapshot.json.prev`). The next time
+generation kept as `snapshot.json.prev`). Starting `kel` with no live workspace
+offers to rebuild it: **y** rebuilds, **n** starts fresh and won't ask again for
+that snapshot, **d** discards the saved workspace. A new snapshot is a new
+question, so `n` never hides a workspace you actually have. The next time
 you run `kel` it offers to rebuild it:
 
 ```
