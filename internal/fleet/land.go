@@ -211,6 +211,17 @@ func landOf(dir, branch string, wantPR bool) *Land {
 		}
 	}
 
+	base := baseRef(dir)
+	// Ask git before gh: if HEAD is already an ancestor of the base the work is
+	// in, and that holds for a local remote, a non-GitHub remote, and offline.
+	// gh only adds the squash-merge case, where the commit is rewritten and the
+	// ancestor test cannot see it.
+	if base != "" && branch != strings.TrimPrefix(base, "origin/") {
+		if exec.Command("git", "-C", dir, "merge-base", "--is-ancestor", "HEAD", base).Run() == nil {
+			return &Land{Code: "merged"}
+		}
+	}
+
 	pr := prStateOf(dir, branch, wantPR)
 	switch pr {
 	case "merged":
@@ -219,7 +230,6 @@ func landOf(dir, branch string, wantPR bool) *Land {
 		return &Land{Code: "review"}
 	}
 
-	base := baseRef(dir)
 	// standing on the base branch itself: nothing to land, and "no PR" would be
 	// suggesting an action that does not exist
 	if base != "" && branch == strings.TrimPrefix(base, "origin/") {

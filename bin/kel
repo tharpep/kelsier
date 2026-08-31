@@ -19,6 +19,7 @@
 #                              (-c resume conversations, -s force the snapshot)
 #   kel restart [name] [-f]    relaunch a crashed agent in its existing window
 #   kel top                    the fleet dashboard (prefix t)
+#   kel sweep [-n] [-f]        close out every finished agent that has landed
 #   kel prune [-f]             discard dead agent records
 #   kel doctor                 capability probe, cached
 #
@@ -80,10 +81,36 @@ has_remote() { [ -n "$(git -C "$1" remote 2>/dev/null)" ]; }
 
 # derive the group for a new agent:
 #   --group flag  >  $KEL_GROUP (force everything into one group)  >  repo basename  >  misc
+# --group flag > $KEL_GROUP > .kel/group > repo basename > misc
 group_for_cwd() {
   [ -n "${KEL_GROUP:-}" ] && { printf '%s' "$KEL_GROUP"; return; }
+  local g; g="$(dir_group "$PWD")"
+  [ -n "$g" ] && { printf '%s' "$g"; return; }
   local gr; gr="$(git_root 2>/dev/null || true)"
   if [ -n "$gr" ]; then basename "$gr"; else printf 'misc'; fi
+}
+
+# A `.kel/group` file pins a directory (and everything under it) to a group,
+# for a monorepo that does not split cleanly on git root.  Searched upward from
+# $1, stopping at the repo root so it cannot escape into a parent project.
+dir_group() {   # dir -> group name, or empty
+  local d="$1" root g
+  root="$(cd "$d" 2>/dev/null && git rev-parse --show-toplevel 2>/dev/null || true)"
+  while [ -n "$d" ] && [ "$d" != / ]; do
+    if [ -f "$d/.kel/group" ]; then
+      read -r g < "$d/.kel/group" 2>/dev/null || g=''
+      g="${g%$'\r'}"                      # tolerate a CRLF checkout
+      g="${g#"${g%%[![:space:]]*}"}"      # trim, but do NOT truncate: a file
+      g="${g%"${g##*[![:space:]]}"}"      # saying "not a slug" is an error,
+      if slug_ok "$g"; then                # not a request for the group "not"
+        printf '%s' "$g"; return 0
+      fi
+      warn ".kel/group in $d is not a slug ('$g') — ignoring it"
+      return 0
+    fi
+    [ "$d" = "$root" ] && break
+    d="$(dirname "$d")"
+  done
 }
 
 # all kel group names that have a live tmux session
@@ -569,8 +596,18 @@ land_of() {   # cwd [branch] [--pr]  ->  code	n
     [ "${n:-0}" -gt 0 ] && { printf 'unpushed	%s' "$n"; return; }
   fi
 
-  # PR state outranks `behind`: a merged branch is sweepable regardless, and an
-  # open PR is someone else's turn.  Falls through when gh can't answer.
+  # "merged" outranks `behind`: it is sweepable regardless, and an open PR is
+  # someone else's turn.  Ask git BEFORE gh — if HEAD is already an ancestor of
+  # the base, the work is in, and that is true for a local remote, a non-GitHub
+  # remote, and offline.  gh only adds the squash-merge case, where the commit
+  # is rewritten and the ancestor test cannot see it.
+  local base_m; base_m="$(base_ref "$d")"
+  if [ -n "$base_m" ] && [ "$br" != "${base_m#origin/}" ]; then
+    if git -C "$d" merge-base --is-ancestor HEAD "$base_m" 2>/dev/null; then
+      printf 'merged	'; return
+    fi
+  fi
+
   local pr; pr="$(pr_state_of "$d" "$br" "$want_pr")"
   case "$pr" in
     merged) printf 'merged	';  return ;;
@@ -1371,6 +1408,85 @@ cmd_top() {
 }
 
 # --------------------------------------------------------------------------
+# kel sweep [-n] [-f]   — close out everything that has actually landed
+# --------------------------------------------------------------------------
+# kel kill and kel prune are one-at-a-time.  Finish five worktree agents and
+# kel top becomes a graveyard you clear one command at a time.
+#
+# Sweeps an agent only when it is finished AND its work is somewhere other than
+# that worktree — `land` already computes exactly that, so `merged` IS the
+# predicate.  Everything else is REPORTED, never touched: the rule from kel
+# kill holds, and deleting an agent's only copy of real work is the one
+# unforgivable bug in this category of tool.
+cmd_sweep() {
+  need tmux; need jq
+  local dry=0 force=0
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      -n|--dry-run) dry=1 ;;
+      -f|--force)   force=1 ;;
+      -*)           die "kel sweep: unknown flag $1" ;;
+      *)            die "kel sweep takes no arguments" ;;
+    esac
+    shift
+  done
+
+  local doc; doc="$(fleet_json --land --pr)"
+  local swept=0 kept=0 g nm code st
+
+  # eligible: finished, and its branch is merged (or -f, which still refuses
+  # anything with uncommitted or unpushed work)
+  while IFS=$'\t' read -r g nm st code; do
+    [ -n "$nm" ] || continue
+    if [ "$dry" = 1 ]; then
+      say "would sweep  $g/$nm  ($st, $code)"
+    else
+      "$SELF" kill "$g/$nm" >/dev/null 2>&1 \
+        && { say "swept  $g/$nm  ($code)"; } \
+        || { warn "could not sweep $g/$nm"; kept=$((kept+1)); continue; }
+    fi
+    swept=$((swept+1))
+  done < <(printf '%s' "$doc" | jq -r --argjson force "$([ "$force" = 1 ] && echo true || echo false)" '
+    .agents[]
+    | select(.managed)
+    | select(.state == "done" or .state == "dead")
+    | select((.land.code // "") as $c
+             | $c == "merged" or ($force and ($c == "clean" or $c == "no_pr" or $c == "review")))
+    | [.group, .name, (.state // "-"), (.land.code // "-")] | @tsv')
+
+  # everything finished that is NOT safe to sweep, and why
+  local why
+  while IFS=$'\t' read -r g nm st code; do
+    [ -n "$nm" ] || continue
+    case "$code" in
+      dirty)    why="uncommitted work" ;;
+      unpushed) why="commits that are only here" ;;
+      behind)   why="behind its base" ;;
+      no_pr)    why="no PR — nothing has merged it" ;;
+      review)   why="its PR is still open" ;;
+      unknown)  why="gh could not say whether it merged" ;;
+      *)        why="not merged" ;;
+    esac
+    warn "kept  $g/$nm  — $why"
+    kept=$((kept+1))
+  done < <(printf '%s' "$doc" | jq -r --argjson force "$([ "$force" = 1 ] && echo true || echo false)" '
+    .agents[]
+    | select(.managed)
+    | select(.state == "done" or .state == "dead")
+    | select((.land.code // "") as $c
+             | ($c != "merged") and (($force | not) or ($c == "dirty" or $c == "unpushed" or $c == "unknown" or $c == "behind")))
+    | [.group, .name, (.state // "-"), (.land.code // "-")] | @tsv')
+
+  if [ "$swept" = 0 ] && [ "$kept" = 0 ]; then
+    say "nothing finished to sweep"
+  elif [ "$dry" = 1 ]; then
+    say "$swept would be swept, $kept kept  (drop -n to do it)"
+  else
+    say "swept $swept, kept $kept"
+  fi
+}
+
+# --------------------------------------------------------------------------
 # kel doctor
 # --------------------------------------------------------------------------
 cmd_doctor() {
@@ -1976,6 +2092,7 @@ main() {
     restore)      migrate_meta; cmd_restore "$@" ;;
     restart)      migrate_meta; cmd_restart "$@" ;;
     top)          cmd_top "$@" ;;
+    sweep)        migrate_meta; cmd_sweep "$@" ;;
     prune)        migrate_meta; cmd_prune "$@" ;;
     snapshot)     cmd_snapshot ;;
     doctor)       cmd_doctor "$@" ;;

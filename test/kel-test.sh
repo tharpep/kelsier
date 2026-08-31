@@ -274,6 +274,52 @@ ok "  ...and needs no gh at all"         '[ "$(PATH="$WORK/nogh:$PATH" "$KEL" _f
 printf '#!/bin/sh\nexit 2\n' > "$WORK/stale"; chmod +x "$WORK/stale"
 ok "a broken kel-fleet falls back to bash" 'KEL_FLEET_BIN="$WORK/stale" "$KEL" _fleet --land | jq -e ".agents" >/dev/null'
 
+section ".kel/group pins a directory to a group (#12)"
+reset
+mkdir -p "$WORK/repos/api-gw/svc/deep"
+NEWD() { ( cd "$1" && "$KEL" new "$2" --agent 'sleep 9999' ) >/dev/null 2>&1; agent_up "$(tmux list-windows -a -F '#{window_id} #{window_name}' | awk -v n="$2" '$2==n{print $1}')"; }
+NEWD "$WORK/repos/api-gw/svc" plain
+ok "no file: group is the repo"          '[ "$(jq -r .group "$SESSIONS/api-gw/plain.json")" = api-gw ]'
+mkdir -p "$WORK/repos/api-gw/svc/.kel"; echo billing > "$WORK/repos/api-gw/svc/.kel/group"
+NEWD "$WORK/repos/api-gw/svc" pinned
+ok "the file pins the group"             '[ -f "$SESSIONS/billing/pinned.json" ]'
+NEWD "$WORK/repos/api-gw/svc/deep" nested
+ok "  ...and applies to subdirectories"  '[ -f "$SESSIONS/billing/nested.json" ]'
+NEWD "$WORK/repos/api-gw" outside
+ok "  ...but not to a sibling"           '[ -f "$SESSIONS/api-gw/outside.json" ]'
+printf 'not a slug!\n' > "$WORK/repos/api-gw/svc/.kel/group"
+out="$( ( cd "$WORK/repos/api-gw/svc" && "$KEL" new bad --agent 'sleep 9999' ) 2>&1 )"
+ok "a non-slug is refused, not truncated" '[[ "$out" == *"not a slug"* ]] && [ -f "$SESSIONS/api-gw/bad.json" ]'
+printf '  billing  \r\n' > "$WORK/repos/api-gw/svc/.kel/group"
+NEWD "$WORK/repos/api-gw/svc" trimmed
+ok "whitespace and CRLF are tolerated"   '[ -f "$SESSIONS/billing/trimmed.json" ]'
+echo billing > "$WORK/repos/api-gw/svc/.kel/group"
+ok "\$KEL_GROUP still outranks the file"  '( cd "$WORK/repos/api-gw/svc" && KEL_GROUP=forced "$KEL" new f --agent "sleep 9999" ) >/dev/null 2>&1; [ -f "$SESSIONS/forced/f.json" ]'
+
+section "kel sweep closes out what has landed (#8)"
+reset
+git init -q --bare -b main "$WORK/origin.git"
+git init -q -b main "$WORK/sw" && ( cd "$WORK/sw" && git remote add origin "$WORK/origin.git" \
+  && echo a>f && git add -A && git -c user.email=t@t -c user.name=t commit -qm i && git push -qu origin main ) >/dev/null 2>&1
+for n in landed openwork messy; do ( cd "$WORK/sw" && "$KEL" new "$n" -w --agent 'sleep 9999' ) >/dev/null 2>&1; done
+SWT="$WORK/.kel-worktrees"
+( cd "$SWT/sw-landed" && echo x>x && git add -A && git -c user.email=t@t -c user.name=t commit -qm x && git push -q origin landed ) >/dev/null 2>&1
+( cd "$WORK/sw" && git fetch -q && git merge -q --no-edit origin/landed && git push -q origin main ) >/dev/null 2>&1
+( cd "$SWT/sw-landed" && git fetch -q ) >/dev/null 2>&1
+( cd "$SWT/sw-openwork" && echo y>y && git add -A && git -c user.email=t@t -c user.name=t commit -qm y && git push -q origin openwork && git fetch -q ) >/dev/null 2>&1
+( cd "$SWT/sw-messy" && echo z>z )
+for n in landed openwork messy; do hook "$(pane_of sw "$n")" Stop; done
+ok "merged is detected without gh"       '[ "$("$KEL" _fleet --land | jq -r ".agents[]|select(.name==\"landed\")|.land.code")" = merged ]'
+ok "-n sweeps nothing"                   '"$KEL" sweep -n >/dev/null 2>&1; [ -d "$SWT/sw-landed" ]'
+ok "  ...but says what it would take"    '[[ "$("$KEL" sweep -n 2>&1)" == *"would sweep"*landed* ]]'
+"$KEL" sweep >/dev/null 2>&1
+ok "sweep removes the merged worktree"   '[ ! -d "$SWT/sw-landed" ]'
+ok "  ...and its record"                 '[ ! -f "$SESSIONS/sw/landed.json" ]'
+ok "keeps the unmerged one"              '[ -d "$SWT/sw-openwork" ] && [ -f "$SESSIONS/sw/openwork.json" ]'
+ok "keeps the dirty one"                 '[ -d "$SWT/sw-messy" ] && [ -f "$SESSIONS/sw/messy.json" ]'
+ok "  ...and says why for each"          'o="$("$KEL" sweep 2>&1)"; [[ "$o" == *"uncommitted work"* ]]'
+ok "-f still refuses uncommitted work"   '"$KEL" sweep -f >/dev/null 2>&1; [ -d "$SWT/sw-messy" ]'
+
 # ---------------------------------------------------------------- restore
 section "restore rebuilds the workspace and keeps the snapshot"
 reset
