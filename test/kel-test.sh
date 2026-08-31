@@ -295,6 +295,23 @@ mv "$SESSIONS/api-gw/c.json" "$SESSIONS/api-gw/ghost.json"
 jq '.name="ghost"' "$SESSIONS/api-gw/ghost.json" > "$WORK/g" && mv "$WORK/g" "$SESSIONS/api-gw/ghost.json"
 ok "an orphaned record shows as dead"    '[ "$("$KEL" _fleet | jq -r ".agents[]|select(.name==\"ghost\")|.state")" = dead ]'
 ok "  ...with a null window_id"          '[ "$("$KEL" _fleet | jq -r ".agents[]|select(.name==\"ghost\")|.window_id")" = null ]'
+# An agent that crashes right after SessionStart (idle) used to stay reading
+# "idle" forever: the dead-check only looked at working/waiting/throttled,
+# treating idle as "no signal yet" when it is actually a real one -- SessionStart
+# already fired. Found by walking through the tool as a fresh user, not by
+# inspection, and it was wrong in THREE independent places: this jq pipeline,
+# the standalone effective_state() bash function, and internal/fleet/fleet.go.
+reset
+NEW api-gw idler
+P="$(pane_of api-gw idler)"
+hook "$P" SessionStart
+ok "SessionStart sets idle"              '[ "$(state_of idler)" = idle ]'
+PPID_="$(tmux list-panes -t "$(window_of api-gw idler)" -F "#{pane_pid}")"
+kill -9 "$PPID_" 2>/dev/null
+wait_until '[ "$(tmux list-panes -t "$(window_of api-gw idler)" -F "#{pane_current_command}")" = bash ]'
+ok "an idle agent that crashes reads dead" '[ "$(state_of idler)" = dead ]'
+ok "  ...and _fleet agrees"              '[ "$("$KEL" _fleet | jq -r ".agents[]|select(.name==\"idler\")|.state")" = dead ]'
+
 # empty fleet must be a document, not an error
 reset
 ok "an empty fleet is {agents:[]}"       '[ "$("$KEL" _fleet | jq -c ".agents")" = "[]" ]'
@@ -307,9 +324,18 @@ if command -v go >/dev/null 2>&1 && (cd "$HERE/.." && go build -o "$GOBIN_FLEET"
   NEW api-gw auth-fix
   NEW api-gw wt
   NEW coppermind sazed
+  NEW api-gw idler2
   P="$(pane_of api-gw auth-fix)"
   hook "$P" Notification permission_prompt "needs Bash now"
   hook "$P" PreCompact
+  # idle, then crashed: this is the case that was WRONG in both bash and Go
+  # the same way, so a diff between them alone would never have caught it.
+  # Keeping it in the differential guards the fix from regressing in only one.
+  IP="$(pane_of api-gw idler2)"
+  hook "$IP" SessionStart
+  IPPID="$(tmux list-panes -t "$(window_of api-gw idler2)" -F "#{pane_pid}")"
+  kill -9 "$IPPID" 2>/dev/null
+  wait_until '[ "$(tmux list-panes -t "$(window_of api-gw idler2)" -F "#{pane_current_command}")" = bash ]'
   printf '%s' '{"model":{"display_name":"Opus 5"},"cost":{"total_cost_usd":18.7},"context_window":{"total_input_tokens":178000,"context_window_size":200000,"used_percentage":91},"rate_limits":{"five_hour":{"used_percentage":74}}}' \
     | TMUX_PANE="$P" "$KEL" statusline >/dev/null
   echo wip > "$WORK/repos/api-gw/dirt.txt"

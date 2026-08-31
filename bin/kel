@@ -26,14 +26,15 @@
 #                              (closes windows; -n shows the plan first)
 #   kel prune [-f]             forget dead agent records (closes nothing)
 #   kel doctor                 capability probe, cached
+#   kel _usage                 what you have actually reached for (prune pass)
+#                              — scaffolding, not wired anywhere; run it yourself
 #
-# internal (wired by install.sh):
+# internal (wired by install.sh; some are fine to type, none are the point):
 #   kel status-line [group]    render tmux status-left
 #   kel jump                   jump to the next waiting agent, any group (prefix `)
 #   kel snapshot               save the workspace shape (hooks call this)
-#   kel cheat                  keybinding reference
+#   kel cheat                  keybinding reference (also: prefix ?)
 #   kel hook <EVENT>           Claude Code state hook
-#   kel _usage                 what you have actually reached for (prune pass)
 #   kel statusline             Claude Code statusLine — context % / cost
 set -uo pipefail
 
@@ -235,7 +236,17 @@ state_of() { # wid -> raw state from the hook, or empty
 effective_state() { # wid
   local s; s="$(state_of "$1")"
   case "$s" in
-    working|waiting|throttled)
+    # idle is a real signal, not "no signal yet" — SessionStart already fired
+    # and set it. That is NOT the launch race this dead-check has to dodge:
+    # during the launch race there is no state FILE at all yet (state_of
+    # returns empty, matching neither branch here), because kel new sends the
+    # agent command with send-keys and the shell briefly still shows before
+    # claude execs. Once idle is on record that race is over, so a shell in
+    # the pane at that point means the agent process actually died — found by
+    # walking through the tool as a fresh user: an agent that crashes between
+    # SessionStart and its first prompt used to sit reading "idle" forever,
+    # with no glyph, no colour, nothing to tell you it was gone.
+    idle|working|waiting|throttled)
       tmux list-panes -t "$1" -F '#{pane_current_command}' 2>/dev/null \
         | grep -qvxE 'bash|zsh|fish|sh|dash|tmux' || { printf 'dead'; return; } ;;
   esac
@@ -900,8 +911,13 @@ _fleet_bash() {
         | ($panemap[$wid] // [])            as $pl
         | ($statemap[$wid] // null)         as $stt
         | ($recmap[$g + " " + $nm] // null) as $rec
+        # idle is a real signal (SessionStart already fired), not "no signal
+        # yet" -- that case is $raw == null, untouched by this branch. Third
+        # copy of this exact check: the standalone effective_state() function
+        # above and internal/fleet/fleet.go each had it independently and
+        # were fixed for the same reason.
         | (($stt.state // null) as $raw
-           | if ($raw == "working" or $raw == "waiting" or $raw == "throttled")
+           | if ($raw == "idle" or $raw == "working" or $raw == "waiting" or $raw == "throttled")
                 and (([$pl[] | select(isshell | not)] | length) == 0)
              then "dead" else $raw end)     as $eff
         | { group:$g, name:$nm, window_id:$wid, index:(.[1]|num),
@@ -1952,7 +1968,7 @@ cat <<'EOF'
   ACT ON AN AGENT
     prefix t      the fleet dashboard — every agent, sorted by who needs you
                   (j/k scroll · s sort: triage/ctx/cost · / filter · q quit)
-    prefix m      manage THIS agent — rename / move / kill / new sibling
+    prefix m      manage THIS agent — rename / move / adopt / relaunch / kill
     (in the board) TAB on any row — the same menu, for that agent
 
   SCROLL an agent's conversation
@@ -2311,7 +2327,8 @@ quickstart() {
   kel new <name>     start an agent in the current repo
   prefix `           jump to whichever agent is waiting on you
   Ctrl+Space         the board — find any agent (enter jumps, tab acts)
-  prefix m           manage the agent you're on — rename / move / kill
+  prefix m           manage the agent you're on — rename / move / relaunch /
+                     kill, plus adopt to track a plain window as an agent
   prefix k           the kel menu — everything, including worktree agents and
                      sweep / restore / prune / doctor
 

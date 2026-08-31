@@ -308,12 +308,18 @@ func Load(o Options) Doc {
 		}
 		st, hasState := stateMap[w.wid]
 
-		// effective state: a hook said working/waiting/throttled, but if the
-		// window holds nothing but a shell the process is gone
+		// effective state: a hook said idle/working/waiting/throttled, but if
+		// the window holds nothing but a shell the process is gone. idle is a
+		// real signal (SessionStart already fired), not "no signal yet" — that
+		// case is hasState==false, handled below by leaving eff nil. An agent
+		// that crashed between SessionStart and its first prompt used to sit
+		// reading "idle" forever here, matching bin/kel's effective_state
+		// before it was fixed for the same reason: found by walking through
+		// the tool as a fresh user, not by inspection.
 		var eff *string
 		if hasState && st.state != "" {
 			eff = sp(st.state)
-			if st.state == "working" || st.state == "waiting" || st.state == "throttled" {
+			if st.state == "idle" || st.state == "working" || st.state == "waiting" || st.state == "throttled" {
 				alive := false
 				for _, c := range panes {
 					if !shells[c] {

@@ -288,11 +288,25 @@ Keyed by window id because `tmux` auto-names every `claude` window `claude` —
 name keying would collide. Stale files are pruned on `kel ls` / `kel`.
 
 **Dead agents (v0.4).** A SIGKILL / OOM / crash fires neither `Stop` nor
-`SessionEnd`, so the state file keeps saying `working`. `kel` catches this at
-*read* time, not with a new hook: in `gather_rows` and `kel status-line`, if the
-record says `working` / `waiting` but the window's only live process is a bare
-shell, the effective state becomes `dead` (bar suffix `x`, red). `kel ls` shows
-`dead`; the board still lists it so you can kill or relaunch it.
+`SessionEnd`, so the state file keeps saying whatever it last said. `kel`
+catches this at *read* time, not with a new hook: if the record says `idle` /
+`working` / `waiting` / `throttled` but the window's only live process is a
+bare shell, the effective state becomes `dead` (bar suffix `x`, red). `kel ls`
+shows `dead`; the board still lists it so you can kill or relaunch it.
+
+`idle` joined that list in v0.9, found by walking through the tool as a fresh
+user rather than by inspection: an agent that fires `SessionStart` and then
+crashes before its first prompt was reading `idle` forever, with no glyph and
+no distinct colour to say anything was wrong. It is not the same case as the
+launch-race trap in `CLAUDE.md` — that race happens while the state FILE does
+not exist yet, which matches neither branch here.
+
+This check now lives in three places kept in sync by hand: the standalone
+`effective_state()` in `bin/kel`, the `_fleet_bash` jq pipeline (the bash
+fallback for the fleet document), and `internal/fleet/fleet.go` — all three had
+this bug independently, which is exactly the class of drift the Go/bash
+differential test cannot catch on its own: it only proves the two
+implementations *agree*, and here they agreed on the wrong answer.
 
 ### 9d. Land state (v0.7)
 

@@ -533,6 +533,38 @@ decided by reading. Landed so far —
   is unambiguously sweep. Menu labels state what each command *touches* —
   sweep closes windows, prune only forgets records.
 
+**Addendum, same day: walking through it as a fresh user.** Reading catches
+staleness; only actually running the tool catches behaviour. Doing that — bare
+`kel` in an empty repo, the cheat sheet, the board, `adopt`/`move`/`sweep`/
+`relaunch`, invariant 1 on a dirty worktree — found:
+
+- The two "what does `prefix m` do" summaries (the cheat sheet and the
+  first-run `quickstart()` shown on a bare `kel` with nothing running) still
+  said "rename / move / kill / new sibling" — missing `adopt` and `relaunch`,
+  the two newest items in that exact menu.
+- `kel _usage` was filed under "internal (wired by install.sh)" in `--help`.
+  Nothing wires it; it is a diagnostic meant to be typed, like `doctor`. Moved
+  next to `doctor`, with an honest note that it is unwired scaffolding.
+- **A real one, found only by triggering it live, not by reading:** an agent
+  that fires `SessionStart` (state `idle`) and then crashes before its first
+  prompt was reported `idle` forever — no glyph, no colour, nothing to say it
+  had died. The dead-check only looked at `working` / `waiting` / `throttled`,
+  treating `idle` as "no signal yet" when it is a real one. Worse, it was wrong
+  the same way in three independent places — `effective_state()`, the
+  `_fleet_bash` jq pipeline, and `internal/fleet/fleet.go` — which is exactly
+  what the Go/bash differential test cannot catch: it only proves the two
+  agree, and here they agreed on the wrong answer. Fixed in all three, and the
+  differential fixture now carries an idle-then-crashed agent so a future
+  divergence between them would be caught.
+- Confirmed by testing, not fixed: `land_of` gives an in-place (non-worktree)
+  agent standing on trunk the code `clean`, never `merged` — `merged` requires
+  a branch to compare against the base, and trunk has none. `kel sweep` without
+  `-f` only accepts `merged`, so for anyone who never runs `kel new -w`, sweep
+  is close to a no-op by construction, and nothing says so. Left as a finding,
+  not a fix: whether "clean" should sweep by default is a product call, not a
+  bug — `clean` is also the fallback for "not a git repo at all", so treating
+  it as automatically safe is not obviously right either.
+
 That is the whole card. What it did **not** do is answer the docket below,
 which still wants use rather than reasoning.
 
