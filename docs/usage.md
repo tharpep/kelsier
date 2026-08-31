@@ -97,9 +97,12 @@ bare terminal.
 complete group names.
 
 Settings live in `~/.config/kel/config.toml`, overridden by a per-repo
-`.kel/config.toml`, overridden by the env vars below. Copy
-`examples/config.toml` to get started — every key is listed there with its
-default. Env knobs: `KEL_NOTIFY` (states worth interrupting you for, default `waiting`;
+`.kel/config.toml`, overridden by the env vars below. **`kel config`** opens it
+in `$VISUAL`/`$EDITOR` (falling back to `nvim`/`vim`/`vi`/`nano`, whichever is
+on `$PATH`), seeding it from `examples/config.toml` the first time — every key
+arrives commented out, with its default, ready to uncomment. Before v0.9 this
+file had no path into it from inside the tool at all: no `--help` line, no
+mention in the cheat sheet, nothing. Env knobs: `KEL_NOTIFY` (states worth interrupting you for, default `waiting`;
 e.g. `"waiting dead"`), `KEL_NOTIFY_CMD` (a command taking title + body — see
 `setup.md`; kel always does a `tmux display-message` regardless),
 `KEL_CTX_WARN` (context % at which the bar starts showing it, default `70`),

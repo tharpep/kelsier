@@ -118,6 +118,14 @@ which stay bound. Opened by **`Ctrl+Space`** (no prefix) or `prefix b`. Since th
 `display-menu` needs an explicit `-c <client>`. The old `display-menu`
 quick-jump is retired; `kel menu` is a one-release alias for `kel board`.
 
+**`ctrl-f` — the fleet menu (v0.9).** Everything that is not about one
+highlighted agent: the dashboard (`kel top`), `kel config`, and
+sweep/restore/prune/doctor. Before this the board could only ever select an
+agent; these five commands lived solely in the `prefix k` menu, unreachable
+from the board no matter which row you had highlighted. `ctrl-f` opens a
+second `tmux display-menu` (the same `become`-plus-`-c <client>` shape as
+`tab`'s) that is not scoped to any row.
+
 ### 5c. Rejected: the two-slot / swap-pane architecture
 
 An earlier design used one visible window split into two slots, with every agent
@@ -454,12 +462,16 @@ kel restore [-c] [-s]      rebuild the workspace after a kill / reboot — group
                            -s force the snapshot
 kel prune [-f]             discard dead agent records (and their worktrees)
 kel doctor                 capability probe, cached to doctor.json
+kel config                 edit config.toml — seeds it from examples/config.toml
+                           the first time, opens it in $VISUAL / $EDITOR (else
+                           the first of nvim/vim/vi/nano found on $PATH), and
+                           pops up in tmux the same way `kel top` does
 ```
 
 Internal (wired into tmux / Claude Code): `kel status-line [group]`,
 `kel jump`, `kel snapshot`, `kel cheat`, `kel hook <EVENT>`, and the board
 helpers `kel _board_rows` / `_board_preview` / `_board_jump` / `_board_kill` /
-`_board_actions` / `_board_rename`. `kel menu` is a one-release alias for
+`_board_actions` / `_board_fleet` / `_board_rename`. `kel menu` is a one-release alias for
 `kel board`.
 
 **Workspace snapshot.** `kel snapshot` (fired by a `client-detached` /

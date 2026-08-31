@@ -488,6 +488,36 @@ printf 'nonsense line with no equals\nBAD_KEY = 1\nctx_warn = 7\n' > "$CH/.confi
 ok "junk lines are skipped, not fatal"   '[[ "$(CFG "$CH")" == *"ctx_warn=7"* ]]'
 ok "the shipped example parses"          'HOME="$CH" XDG_CONFIG_HOME="$CH/.config" bash -c "mkdir -p $CH/.config/kel && cp $HERE/../examples/config.toml $CH/.config/kel/config.toml && cd $CH && \"$KEL\" _cfgdump" >/dev/null'
 
+section "kel config (v0.9: it had no path into it at all before this)"
+reset
+CFH="$WORK/cfghome2"; mkdir -p "$CFH/.config"
+# Invoked through a SYMLINK, matching the real install shape (~/.local/bin/kel
+# is always a symlink to bin/kel, never a copy). That is the exact case
+# _real_self exists for: a naive $(dirname "$SELF") stays pointed at the
+# symlink's own directory, which has no examples/ next to it.
+KELLINK="$WORK/kel-symlink"; ln -sf "$KEL" "$KELLINK"
+CFGRUN() { HOME="$CFH" XDG_CONFIG_HOME="$CFH/.config" EDITOR=cat "$KELLINK" config; }
+out="$(CFGRUN 2>&1)"
+ok "seeds config.toml on first run"      '[ -f "$CFH/.config/kel/config.toml" ]'
+ok "  ...from the REAL shipped example"  '[[ "$out" == *"copy to ~/.config/kel/config.toml"* ]]'
+ok "  ...found through the symlink"      '[[ "$out" == *"created"*"from the shipped example"* ]]'
+ok "  ...cat (the fake EDITOR) ran on it" '[[ "$out" == *"[fleet]"* ]]'
+echo "# a mark that must survive" >> "$CFH/.config/kel/config.toml"
+out2="$(CFGRUN 2>&1)"
+ok "a second run does not re-seed"       '[[ "$out2" != *created* ]]'
+ok "  ...and the file is untouched"      '[[ "$out2" == *"a mark that must survive"* ]]'
+mkdir -p "$WORK/noeditor"
+for b in bash sh jq tmux cat mkdir dirname basename cp printf readlink date grep sed awk mktemp rm mv; do
+  [ -e "$WORK/noeditor/$b" ] || ln -sf "$(command -v "$b" 2>/dev/null)" "$WORK/noeditor/$b" 2>/dev/null
+done
+# captured, then pattern-matched — not piped through grep inside the eval'd
+# expression, which the ok() harness does not reliably propagate an exit
+# status through here
+noed_out="$(env -u EDITOR -u VISUAL HOME="$CFH" XDG_CONFIG_HOME="$CFH/.config" PATH="$WORK/noeditor" "$KELLINK" config 2>&1)"
+ok "with no editor anywhere, it says so, not silently failing" \
+  '[[ "$noed_out" == *"no editor found"* ]]'
+
+
 section "the system around the agent (v0.9a)"
 reset
 NEW api-gw agent1

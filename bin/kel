@@ -16,7 +16,8 @@
 #                              PANE is standing in, else $KEL_GROUP, else misc)
 #   kel rename <newname>       rename the current window (keeps metadata in sync)
 #   kel board                  fzf fleet browser — filter / preview / act
-#                              (Ctrl+Space or prefix b; enter jumps, tab = actions)
+#                              (Ctrl+Space or prefix b; enter jumps, tab = agent
+#                              actions, ctrl-f = dashboard/config/sweep/etc.)
 #   kel restore [-c] [-s]      rebuild the workspace after a kill / reboot
 #                              (-c resume conversations, -s force the snapshot)
 #   kel relaunch [name] [-f]   relaunch a crashed agent in its existing window
@@ -26,6 +27,9 @@
 #                              (closes windows; -n shows the plan first)
 #   kel prune [-f]             forget dead agent records (closes nothing)
 #   kel doctor                 capability probe, cached
+#   kel config                 edit config.toml (seeds it from the shipped
+#                              example the first time — every key is
+#                              commented out with its default)
 #   kel _usage                 what you have actually reached for (prune pass)
 #                              — scaffolding, not wired anywhere; run it yourself
 #
@@ -1315,6 +1319,29 @@ cmd_board_actions() {   # wid name group cwd
     "kill it"                   k  "run-shell \"$SELF _board_kill '$group' '$name'\""
 }
 
+# ctrl-f in the board: everything that is NOT about one agent — the
+# dashboard, config, and the fleet commands. Until v0.9's board-hub pass these
+# lived only in the prefix-k menu, with no relation to which row was
+# highlighted; that menu is now `kel cheat` instead (see tmux/kel.conf), so
+# this is their one home rather than two.
+cmd_board_fleet_actions() {
+  need tmux
+  local cl sn
+  sn="$(tmux display-message -p -t "${TMUX_PANE:-}" '#{session_name}' 2>/dev/null || true)"
+  cl="$(tmux list-clients ${sn:+-t "$sn"} -F '#{client_name}' 2>/dev/null | head -1)"
+  [ -n "$cl" ] || cl="$(tmux list-clients -F '#{client_name}' 2>/dev/null | head -1)"
+  tmux display-menu ${cl:+-c $cl} -x C -y C -T ' kel ' -- \
+    "the fleet dashboard (kel top)"                 t  "run-shell -b \"$SELF top\"" \
+    "edit config.toml"                              c  "run-shell -b \"$SELF config\"" \
+    "" \
+    "sweep — close agents whose work merged"        s  "run-shell -b \"$SELF _run sweep\"" \
+    "restore — rebuild the WHOLE workspace"         R  "run-shell -b \"$SELF _run restore\"" \
+    "prune — forget dead records (closes nothing)"  p  "run-shell -b \"$SELF _run prune\"" \
+    "check the machine (doctor)"                    D  "run-shell -b \"$SELF _run doctor\"" \
+    "" \
+    "kel keys (cheat sheet)"                        "?" "display-popup -w 84 -h 85% -T ' kel keys ' -E \"$SELF cheat | less -R\""
+}
+
 cmd_board_rename() {   # wid new
   need tmux; need jq
   slug_ok "${2:-}" || { warn "name must be a slug (A-Z a-z 0-9 . _ -)"; return 1; }
@@ -1348,7 +1375,7 @@ cmd_board() {
     --ansi --delimiter '\t' --with-nth '1,2,3,4' --nth '1,2' \
     --layout reverse --info inline --height '100%' \
     --border rounded --border-label ' kel ' \
-    --footer 'enter jump  ·  tab actions' \
+    --footer 'enter jump · tab actions · ctrl-f dashboard/config/sweep…' \
     --preview "$SELF _board_preview {2} {1}" \
     --preview-window 'right,45%,wrap,border-left' \
     --bind "enter:become($SELF _board_jump {6} {1})" \
@@ -1357,6 +1384,7 @@ cmd_board() {
     --bind "ctrl-r:reload($SELF _board_rows)" \
     --bind "ctrl-k:execute($SELF _board_kill {1} {2})+reload($SELF _board_rows)" \
     --bind "ctrl-n:become(tmux command-prompt -p 'new agent:' \"run-shell \\\"cd {5} && $SELF new %%\\\"\")" \
+    --bind "ctrl-f:become($SELF _board_fleet)" \
     --color 'footer:italic,border:8' \
     >/dev/null 2>&1 || true
 }
@@ -1833,6 +1861,63 @@ cmd_doctor() {
 }
 
 # --------------------------------------------------------------------------
+# kel config   — edit config.toml, seeded from the shipped example
+# --------------------------------------------------------------------------
+# config.toml (v0.8) had no path INTO it from inside the tool at all — no
+# --help line, no cheat mention, no menu item, no subcommand. It existed only
+# as examples/config.toml and prose in usage.md. Found the same way as the
+# idle/dead bug: by trying to actually use the tool as a fresh person, not by
+# reading it.
+#
+# $SELF stays a SYMLINK (kel is always symlinked, never copied — see the SELF
+# comment near the top), so a naive `$(dirname "$SELF")/../examples` looks in
+# ~/.local/bin/../examples, which does not exist. Resolve it for real, without
+# `readlink -f`: that flag is GNU-only and macOS's built-in readlink lacks it.
+_real_self() {
+  local p="$SELF" seen=0 t
+  while [ -L "$p" ] && [ "$seen" -lt 20 ]; do
+    t="$(readlink "$p")"
+    case "$t" in /*) p="$t" ;; *) p="$(dirname "$p")/$t" ;; esac
+    seen=$((seen + 1))
+  done
+  printf '%s/%s' "$(cd "$(dirname "$p")" 2>/dev/null && pwd)" "$(basename "$p")"
+}
+
+cmd_config() {
+  local cfg="${XDG_CONFIG_HOME:-$HOME/.config}/kel/config.toml"
+  mkdir -p "$(dirname "$cfg")"
+  if [ ! -f "$cfg" ]; then
+    local example; example="$(dirname "$(_real_self)")/../examples/config.toml"
+    if [ -f "$example" ]; then
+      cp "$example" "$cfg"
+      say "created $cfg from the shipped example — every key is commented out with its default"
+    else
+      # not a total dead end: an installed-elsewhere kel (copied, not
+      # symlinked, or examples/ pruned) still gets a file to open, just not
+      # the annotated one — invariant 3: say what actually happened
+      printf '# kelsier config — see docs/usage.md for the full key list\n' > "$cfg"
+      warn "could not find the shipped example — started $cfg empty"
+    fi
+  fi
+
+  local ed="${VISUAL:-${EDITOR:-}}" c
+  if [ -z "$ed" ]; then
+    for c in nvim vim vi nano; do command -v "$c" >/dev/null 2>&1 && { ed="$c"; break; }; done
+  fi
+  [ -n "$ed" ] || die "no editor found — set \$EDITOR, or open $cfg yourself"
+
+  # in tmux, open in a popup the way the board and kel top do; outside, run
+  # inline. Same pattern as cmd_top and cmd_run_popup — not duplicated logic,
+  # the same idiom applied a third time.
+  if [ -n "${TMUX:-}" ] && [ -z "${KEL_IN_POPUP:-}" ]; then
+    exec tmux display-popup -e KEL_IN_POPUP=1 \
+      -w "${KEL_CONFIG_W:-90%}" -h "${KEL_CONFIG_H:-85%}" -T ' kel config ' \
+      -E "'$SELF' config"
+  fi
+  exec "$ed" "$cfg"
+}
+
+# --------------------------------------------------------------------------
 # kel status-line   (tmux status-left)
 # --------------------------------------------------------------------------
 cmd_status_line() {
@@ -1959,6 +2044,7 @@ cat <<'EOF'
 
   MOVE AROUND
     Ctrl+Space    the board — find any agent OR pane; enter jumps, TAB = act
+                  ctrl-f in the board = dashboard, config, sweep/restore/etc.
     (prefix b)    the same board
     prefix `      jump to the next agent WAITING on you — any group
     prefix 1-9    window (agent) N in this group
@@ -1968,6 +2054,7 @@ cat <<'EOF'
   ACT ON AN AGENT
     prefix t      the fleet dashboard — every agent, sorted by who needs you
                   (j/k scroll · s sort: triage/ctx/cost · / filter · q quit)
+                  same place ctrl-f → "the fleet dashboard" in the board goes
     prefix m      manage THIS agent — rename / move / adopt / relaunch / kill
     (in the board) TAB on any row — the same menu, for that agent
 
@@ -2014,6 +2101,7 @@ cat <<'EOF'
     kel relaunch [name]  relaunch THIS agent after a crash — same window,
                        same worktree, same conversation
     kel restore [-c]   rebuild after a kill / reboot  (-c resumes conversations)
+    kel config         edit config.toml (seeds it from the example, once)
 
   STATUS BAR
     1:name*  working   1:name?  waiting-on-you   1:name!  done   1:name  idle
@@ -2476,6 +2564,7 @@ main() {
     _board_jump)     cmd_board_jump "$@" ;;
     _board_kill)     cmd_board_kill "$@" ;;
     _board_actions)  cmd_board_actions "$@" ;;
+    _board_fleet)    cmd_board_fleet_actions ;;
     _board_rename)   migrate_meta; cmd_board_rename "$@" ;;
     restore)      migrate_meta; cmd_restore "$@" ;;
     relaunch)     migrate_meta; cmd_relaunch "$@" ;;
@@ -2486,6 +2575,7 @@ main() {
     prune)        migrate_meta; cmd_prune "$@" ;;
     snapshot)     cmd_snapshot ;;
     doctor)       cmd_doctor "$@" ;;
+    config)       cmd_config ;;
     status-line)  cmd_status_line "$@" ;;
     _fleet)       fleet_json "$@" ;;
     _land)        land_of "$@"; echo ;;                # for tests
