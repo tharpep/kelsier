@@ -42,7 +42,10 @@ Explicit, because each is a thing this project will be tempted into.
 
 ## Status
 
-**v0.4** — working and in daily use. One `kel` command:
+**v0.6** — working and in daily use. MIT. The README below still describes the
+v0.4 command set; `docs/rollout.md` is current and lists what shipped since
+(context %/cost per agent, notifications, `kel restart`, `kel top`, and a Go
+fleet reader alongside the bash one). One `kel` command:
 
 ```
 kel                go to (or start) this repo's agent   kel ls      every agent, grouped
