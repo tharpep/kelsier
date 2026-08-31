@@ -515,6 +515,40 @@ or `jq` is missing.
 
 Portability rule: nothing machine-specific in the script or the schema.
 
+### 12b. What kel keeps, and what leaves the machine (v0.9)
+
+Worth stating plainly, because the honest answer is short and the tool is meant
+to run on a work laptop.
+
+**kel makes exactly one network call**: `gh api repos/<slug>/pulls`, to resolve
+the two land codes local git cannot — an open PR, and a squash-merge where the
+commit was rewritten. Three things narrow it, in order:
+
+1. `repo_slug` returns empty unless `origin` is on `github.com`, so an internal
+   GitLab, Bitbucket, or GHE-on-a-custom-domain repo never reaches it.
+2. `land_of` asks local git **first** and short-circuits. A repo with
+   uncommitted or unpushed work is answered without the network at all.
+3. `pr = "off"` disables it outright. `land` then runs on local git alone,
+   which still gives `dirty` / `unpushed` / `merged` / `behind`.
+
+Nothing else leaves the machine. There is no daemon, no telemetry, and no
+sync. Above all kel does not wrap Claude Code — so your code reaches Anthropic
+by exactly the path it would from a bare terminal, and kel adds no new one.
+
+**What it keeps** is in `~/.local/state/kel/`, mode `0700` (§ the on-disk
+contract in `CLAUDE.md`). The sensitive part is not the paths and branch names
+but `<window-id>.state`, which stores Claude Code's `notification_text` — the
+agent quoting a command back at you, greps and filenames included.
+
+**Agent output is read but never stored.** The board preview shows the last
+eight lines of a pane and `kel top` the last line of each; both are rendered
+and dropped. That is a screenshare consideration, not an exfiltration one.
+
+**`$KEL_NOTIFY_CMD` is the one place untrusted text crosses a boundary.** The
+body handed to it is agent-derived, so the recipes in `setup.md` pass it as
+arguments or escape it for the target language rather than building a script
+out of it. A notification body is input, not a label you wrote.
+
 ---
 
 ## 13. On making it public

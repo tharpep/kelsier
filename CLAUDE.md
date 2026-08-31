@@ -77,6 +77,14 @@ breaking change; migrate old records in `migrate_meta`.
 | `.restoring` | lockfile held during a restore (see Invariants) |
 | `.stash/<claude-session-id>` | pane id from `SessionStart`, for hooks with no `$TMUX_PANE` |
 | `doctor.json`, `last-group` | cached probe results, last-used group |
+| `usage.log` | `<epoch> <subcommand>` per user gesture — scaffolding for the prune pass, delete it with that card |
+
+**The directory is `0700`.** The records carry repo paths, branch names and
+Claude session ids, and `<window-id>.state` carries Claude Code's notification
+text — the agent quoting a command back at you, greps and file paths included.
+`migrate_meta` re-applies the mode so pre-0.9 installs get fixed. Deliberately
+**not** a global `umask 077`: that would also apply to the files
+`git worktree add` creates, and kel has no business writing your source at 0600.
 
 State is keyed by **window id**, metadata by **group + name**. tmux auto-names
 every `claude` window `claude`, so name-keyed state would collide.
@@ -125,7 +133,7 @@ hook). `kel jump` matches `waiting` only.
 ```sh
 bash -n bin/kel && bash -n install.sh      # syntax
 go vet ./... && go build ./...              # Go, if installed
-test/kel-test.sh                            # 92 cases, ~60s
+test/kel-test.sh                            # 197 cases, ~90s
 ```
 
 Go is **optional**: `bin/kel` falls back to its bash implementation whenever
@@ -256,11 +264,28 @@ never. `rollout.md` § v0.6 has the rules — follow them rather than re-derivin
 the strategy. Bubble Tea is **v2** (`charm.land/bubbletea/v2`, `View() tea.View`,
 `tea.KeyPressMsg`); almost every tutorial online is v1 and will not compile.
 
-**v0.7 and v0.8 are done** too: land state, `kel sweep`, `.kel/group`,
-`install.sh --uninstall`, `config.toml`, and the README.
+**v0.7, v0.8 and v0.9a are done** too: land state, `kel sweep`, `.kel/group`,
+`install.sh --uninstall`, `config.toml`, the README, pane-border state, and the
+board learning panes rather than only agents.
 
-Next is **v0.9 — the prune pass**: every shipped surface gets keep / simplify /
-cut on whether it was actually reached for, before v1.0 fixes the feature set.
-`rollout.md` § v0.9 names the candidates and records which things unwind
-cheaply (columns, flags, subcommands) versus which are sticky (keybindings,
-the on-disk format).
+**v0.9 shipped as a clarity pass, not the prune pass.** The prune pass asks
+*did I reach for it*, and nothing recorded an answer — so it was gated on
+something no amount of work could produce, while sitting last in front of v1.0.
+It has moved to its own card **after v1.0** and no longer blocks it.
+
+What v0.9 did instead was subtract *confusion*, decided by inspection:
+
+- eight bugs, two of which made shipped surfaces silently inert (the shell
+  completions had been dead since v0.6; `kel ls --json` could emit English)
+- `kel ls` grew a column header, and `inplace` renders as `repo`
+- `doctor` prescribes a fix per failed probe; `install/macos-tools.sh` added
+- **`kel adopt`** split out of `kel move`, which now refuses rather than
+  silently adopting
+- **`kel restart` is now `kel relaunch`** — no alias — and the two menus agree
+  on every key they share
+- state dir `0700`, `pr = "off"` to close the one network call, and the usage
+  counter (`kel _usage`)
+
+**Next: v1.0.** The remaining gate is that `install/macos-tools.sh` and
+`install.sh` have never run on a Mac — they are syntax-checked and nothing more.
+Everything else in the v1.0 definition is met.

@@ -69,6 +69,12 @@ Internal (wired into tmux / Claude Code, you won't call these):
 `kel hook <EVENT>`, `kel statusline`, `kel _board_*`. `kel menu` is a deprecated alias for
 `kel board` — kept one release for muscle memory.
 
+**What you have actually reached for.** `kel _usage` prints a count per
+subcommand, from a log kel appends to on each command you run — epoch and name
+only, never arguments. Hot paths and background work are excluded, so it is
+gestures rather than noise. `usage = "off"` records nothing. Both the counter
+and `_usage` are scaffolding for the prune pass and go away with it.
+
 **What kel writes, and where.** Everything lives in
 `${XDG_STATE_HOME:-~/.local/state}/kel/`, which kel keeps at mode `0700` — the
 records carry repo paths, branch names and Claude session ids, and a
