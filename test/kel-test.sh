@@ -194,12 +194,20 @@ if command -v go >/dev/null 2>&1 && (cd "$HERE/.." && go build -o "$GOBIN_FLEET"
   tmux new-window -d -t '=keltest/api-gw' -n stray 2>/dev/null      # unmanaged
   cp "$SESSIONS/coppermind/sazed.json" "$SESSIONS/coppermind/ghost.json"
   jq '.name="ghost"' "$SESSIONS/coppermind/ghost.json" > "$WORK/g" && mv "$WORK/g" "$SESSIONS/coppermind/ghost.json"
+  # Warm every index first. The first `git status` in a fresh worktree
+  # refreshes .git/index, so whichever implementation runs first can legitimately
+  # see a different count from the second — a real source of nondeterminism that
+  # is not a kel bug and would otherwise show up as a flaky differential.
+  for d in $("$KEL" _fleet | jq -r '.agents[].cwd // empty' | sort -u); do
+    git -C "$d" status --porcelain >/dev/null 2>&1 || true
+  done
   norm() { jq -S 'del(.generated_at)'; }
   for flag in "" "--dirty" "--land"; do
     "$KEL" _fleet $flag | norm > "$WORK/bash.json"
     KEL_FLEET_BIN=/nonexistent "$KEL" _fleet $flag | norm > "$WORK/bash2.json"
     "$GOBIN_FLEET" $flag       | norm > "$WORK/go.json"
     ok "bash and Go agree${flag:+ ($flag)}"  '[ -z "$(diff "$WORK/bash2.json" "$WORK/go.json")" ]'
+    [ -n "$(diff "$WORK/bash2.json" "$WORK/go.json")" ] && diff "$WORK/bash2.json" "$WORK/go.json" | head -14 | sed "s/^/       /"
   done
   # regenerate without flags: the loop above left go.json holding --dirty output
   "$GOBIN_FLEET" | norm > "$WORK/go-plain.json"
@@ -256,7 +264,11 @@ ok "commits no remote has -> unpushed N" '[[ "$(L "$WORK/repos/coppermind")" == 
 ok "a non-GitHub remote is never unknown" '[[ "$(L "$WORK/repos/coppermind")" != unknown/* ]]'
 ok "--land fills the document"           '[ "$("$KEL" _fleet --land | jq -r ".agents[0].land.code")" != null ]'
 ok "  ...and plain _fleet leaves it null" '[ "$("$KEL" _fleet | jq -r ".agents[0].land")" = null ]'
-ok "  ...and costs no network"           'KEL_PR_TTL=0 timeout 5 "$KEL" _fleet --land >/dev/null'
+# Prove it needs no network by taking gh away, rather than by timing it:
+# `timeout` is GNU coreutils and absent on macOS — caught by CI, which is the
+# whole reason the macOS runner exists.
+mkdir -p "$WORK/nogh"; printf '#!/bin/sh\nexit 127\n' > "$WORK/nogh/gh"; chmod +x "$WORK/nogh/gh"
+ok "  ...and needs no gh at all"         '[ "$(PATH="$WORK/nogh:$PATH" "$KEL" _fleet --land | jq -Sc ".agents[].land")" = "$("$KEL" _fleet --land | jq -Sc ".agents[].land")" ]'
 # bin/kel updates on pull; kel-fleet only on install.sh, so a stale binary that
 # rejects a new flag is a normal transient state and must not break the command
 printf '#!/bin/sh\nexit 2\n' > "$WORK/stale"; chmod +x "$WORK/stale"
