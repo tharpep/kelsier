@@ -412,6 +412,98 @@ and does nothing for the five branches that need to land.
 - **#8** `kel sweep` — batch teardown of merged, clean, pushed agents.
 - **#12** `.kel/group` per-directory override.
 
+## v0.9a — the system around the agent
+
+**Theme:** kel manages the *system around* the agent, never the agent. That is
+the pitch, sharper than "know which agent is blocked" — which, since
+`claude agents` shipped, is a thing Anthropic does for its own sessions and
+only its own. kel's claim is the terminal staying navigable: across agents,
+across repos, and across agent-and-not-agent, with nothing owning your session.
+
+Came out of a landscape read (2026-08-31) of Claude Squad, agent-deck, amux,
+NTM, tmai, tmux-agent, tmux-agent-indicator, sesh, dmux/muxtree, Zellij, and
+Claude Code's own agent view / cross-session messaging.
+
+Ordered by how directly each serves that pitch.
+
+### B′. Parity from inside  ·  the biggest gap, and it was invisible
+
+The author enters with `kel` once and then lives inside tmux. Under that
+workflow these are **unreachable**, because no key or menu offers them:
+
+| missing | why it matters |
+|---|---|
+| `kel new -w` | *worktree* creation. Every "new agent" path — board `tab`→n, board `ctrl-n`, `prefix m`→n, `prefix k`→n — makes a plain in-place agent. The isolation story is shell-only, which means it effectively does not exist. |
+| `kel sweep` | the command that closes out the day. Shipped in v0.7 with no key. |
+| `kel restore` / `kel prune` / `kel doctor` | rare, but stranded |
+
+Fix: the "new agent" prompt asks in-place vs worktree, and the rare commands
+get menu entries — they do not each need a keybinding, and the key budget is
+deliberate.
+
+### A. State on the pane border and window title
+
+State lives only on the status bar: one line, at the bottom, that you have to
+look *at*. When Claude Code is full-screen a coloured pane border is peripheral
+vision instead. kel already sets `pane-border-status` and already has the
+state from its hooks; it just never colours it. Prior art:
+`tmux-agent-indicator`, which reaches the same states through the same hooks
+and paints borders, window titles and status icons.
+
+### B. The board learns panes, not just agents
+
+`Ctrl+Space` lists agents. Your nvim pane, lazygit, a scratch shell — invisible.
+That is the literal "can't move between Claude Code and any other terminal
+thing" complaint. `tmux-agent` ships five switchers; the one worth copying is
+"all panes, with directory and branch context."
+
+### F. Propagate kel's name into Claude Code
+
+`kel new auth-fix` should launch `claude --name auth-fix`, so `/list-agents`,
+`@mentions` and `kel ls` agree on the name **you chose** rather than Claude's
+auto-generated one. One line, no user-visible surface.
+
+Speculative — the benefit only lands if cross-session messaging gets used — but
+it has the nice property that if it is never used there is nothing to prune,
+because there is no surface. `kel rename` cannot rename a *running* Claude
+session (`/rename` is interactive-only), so names drift until that agent
+restarts. That is a footnote, not something to build around.
+
+### Considered and not taken
+
+- **C. A scratch-shell popup.** The only delta over `prefix |` is that a split
+  resizes the agent's pane and makes Claude Code's TUI reflow. Real, but not
+  worth a keybinding. Dropped.
+- **D. Reaching a repo with no agent yet** (`sesh` merges tmux sessions +
+  zoxide frecency + configured projects). Reading shell history to guess where
+  you want to go is invasive, and it is someone else's data. A non-invasive
+  version could use kel's *own* record history instead — but bare `kel` is
+  already directory-aware, and the moment you want a brand-new repo is a moment
+  you are plausibly already in a shell. **Parked as probably unnecessary.**
+- **E. Delivering into a session** via `CLAUDE_CODE_MESSAGING_SOCKET`, which
+  Claude Code exports to hooks. Looked promising and mostly is not: agent-to-
+  agent awareness is shared context between agents, already rejected as R1;
+  you messaging another agent is first-party cross-session messaging, which kel
+  would be reimplementing; and routing kel's own notifications into a session
+  pollutes that agent's context and costs tokens for what a tmux message does
+  free. What remains is kel telling an agent a system fact it cannot know, like
+  "you were killed and restarted mid-task." **Parked**, with the reasoning
+  recorded so it is not re-proposed as an obviously good idea.
+- **Floating panes** (Zellij). A *persistent* floating pane is tabs with extra
+  steps — it recreates the sprawl kel exists to fix. A *transient* popup does
+  not, which is why the board and `kel top` already use one.
+- **Auto-compaction watchdogs** (amux), **broadcast/approval machinery** (NTM),
+  **owning the agent UI** (Claude Squad, agent-deck). All cross the non-goals.
+
+### Known interaction: Claude Code's agent view
+
+`claude agents` manages *its own* background sessions and only those —
+interactive sessions started in a terminal do not appear until backgrounded.
+But pressing `←` or `/bg` inside a kel window hands that session to Claude
+Code's supervisor and leaves the kel window holding a dead pane. Same class as
+the Agent Teams entry in `backlog.md`. Recorded so it is recognised rather than
+debugged.
+
 ## v0.9 — the prune pass
 
 **Theme:** subtract. Everything above was added on the strength of an argument.
