@@ -88,7 +88,8 @@ kel board            find an agent — filter, preview, act       (Ctrl+Space)
 kel restart [name]   relaunch a crashed agent in place
 kel sweep [-n]       close out every finished agent that landed
 kel kill <name>      close one       ·  kel prune    discard dead records
-kel go [group]       switch group    ·  kel move     regroup this window
+kel go [group]       switch group    ·  kel move     regroup this agent
+kel adopt [group]    track a window kel does not manage yet
 kel restore [-c]     rebuild after a reboot
 kel doctor           check the machine
 ```

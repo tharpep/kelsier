@@ -10,8 +10,10 @@
 #                              the uncommitted / unpushed check
 #   kel ls [--json]            list agents, grouped by repo
 #   kel go [<group>]           switch to a group (no arg: list groups)
-#   kel move [<group>]         put the current window in another group
-#                              (no arg: the group for the current directory)
+#   kel move [<group>]         change a managed agent's group
+#   kel adopt [<group>]        start tracking an unmanaged window as an agent
+#                              (no arg for either: the group for the repo the
+#                              PANE is standing in, else $KEL_GROUP, else misc)
 #   kel rename <newname>       rename the current window (keeps metadata in sync)
 #   kel board                  fzf fleet browser — filter / preview / act
 #                              (Ctrl+Space or prefix b; enter jumps, tab = actions)
@@ -1008,72 +1010,137 @@ cmd_go() {
 }
 
 # --------------------------------------------------------------------------
-# kel move  — relocate the current window to another group
+# kel move   — change the group of a managed agent
+# kel adopt  — start managing a window kel does not know about
 # --------------------------------------------------------------------------
+# These were one command until v0.9.  `kel move` on a window with no metadata
+# silently fell through to meta_write and printed "adopted 'x' into kel" — a
+# second, unrelated job hiding behind a verb nobody would type to reach it, and
+# documented nowhere.  Since v0.9a the board lists unmanaged panes, so "take
+# this one under management" is a gesture you now arrive at on purpose.
+#
+# The split is by *managed or not*, which is the thing you actually know when
+# you reach for one:
+#   move   an agent kel already tracks -> a different group
+#   adopt  a window kel does not track -> tracked, here or in a named group
+# Both may relocate the window; only adopt writes a new record.
+
+# Shared preamble.  Sets KW_* rather than printing tab-separated fields the way
+# resolve_agent does, because both callers need `die` to end the command — and
+# `die` inside $( ) only ends the subshell, which would let a bad group through.
+_kel_window_target() {   # [group]
+  local cur_sess tp
+  # Ask about THIS pane, not "the current one".  A bare `display-message -p`
+  # resolves against the session's ACTIVE window, so running this from a window
+  # that is not the active one — a script, a popup, a send-keys — silently
+  # reported a different window and would have moved the wrong agent.  Same
+  # ${var:+-t "$var"} shape cmd_board_actions uses for its client.
+  tp="${TMUX_PANE:-}"
+  KW_WID="$(tmux display-message -p ${tp:+-t "$tp"} '#{window_id}')"
+  cur_sess="$(tmux display-message -p ${tp:+-t "$tp"} '#{session_name}')"
+  KW_NAME="$(tmux display-message -p ${tp:+-t "$tp"} '#{window_name}')"
+  KW_PCWD="$(tmux display-message -p ${tp:+-t "$tp"} '#{pane_current_path}')"
+  # The group comes from THIS WINDOW's session, not from current_group, which
+  # reads #{client_session} — the group the attached client is looking at.
+  # Those differ whenever you act on a window other than the one on screen, and
+  # with no client attached current_group is empty, which silently sent the
+  # "already tracked" check looking in the wrong place.
+  case "$cur_sess" in
+    "$KEL_PREFIX")   KW_GROUP="$KEL_PREFIX" ;;
+    "$KEL_PREFIX"/*) KW_GROUP="${cur_sess#"$KEL_PREFIX"/}" ;;
+    *)               die "this window isn't in a kel group" ;;
+  esac
+
+  KW_TARGET="${1:-}"
+  if [ -z "$KW_TARGET" ]; then
+    if [ -n "${KEL_GROUP:-}" ]; then KW_TARGET="$KEL_GROUP"
+    else
+      # NB: the pane's cwd, not yours — an agent may have cd'd elsewhere since
+      # it started, so say which directory the guess came from.
+      local gr; gr="$(cd "$KW_PCWD" 2>/dev/null && git rev-parse --show-toplevel 2>/dev/null || true)"
+      if [ -n "$gr" ]; then KW_TARGET="$(basename "$gr")"
+      else KW_TARGET="misc"; warn "no git repo in $KW_PCWD → group 'misc'  (name a group to override)"; fi
+    fi
+  fi
+  slug_ok "$KW_TARGET" || die "group '$KW_TARGET' isn't a slug"
+}
+
+# Relocate a window into a group's session, creating that session if needed.
+_kel_relocate() {   # wid target
+  local dst ph; dst="$(sess "$2")"
+  if ! tmux has-session -t "=$dst" 2>/dev/null; then
+    tmux new-session -d -s "$dst" -c "$HOME" -x 220 -y 50
+    group_session_status "$2" "$dst"
+    ph="$(tmux list-windows -t "=$dst" -F '#{window_id}' | head -1)"
+    tmux move-window -s "$1" -t "$dst:"
+    tmux kill-window -t "$ph" 2>/dev/null || true
+  else
+    tmux move-window -s "$1" -t "$dst:"
+  fi
+  tmux switch-client -t "=$dst" \; select-window -t "$1" 2>/dev/null || true
+}
+
+# tidy: drop a group session that the move just emptied
+_kel_drop_empty_group() {   # group
+  [ -n "${1:-}" ] || return 0
+  tmux list-windows -t "=$(sess "$1")" -F x 2>/dev/null | grep -q x \
+    || tmux kill-session -t "=$(sess "$1")" 2>/dev/null || true
+}
+
 cmd_move() {
   need tmux; need jq
   [ -n "${TMUX:-}" ] || die "kel move: run this from inside kel"
+  _kel_window_target "${1:-}"
 
-  local cur_wid cur_sess cur_group wname pcwd
-  cur_wid="$(tmux display-message -p '#{window_id}')"
-  cur_sess="$(tmux display-message -p '#{session_name}')"
-  wname="$(tmux display-message -p '#{window_name}')"
-  pcwd="$(tmux display-message -p '#{pane_current_path}')"
-  case "$cur_sess" in "$KEL_PREFIX"|"$KEL_PREFIX"/*) ;; *) die "kel move: this window isn't in a kel group" ;; esac
-  cur_group="$(current_group)"
-
-  local target="${1:-}"
-  if [ -z "$target" ]; then
-    if [ -n "${KEL_GROUP:-}" ]; then target="$KEL_GROUP"
-    else
-      local gr; gr="$(cd "$pcwd" 2>/dev/null && git rev-parse --show-toplevel 2>/dev/null || true)"
-      if [ -n "$gr" ]; then target="$(basename "$gr")"
-      else target="misc"; warn "no git repo here → group 'misc'  (kel move NAME to name it)"; fi
-    fi
-  fi
-  slug_ok "$target" || die "group '$target' isn't a slug"
-  [ "$target" = "$cur_group" ] && { say "already in group '$cur_group'"; return 0; }
-  [ -f "$(meta_path "$target" "$wname")" ] && \
-    die "[$target] already has an agent called '$wname' — kel rename it first"
+  local meta; meta="$(meta_path "$KW_GROUP" "$KW_NAME")"
+  [ -f "$meta" ] || die "kel move: '$KW_NAME' isn't a kel agent — 'kel adopt' to start tracking it"
+  [ "$KW_TARGET" = "$KW_GROUP" ] && { say "already in group '$KW_GROUP'"; return 0; }
+  [ -f "$(meta_path "$KW_TARGET" "$KW_NAME")" ] && \
+    die "[$KW_TARGET] already has an agent called '$KW_NAME' — kel rename it first"
 
   # warn if we're moving a worktree agent away from its repo's group
-  local mv_meta; mv_meta="$(meta_path "$cur_group" "$wname")"
-  if [ -f "$mv_meta" ] && [ "$(jq -r '.isolation' "$mv_meta")" = worktree ]; then
-    local mr; mr="$(basename "$(jq -r '.repo // ""' "$mv_meta")")"
-    [ -n "$mr" ] && [ "$mr" != "$target" ] && \
-      warn "'$wname' works in $mr's worktree — moving it to [$target] is cosmetic only"
+  if [ "$(jq -r '.isolation' "$meta")" = worktree ]; then
+    local mr; mr="$(basename "$(jq -r '.repo // ""' "$meta")")"
+    [ -n "$mr" ] && [ "$mr" != "$KW_TARGET" ] && \
+      warn "'$KW_NAME' works in $mr's worktree — moving it to [$KW_TARGET] is cosmetic only"
   fi
 
-  local dst; dst="$(sess "$target")"
-  if ! tmux has-session -t "=$dst" 2>/dev/null; then
-    tmux new-session -d -s "$dst" -c "$HOME" -x 220 -y 50
-    group_session_status "$target" "$dst"
-    local ph; ph="$(tmux list-windows -t "=$dst" -F '#{window_id}' | head -1)"
-    tmux move-window -s "$cur_wid" -t "$dst:"
-    tmux kill-window -t "$ph" 2>/dev/null || true
-  else
-    tmux move-window -s "$cur_wid" -t "$dst:"
-  fi
+  _kel_relocate "$KW_WID" "$KW_TARGET"
+  mkdir -p "$SESSIONS_DIR/$KW_TARGET"
+  jq --arg g "$KW_TARGET" '.group=$g' "$meta" > "$(meta_path "$KW_TARGET" "$KW_NAME")" && rm -f "$meta"
+  set_last_group "$KW_TARGET"
+  _kel_drop_empty_group "$KW_GROUP"
 
-  local meta; meta="$(meta_path "$cur_group" "$wname")"
-  if [ -f "$meta" ]; then
-    mkdir -p "$SESSIONS_DIR/$target"
-    jq --arg g "$target" '.group=$g' "$meta" > "$(meta_path "$target" "$wname")" && rm -f "$meta"
-  else
-    local repo; repo="$(cd "$pcwd" 2>/dev/null && git rev-parse --show-toplevel 2>/dev/null || true)"
-    meta_write "$wname" "$cur_wid" "$repo" "$pcwd" "inplace" "" "$KEL_AGENT" "$target"
-    say "adopted '$wname' into kel"
-  fi
-  set_last_group "$target"
+  say "moved '$KW_NAME'  ->  [$KW_TARGET]"
+  snapshot
+}
 
-  tmux switch-client -t "=$dst" \; select-window -t "$cur_wid" 2>/dev/null || true
+cmd_adopt() {
+  need tmux; need jq
+  [ -n "${TMUX:-}" ] || die "kel adopt: run this from inside kel"
+  _kel_window_target "${1:-}"
 
-  # tidy: drop the old group session if it's now empty
-  if [ -n "$cur_group" ] && ! tmux list-windows -t "=$(sess "$cur_group")" -F x 2>/dev/null | grep -q x; then
-    tmux kill-session -t "=$(sess "$cur_group")" 2>/dev/null || true
-  fi
+  [ -f "$(meta_path "$KW_GROUP" "$KW_NAME")" ] && \
+    die "kel adopt: '$KW_NAME' is already a kel agent in [$KW_GROUP] — 'kel move' changes its group"
+  [ -f "$(meta_path "$KW_TARGET" "$KW_NAME")" ] && \
+    die "[$KW_TARGET] already has an agent called '$KW_NAME' — kel rename it first"
 
-  say "moved '$wname'  ->  [$target]"
+  local repo; repo="$(cd "$KW_PCWD" 2>/dev/null && git rev-parse --show-toplevel 2>/dev/null || true)"
+  [ "$KW_TARGET" != "$KW_GROUP" ] && _kel_relocate "$KW_WID" "$KW_TARGET"
+
+  # isolation is "inplace": an adopted window edits the checkout it is standing
+  # in, and kel did not create a worktree for it.
+  #
+  # The `agent` field records $KEL_AGENT, carried over from when this lived
+  # inside cmd_move.  For a window running nvim or a shell that is optimistic —
+  # it is what `kel relaunch` would run, not what is running now.  Left as-is
+  # rather than widened here; recording the live pane command instead is a
+  # separate call.
+  meta_write "$KW_NAME" "$KW_WID" "$repo" "$KW_PCWD" "inplace" "" "$KEL_AGENT" "$KW_TARGET"
+  set_last_group "$KW_TARGET"
+  [ "$KW_TARGET" != "$KW_GROUP" ] && _kel_drop_empty_group "$KW_GROUP"
+
+  say "adopted '$KW_NAME'  ->  [$KW_TARGET]"
   snapshot
 }
 
@@ -1883,7 +1950,9 @@ cat <<'EOF'
     kel ls             list every agent, grouped
     kel board          fzf browser: filter, preview; enter jumps, tab acts
     kel go [group]     switch group
-    kel move [group]   put THIS window in another group (cd first, then kel move)
+    kel move [group]   change THIS agent's group
+    kel adopt [group]  make THIS window a kel agent (a plain `prefix c` window,
+                       your editor, lazygit — anything kel shows as unmanaged)
     kel rename <new>   rename this window, keep metadata in sync
     kel kill <name>    close one      ·   kel prune  discard dead records
     kel top            the fleet dashboard — every agent, sorted by who needs
@@ -2304,6 +2373,7 @@ main() {
     ls|list)      migrate_meta; cmd_ls "$@" ;;
     go)           migrate_meta; cmd_go "$@" ;;
     move)         migrate_meta; cmd_move "$@" ;;
+    adopt)        migrate_meta; cmd_adopt "$@" ;;
     rename)       migrate_meta; cmd_rename "$@" ;;
     board|menu)   migrate_meta; cmd_board ;;   # menu = deprecated alias
     _board_rows)     cmd_board_rows ;;

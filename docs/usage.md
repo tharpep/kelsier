@@ -37,7 +37,11 @@ kel ls [--json]        list every agent, grouped by repo (state, context %, cost
                        agents:[...]}.  v0.6 changed this from a bare array —
                        the list is now under .agents
 kel go [<group>]       switch to a group  (no arg: list the groups)
-kel move [<group>]     put THIS window in another group (cd there first, then kel move)
+kel move [<group>]     change THIS agent's group
+kel adopt [<group>]    make THIS window a kel agent — a plain `prefix c`
+                       window, your editor, lazygit. With no group, both use
+                       the repo the PANE is standing in, else $KEL_GROUP,
+                       else `misc`
 kel rename <newname>   rename THIS window and keep its metadata record in sync
 kel board              browse agents AND panes — your editor, lazygit, a shell;
                        enter jumps to the pane itself  (Ctrl+Space
@@ -113,8 +117,14 @@ pass `--group NAME` (or `kel move NAME`) to name it something real.
 
 **Relocating a window** — `cd` to another repo in a shell pane, run `kel move`;
 the window (agent and all) hops into that repo's group and you follow it,
-nothing restarts. `kel move <group>` for an explicit target. A hand-made
-`prefix c` window gets adopted into kel this way too.
+nothing restarts. `kel move <group>` for an explicit target.
+
+**Adopting a window** — `kel adopt` (or `prefix m` → `a`) makes a window kel
+does not track into a managed agent, in place or in a group you name. That is
+what a hand-made `prefix c` window needs, and what the board's unmanaged pane
+rows are asking for. Until v0.9 this was a silent fallback inside `kel move`,
+reachable only if you happened to run the wrong command on the right window;
+`move` now refuses and points here.
 
 **window vs pane vs group:**
 - `kel new <name>` → a new **window** (tab) = a new agent. The kel way to add one.
@@ -161,7 +171,7 @@ is gone. It still shows on the board so you can act on it.
 menu paths' "new agent here" now (they route through `kel new`). Only tmux's
 own `prefix c` makes an *unmanaged* window: still state-tracked, shown in
 `kel ls` as `(unmanaged)`, and `kel kill` on it just closes the window (adopt it
-into kel with `kel move`). State is keyed by window id, so two windows may even
+into kel with **`kel adopt`**). State is keyed by window id, so two windows may even
 share a name.
 
 ## Detach vs kill

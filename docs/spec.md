@@ -412,7 +412,12 @@ kel kill <name> [-f]       close the window; remove the worktree; -f overrides
                            the uncommitted / unpushed check
 kel ls [--json]            every agent, grouped by repo
 kel go [<group>]           switch to a group (no arg: list them)
-kel move [<group>]         relocate the current window to another group
+kel move [<group>]         change a managed agent's group
+kel adopt [<group>]        take an unmanaged window under kel's bookkeeping —
+                           writes the record `move` used to write as a silent
+                           fallback. Split out in v0.9: the two jobs divide on
+                           whether kel already tracks the window, which is the
+                           thing you know when you reach for one
 kel rename <newname>       rename the current window, keep the record in sync
 kel board                  the fleet browser — filter, preview  (Ctrl+Space or
                            prefix b); enter jumps, tab acts on the highlighted agent

@@ -18,7 +18,8 @@ _kel() {
     'kill:close a window, remove its worktree'
     'ls:list agents, grouped by repo'
     'go:switch to a group'
-    'move:put the current window in another group'
+    'move:change a managed agent'\''s group'
+    'adopt:start tracking an unmanaged window as an agent'
     'rename:rename the current window (keeps metadata in sync)'
     'board:fzf fleet browser'
     'top:fleet dashboard — sorted by who needs you'
@@ -43,7 +44,7 @@ _kel() {
         'flags:flag:(-f)' \
         "agents:agent:($(_kel_names '.agents[] | .name, "\(.group)/\(.name)"'))"
       ;;
-    go|move)
+    go|move|adopt)
       compadd -- $(_kel_names '.agents[].group')
       ;;
     new)

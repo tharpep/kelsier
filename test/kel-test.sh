@@ -148,6 +148,62 @@ ok "rename moves the record"            '[ -f "$SESSIONS/api-gw/beta.json" ] && 
 ok "  ...and leaves the other group"    '[ -f "$SESSIONS/coppermind/alpha.json" ]'
 ok "  ...and rewrites .name"            '[ "$(jq -r .name "$SESSIONS/api-gw/beta.json")" = beta ]'
 
+section "adopt is its own verb, and move refuses to do its job"
+# move and adopt read the CURRENT window, so they only work from inside a pane
+# -- drive them with send-keys the way a user does, and assert on the record
+# rather than on stdout.
+#
+# Take the window id at creation and derive everything from it.  Looking the
+# window up by NAME races tmux's automatic-rename, which relabels it "bash" as
+# soon as the shell starts; the lookup then returns empty, `send-keys -t ""`
+# quietly targets the ACTIVE pane, and the test drives the wrong window.
+reset
+NEW api-gw a
+plain_win() {   # name -> echoes the window id, rename pinned
+  local wid
+  # -P -F prints the id of the window just created.  Picking it out of
+  # list-windows afterwards guesses, and guessed wrong: sorting by activity
+  # selected the running agent instead.
+  wid="$(tmux new-window -d -P -F '#{window_id}' -t '=keltest/api-gw' -c "$WORK/repos/api-gw")"
+  tmux set-option -w -t "$wid" automatic-rename off
+  tmux rename-window -t "$wid" "$1"
+  echo "$wid"
+}
+in_win() {   # wid  command...  -> runs it in that window pane 0
+  local pane; pane="$(tmux list-panes -t "$1" -F '#{pane_id}' | head -1)"
+  [ -n "$pane" ] || return 1
+  shift; tmux send-keys -t "$pane" "$*" Enter
+}
+
+PW="$(plain_win plainwin)"
+ok "the plain window keeps its name"     '[ "$(tmux display-message -p -t "$PW" "#{window_name}")" = plainwin ]'
+in_win "$PW" "'$KEL' adopt > '$WORK/adopt.out' 2>&1"
+wait_until '[ -f "$SESSIONS/api-gw/plainwin.json" ]'
+ok "adopt writes a record"              '[ -f "$SESSIONS/api-gw/plainwin.json" ]'
+ok "  ...in the pane repo group"        '[ "$(jq -r .group "$SESSIONS/api-gw/plainwin.json")" = api-gw ]'
+ok "  ...marked inplace"                '[ "$(jq -r .isolation "$SESSIONS/api-gw/plainwin.json")" = inplace ]'
+ok "  ...and ls stops saying unmanaged" '[ -z "$("$KEL" ls 2>/dev/null | awk "\$2==\"plainwin\"" | grep unmanaged)" ]'
+in_win "$PW" "'$KEL' adopt > '$WORK/a2.out' 2>&1"
+wait_until 'grep -q . "$WORK/a2.out" 2>/dev/null'
+ok "adopting twice is refused"          'grep -q "already a kel agent" "$WORK/a2.out"'
+
+# move on an unmanaged window must refuse and point at adopt, not adopt silently
+OW="$(plain_win orphan)"
+in_win "$OW" "'$KEL' move coppermind > '$WORK/move.out' 2>&1"
+wait_until 'grep -q . "$WORK/move.out" 2>/dev/null'
+ok "move refuses an unmanaged window"   'grep -q "kel adopt" "$WORK/move.out"'
+ok "  ...and writes no record for it"   '[ ! -f "$SESSIONS/coppermind/orphan.json" ] && [ ! -f "$SESSIONS/api-gw/orphan.json" ]'
+ok "  ...and leaves it where it was"    '[ "$(tmux display-message -p -t "$OW" "#{session_name}")" = keltest/api-gw ]'
+
+# move still does its own job on an agent kel manages.  Driven from the window
+# adopted above rather than from agent `a`: `a` runs the fake agent (sleep
+# 9999), so send-keys there types into sleep, not into a shell.
+in_win "$PW" "'$KEL' move coppermind > '$WORK/mv2.out' 2>&1"
+wait_until '[ -f "$SESSIONS/coppermind/plainwin.json" ]'
+ok "move relocates a managed agent"     '[ -f "$SESSIONS/coppermind/plainwin.json" ] && [ ! -f "$SESSIONS/api-gw/plainwin.json" ]'
+ok "  ...and rewrites .group"           '[ "$(jq -r .group "$SESSIONS/coppermind/plainwin.json")" = coppermind ]'
+ok "  ...and the window followed it"    '[ "$(tmux display-message -p -t "$PW" "#{session_name}")" = keltest/coppermind ]'
+
 section "legacy flat records migrate"
 reset
 NEW api-gw legacy

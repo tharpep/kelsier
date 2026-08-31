@@ -504,6 +504,32 @@ Code's supervisor and leaves the kel window holding a dead pane. Same class as
 the Agent Teams entry in `backlog.md`. Recorded so it is recognised rather than
 debugged.
 
+## v0.9-clarity — the pass that did not need evidence  ·  **in progress**
+
+Split out of v0.9 below. The prune pass asks *did I reach for it*, and that
+question has no data yet: on 2026-08-31 the state dir held one record ever, no
+snapshot, and no config file the user had written. But the target machine
+became a work MacBook, which justifies polish now — on the input that *is*
+available, which is inspection.
+
+So: not "remove what is unused" but "remove what is confusing or broken",
+decided by reading. Landed so far —
+
+- **five bugs**, two of which made shipped surfaces silently inert: the shell
+  completions had been dead since v0.6 (and their `group/name` filter had never
+  worked), `kel ls --json` could emit English, `prefix k` bound `w` twice, the
+  badge docs were three versions stale, and doctor mislabelled `gh`.
+- **`kel ls`** got a column header, and `inplace` renders as `repo`.
+- **doctor** prescribes a fix per failed probe, and `install/macos-tools.sh`
+  provisions a Mac.
+- **`kel adopt`** split out of `kel move`; `move` refuses instead of silently
+  adopting. Found two latent bugs in the shared code while splitting it: both
+  commands resolved the *active* window rather than the caller's pane, and took
+  their group from `#{client_session}` rather than from the window's own
+  session.
+
+Still to come: `restart` → `relaunch`, and reconciling the two menus.
+
 ## v0.9 — the prune pass
 
 **Theme:** subtract. Everything above was added on the strength of an argument.
