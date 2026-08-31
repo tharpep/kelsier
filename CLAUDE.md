@@ -252,6 +252,11 @@ never. `rollout.md` § v0.6 has the rules — follow them rather than re-derivin
 the strategy. Bubble Tea is **v2** (`charm.land/bubbletea/v2`, `View() tea.View`,
 `tea.KeyPressMsg`); almost every tutorial online is v1 and will not compile.
 
-Next is **v0.7**: `#6` merge-readiness via `gh` (three-valued —
-ready/not-ready/**unknown**, because an expired token must never render as "no
-PR"), `#8` `kel sweep`, `#12` `.kel/group`.
+**v0.7 and v0.8 are done** too: land state, `kel sweep`, `.kel/group`,
+`install.sh --uninstall`, `config.toml`, and the README.
+
+Next is **v0.9 — the prune pass**: every shipped surface gets keep / simplify /
+cut on whether it was actually reached for, before v1.0 fixes the feature set.
+`rollout.md` § v0.9 names the candidates and records which things unwind
+cheaply (columns, flags, subcommands) versus which are sticky (keybindings,
+the on-disk format).

@@ -412,14 +412,24 @@ and does nothing for the five branches that need to land.
 - **#8** `kel sweep` — batch teardown of merged, clean, pushed agents.
 - **#12** `.kel/group` per-directory override.
 
-## v0.8 — someone else could install this
+## v0.8 — someone else could install this  ·  **done**
 
-- **#11** `install.sh --uninstall` — the standing release blocker.
-- **`~/.config/kel/config.toml`** + per-repo `.kel/config.toml`, absorbing the
-  `KEL_*` env vars. This lands *before* v1.0 and before **#10** presets, so kel
-  never has two config systems at once.
-- README leading with the layout and the jump key; MIT.
-- docs pass: `spec.md` / `usage.md` / `rollout.md` reconciled against reality.
+- ~~**#11** `install.sh --uninstall`~~ — **done**. Every line install.sh
+  writes outside the repo has an inverse; settings.json is unwired surgically
+  so your own hooks survive, a displaced statusLine is restored rather than
+  deleted, and the state dir is kept unless you also pass --purge. Verified as
+  a round-trip in a throwaway HOME seeded to look like a machine that already
+  had its own config.
+- ~~**config.toml**~~ — **done**. User file, overridden by a per-repo one,
+  overridden by an exported `KEL_*`. A flat `key = value` subset rather than a
+  parser, and fork-free unless a config actually exists — the first cut used
+  `git rev-parse` and cost 5ms on every bar redraw. `examples/config.toml`
+  lists every key and is parsed by a test so it cannot rot.
+- ~~README leading with the layout and the jump key; MIT~~ — **done**. It now
+  opens with what the bar and the dashboard actually look like, then the jump
+  key, then the commands.
+- ~~docs pass~~ — **done** alongside each change rather than as a sweep, per
+  the house rule that a behaviour change updates the docs in the same commit.
 
 ## v1.0 — shareable
 
