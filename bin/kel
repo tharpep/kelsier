@@ -1299,21 +1299,74 @@ cmd_board_kill() {   # group name
   case "$a" in y|Y|yes) "$SELF" kill "$1/$2" ;; *) : ;; esac
 }
 
-# tab in the board: a labelled action menu for the highlighted agent.
+# A tmux display-menu (or command-prompt) CANNOT RENDER while this popup is
+# already open. Confirmed by driving a real attached client through a pty,
+# not assumed: it silently fails to draw — no error, exit 0 — whether the
+# nested call goes through become(), execute() or execute-silent(). tmux
+# allows one client-side overlay at a time, and the board's own popup already
+# owns that slot. Every "tab menu just closes the board" / "ctrl-f does
+# nothing" report traces to this.
+#
+# The fix: never open a SECOND overlay type. become() into a SECOND fzf list
+# instead — same overlay the board already has open, just new rows — which
+# is confirmed to work. Free-text input (new agent name, rename, a group to
+# move to) goes through _kel_ask below instead of command-prompt, for the
+# same reason.
+_kel_ask() {   # header -> the typed line on stdout, empty if cancelled
+  # < /dev/null, not `: | fzf`: a PIPE closes its write end the instant `:`
+  # exits, and fzf reads that as EOF on its item list — it does not wait for
+  # you to type, it just exits immediately with no query typed at all.
+  # /dev/null is the documented way to give fzf zero items without closing
+  # the interaction — confirmed live, not assumed, after the pipe form
+  # silently ate every keystroke.
+  # --layout reverse, matching every other menu here: fzf's DEFAULT layout
+  # puts the prompt at the BOTTOM of the available space, and with zero
+  # rows to list there is nothing else to fill it — the header and input
+  # line rendered ~35 blank lines down, looking broken. Confirmed visually.
+  fzf --print-query --header "$1" --prompt '> ' --height '100%' --layout reverse \
+      --border rounded --border-label ' kel ' < /dev/null 2>/dev/null | head -1
+}
+
+cmd_ask_new() {   # cwd
+  need fzf
+  local name; name="$(_kel_ask 'new agent — name, enter to create:')"
+  [ -n "$name" ] || return 0
+  cd "$1" 2>/dev/null || true
+  exec "$SELF" new "$name"
+}
+
+cmd_ask_new_wt() {   # cwd
+  need fzf
+  local name; name="$(_kel_ask 'new WORKTREE agent — branch/name:')"
+  [ -n "$name" ] || return 0
+  cd "$1" 2>/dev/null || true
+  exec "$SELF" new "$name" -w
+}
+
+cmd_ask_rename() {   # wid
+  need fzf
+  local name; name="$(_kel_ask 'rename — new name:')"
+  [ -n "$name" ] || return 0
+  exec "$SELF" _board_rename "$1" "$name"
+}
+
+cmd_ask_move() {
+  need fzf
+  local grp; grp="$(_kel_ask 'move to which group:')"
+  [ -n "$grp" ] || return 0
+  exec "$SELF" move "$grp"
+}
+
+# tab in the board: the action list for the highlighted agent.
 # (the board closes behind it, same as pressing enter to jump)
-# display-menu needs an explicit -c client here — invoked via fzf `become`, not
-# from a key binding, tmux can't resolve the "current" client on its own.
 cmd_board_actions() {   # wid name group cwd [here]
-  need tmux
-  local wid="$1" name="$2" group="$3" cwd="$4" here="${5:-}" cl sn
-  sn="$(tmux display-message -p -t "${TMUX_PANE:-}" '#{session_name}' 2>/dev/null || true)"
-  cl="$(tmux list-clients ${sn:+-t "$sn"} -F '#{client_name}' 2>/dev/null | head -1)"
-  [ -n "$cl" ] || cl="$(tmux list-clients -F '#{client_name}' 2>/dev/null | head -1)"
+  need tmux; need fzf
+  local wid="$1" name="$2" group="$3" cwd="$4" here="${5:-}"
   local -a items=(
-    "jump to it"                j  "run-shell \"$SELF _board_jump '$wid' '$group'\""
-    "new agent in its folder"   n  "command-prompt -p 'name:' { run-shell \"cd '$cwd' && $SELF new %%\" }"
-    "new WORKTREE agent there"  w  "command-prompt -p 'branch/name:' { run-shell \"cd '$cwd' && $SELF new %% -w\" }"
-    "rename it"                  r  "command-prompt -p 'new name:' { run-shell \"$SELF _board_rename '$wid' %%\" }"
+    "jump to it"                j  "$SELF _board_jump '$wid' '$group'"
+    "new agent in its folder"   n  "$SELF _ask_new '$cwd'"
+    "new WORKTREE agent there"  w  "$SELF _ask_new_wt '$cwd'"
+    "rename it"                  r  "$SELF _ask_rename '$wid'"
   )
   # move / adopt / relaunch all act on "whichever pane I was invoked from" —
   # none takes an explicit wid — which is correct when $here says this window
@@ -1323,30 +1376,31 @@ cmd_board_actions() {   # wid name group cwd [here]
   # $here, so these three stay off the board's own menu.
   if [ "$here" = here ]; then
     items+=(
-      "move it to another group"    m  "command-prompt -p 'group:' { run-shell \"$SELF move %%\" }"
-      "adopt this window into kel"  a  "run-shell \"$SELF adopt\""
-      "relaunch it (after a crash)" l  "run-shell \"$SELF relaunch '$group/$name'\""
+      "move it to another group"    m  "$SELF _ask_move"
+      "adopt this window into kel"  a  "$SELF adopt"
+      "relaunch it (after a crash)" l  "$SELF relaunch '$group/$name'"
     )
   fi
   items+=(
-    "go to its group"           g  "run-shell \"$SELF go '$group'\""
+    "go to its group"           g  "$SELF go '$group'"
     ""
-    "kill it"                   k  "run-shell \"$SELF _board_kill '$group' '$name'\""
+    "kill it"                   k  "$SELF _board_kill '$group' '$name'"
   )
-  _kel_menu_or_dump "$cl" " $name " "${items[@]}"
+  _kel_actions_or_dump " $name " "${items[@]}"
 }
 
-# Shared by every tmux display-menu this file builds from a bash array:
-# dumps "key<TAB>label" instead of opening the menu when KEL_DUMP_ITEMS is
-# set, for the regression suite's duplicate-key check — exercising the REAL
-# array a function built (including any conditional branch above the call),
-# not a static guess at its shape parsed out of the source text.
-_kel_menu_or_dump() {   # client title item...
-  local cl="$1" title="$2"; shift 2
+# Shared by every action list this file builds from a bash array: dumps
+# "key<TAB>label" instead of opening it when KEL_DUMP_ITEMS is set, for the
+# regression suite's duplicate-key check — exercising the REAL array a
+# function built (including any conditional branch above the call), not a
+# static guess at its shape parsed out of the source text. Otherwise, rows go
+# to fzf as "label<TAB>command"; the command column is hidden and is what
+# enter become()s into — a plain shell command, since become() execs it
+# directly rather than passing through tmux's own command language.
+_kel_actions_or_dump() {   # title item...
+  local title="$1"; shift
   local -a items=( "$@" )
   if [ -n "${KEL_DUMP_ITEMS:-}" ]; then
-    # a separator is ONE array element ("", no key/command), not a triple —
-    # advance by 1 there, or the walk misaligns for every item after it
     local i=0 lbl
     while [ "$i" -lt "${#items[@]}" ]; do
       lbl="${items[$i]}"
@@ -1359,7 +1413,33 @@ _kel_menu_or_dump() {   # client title item...
     done
     return 0
   fi
-  tmux display-menu ${cl:+-c $cl} -x C -y C -T "$title" -- "${items[@]}"
+  # Each item's own letter key is bound DIRECTLY and hard-coded into the bind
+  # string — not read back out of the row via {2}. Confirmed by testing, not
+  # assumed: fzf's {2} field substitution works fine when the become() target
+  # is a plain command (jump/kill/go-to-group all use it via the enter bind
+  # below), but breaks silently — no error, no render — the moment the
+  # substituted value is itself something that opens ANOTHER fzf (the ask
+  # prompts). A hard-coded bind string with the same command does not have
+  # that problem. This also restores the letter-key-driven feel the old
+  # tmux display-menu had, rather than only arrow+enter.
+  local i=0 lbl key cmd rows=""
+  local -a binds=()
+  while [ "$i" -lt "${#items[@]}" ]; do
+    lbl="${items[$i]}"
+    if [ -z "$lbl" ]; then
+      i=$((i + 1))
+    else
+      key="${items[$((i+1))]}"
+      cmd="${items[$((i+2))]}"
+      rows="${rows}${lbl} (${key})"$'\t'"${cmd}"$'\n'
+      binds+=( --bind "${key}:become(${cmd})" )
+      i=$((i + 3))
+    fi
+  done
+  printf '%s' "$rows" | fzf --delimiter '\t' --with-nth 1 --nth 1 \
+    --layout reverse --height '100%' --border rounded --border-label "$title" \
+    --bind 'enter:become({2})' "${binds[@]}" \
+    --header 'press the (letter) shown, or arrow + enter — esc: close'
 }
 
 # ctrl-f in the board: everything that is NOT about one agent — the
@@ -1368,23 +1448,19 @@ _kel_menu_or_dump() {   # client title item...
 # highlighted; that menu is now `kel cheat` instead (see tmux/kel.conf), so
 # this is their one home rather than two.
 cmd_board_fleet_actions() {
-  need tmux
-  local cl sn
-  sn="$(tmux display-message -p -t "${TMUX_PANE:-}" '#{session_name}' 2>/dev/null || true)"
-  cl="$(tmux list-clients ${sn:+-t "$sn"} -F '#{client_name}' 2>/dev/null | head -1)"
-  [ -n "$cl" ] || cl="$(tmux list-clients -F '#{client_name}' 2>/dev/null | head -1)"
+  need tmux; need fzf
   local -a items=(
-    "the fleet dashboard (kel top)"                 t  "run-shell -b \"$SELF top\""
-    "edit config.toml"                              c  "run-shell -b \"$SELF config\""
+    "the fleet dashboard (kel top)"                 t  "$SELF top"
+    "edit config.toml"                              c  "$SELF config"
     ""
-    "sweep — close agents whose work merged"        s  "run-shell -b \"$SELF _run sweep\""
-    "restore — rebuild the WHOLE workspace"         R  "run-shell -b \"$SELF _run restore\""
-    "prune — forget dead records (closes nothing)"  p  "run-shell -b \"$SELF _run prune\""
-    "check the machine (doctor)"                    D  "run-shell -b \"$SELF _run doctor\""
+    "sweep — close agents whose work merged"        s  "$SELF _run sweep"
+    "restore — rebuild the WHOLE workspace"         R  "$SELF _run restore"
+    "prune — forget dead records (closes nothing)"  p  "$SELF _run prune"
+    "check the machine (doctor)"                    D  "$SELF _run doctor"
     ""
-    "kel keys (cheat sheet)"                        "?" "display-popup -w 84 -h 85% -T ' kel keys ' -E \"$SELF cheat | less -R\""
+    "kel keys (cheat sheet)"                        "?" "$SELF cheat | less -R"
   )
-  _kel_menu_or_dump "$cl" ' kel ' "${items[@]}"
+  _kel_actions_or_dump ' kel ' "${items[@]}"
 }
 
 cmd_board_rename() {   # wid new
@@ -1436,8 +1512,14 @@ cmd_board() {
     for v in KEL_SESSION KEL_AGENT KEL_GROUP KEL_WORKTREES KEL_CTX_WARN XDG_STATE_HOME; do
       [ -n "${!v:-}" ] && penv+=( -e "$v=${!v}" )
     done
-    exec tmux display-popup "${penv[@]}" \
-      -w "${KEL_BOARD_W:-90%}" -h "${KEL_BOARD_H:-85%}" -T ' kel ' -E "'$SELF' board"
+    # -B: no popup border/title. fzf draws its own rounded border and label
+    # right inside it, so without -B this was two nested boxes both saying
+    # " kel " — confirmed visually, not assumed: a real capture showed the
+    # doubled frame. -B applies to every fzf this popup ever become()s into
+    # (tab's action list, ctrl-f's fleet list, the ask prompts), since they
+    # all render inside this SAME popup, each drawing its own border.
+    exec tmux display-popup -B "${penv[@]}" \
+      -w "${KEL_BOARD_W:-90%}" -h "${KEL_BOARD_H:-85%}" -E "'$SELF' board"
   fi
 
   cmd_board_rows | SHELL=/bin/bash fzf \
@@ -1843,8 +1925,22 @@ cmd_run_popup() {   # subcommand [args...]
     exec tmux display-popup "${penv[@]}" -w 80% -h 60% -T " kel $sub " -E \
       "'$SELF' _run $sub $* ; printf '\n  [any key]'; read -rsn1"
   fi
-  # from a menu, sweep always shows the dry run and asks first
-  if [ "$sub" = sweep ]; then "$SELF" _sweepui; else "$SELF" "$sub" "$@"; fi
+  # Reached here two ways: from the OLD tmux display-menu (now gone — see
+  # cmd_board_fleet_actions), and from the board's ctrl-f, become()'d in from
+  # a fzf that is ALREADY inside a popup. Both need the same pause: this
+  # branch prints and returns immediately, and the become() chain then exits,
+  # closing the whole popup before the output could be read — confirmed live,
+  # not assumed, the same way the {2} nesting bug was.
+  local rc
+  if [ "$sub" = sweep ]; then "$SELF" _sweepui; rc=$?; else "$SELF" "$sub" "$@"; rc=$?; fi
+  # same [ -t 0 ] guard cmd_attach's snapshot prompt uses: only wait for a
+  # keypress when there is a real terminal to press it on. A plain
+  # `[ -t 0 ] && { ... }` as the function's last statement would make ITS
+  # OWN false result (no tty) become the function's return status, silently
+  # turning a successful doctor/sweep/etc into a reported failure — caught by
+  # the suite, not by reading the code.
+  if [ -t 0 ]; then printf '\n  [any key]'; read -rsn1; fi
+  return "$rc"
 }
 
 # sweep is the one that removes things, so from a menu it always shows the
@@ -2635,6 +2731,10 @@ main() {
     _board_actions)  cmd_board_actions "$@" ;;
     _board_fleet)    cmd_board_fleet_actions ;;
     _board_rename)   migrate_meta; cmd_board_rename "$@" ;;
+    _ask_new)        migrate_meta; cmd_ask_new "$@" ;;
+    _ask_new_wt)     migrate_meta; cmd_ask_new_wt "$@" ;;
+    _ask_rename)     migrate_meta; cmd_ask_rename "$@" ;;
+    _ask_move)       migrate_meta; cmd_ask_move "$@" ;;
     _here)           cmd_here_actions ;;                  # prefix m
     restore)      migrate_meta; cmd_restore "$@" ;;
     relaunch)     migrate_meta; cmd_relaunch "$@" ;;

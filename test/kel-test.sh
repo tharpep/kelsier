@@ -548,7 +548,10 @@ ok "a plain window appears as well"      '[ -n "$(rows | grep plainwin)" ]'
 # B' — worktree reachable from a menu, and the stranded commands guarded
 ok "kel new -w still makes a worktree"   'NEW_W() { ( cd "$WORK/repos/api-gw" && "$KEL" new wt1 -w --agent "sleep 9999" ) >/dev/null 2>&1; }; NEW_W; [ "$(jq -r .isolation "$SESSIONS/api-gw/wt1.json")" = worktree ]'
 ok "_run refuses anything not allowed"   '! "$KEL" _run kill >/dev/null 2>&1'
-ok "_run doctor runs"                    'KEL_IN_POPUP=1 "$KEL" _run doctor >/dev/null 2>&1'
+# < /dev/null: a real popup's stdin is a real tty, so the "press any key"
+# pause after the output is correct there and must NOT fire in this suite,
+# which does have a real tty on stdin (this session's own).
+ok "_run doctor runs"                    'KEL_IN_POPUP=1 "$KEL" _run doctor >/dev/null 2>&1 < /dev/null'
 # doctor hints go to stderr only — the cached JSON schema must not gain a field
 "$KEL" doctor >/dev/null 2>&1
 ok "doctor caches the same schema"       '[ "$(jq -Sr "keys | join(\",\")" "$XDG_STATE_HOME/kel/doctor.json")" = "allow_passthrough,checked_at,claude,display_popup,fzf,gh_auth,git_worktree,go_fleet,hooks_wired,jq,node,statusline_wired,tmux,tmux>=3.0" ]'
