@@ -615,6 +615,27 @@ not a static guess at its shape. Verified against the tool itself, not just
 the test suite: planted a real duplicate key in `bin/kel`, confirmed the
 suite caught it, reverted.
 
+**Third addendum: tab and ctrl-f did not actually work.** The user reported it
+plainly — "tab and ctrl-f just close the board" — and it took driving a real
+attached tmux client through a pty, not headless commands, to see why:
+`tmux display-menu` and `command-prompt` cannot render while a `display-popup`
+is already open, confirmed directly rather than inferred. The board is always
+a popup, so both were dead on arrival from the day they were built. Fixed by
+`become()`-chaining into a second `fzf` list instead — the same overlay type
+the popup already has open — which surfaced a second hard limit (three
+chained `become()`s never render, only two) that broke free-text prompting
+until each action's letter key was bound directly rather than read back
+through fzf's `{2}` substitution. Verified by actually creating an agent
+through the fixed flow, not just watching it render.
+
+A visual pass followed, at the user's request, same method: the board's
+popup and fzf's own border were both drawing a frame with the same "kel"
+label, and the ask-prompt used fzf's default (bottom-anchored) layout instead
+of `--layout reverse`, burying it under ~35 blank lines. Both fixed. Left
+open: the small action lists inherit the board's full popup size, since a
+`become()`'d fzf cannot resize the popup around it, and board rows are
+unpadded tab-separated text, so differently-named agents do not align.
+
 That is the whole card. What it did **not** do is answer the docket below,
 which still wants use rather than reasoning.
 
