@@ -965,7 +965,7 @@ cmd_ls() {
     # a column unwinds in one commit, a format change needs a migration.
     def where: if . == "inplace" then "repo" else (. // "-") end;
     ( $hd + "  " + ("IDX" | pad(4)) + " " + ("NAME" | pad(24)) + " "
-      + ("STATE" | pad(10)) + " " + ("CTX" | pad(5)) + " " + ("WHERE" | pad(10))
+      + ("STATE" | pad(10)) + " " + ("CTX" | pad(5)) + " " + ("WHERE" | pad(11))
       + " " + ("BRANCH" | pad(12)) + "  PATH" + $ho ),
     ( .agents
     | sort_by(.group, (.index // 9999))
@@ -975,7 +975,8 @@ cmd_ls() {
       | ( .name + (if (.panes | length) > 1 then " (" + (.panes | join("|")) + ")" else "" end) | pad(24) ) as $nm
       | ( (.state // "-") | pad(10) ) as $st
       | ( (if .context.pct == null then "-" else "\(.context.pct)%" end) | pad(5) ) as $cx
-      | ( (if .managed then (.isolation | where) else "(unmanaged)" end) | pad(10) ) as $iso
+      # 11, not 10: "(unmanaged)" is exactly 11 characters and pad() truncates
+      | ( (if .managed then (.isolation | where) else "(unmanaged)" end) | pad(11) ) as $iso
       | ( (.branch // "-") | pad(12) ) as $br
       | ( (.cwd // "") | sub("^" + $home; "~") ) as $cw
       | ( if (.context.cost_usd // 0) > 0 then "  $" + (.context.cost_usd | money) else "" end ) as $cost

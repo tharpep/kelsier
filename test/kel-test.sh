@@ -177,6 +177,9 @@ in_win() {   # wid  command...  -> runs it in that window pane 0
 
 PW="$(plain_win plainwin)"
 ok "the plain window keeps its name"     '[ "$(tmux display-message -p -t "$PW" "#{window_name}")" = plainwin ]'
+# WHERE is pad(11) because "(unmanaged)" is 11 chars; at 10 it rendered as
+# "(unmanaged" and the new column header made that obvious
+ok "  ...and reads (unmanaged), unclipped" '[ -n "$("$KEL" ls 2>/dev/null | grep -F "(unmanaged)")" ]'
 in_win "$PW" "'$KEL' adopt > '$WORK/adopt.out' 2>&1"
 wait_until '[ -f "$SESSIONS/api-gw/plainwin.json" ]'
 ok "adopt writes a record"              '[ -f "$SESSIONS/api-gw/plainwin.json" ]'
