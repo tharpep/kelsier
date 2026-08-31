@@ -364,6 +364,7 @@ ok "the board still lists the agent"     '[ -n "$(rows | awk -F"\t" "\$2==\"agen
 ok "  ...and now its other pane too"     '[ -n "$(rows | awk -F"\t" "\$3==\"pane\"")" ]'
 ok "  ...targeted by pane id"            '[[ "$(rows | awk -F"\t" "\$3==\"pane\"{print \$6; exit}")" == %* ]]'
 ok "an agent is never listed twice"      '[ "$(rows | awk -F"\t" "\$2==\"agent1\"" | wc -l)" = 1 ]'
+[ "$(rows | awk -F"\t" '$2=="agent1"' | wc -l)" = 1 ] || rows | sed "s/^/       /"
 ok "a plain window appears as well"      '[ -n "$(rows | grep plainwin)" ]'
 
 # B' — worktree reachable from a menu, and the stranded commands guarded

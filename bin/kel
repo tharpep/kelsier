@@ -1091,18 +1091,27 @@ cmd_board_rows() {
 
   # Every pane EXCEPT the one already represented by its window's own row.
   # Every window has a row above (agents and unmanaged alike), so the rule is
-  # simply "skip each window's lowest pane index" — not "skip agents", which
-  # left an agent's own pane listed twice.
+  # "skip each window's lowest pane index".
+  #
+  # Two passes rather than relying on sorted input: the first cut piped through
+  # `sort -t<tab> -k5,5n` and took the first row seen per window, which held on
+  # GNU sort and not on BSD — an agent got listed twice on macOS. Computing the
+  # minimum explicitly cannot care what order the rows arrive in.
   tmux list-panes -a -F '#{session_name}	#{window_id}	#{window_name}	#{pane_id}	#{pane_index}	#{pane_current_command}	#{pane_current_path}' 2>/dev/null \
-  | sort -t"$(printf '	')" -k2,2 -k5,5n \
   | awk -F'	' -v pfx="$KEL_PREFIX" '
-      {
-        sn=$1; wid=$2; wname=$3; pid=$4; pidx=$5; cmd=$6; path=$7
-        if (sn == pfx)                     g = pfx
-        else if (index(sn, pfx "/") == 1)  g = substr(sn, length(pfx)+2)
-        else                               next
-        if (!(wid in seen)) { seen[wid] = 1; next }   # the window own row covers it
-        printf "%s\t%s\t\033[2mpane\033[0m\t\t%s\t%s\n", g, wname "/" cmd, path, pid
+      { rows[NR] = $0
+        wid = $2; idx = $5 + 0
+        if (!(wid in lo) || idx < lo[wid]) lo[wid] = idx }
+      END {
+        for (i = 1; i <= NR; i++) {
+          split(rows[i], f, "	")
+          sn=f[1]; wid=f[2]; wname=f[3]; pid=f[4]; pidx=f[5]+0; cmd=f[6]; path=f[7]
+          if (sn == pfx)                    g = pfx
+          else if (index(sn, pfx "/") == 1) g = substr(sn, length(pfx)+2)
+          else continue
+          if (pidx == lo[wid]) continue        # the window own row covers it
+          printf "%s\t%s\t\033[2mpane\033[0m\t\t%s\t%s\n", g, wname "/" cmd, path, pid
+        }
       }'
   } | sort
 }
