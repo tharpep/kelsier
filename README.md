@@ -93,6 +93,7 @@ kel adopt [group]    track a window kel does not manage yet
 kel restore [-c]     rebuild after a reboot
 kel doctor           check the machine
 kel config           edit config.toml (seeds it from the example, once)
+kel update           fast-forward this clone, then re-wire
 ```
 
 Four keys carry it: `` prefix ` `` jump-to-blocked · **`Ctrl+Space`** the board

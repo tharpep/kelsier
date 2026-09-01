@@ -574,7 +574,7 @@ ok "_run refuses anything not allowed"   '! "$KEL" _run kill >/dev/null 2>&1'
 ok "_run doctor runs"                    'KEL_IN_POPUP=1 "$KEL" _run doctor >/dev/null 2>&1 < /dev/null'
 # doctor hints go to stderr only — the cached JSON schema must not gain a field
 "$KEL" doctor >/dev/null 2>&1
-ok "doctor caches the same schema"       '[ "$(jq -Sr "keys | join(\",\")" "$XDG_STATE_HOME/kel/doctor.json")" = "allow_passthrough,checked_at,claude,display_popup,fzf,gh_auth,git_worktree,go_fleet,hooks_wired,jq,node,statusline_wired,tmux,tmux>=3.0" ]'
+ok "doctor caches the same schema"       '[ "$(jq -Sr "keys | join(\",\")" "$XDG_STATE_HOME/kel/doctor.json")" = "allow_passthrough,checked_at,claude,display_popup,fzf,gh_auth,git_worktree,go_fleet,hooks_permitted,hooks_wired,jq,kel_path,node,statusline_wired,tmux,tmux>=3.0,up_to_date" ]'
 # capture, do not pipe: doctor exits non-zero when a required probe fails, and
 # `set -o pipefail` would then fail this test even though the hint was printed
 dout="$(PATH="$WORK/nogh:$PATH" "$KEL" doctor 2>&1 || true)"
@@ -833,6 +833,42 @@ ok "  ...and not the old +N form"           '[[ "$bar" != *"+1 waiting"* ]]'
 unset TMUX
 
 # ---------------------------------------------------------------- statusline
+section "kel update refuses before it touches anything"
+# Driven against a throwaway clone, with $SELF pointed into it, so nothing here
+# can pull or re-wire the checkout the suite is running from. Each refusal is
+# asserted to leave HEAD where it was: a guard that declines but has already
+# moved the tree is not a guard.
+UPSTREAM="$WORK/up.git"; UCLONE="$WORK/uclone"
+git init -q --bare "$UPSTREAM"
+git clone -q "$UPSTREAM" "$UCLONE" 2>/dev/null
+( cd "$UCLONE" && git config user.email t@t.t && git config user.name T \
+  && mkdir -p bin && cp "$KEL" bin/kel && printf 'x\n' > f.txt \
+  && git add -A && git commit -q -m init && git push -q origin HEAD:refs/heads/main \
+  && git branch -q -u origin/main 2>/dev/null ) 2>/dev/null
+UKEL="$UCLONE/bin/kel"
+UHEAD() { git -C "$UCLONE" rev-parse HEAD; }
+
+before="$(UHEAD)"
+printf 'dirty\n' >> "$UCLONE/f.txt"
+uout="$("$UKEL" update 2>&1 || true)"
+ok "refuses a dirty tree"                '[[ "$uout" == *"uncommitted changes"* ]]'
+ok "  ...and moved nothing"              '[ "$(UHEAD)" = "$before" ]'
+( cd "$UCLONE" && git checkout -q -- f.txt )
+
+uout="$( cd "$UCLONE" && git checkout -q --detach && "$UKEL" update 2>&1 || true)"
+ok "refuses a detached HEAD"             '[[ "$uout" == *"detached HEAD"* ]]'
+( cd "$UCLONE" && git checkout -q main 2>/dev/null || git checkout -q master 2>/dev/null )
+
+uout="$( cd "$UCLONE" && git checkout -q -b nobranch-upstream && "$UKEL" update 2>&1 || true)"
+ok "refuses a branch with no upstream"   '[[ "$uout" == *"no upstream"* ]]'
+( cd "$UCLONE" && git checkout -q - 2>/dev/null )
+
+ok "reports already-up-to-date"           '[[ "$("$UKEL" update 2>&1 || true)" == *"up to date"* ]]'
+ok "  ...and left HEAD alone"              '[ "$(UHEAD)" = "$before" ]'
+# a non-clone install must say so rather than half-running
+mkdir -p "$WORK/nogit/bin" && cp "$KEL" "$WORK/nogit/bin/kel"
+ok "refuses when it is not a git clone"  '[[ "$("$WORK/nogit/bin/kel" update 2>&1 || true)" == *"not a git clone"* ]]'
+
 section "statusline records context without a live agent"
 reset
 NEW api-gw a

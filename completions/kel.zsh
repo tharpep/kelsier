@@ -28,6 +28,7 @@ _kel() {
     'sweep:close finished agents whose work has merged'
     'prune:discard dead agent records'
     'doctor:capability probe'
+    'update:fast-forward the clone kel runs from, then re-wire'
     'cheat:keybinding reference'
     'help:usage'
   )

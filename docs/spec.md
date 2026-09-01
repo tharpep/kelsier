@@ -510,6 +510,9 @@ kel config                 edit config.toml — seeds it from examples/config.to
                            the first time, opens it in $VISUAL / $EDITOR (else
                            the first of nvim/vim/vi/nano found on $PATH), and
                            pops up in tmux the same way `kel top` does
+kel update                 fast-forward the clone kel runs from, then re-run
+                           install.sh. Refuses on a dirty tree, a detached HEAD,
+                           no upstream, or a non-fast-forward (§11a)
 ```
 
 Internal (wired into tmux / Claude Code): `kel status-line [group]`,
@@ -550,7 +553,33 @@ or `jq` is missing.
 | `node` on `PATH` | Claude Code needs it; catches a broken WSL PATH |
 | `claude` on `PATH` | the default agent |
 | kel hooks wired in `settings.json` | state detection |
+| the wired kel path resolves | `install.sh` records an absolute path into the clone; moving it silences every hook |
+| hooks not disabled by managed settings | `allowManagedHooksOnly` / `disableAllHooks` stop hooks firing while the entries remain, so "wired" alone reads true against a dead install |
+| clone level with its upstream | `kel update` has something to apply |
 | `allow-passthrough on` | Neovim OSC 52 clipboard through tmux |
+
+The upstream probe does **not** fetch. A probe that needs the network is one
+people stop running, so it compares against the last fetch and says that is what
+it did.
+
+### 11a. Updating
+
+`install.sh` symlinks `bin/kel`, both completions and `tmux/kel.conf` out of the
+clone, so the working tree **is** the installed artifact. `kel-fleet` and
+`kel-top` are the only copies. `kel update` therefore fast-forwards the clone and
+re-runs `install.sh`, which rebuilds those two and is idempotent.
+
+Releases and tags would be the wrong mechanism for the same reason: there is no
+artifact to publish that the symlink does not already point at.
+
+It **refuses** rather than merges — on a dirty tree, a detached HEAD, a branch
+with no upstream, or a non-fast-forward. On the author's machines that clone is
+also the development checkout, and rebasing over uncommitted work is the one
+outcome here that cannot be undone.
+
+The success path is deliberately not in the suite: exercising it would re-run
+`install.sh` against the machine running the tests. The refusals are covered,
+which is the half that protects anything.
 
 ---
 

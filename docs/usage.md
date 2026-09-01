@@ -62,6 +62,10 @@ kel restore [-c] [-s]  rebuild the workspace after a kill / reboot
                        (-c resume conversations; -s force the snapshot)
 kel prune [-f]         discard dead agent records (and their worktrees)
 kel doctor             probe the machine, cache to ~/.local/state/kel/doctor.json
+kel update             fast-forward the clone kel runs from, then re-run
+                       install.sh. Refuses on a dirty tree, a detached HEAD, a
+                       branch with no upstream, or a non-fast-forward — the
+                       clone is usually a checkout you also work in
 ```
 
 Internal (wired into tmux / Claude Code, you won't call these):
