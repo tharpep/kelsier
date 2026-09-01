@@ -836,6 +836,45 @@ either payload.
 failed once on Linux CI with a one-second difference. Reduced to a presence
 check, which is the property either side can actually hold.
 
+## The TUI pass — audited 2026-09-01, not started
+
+**Dated record.** This section is a point-in-time finding, not a current-state
+claim. The work items live in `backlog.md` § *The TUI pass*, each with
+Error / Surface / Fix / Test.
+
+**Trigger:** the author's own account — *"it's not a good UI"* — while the v1.0
+gate was otherwise closing. Auditing it first, deliberately, rather than fixing
+what was easiest to see.
+
+**What the audit found.** Nothing is unwired: all 46 dispatcher entries are
+reachable by a bind, menu, doc or test. The problem is in three layers.
+
+*The UI could not report its own failures.* Four independent mechanisms: the
+board's fzf runs with `>/dev/null 2>&1` and every bind uses `become()`, which
+execs in place inheriting those descriptors; four popups use single `-E`, which
+closes them on any exit including a `die`; four `kel.conf` binds use
+`run-shell -b` without `-E`, which drops stderr; and `_run`'s `[any key]` pause
+fixes the third mechanism but not the first, so it holds a popup open over an
+empty screen. The worst instance is `kel kill`'s uncommitted-work refusal —
+invariant 1's safety message — swallowed when the kill goes through the board.
+This is why "check every button" stops: the buttons often ran and said nothing.
+
+*Depth.* Nine actions sit three keypresses deep with no shorter route. `7e80559`
+removed `prefix k`'s and `prefix m`'s menus — both one level — on the reasoning
+that submenus add steps, and the same commit added `ctrl-f`, which reintroduced
+depth for kel's own fleet actions. Both halves were right about their own problem.
+
+*Asymmetry.* `config`, `sweep`, `restore`, `prune` and `doctor` have no prefix
+key; `move`, `adopt` and `relaunch` have no `Ctrl+Space` path at all. The two
+surfaces documented as "the same menu" do not offer the same actions. `kel ls`
+and `kel update` have no TUI path whatsoever.
+
+**Method limit, recorded because it shaped the result.** Coverage was derived by
+asking "does every command have a TUI path", which is structurally blind to
+capabilities that are not commands. Closing kel, managing a pane, and seeing git
+state in the primary flow were invisible to that method and came from the author
+instead. A derived guard cannot find a gap in its own vocabulary.
+
 ## v1.0 — shareable
 
 **v1.0 is a product milestone, not an implementation one.** It previously read
@@ -847,6 +886,14 @@ by the backlog's own words — sat outside the definition.
 deep it is, and what it cost), the worktree lifecycle ends as cleanly as it
 starts, the install is reversible, and someone who is not the author can run
 `git clone && ./install.sh` and have it work — with or without Go.
+
+**And the TUI is one the author will stand behind.** Added 2026-09-01, because
+without it this definition reads as met while the author's position is that it
+is not. This criterion is **author judgment with no trigger** — deliberately no
+acceptance test, no checklist, no proxy metric. Inventing one would let the
+document declare v1.0 ready over the author's objection, which is the failure
+the criterion exists to prevent. The audit in *The TUI pass* above is the
+starting evidence, not the bar.
 
 How much of it is Go by then is an outcome, not a requirement.
 

@@ -30,11 +30,19 @@ rollout wins.
 | ~~v0.6~~ **done** | ~~`_fleet --json`~~ · ~~#2~~ (folds #3, #7) · Go seam · ~~#5~~ **cut, see R6** |
 | ~~v0.7~~ **done** | ~~#6~~ · ~~#8~~ · ~~#12~~ |
 | v0.8 | #11 · config file (un-parked below) |
+| the TUI pass | #35 (upstream of the rest) · #17–#31 · #32–#34 · #36 |
 | unscheduled | #9 · #10 · #16 · everything under *Parked* |
 
 **Tags.** `[fits]` — inside "just bookkeeping, never wrap the agent."
 `[borderline]` — one design decision away from crossing a non-goal; the entry
 says which. `[violates]` — recorded so it stops getting re-proposed.
+
+The TUI pass adds three that describe *what makes an entry done* rather than
+whether it belongs: `[defect]` — code exists and misbehaves, done when fixed with
+a test. `[coverage]` — a command exists with no TUI path, done when a path exists
+and a guard asserts it. `[capability]` — kel has no notion of the thing, done when
+it does. None of the three takes a gate; a confirmed defect gated on future pain
+is a category error.
 
 ---
 
@@ -357,7 +365,486 @@ recorded session id) in the existing window, touching nothing else.
 
 ---
 
-## Parked — needs a concrete pain first
+## The TUI pass  ·  audited 2026-09-01
+
+Every entry below carries **Error / Surface / Fix / Test**. Confirmed defects carry
+no gate: gating a known bug on future pain is a category error. Only the design
+questions at the end are ungated because they *cannot* be gated.
+
+Three kinds here, separated because what makes them done differs:
+
+| kind | done when |
+|---|---|
+| **defect** | fixed, with a test |
+| **coverage gap** | a command exists but no TUI path reaches it — done when a path exists *and* a guard asserts it |
+| **capability gap** | kel has no notion of the thing at all — done when it does |
+
+The coverage row is the one that turns "the UI lacks things" from taste into a
+table. It is also structurally blind to the capability row, which is why that row
+was assembled from the author's own account rather than derived.
+
+**Standing design decision (2026-09-01).** Three rules, and the third is the one
+that constrains fixes:
+
+1. Every capability has a bash command. Already true.
+2. The commonly-used ones need **both** a prefix key **and** a path from
+   `Ctrl+Space`. Not either — a user who lives in the TUI and a user who reaches
+   for keys are the same person at different moments.
+3. **Depth is a cost, not a container.** `Ctrl+Space` → board → `ctrl-f` → item is
+   three levels. Adding an item to `ctrl-f` is therefore not a fix for
+   unreachability; it relocates the problem. `7e80559` pruned `prefix k`'s menu on
+   exactly this reasoning — *"wrapping 'press prefix, then press the native key' in
+   a submenu is strictly more steps"* — and then added `ctrl-f`, which reintroduced
+   depth on a different axis. Both halves of that commit were right about their own
+   problem; together they produced the current shape.
+
+This makes "is X reachable from Ctrl+Space" checkable, and "how many keypresses"
+countable. Several items below only count as gaps under rule 2, and several
+candidate fixes are ruled out by rule 3.
+
+### 35. Common actions cost three levels  ·  `[capability]`  ·  *open*
+
+**Error.** Derived keypress depth, counting the entry key itself:
+
+| depth | actions |
+|---|---|
+| 1 | board (`Ctrl+Space`) |
+| 2 | jump, kill, go, new, rename, top, cheat |
+| **3, nothing shallower** | config, sweep, restore, prune, doctor, new-worktree, move, adopt, relaunch |
+| unreachable | `ls`, `update` |
+
+Nine actions sit three keys deep with no shorter route. And rule 2 is broken in
+**both** directions, which the depth count alone hides: config, sweep, restore,
+prune and doctor have **no prefix key**; move, adopt and relaunch have **no
+`Ctrl+Space` path at all** — they exist only under `prefix m`. So the two surfaces
+that are documented as "the same menu" do not offer the same actions.
+
+`7e80559` removed `prefix k`'s and `prefix m`'s menus — both one level — and their
+contents now live at level three. That commit's own reasoning was that submenus add
+steps; it applied that to native tmux keys and not to kel's own actions.
+
+**Surface.** The table above is derivable from the bind and menu definitions, so it
+can be asserted: a guard capping depth for a "common" list, with the list being the
+author's call rather than the guard's, plus a check that anything on it has both a
+prefix key and a `Ctrl+Space` path.
+
+**Fix.** Undecided, and upstream of every other UI item here — this is what the
+design questions below resolve into. Three shapes, none of them "add another menu":
+promote the daily actions to prefix keys so the board is never the only path;
+flatten `ctrl-f` and `tab` onto the board's own screen instead of a nested popup; or
+make the board's first screen answer more questions so fewer actions are needed at
+all (see #34).
+
+**Test.** The depth table asserted against a cap, and the both-paths check for the
+common set. Prove-can-fail by burying a common action one level deeper, and by
+removing one of its two paths.
+
+### Silent failure — these gate everything else
+
+Four independent mechanisms. Any UI redesign layered on top inherits the silence,
+so these come first regardless of how the surfaces are later reshaped.
+
+### 17. The board discards all output from everything it launches  ·  `[defect]`  ·  *open*
+
+**Error.** `cmd_board` (`bin/kel:1653`) launches fzf with `>/dev/null 2>&1 || true`.
+Every `--bind` uses `become()`, which execs in place and inherits fzf's
+descriptors, so every command reached from the board has stdout and stderr on
+`/dev/null` for the rest of the session. fzf still draws, because it writes
+`/dev/tty`. The worst instance is `cmd_kill`'s uncommitted-work refusal — the
+message invariant 1 calls safety-critical — swallowed when a kill goes through
+the board. `cmd_board_kill:1364` writes its *own* prompt to `/dev/tty`, which is
+the shape of a half-applied fix.
+
+**Surface.** Two layers. A source guard: the board's fzf invocation must not
+redirect stdout or stderr to `/dev/null` — legitimate as a source check because
+the defect is the source shape. A behavioural assertion: `cmd_board_kill` takes
+`group name` and reads its prompt from `/dev/tty`, so it can be driven directly
+against a dirty worktree with output captured, asserting the at-risk path appears.
+
+**Fix.** Drop `>/dev/null 2>&1`. The trailing `|| true` already absorbs fzf's exit
+status, which is what the redirect was likely for.
+
+**Test.** Both layers above; prove-can-fail by reintroducing the redirect and
+watching the behavioural assertion break. Stated limit: the suite cannot drive
+fzf interactively, so the `become()` chain itself stays unverified — the guard
+covers the shape and the endpoints, not the middle.
+
+### 18. Every popup closes before its error can be read  ·  `[defect]`  ·  *open*
+
+**Error.** `man tmux`: single `-E` closes a popup when the command exits, on any
+status; `-EE` closes it only on success. Four popups use single `-E`
+(`cmd_here_actions:1592`, `cmd_board:1624`, `cmd_top:1935`, `cmd_config:2275`), so
+a `die` closes the popup instantly and its message is unreadable. `cmd_run_popup`
+is the one place this was addressed, by appending `[any key]` and a `read` — the
+comment at `:2041-2046` names the bug as confirmed live. That fix was never
+applied to the other four.
+
+**Surface.** A source guard asserting no kel `display-popup` uses single `-E`.
+Behaviourally, `prefix t` with `$KEL_TOP_BIN` absent hits `die "run ./install.sh
+to build it"` (`bin/kel:1924`) — reachable in the suite by pointing
+`KEL_TOP_BIN` at a nonexistent path and asserting the message is emitted.
+
+**Fix.** `-E` → `-EE` on all four. A failing command then leaves the popup open.
+
+**Test.** The source guard, plus the `KEL_TOP_BIN` case above. Prove-can-fail by
+reverting one popup to `-E`.
+
+### 19. tmux keybindings drop stderr  ·  `[defect]`  ·  *open*
+
+**Error.** `C-Space`, `b`, `m` and `t` (`tmux/kel.conf:56,57,66,69`) use
+`run-shell -b`. `-b` backgrounds the command and tmux discards its output; `-E`
+is what redirects it. So every `die`/`warn` from `cmd_board`,
+`cmd_here_actions` and `cmd_top` fired from a keybinding is dropped before it
+reaches a pane.
+
+**Surface.** A source guard: any `run-shell` invoking `kel` in `kel.conf` must
+pass `-E`. The failure is invisible at runtime by construction, which is what
+makes the source check the honest instrument here rather than a shortcut.
+
+**Fix.** Add `-E` to those four binds, or route them through `display-popup`
+which already has a pane to write to.
+
+**Test.** The source guard, proven to fail by removing `-E` from one bind.
+
+### 20. `_run`'s pause holds a popup open over nothing  ·  `[defect]`  ·  *open*
+
+**Error.** `cmd_run_popup:2027-2057` fixes #18 for its own four commands, but not
+#17: reached from the board, its output still goes to `/dev/null`, so the popup
+stays open showing an empty screen and blocks on `read -rsn1`. It reads as frozen.
+This is why sweep/restore/prune/doctor — the advertised `ctrl-f` items — appear to
+do nothing.
+
+**Surface.** Resolved by fixing #17; until then, assert `_run doctor` emits
+recognisable output when invoked with stdout captured.
+
+**Fix.** Falls out of #17. Keep the `[any key]` pause, which is correct once there
+is something to read.
+
+**Test.** `KEL_IN_POPUP=1 kel _run doctor` with output captured must contain a
+probe label. Guards the composition of #17 and #18, which is where the user
+actually lands.
+
+### Defects
+
+### 21. `_board_preview` has no argument guard  ·  `[defect]`  ·  *open*
+
+**Error.** `bin/kel:1320` does `local name="$1" group="$2"` under `set -u`. The
+board invokes it as `_board_preview {2} {1}`; when fzf's `{2}` expands empty the
+shell collapses the arguments and `$2` is unbound, rendering
+`$2: unbound variable` into the preview pane. Reproduced directly. It is the
+most-invoked helper in the UI — preview fires on every cursor move.
+
+**Surface.** Invoke it with zero and one argument and assert it exits 0 with empty
+output rather than a bash diagnostic.
+
+**Fix.** Default both parameters and return early when either is empty, matching
+`cmd_board_kill:1363` which already does exactly this.
+
+**Test.** The two assertions above; prove-can-fail by removing the guard.
+
+### 22. `resolve_agent` silently drops the middle path segment  ·  `[defect]`  ·  *open*
+
+**Error.** `bin/kel:335` uses `${want%%/*}` and `${want##*/}` — first slash and
+last slash — so `grp/wname/cmd` resolves to group `grp`, name `cmd`, discarding
+`wname`. Pane rows carry `wname/cmd` in field 2 (`:1289-1316`), so `ctrl-k` or
+`tab`→`k` on a pane row in a multi-pane window resolves to a record that does not
+exist and dies. Invisibly, per #17.
+
+**Surface.** `resolve_agent` is reachable through `kel kill`; assert a
+three-segment argument is refused with a message naming what it could not resolve,
+rather than resolving to the wrong record.
+
+**Fix.** Reject arguments with more than one `/`, or resolve pane rows through
+their window id rather than a composed name. The second is the real fix and needs
+a decision about whether a pane is addressable at all — see #32.
+
+**Test.** `kel kill a/b/c` must fail with a message naming `a/b/c`, not report a
+missing agent called `c`.
+
+### 23. `cmd_menu` is dead code  ·  `[defect]`  ·  *open*
+
+**Error.** `bin/kel:1657` defines `cmd_menu() { cmd_board; }`. The dispatcher's
+`board|menu` case (`:3026`) calls `cmd_board` directly, so nothing reaches it.
+The house rule is to delete dead code rather than keep shims.
+
+**Surface.** The dispatcher-reachability check already added in the docs guard can
+be extended to flag a `cmd_*` function no dispatcher case names.
+
+**Fix.** Delete the function.
+
+**Test.** Extend that guard; prove-can-fail by re-adding an unreferenced `cmd_`
+function.
+
+### 24. `kel cheat` names the wrong key for five actions  ·  `[defect]`  ·  *open*
+
+**Error.** `bin/kel:2435-2436` says new / worktree / rename / adopt / relaunch are
+at `ctrl-f`→board. They are on **`tab`** (`:1646`); `ctrl-f` (`:1651`) opens the
+fleet menu, which contains none of them. The cheat sheet is the only place the
+full keymap exists, so a user reads it, presses `ctrl-f`, does not find rename,
+and concludes the key did nothing. This compounds every legibility complaint
+below and is cheaper to fix than any of them.
+
+**Surface.** Assert the cheat sheet's key attributions against the board's actual
+`--bind` list — the same counted-not-matched approach as the existing docs guards.
+
+**Fix.** Correct the line to name `tab`, and split the fleet sentence from the
+per-agent one.
+
+**Test.** A guard asserting every action named in `cmd_cheat` alongside a key is
+bound to that key. Prove-can-fail by swapping two key names.
+
+### 25. A malformed record makes an agent vanish from `kel top`  ·  `[defect]`  ·  *open*
+
+**Error.** `internal/fleet/fleet.go:254-256` drops a record whose JSON fails to
+unmarshal and continues. The agent disappears from the dashboard with no
+indication — a silent omission where invariant 3 requires a distinct display for
+an unknown.
+
+**Surface.** Write a deliberately corrupt record and assert the fleet document
+still accounts for it.
+
+**Fix.** Emit a placeholder entry carrying the file name and an `unreadable`
+state, so the row is visibly wrong rather than absent.
+
+**Test.** Corrupt one record; assert `_fleet` returns the same agent count and the
+bad one renders distinctly. This case is currently untested in either
+implementation, so it needs the bash side too.
+
+### 26. `kel top` has no minimum height  ·  `[defect]`  ·  *open*
+
+**Error.** `cmd/kel-top/main.go:396-398` clamps the body to at least one row, but
+header and footer print unconditionally, so a one- or two-row terminal overflows.
+The 80-column case is tested; height is not.
+
+**Surface.** Render at heights 1 through 4 and assert total output never exceeds
+the height.
+
+**Fix.** Drop the footer, then the header, before clamping the body.
+
+**Test.** The height sweep above, alongside the existing width test.
+
+### 27. Six `kel top` keys are undocumented on screen  ·  `[defect]`  ·  *open*
+
+**Error.** `g`, `G`, `r`, `esc`, `ctrl+c` are handled (`main.go:311-334`) and
+appear in no hint line; `backspace` and `ctrl+c` are handled in filter mode and
+absent from its footer (`:476`). Separately, `enter` in normal mode matches no
+case — a keypress with no effect and no feedback, which is the exact pattern under
+audit.
+
+**Surface.** Assert every key the update loop handles appears in the rendered hint
+line, and that every key named in the hint line is handled.
+
+**Fix.** Extend the hint line; give `enter` either an action or an explicit
+no-op message.
+
+**Test.** The bidirectional assertion above — it catches both drift directions,
+which a one-way check would not.
+
+### 28. `r` and `R` sit one case apart for unrelated actions  ·  `[defect]`  ·  *open*
+
+**Error.** In the board's menus `r` renames one agent and `R` restores the entire
+workspace. Commit `9c6029c` already fixed one instance of exactly this adjacency
+(restart against restore); it has recurred one letter over. A mistyped shift key
+runs a workspace rebuild.
+
+**Surface.** Assert no two items reachable from the same surface differ only by
+case when one is destructive.
+
+**Fix.** Move `restore` off `R`, or require a confirmation the way `_board_kill`
+does.
+
+**Test.** The case-collision guard; prove-can-fail by reintroducing the pair.
+
+### Coverage gaps — a command with no TUI path
+
+### 29. `kel ls` is unreachable from the TUI  ·  `[coverage]`  ·  *open*
+
+**Error.** The most basic read in the tool has no entry point from any surface:
+not a board bind, not `tab`, not `ctrl-f`, not a prefix key. Derived, not
+asserted by hand.
+
+**Surface.** A guard asserting every user-facing command has at least one TUI
+path. This is the instrument that makes the whole coverage row checkable.
+
+**Fix.** Not by adding a `ctrl-f` item — rule 3. The board *is* the interactive
+`ls`, so the gap is that nothing says so and that it costs a keypress to learn.
+Two candidates: surface the count in the board's own border label so
+`Ctrl+Space` answers "what have I got" on arrival, and give `ls` a prefix key so
+the answer is available without opening anything. Both are shallower than today,
+neither adds a level.
+
+**Test.** The coverage guard, with `ls` and `update` as its initial failures if
+run before the fix. The guard asserts a path exists; it deliberately does not
+assert *which*, because that is a design call and a test that pinned it would
+have to be rewritten by every redesign.
+
+### 30. `kel update` is unreachable from the TUI  ·  `[coverage]`  ·  *open*
+
+**Error.** Shipped 2026-09-01 with a dispatcher entry, completions and docs, and
+no TUI path — the coverage gap was created in the same commit that added the
+command, which is the argument for the guard existing.
+
+**Surface.** Same guard as #29.
+
+**Fix.** `doctor`'s behind-upstream probe already tells the user to run it, so the
+honest fix is for that message to be actionable where it appears rather than for
+`update` to gain a menu item three levels down. A prefix key is defensible; a
+`ctrl-f` entry is rule 3 again.
+
+**Test.** Same guard.
+
+### 31. `move` and `adopt` reach the TUI but pass no target  ·  `[defect]`  ·  *open*
+
+**Error.** In `cmd_board_actions` (`:1444-1454`), `relaunch` passes
+`'$group/$name'`, `go` passes `'$group'` and `kill` passes both — but `move` calls
+`_ask_move`, which execs `move "$grp"` with no agent, and `adopt` is called with
+no arguments at all. Both fall back to `_kel_window_target`, which re-derives from
+`$TMUX_PANE`.
+
+This is a **partial migration, not an oversight.** `7e80559` states that all three
+of move/adopt/relaunch "only know how to act on whichever pane I was invoked from
+(no explicit wid parameter exists for any of them)", and gates them behind `$here`
+for exactly that reason — correct for `prefix m`, which is always the window you
+are standing in. `relaunch` was later given an explicit target; the other two were
+not. So the `$here` gate is now load-bearing for two items and vestigial for the
+third, and the comment at `:1576-1586` threads `wid`/`cwd`/`group`/`name`
+explicitly for other fields while these two still rely on invocation context.
+
+**Surface.** Assert both carry an explicit target, the same way the other three
+items in the same list do.
+
+**Fix.** Give `move` and `adopt` explicit targets, then re-examine whether `$here`
+still needs to exist — if all three take a target, the gate's original reason is
+gone and the board's `tab` could offer them too, which is one fewer asymmetry
+between two surfaces that are supposed to be the same menu.
+
+**Test.** Drive both from a window that is not the one being acted on and assert
+the record that changes is the intended one. That asymmetry is what a same-window
+test would miss, and it is precisely the case `$here` was invented to avoid.
+
+
+### 36. Nothing in kel can tell you kel's keys are loaded  ·  `[capability]`  ·  *open*
+
+**Error.** `cmd_doctor` runs fourteen probes and **not one mentions a keybinding**.
+Its only signal about `kel.conf` is indirect — `allow-passthrough on`, which the
+conf sets at `tmux/kel.conf:96` — and that probe runs
+`tmux start-server \; show -gv allow-passthrough`, which starts a *fresh* server
+and reads the option there. A fresh server sources `~/.tmux.conf`; the server you
+are attached to may predate the install. So the probe can report ✓ while the live
+session has none of kel's binds, and every downstream complaint — "prefix | does
+nothing", "the button did nothing" — is indistinguishable from a real defect.
+
+Found by making the mistake: diagnosing a reported dead keybind by reaching for
+`tmux list-keys` rather than a kel command, on a server this session had itself
+created. The tool offers no path to that answer, so the reflex was to leave kel —
+which is the same failure the rest of this section describes, one level up.
+
+**Surface.** A probe against the **attached** client, not a new server:
+`tmux list-keys -T prefix` filtered for the binds `kel.conf` defines, comparing
+what is registered against what the file declares. Both halves matter — the file
+being correct and the server having read it are different facts, and today neither
+is checked.
+
+**Fix.** Add the probe. Derive the expected bind list from `kel.conf` rather than
+hardcoding it, so the probe cannot drift from the file the way `spec.md` §11 did.
+Report the difference, not a boolean: "kel.conf declares 12 binds, this server has
+3" names the problem and implies `tmux source-file ~/.tmux.conf`. Also worth
+correcting the `allow-passthrough` probe to read the attached server.
+
+**Test.** Start a server with `-f /dev/null`, assert the probe fails and names the
+count; source `kel.conf`, assert it passes. The suite already starts bare servers
+this way (`reset` uses `tmux -f /dev/null start-server`), so the fixture exists.
+Prove-can-fail by pointing the probe at a new server instead of the attached one —
+which reproduces the current bug and is the assertion that matters most here.
+
+### Capability gaps — kel has no notion of the thing
+
+Assembled from the author's account, because the coverage guard cannot see these
+by construction: it enumerates commands, and a capability that is not a command
+is invisible to it.
+
+### 32. Panes are discovered, never managed  ·  `[capability]`  ·  *open*
+
+**Error.** `prefix |` and `prefix -` are bound and live, and `kel cheat` documents
+them — verified against `tmux list-keys`. So splitting works. What does not exist
+is any kel-level pane action: no "open a pane here" from Ctrl+Space, no way to
+open a pane *for* something (an editor, a shell, a git view), and no pane row in
+`tab`'s menu. kel learns about a pane only after tmux made it (`:1256-1257`).
+Under the Ctrl+Space decision this counts as a gap even though the keybind works,
+because the primary entry offers nothing. Invariant 4 forbids kel *rearranging* a
+user's panes; it does not forbid offering to create one.
+
+**Surface.** A coverage question phrased over capabilities rather than commands:
+from Ctrl+Space, can the user create a pane? Today, no.
+
+**Fix.** Undecided, and it needs the addressing question from #22 answered first —
+whether a pane is a thing kel can name. A `tab` item that splits the highlighted
+agent's window is the smallest version.
+
+**Test.** Once a pane is addressable: create one from the board, assert it exists
+in the fleet document and that the board lists it.
+
+### 33. There is no way to close kel  ·  `[capability]`  ·  *open*
+
+**Error.** No command and no binding ends the workspace. `prefix d` detaches and
+the `client-detached` hook snapshots, leaving every agent running. To actually
+stop, a user kills each group's tmux session by hand. Confirmed absent from the
+dispatcher.
+
+**Surface.** Nothing to surface — the capability does not exist. Its absence is
+visible only as the user's own experience, which is how it went unrecorded until
+now.
+
+**Fix.** A `kel quit` that snapshots, then kills every kel session, refusing on
+unsaved worktree work the way `kel kill` does. The refusal matters more than the
+convenience: this is the one command that could destroy several agents at once.
+
+**Test.** With agents in two groups, `kel quit` ends both and leaves the snapshot
+restorable. With a dirty worktree, it refuses and names it — the same assertion
+shape as invariant 1.
+
+### 34. Git state is computed but absent from the primary flow  ·  `[capability]`  ·  *open*
+
+**Error.** `_fleet --land` computes dirty, unpushed, behind, review and merged, and
+`kel top` renders all of it. The board preview
+(`cmd_board_preview`) shows group, agent, isolation, directory, last output,
+context and compactions — and uses `.branch` only as a parenthetical. No dirty, no
+land, no PR. So from Ctrl+Space you cannot see the state of the work, though the
+tool already knows it.
+
+**Surface.** Assert the preview renders the land and dirty fields for an agent
+whose fleet entry carries them.
+
+**Fix.** Add them to the preview. The data is already in the document the preview
+reads, so this is a rendering change, not a new computation — and `--dirty` is
+opt-in for cost reasons, so the preview must pass it.
+
+**Test.** Fixture with a dirty worktree and a known land code; assert both appear
+in the preview output. Also assert the preview still renders when they are absent,
+since `--dirty` is optional.
+
+### Design questions — author judgment, no gate possible
+
+These have no right answer and no trigger that could resolve them from outside.
+Recorded so they are not mistaken for defects, and deliberately without invented
+acceptance criteria — inventing them is how a doc starts lying about what done
+means.
+
+- **What belongs in `ctrl-f`.** Seven flat items today, no grouping, mixing
+  `config` (near-daily) with `restore` (rebuilds the entire workspace). The author's
+  account is that it "holds too much, but not enough" — both at once, which no
+  reordering alone resolves.
+- **How the second level announces itself.** One `--footer` names three of seven
+  board keys; `ctrl-g`, `ctrl-r`, `ctrl-k` and `ctrl-n` appear nowhere on screen,
+  and a sub-menu's header renders only after the key is pressed.
+- **Whether `kel top` should act.** It is read-only by design, and shows a `›`
+  cursor and action-shaped verbs (dirty, unpushed, behind, review) with nothing
+  bound. Either the affordances go or the actions arrive.
+- **One interaction model or two.** The board filters live with no mode; `kel top`
+  needs `/` to enter one. `q` quits `kel top` and types into the board's filter.
+  Reload is `ctrl-r` in one and `r` in the other.
+
+
 
 - ~~**Fleet cost / token view.**~~ **Un-parked and shipped in v0.4.1.** The gate
   was "only if Claude Code exposes cost in a hook payload or `--json` output — a
