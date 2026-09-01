@@ -2114,7 +2114,7 @@ cmd_doctor() {
       hooks_wired:$hooks, statusline_wired:$sl, go_fleet:$go, gh_auth:$gh,
       allow_passthrough:$pass}' \
     > "$DOCTOR_CACHE"
-  printf '  cached -> %s\n' "${DOCTOR_CACHE/#$HOME/\~}" >&2
+  printf '  cached -> %s\n' "${DOCTOR_CACHE/#$HOME/~}" >&2
   case "$r_tmux$r_ver$r_jq" in *false*) exit 1 ;; esac
 }
 
