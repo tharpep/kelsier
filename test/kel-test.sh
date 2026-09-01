@@ -544,6 +544,15 @@ ok "  ...targeted by pane id"            '[[ "$(rows | awk -F"\t" "\$3==\"pane\"
 ok "an agent is never listed twice"      '[ "$(rows | awk -F"\t" "\$2==\"agent1\"" | grep -c .)" = 1 ]'
 [ "$(rows | awk -F"\t" '$2=="agent1"' | grep -c .)" = 1 ] || rows | sed "s/^/       /"
 ok "a plain window appears as well"      '[ -n "$(rows | grep plainwin)" ]'
+# field 7: a separate, padded DISPLAY column (v0.9). Fields 1-6 must stay raw
+# -- _board_preview / _board_jump / cmd_go / _board_kill / _board_actions all
+# do exact-match lookups against them, and the tests above (awk $2=="agent1")
+# already prove that by passing; this locks in field 7 specifically, so a
+# future change that folds padding back into the real fields would be caught
+# here rather than only breaking the board in a way nothing types out.
+ok "field 7 exists and is padded"       '[ "$(rows | awk -F"\t" "\$2==\"agent1\"{print length(\$7)}")" -ge 32 ]'
+ok "  ...and field 2 (name) is not"     '[[ "$(rows | awk -F"\t" "\$2==\"agent1\"{print \$2}")" != *" "* ]]'
+ok "  ...pane rows have field 7 too"    '[ -n "$(rows | awk -F"\t" "\$3==\"pane\"{print \$7}")" ]'
 
 # B' — worktree reachable from a menu, and the stranded commands guarded
 ok "kel new -w still makes a worktree"   'NEW_W() { ( cd "$WORK/repos/api-gw" && "$KEL" new wt1 -w --agent "sleep 9999" ) >/dev/null 2>&1; }; NEW_W; [ "$(jq -r .isolation "$SESSIONS/api-gw/wt1.json")" = worktree ]'

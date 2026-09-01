@@ -636,6 +636,40 @@ open: the small action lists inherit the board's full popup size, since a
 `become()`'d fzf cannot resize the popup around it, and board rows are
 unpadded tab-separated text, so differently-named agents do not align.
 
+**Fourth addendum: the rest of the visual review.** Two more findings acted
+on, one investigated and left alone rather than forced:
+
+- Board rows were unpadded tab-separated text, so differently-named agents
+  did not line up. Padding the real `group`/`name` fields directly would have
+  broken every exact-match lookup downstream (`_board_preview`,
+  `_board_jump`, `cmd_go`, `_board_kill`, `_board_actions` all compare
+  against the raw values) — the existing suite's `awk '$2=="agent1"'`
+  assertions already prove those fields stay raw, since padding would have
+  failed them. Fixed by adding a seventh, padding-only display field instead,
+  shown via `--with-nth 7`, leaving 1-6 untouched.
+- The old `tmux display-menu`'s blank, unselectable separators between
+  action groups (new/worktree/rename | move/adopt/relaunch | go/kill; and in
+  the fleet menu, dashboard/config | sweep group | cheat) had no equivalent
+  in fzf — there is no such thing as an unselectable row — so the groups
+  just ran together. Fixed with a real row: a dim divider, no letter-key
+  bind, and a `true` command so pressing enter on it by accident is a safe
+  no-op rather than an error.
+- Investigated and left alone: the small menus (6-9 items) still stretch to
+  fill the board's full ~85%-of-screen popup, because a `become()`'d fzf
+  cannot resize the popup around it. Tried shrinking it directly — any
+  `--height` below 100%, absolute or percentage, breaks the render entirely
+  for a second-level `become()`'d fzf inside an already-open popup, the same
+  class of failure the tab/ctrl-f bug itself was. Confirmed by testing, not
+  guessed at: `--height 100%` is a hard requirement here, not a preference.
+
+Also recorded for the account, not because the user asked to see it: the
+live-pty method that found and verified all of this killed the real
+default-socket tmux server a second and third time during this pass, despite
+a hard-coded isolation wrapper built specifically to prevent it — the failure
+both times was a bash block that fell back to bare `tmux` without exporting
+`TMUX_TMPDIR` at all, bypassing the wrapper rather than defeating it. Live
+testing stopped for the remainder of the pass once this was caught.
+
 That is the whole card. What it did **not** do is answer the docket below,
 which still wants use rather than reasoning.
 

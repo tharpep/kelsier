@@ -1214,12 +1214,21 @@ cmd_board_rows() {
       elif . == "dead"      then "\u001b[1;31m"
       elif . == "idle"      then "\u001b[2m"
       else "\u001b[0m" end;
+    # Field 7 is a SEPARATE, pre-formatted display column, padded for visual
+    # alignment -- fields 1-6 stay exactly as they were (raw group/name/etc),
+    # because {1}/{2} feed EXACT-MATCH lookups downstream (_board_preview,
+    # _board_jump, cmd_go, _board_kill, _board_actions all compare against
+    # the real .group/.name) and padding those directly would break every
+    # one of them with trailing whitespace. --with-nth shows only field 7.
+    def pad($n): (. // "") | tostring | . + (" " * ($n - length)) | .[0:$n];
     .agents[]
     | select(.window_id != null)          # orphan-metadata rows have no window
     | (.state // "idle") as $st
     | [ .group, .name, ($st | colour) + $st + "\u001b[0m",
         (if (.dirty // 0) > 0 then "\(.dirty) dirty" else "" end),
-        (.cwd // ""), .window_id ]
+        (.cwd // ""), .window_id,
+        (.group | pad(12)) + (.name | pad(20)) + ($st | colour) + ($st | pad(9)) + "\u001b[0m"
+          + (if (.dirty // 0) > 0 then " \(.dirty) dirty" else "" end) ]
     | @tsv'
 
   # Every pane EXCEPT the one already represented by its window's own row.
@@ -1243,7 +1252,11 @@ cmd_board_rows() {
           else if (index(sn, pfx "/") == 1) g = substr(sn, length(pfx)+2)
           else continue
           if (pidx == lo[wid]) continue        # the window own row covers it
-          printf "%s\t%s\t\033[2mpane\033[0m\t\t%s\t%s\n", g, wname "/" cmd, path, pid
+          nm = wname "/" cmd
+          # field 7: the same padded display column the jq side builds, so
+          # --with-nth 7 has something to show for pane rows too
+          disp = sprintf("%-12.12s%-20.20s\033[2m%-9s\033[0m", g, nm, "pane")
+          printf "%s\t%s\t\033[2mpane\033[0m\t\t%s\t%s\t%s\n", g, nm, path, pid, disp
         }
       }'
   } | sort
@@ -1431,6 +1444,13 @@ _kel_actions_or_dump() {   # title item...
   while [ "$i" -lt "${#items[@]}" ]; do
     lbl="${items[$i]}"
     if [ -z "$lbl" ]; then
+      # a real fzf row, not skipped: the OLD tmux display-menu had a genuine
+      # blank, unselectable separator between groups (new/worktree/rename |
+      # move/adopt/relaunch | go/kill), which just vanished when this moved
+      # to fzf — there is no such thing as an unselectable row here, so this
+      # is a dim divider line whose command is a harmless no-op if selected,
+      # and it gets no letter-key bind so it can never be reached on purpose.
+      rows="${rows}"$'\033[2m  ───\033[0m'$'\t'"true"$'\n'
       i=$((i + 1))
     else
       key="${items[$((i+1))]}"
@@ -1440,7 +1460,7 @@ _kel_actions_or_dump() {   # title item...
       i=$((i + 3))
     fi
   done
-  printf '%s' "$rows" | fzf --delimiter '\t' --with-nth 1 --nth 1 \
+  printf '%s' "$rows" | fzf --ansi --delimiter '\t' --with-nth 1 --nth 1 \
     --layout reverse --height '100%' --border rounded --border-label "$title" \
     --bind 'enter:become({2})' "${binds[@]}" \
     --header 'press the (letter) shown, or arrow + enter — esc: close'
@@ -1526,7 +1546,7 @@ cmd_board() {
   fi
 
   cmd_board_rows | SHELL=/bin/bash fzf \
-    --ansi --delimiter '\t' --with-nth '1,2,3,4' --nth '1,2' \
+    --ansi --delimiter '\t' --with-nth '7' --nth '1,2' \
     --layout reverse --info inline --height '100%' \
     --border rounded --border-label ' kel ' \
     --footer 'enter jump · tab actions · ctrl-f dashboard/config/sweep…' \
