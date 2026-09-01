@@ -598,6 +598,17 @@ ok "  ...and qualified group/name"       '[ -n "$(CFILT "$NAMEFILT" | grep -x "a
 ok "  ...never a null/null row"          '[ -z "$(CFILT "$NAMEFILT" | grep null)" ]'
 ok "the group filter returns groups"     '[ -n "$(CFILT ".agents[].group" | grep -x api-gw)" ]'
 ok "both completion files use it"        'for f in bash zsh; do grep -q "agents\[\] | .name" "$HERE/../completions/kel.$f" || exit 1; done'
+# The two lists drifted apart twice: the v0.6 document change, and `kel config`,
+# which shipped in v0.9 and was in neither file until 2026-09-01. Compare them
+# to each other rather than to a third copy that would drift as well.
+# Scoped to the subcmds array: `_alternative 'flags:flag:(-f)'` elsewhere in the
+# zsh file matches a bare quoted-word-colon pattern too.
+BLIST="$(sed -n 's/.*subcmds="\([^"]*\)".*/\1/p' "$HERE/../completions/kel.bash" | tr ' ' '\n' | sort -u)"
+ZLIST="$(awk '/subcmds=\(/,/^  \)/' "$HERE/../completions/kel.zsh" | grep -oE "'[a-z-]+:" | tr -d "':" | sort -u)"
+ok "bash and zsh complete the same set"  '[ "$BLIST" = "$ZLIST" ]'
+ok "  ...and it is not empty"            '[ "$(printf "%s\n" "$BLIST" | grep -c .)" -ge 15 ]'
+ok "  ...and includes config"            '[ -n "$(printf "%s\n" "$BLIST" | grep -x config)" ]'
+ok "  ...and includes update"            '[ -n "$(printf "%s\n" "$BLIST" | grep -x update)" ]'
 # an empty fleet must still answer --json with JSON, not an English sentence
 ok "--json is JSON with an empty fleet"  'E="$(mktemp -d "$WORK/empty.XXXX")"; XDG_STATE_HOME="$E" KEL_SESSION=nosuchprefix "$KEL" ls --json | jq -e ".agents | length == 0" >/dev/null'
 

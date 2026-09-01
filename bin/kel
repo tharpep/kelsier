@@ -406,13 +406,26 @@ dead_sessions() {
 }
 
 prune_state() {
-  local live f wid
+  local live f wid panes pane
   live="$(tmux list-windows -a -F '#{window_id}' 2>/dev/null || true)"
   [ -n "$live" ] || return 0
   for f in "$STATE_DIR"/*.state "$STATE_DIR"/*.ctx; do
     [ -e "$f" ] || continue
     wid="${f##*/}"; wid="${wid%.state}"; wid="${wid%.ctx}"
     printf '%s\n' "$live" | grep -qxF "$wid" || rm -f "$f"
+  done
+  # SessionEnd removes a session's own stash entry, including on /clear, which
+  # fires it with reason "clear". Nothing fires when a session dies with its
+  # terminal — SIGKILL, a closed window, a reboot — and SessionEnd gets a 1.5s
+  # budget besides. Those entries name a pane, so a pane that is gone marks an
+  # entry that can go with it.
+  panes="$(tmux list-panes -a -F '#{pane_id}' 2>/dev/null || true)"
+  [ -n "$panes" ] || return 0
+  for f in "$STASH_DIR"/*; do
+    [ -e "$f" ] || continue
+    pane="$(cat "$f" 2>/dev/null || true)"
+    [ -n "$pane" ] || { rm -f "$f"; continue; }
+    printf '%s\n' "$panes" | grep -qxF "$pane" || rm -f "$f"
   done
 }
 
