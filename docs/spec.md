@@ -111,24 +111,26 @@ shows the current group in full plus `⟨api·1 infra·1⟩` for the rest.
 `kel board` — a `display-popup` running `fzf` over every agent: fuzzy filter, a
 preview pane (metadata, recent pane output, git status). `enter` jumps to the
 highlighted agent; **`tab`** becomes into a second `fzf` list acting on it
-(jump / new agent in its dir / rename / go to its group / kill), plus the
-hidden accelerators `ctrl-k` / `ctrl-g` / `ctrl-r` for the same handful of
-actions. Opened by **`Ctrl+Space`** (no prefix) or `prefix b`. The old
-`display-menu` quick-jump is retired; `kel menu` is a one-release alias for
-`kel board`.
+(jump / new agent in its dir / new worktree agent / rename / go to its group /
+kill), plus the hidden accelerators `ctrl-n` / `ctrl-k` / `ctrl-g` / `ctrl-r`
+for a few of the same actions directly. Opened by **`Ctrl+Space`** (no prefix)
+or `prefix b`. The old `display-menu` quick-jump is retired; `kel menu` is a
+one-release alias for `kel board`.
 
 Both `tab` and `ctrl-f` (below) become() into a *second `fzf` list*, never a
 `tmux display-menu` or `command-prompt` — tmux allows only one client-side
 overlay at a time, the board's own popup already owns that slot, and a second
 overlay TYPE silently fails to draw from inside it (confirmed live: exit 0,
 nothing rendered). become()-chaining fzf into another fzf is the one overlay
-transition tmux actually supports here. This is also why the board has no
-direct "new agent" accelerator: even become()'d fzf-into-fzf has a depth
-limit — reached in one hop straight from the board's own fzf, a target that
-itself opens a nested fzf reliably fails to render that inner one, where the
-identical target reached via `tab`'s one extra hop works. Free-text prompts
-(name, rename, group) go through `_kel_ask`, an fzf `--print-query` list with
-zero rows, for the same reason `command-prompt` is off the table.
+transition tmux actually supports here, including a direct one-hop become()
+straight from the board's own fzf into a script that itself opens a nested
+fzf (`ctrl-n` does exactly this) — that shape was wrongly suspected of having
+its own depth limit after a real but unrelated bug (a `#` comment sitting
+between two `\`-continued lines of the board's own fzf invocation, silently
+truncating the whole command and eating `ctrl-n`'s bind along with `ctrl-f`'s)
+produced the same symptom. Free-text prompts (name, rename, group) go through
+`_kel_ask`, an fzf `--print-query` list with zero rows, for the same reason
+`command-prompt` is off the table.
 
 **`ctrl-f` — the fleet menu (v0.9).** Everything that is not about one
 highlighted agent: the dashboard (`kel top`), `kel config`, and

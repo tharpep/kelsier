@@ -1593,6 +1593,16 @@ cmd_board() {
       -w "${KEL_BOARD_W:-90%}" -h "${KEL_BOARD_H:-85%}" -E "'$SELF' board"
   fi
 
+  # A `#` comment placed between two `\`-continued lines of the fzf
+  # invocation below silently truncates the WHOLE command at that point —
+  # confirmed live and the hard way: an earlier explanatory comment sat
+  # between the ctrl-k and ctrl-f binds, which ate --bind ctrl-f, --color
+  # and the trailing redirect entirely (they became stray, separately-run
+  # "command not found" fragments), leaving ctrl-f silently unbound with no
+  # error anywhere. A `\`-continued shell command is one logical line only
+  # once every line in it is code; a comment line breaks that, continuation
+  # or not, so every note about this invocation lives up here, before it
+  # starts, and the block below stays comment-free.
   cmd_board_rows | SHELL=/bin/bash fzf \
     --ansi --delimiter '\t' --with-nth '7' --nth '1,2' \
     --layout reverse --info inline --height '100%' \
@@ -1605,17 +1615,7 @@ cmd_board() {
     --bind "ctrl-g:become($SELF go {1})" \
     --bind "ctrl-r:reload($SELF _board_rows)" \
     --bind "ctrl-k:execute($SELF _board_kill {1} {2})+reload($SELF _board_rows)" \
-    # ctrl-n used to become() straight into _ask_new (same target tab's "n"
-    # item uses) as a one-key shortcut for "new agent in its folder". Cut,
-    # not fixed: become()'d directly from THIS fzf into a script that itself
-    # opens a second fzf via command substitution reliably fails to render
-    # that inner fzf (confirmed live — the popup exits nonzero the instant
-    # ctrl-n fires), where the identical target reached via tab's one extra
-    # hop (this fzf -> action-list fzf -> _ask_new) works every time. That
-    # smells like an fzf/tmux become()-depth interaction, not a bug in
-    # _ask_new; not worth hand-rolling a second live fzf-in-fzf hop just to
-    # save one keystroke tab -> n already covers. If revisiting, start there
-    # rather than re-deriving this from scratch.
+    --bind "ctrl-n:become($SELF _ask_new {5})" \
     --bind "ctrl-f:become($SELF _board_fleet)" \
     --color 'footer:italic,border:8' \
     >/dev/null 2>&1 || true
