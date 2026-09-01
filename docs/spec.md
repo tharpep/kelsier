@@ -409,6 +409,35 @@ is one `jq`, one atomic write, and a `refresh-client -S` **only** when the
 displayed integer changes. Writes are gated on a non-zero `context_window_size`
 so a malformed payload cannot blank a good record.
 
+**The row is not the record.** `.ctx` stays at those seven fields — it is the
+bash/Go contract (§8) and widening it costs a migration. Everything below is
+rendered from the live payload and persisted nowhere, so it needs no format
+change:
+
+| shown | from | gated on |
+|---|---|---|
+| `owner/name@worktree` | `workspace.repo`, `worktree.name` | outside a kel window, where there is no group/name label |
+| `250k/1M` | `total_input_tokens`, `context_window_size` | at or past `KEL_CTX_WARN` |
+| `5h`/`7d`/`spend` + reset | `rate_limits.*` | that quota at 50% or more |
+| `fast`, `xhigh`, `no-think` | `fast_mode`, `effort.level`, `thinking.enabled` | non-default only |
+| agent name | `agent.name` | present |
+
+Repo identity arrives **in the payload**, so it costs no `git` call. A
+`git rev-parse` here would run on every redraw, which §hot-paths forbids.
+
+**`used_percentage` is `null`, not `0`, before the first API call and again
+right after `/compact`.** Those are different facts and the row distinguishes
+them: a measured value gets the bar, an unmeasured one gets a dim `ctx ?`, and
+the unmeasured case declines to write `.ctx` rather than overwrite a real
+figure with a placeholder.
+
+**`agent.name` does not mean "subagent".** It marks a session started with
+`claude --agent`, which is primary and records normally. Task-tool subagents
+never reach this command at all — they render through a separate
+`subagentStatusLine` setting whose payload is a `tasks[]` array. No
+per-subagent cost is exposed in either payload, and whether the session's
+`cost.total_cost_usd` includes subagent spend is undocumented.
+
 ### 9b. Notifications (v0.5)
 
 The status line is a *pull* surface — it only helps while you are looking at

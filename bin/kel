@@ -2476,6 +2476,33 @@ ctx_field() { # wid n  -> field n of the .ctx line, or empty
   cut -f"$2" "$STATE_DIR/$1.ctx" 2>/dev/null | head -1
 }
 
+# 250000 -> 250k, 1000000 -> 1M.  Integer arithmetic only: this runs on the
+# statusLine path, and printf %f would round 999999 up to a wrong 1.0M.
+si_units() { # n
+  local n="${1:-0}"
+  if [ "$n" -ge 1000000 ]; then
+    if [ $((n % 1000000)) -eq 0 ]; then printf '%dM' "$((n / 1000000))"
+    else printf '%d.%dM' "$((n / 1000000))" "$(( (n % 1000000) / 100000 ))"; fi
+  elif [ "$n" -ge 1000 ]; then printf '%dk' "$((n / 1000))"
+  else printf '%d' "$n"; fi
+}
+
+# epoch -> "40m" / "3h10m", empty once it is in the past.  Takes `now` rather
+# than calling date: the statusLine path already has it.
+time_until() { # epoch now
+  local d=$(( ${1:-0} - ${2:-0} ))
+  [ "$d" -gt 0 ] || return 0
+  if [ "$d" -ge 3600 ]; then printf '%dh%dm' "$((d / 3600))" "$(( (d % 3600) / 60 ))"
+  else printf '%dm' "$((d / 60))"; fi
+}
+
+# one quota chip per rate limit; gated at 50%.
+quota_chip() { # label pct resets_at now
+  [ "${2:--1}" -ge 50 ] 2>/dev/null || return 0
+  local r; r="$(time_until "${3:-0}" "${4:-0}")"
+  printf ' \033[2m·\033[0m \033[33m%s %s%%%s\033[0m' "$1" "$2" "${r:+ ($r)}"
+}
+
 # --------------------------------------------------------------------------
 # kel statusline   —   Claude Code's own status row (wired by install.sh)
 # --------------------------------------------------------------------------
@@ -2491,27 +2518,59 @@ cmd_statusline() {
   # One field per line, not @tsv: bash folds runs of tab (an IFS whitespace
   # character) into one delimiter, so a single empty field — an unset model
   # name, say — would silently shift every value after it.
+  #
+  # used_percentage comes through as empty rather than 0. It is null before the
+  # first API call and again right after /compact, and an empty context is a
+  # different fact from an unmeasured one.
   local sid cwd pct cost intok ctxsz rl5 model
+  local rl5at rl7d rl7dat spend spendat effort fastmode thinking agent repo wt
   {
-    read -r sid; read -r cwd; read -r pct;   read -r cost
-    read -r intok; read -r ctxsz; read -r rl5; read -r model
+    read -r sid;    read -r cwd;      read -r pct;      read -r cost
+    read -r intok;  read -r ctxsz;    read -r rl5;      read -r model
+    read -r rl5at;  read -r rl7d;     read -r rl7dat
+    read -r spend;  read -r spendat
+    read -r effort; read -r fastmode; read -r thinking
+    read -r agent;  read -r repo;     read -r wt
   } < <(printf '%s' "$payload" | jq -r '[
       (.session_id // ""),
       (.workspace.current_dir // .cwd // ""),
-      (.context_window.used_percentage // 0 | floor),
+      (if .context_window.used_percentage == null then ""
+       else (.context_window.used_percentage | floor) end),
       (.cost.total_cost_usd // 0),
       (.context_window.total_input_tokens // 0),
       (.context_window.context_window_size // 0),
       (.rate_limits.five_hour.used_percentage // -1 | floor),
-      (.model.display_name // "")
+      (.model.display_name // ""),
+      (.rate_limits.five_hour.resets_at // 0),
+      (.rate_limits.seven_day.used_percentage // -1 | floor),
+      (.rate_limits.seven_day.resets_at // 0),
+      (.rate_limits.spend_limit.used_percentage // -1 | floor),
+      (.rate_limits.spend_limit.resets_at // 0),
+      (.effort.level // ""),
+      (if .fast_mode then 1 else 0 end),
+      (if .thinking.enabled == false then 0 else 1 end),
+      (.agent.name // ""),
+      (if (.workspace.repo | type) == "object"
+       then ((.workspace.repo.owner // "") + "/" + (.workspace.repo.name // ""))
+       else "" end),
+      (.worktree.name // "")
     ] | .[] | tostring | gsub("[\n\t]"; " ")' 2>/dev/null)
 
   # never let a surprising payload reach arithmetic or a %f conversion
-  case "${pct:-}"   in ''|*[!0-9]*)  pct=0 ;;   esac
+  case "${pct:-}"   in ''|*[!0-9]*)  pct='' ;;  esac
   case "${intok:-}" in ''|*[!0-9]*)  intok=0 ;; esac
   case "${ctxsz:-}" in ''|*[!0-9]*)  ctxsz=0 ;; esac
   case "${rl5:-}"   in ''|-1|*[!0-9]*) rl5=-1 ;; esac
+  case "${rl7d:-}"  in ''|-1|*[!0-9]*) rl7d=-1 ;; esac
+  case "${spend:-}" in ''|-1|*[!0-9]*) spend=-1 ;; esac
+  case "${rl5at:-}"   in ''|*[!0-9]*) rl5at=0 ;; esac
+  case "${rl7dat:-}"  in ''|*[!0-9]*) rl7dat=0 ;; esac
+  case "${spendat:-}" in ''|*[!0-9]*) spendat=0 ;; esac
   case "${cost:-}"  in ''|*[!0-9.]*) cost=0 ;;  esac
+  case "${fastmode:-}" in 1) ;; *) fastmode=0 ;; esac
+  case "${thinking:-}" in 0) ;; *) thinking=1 ;; esac
+
+  local now; now="$(date +%s)"
 
   # record it against this agent's window, if we are inside one
   local wid=''
@@ -2519,12 +2578,16 @@ cmd_statusline() {
     local pane; pane="$(resolve_pane "$sid" "$cwd")"
     [ -n "$pane" ] && wid="$(tmux display-message -p -t "$pane" '#{window_id}' 2>/dev/null || true)"
   fi
-  if [ -n "$wid" ] && [ "$ctxsz" -gt 0 ]; then
+  # An unknown pct writes nothing. Overwriting a real 25% with a placeholder 0
+  # would make every other surface — the bar, `kel ls`, the board, `kel top` —
+  # report an empty context window for an agent that has a full one. The stale
+  # record keeps its own epoch in field 6, so a reader can see its age.
+  if [ -n "$wid" ] && [ "$ctxsz" -gt 0 ] && [ -n "$pct" ]; then
     local old; old="$(ctx_field "$wid" 1)"
     local tmp; tmp="$(mktemp "$STATE_DIR/.${wid#@}.ctx.XXXXXX" 2>/dev/null)"
     if [ -n "${tmp:-}" ]; then
       printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
-        "$pct" "$cost" "$intok" "$ctxsz" "$rl5" "$(date +%s)" "$model" > "$tmp"
+        "$pct" "$cost" "$intok" "$ctxsz" "$rl5" "$now" "$model" > "$tmp"
       mv -f "$tmp" "$STATE_DIR/$wid.ctx"
     fi
     # only redraw the tmux bar when the figure it renders actually moved —
@@ -2543,6 +2606,15 @@ cmd_statusline() {
     esac
   fi
 
+  # Outside a kel window there is no label, so the payload's own repo and
+  # worktree identity takes that slot. It arrives in the JSON, so this costs no
+  # git subprocess — a `git` call here would run on every redraw.
+  local ident=''
+  if [ -z "$label" ] && [ -n "$repo" ] && [ "$repo" != "/" ]; then
+    ident="$repo"
+    [ -n "$wt" ] && ident="$ident@$wt"
+  fi
+
   local bar='' i filled=$(( (${pct:-0} + 9) / 10 ))
   [ "$filled" -gt 10 ] && filled=10
   # ${bar}, not $bar, immediately before the literal block character: bash on
@@ -2558,11 +2630,36 @@ cmd_statusline() {
   [ "${pct:-0}" -ge "$KEL_CTX_WARN" ] && cc='\033[33m'  # yellow
   [ "${pct:-0}" -ge 90 ]              && cc='\033[31m'  # red
 
+  # non-default modes only: the defaults are the common case and naming them
+  # every redraw costs width without telling you anything
+  local modes=''
+  [ "$fastmode" = 1 ] && modes="fast"
+  case "$effort" in ''|medium) ;; *) modes="${modes:+$modes }$effort" ;; esac
+  [ "$thinking" = 0 ] && modes="${modes:+$modes }no-think"
+
   [ -n "$label" ] && printf '\033[2mkel\033[0m \033[36m%s\033[0m \033[2m·\033[0m ' "$label"
-  [ -n "$model" ]  && printf '%s \033[2m·\033[0m ' "$model"
-  printf '%b%s %s%%\033[0m \033[2mctx\033[0m' "$cc" "$bar" "${pct:-0}"
+  [ -n "$ident" ] && printf '\033[36m%s\033[0m \033[2m·\033[0m ' "$ident"
+  [ -n "$model" ] && printf '%s' "$model"
+  [ -n "$modes" ] && printf ' \033[2m%s\033[0m' "$modes"
+  [ -n "$model" ] && printf ' \033[2m·\033[0m '
+  if [ -n "$pct" ]; then
+    printf '%b%s %s%%\033[0m \033[2mctx\033[0m' "$cc" "$bar" "$pct"
+    # absolute figures only once the percentage is worth acting on — that is
+    # when "how much room is left" stops being idle curiosity
+    if [ "$pct" -ge "$KEL_CTX_WARN" ] && [ "$ctxsz" -gt 0 ]; then
+      printf ' \033[2m%s/%s\033[0m' "$(si_units "$intok")" "$(si_units "$ctxsz")"
+    fi
+  else
+    # No bar at all. A dim empty bar still reads as "0% used", and this state is
+    # "not measured yet" — null before the first call, and again after /compact.
+    printf '\033[2mctx ?\033[0m'
+  fi
   [ -n "$cost" ] && [ "$cost" != "0" ] && printf ' \033[2m·\033[0m $%.2f' "$cost" 2>/dev/null
-  [ "${rl5:--1}" -ge 50 ] 2>/dev/null && printf ' \033[2m·\033[0m \033[33m5h %s%%\033[0m' "$rl5"
+  quota_chip 5h    "$rl5"   "$rl5at"   "$now"
+  quota_chip 7d    "$rl7d"  "$rl7dat"  "$now"
+  quota_chip spend "$spend" "$spendat" "$now"
+  # agent.name marks a `claude --agent` session, not a Task-tool subagent.
+  [ -n "$agent" ] && printf ' \033[2m·\033[0m \033[35m%s\033[0m' "$agent"
   printf '\n'
 
   # a statusLine kel displaced at install time still gets its say

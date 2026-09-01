@@ -849,6 +849,44 @@ ok "an empty field does not shift the others"       '[ "$(cut -f1 "$STATE/$W.ctx
 for bad in '' 'not json' '{}' '{"context_window":null}'; do sl "$bad" >/dev/null 2>&1; done
 ok "garbage payloads cannot blank a good record"    '[ "$(cut -f1 "$STATE/$W.ctx")" = 86 ]'
 
+# used_percentage is null before the first API call and again right after
+# /compact. That is "not measured", not "empty", and the two must render
+# differently.
+NULLPCT='{"session_id":"a","model":{"display_name":"Opus 5"},
+          "context_window":{"total_input_tokens":170000,"context_window_size":200000,"used_percentage":null}}'
+ok "an unmeasured context renders as unknown"       '[[ "$(sl "$NULLPCT")" == *"ctx ?"* ]]'
+ok "  ...and not as 0%"                             '[[ "$(sl "$NULLPCT")" != *"0%"* ]]'
+ok "  ...and does not overwrite a real record"      '[ "$(cut -f1 "$STATE/$W.ctx")" = 86 ]'
+ok "a real 0% still renders as a figure"            '[[ "$(sl "{\"session_id\":\"a\",\"context_window\":{\"context_window_size\":200000,\"used_percentage\":0}}")" == *"0%"* ]]'
+
+# `agent.name` marks a session started with `claude --agent`, NOT a Task-tool
+# subagent — those render through a separate `subagentStatusLine` setting and
+# never reach this channel. An --agent session is primary and records normally.
+AGENTPL='{"session_id":"a","agent":{"name":"Explore"},
+          "context_window":{"total_input_tokens":8000,"context_window_size":200000,"used_percentage":4}}'
+AGENTROW="$(sl "$AGENTPL")"
+ok "an --agent session still records context"       '[ "$(cut -f1 "$STATE/$W.ctx")" = 4 ]'
+ok "  ...and names the agent in the row"            '[[ "$AGENTROW" == *Explore* ]]'
+sl '{"session_id":"a","context_window":{"total_input_tokens":170000,"context_window_size":200000,"used_percentage":86}}' >/dev/null
+
+# these arrive in the payload, so rendering them costs no git subprocess.
+# Driven WITHOUT $TMUX_PANE and with a cwd no pane holds: inside a kel window
+# the `kel <group>/<name>` label owns that slot.
+IDROW="$(printf '%s' '{"session_id":"zz","workspace":{"current_dir":"/nonexistent-kel-test","repo":{"owner":"tharpep","name":"kelsier"}},"worktree":{"name":"wt1"},"context_window":{"context_window_size":200000,"used_percentage":5}}' | "$KEL" statusline)"
+ok "repo identity renders from the payload"         '[[ "$IDROW" == *tharpep/kelsier@wt1* ]]'
+ok "  ...and yields to the kel label inside kel"    '[[ "$(sl "{\"session_id\":\"a\",\"workspace\":{\"repo\":{\"owner\":\"tharpep\",\"name\":\"kelsier\"}},\"context_window\":{\"context_window_size\":200000,\"used_percentage\":5}}")" != *tharpep/kelsier* ]]'
+ok "absolute tokens appear once past the warn"      '[[ "$(sl "{\"session_id\":\"a\",\"context_window\":{\"total_input_tokens\":847000,\"context_window_size\":1000000,\"used_percentage\":85}}")" == *847k/1M* ]]'
+ok "  ...and not below it"                          '[[ "$(sl "{\"session_id\":\"a\",\"context_window\":{\"total_input_tokens\":20000,\"context_window_size\":1000000,\"used_percentage\":2}}")" != *20k/1M* ]]'
+# 5400s sits mid-hour, so the hour digit cannot flip while the test runs. An
+# exact minute count would race the clock; only the shape is asserted.
+RESET_AT=$(( $(date +%s) + 5400 ))
+QROW="$(sl "{\"session_id\":\"a\",\"context_window\":{\"context_window_size\":200000,\"used_percentage\":5},\"rate_limits\":{\"five_hour\":{\"used_percentage\":74,\"resets_at\":$RESET_AT}}}")"
+ok "a quota past 50% names its reset"               '[[ "$QROW" == *"5h 74% (1h"* ]]'
+ok "  ...and a quota below 50% stays hidden"        '[[ "$(sl "{\"session_id\":\"a\",\"context_window\":{\"context_window_size\":200000,\"used_percentage\":5},\"rate_limits\":{\"five_hour\":{\"used_percentage\":31}}}")" != *5h* ]]'
+ok "a reset already in the past is omitted"         '[[ "$(sl "{\"session_id\":\"a\",\"context_window\":{\"context_window_size\":200000,\"used_percentage\":5},\"rate_limits\":{\"five_hour\":{\"used_percentage\":74,\"resets_at\":1}}}")" == *"5h 74%"* ]]'
+ok "non-default modes render"                       '[[ "$(sl "{\"session_id\":\"a\",\"fast_mode\":true,\"effort\":{\"level\":\"xhigh\"},\"context_window\":{\"context_window_size\":200000,\"used_percentage\":5}}")" == *"fast xhigh"* ]]'
+ok "  ...and default ones do not"                   '[[ "$(sl "{\"session_id\":\"a\",\"effort\":{\"level\":\"medium\"},\"thinking\":{\"enabled\":true},\"context_window\":{\"context_window_size\":200000,\"used_percentage\":5}}")" != *medium* ]]'
+
 # ---------------------------------------------------------------- summary
 printf '\n'
 if [ "$fail" -eq 0 ]; then

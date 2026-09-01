@@ -179,6 +179,15 @@ bugs in this repo were invisible to inspection and obvious on the first run.
   `notification_type`; mapping them all to `waiting` made the jump key lie.
 - **Hook payloads carry no token/cost data** — that comes from `statusLine`,
   which is a separate settings key with a different payload shape.
+- **`context_window.used_percentage` is `null`, not `0`**, before the first API
+  call and again right after `/compact`. `// 0` in the jq turns "not measured"
+  into a confident green `0%` on a full context window. Keep it empty and render
+  the unknown as unknown.
+- **`agent.name` in a `statusLine` payload is not a subagent.** It marks a
+  session started with `claude --agent`. Task-tool subagents never invoke this
+  command — they go through a separate `subagentStatusLine` setting carrying a
+  `tasks[]` array. No per-subagent cost is exposed in either payload, so a
+  combined main-plus-subagents dollar figure cannot be computed.
 - **`kel new` sends the agent command with `send-keys`**, so there is a brief
   window where the pane still shows a bare shell and `effective_state` reads
   `dead`. Harmless in practice; do not "fix" it by polling. Tests must wait for

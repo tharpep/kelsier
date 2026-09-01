@@ -319,6 +319,38 @@ tmux session per repo.**
 The field layout of `.ctx` and `.state` is in `CLAUDE.md` under *The on-disk
 contract*. Both are positional formats, so they live in one place.
 
+## Claude Code's own row
+
+`install.sh` wires `kel statusline` as Claude Code's `statusLine`, so this row
+appears in **every** Claude Code session on the machine, kel or not. Inside a
+kel window it is prefixed with the agent's group and name; everywhere else that
+slot shows the repo the payload reports.
+
+```
+tharpep/kelsier@auth-fix · opus-5[1m] fast xhigh · ███░░░░░░░ 25% ctx · $31.90 · 5h 74% (39m)
+```
+
+Everything past the model is conditional, so the common row stays short:
+
+| segment | appears when |
+|---|---|
+| `owner/name@worktree` | outside a kel window, and the payload names a repo |
+| `fast` `xhigh` `no-think` | those modes are not at their defaults |
+| `250k/1M` after the bar | context is at `KEL_CTX_WARN` (default 70) or above |
+| `$N.NN` | cost is non-zero |
+| `5h` / `7d` / `spend` + reset | that quota is at 50% or above |
+| an agent name | the session was started with `claude --agent` |
+
+`ctx ?` in place of the bar means the context window has not been measured yet —
+Claude Code reports it as unknown before the first reply and again right after
+`/compact`. It is not the same as `0%`, and kel will not overwrite a recorded
+figure with it.
+
+**Subagent cost is not in this row.** Task-tool subagents report through a
+separate `subagentStatusLine` setting, and neither payload exposes a per-subagent
+dollar figure, so a main-plus-subagents total cannot be computed. The `$` shown
+is whatever Claude Code attributes to this session.
+
 Events → states: `SessionStart`→idle, `UserPromptSubmit`→working,
 `Notification`→waiting, `Stop`→done, `SessionEnd`→cleared.
 
