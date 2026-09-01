@@ -1360,7 +1360,6 @@ cmd_ask_move() {
 # tab in the board: the action list for the highlighted agent.
 # (the board closes behind it, same as pressing enter to jump)
 cmd_board_actions() {   # wid name group cwd [here]
-  need tmux; need fzf
   local wid="$1" name="$2" group="$3" cwd="$4" here="${5:-}"
   local -a items=(
     "jump to it"                j  "$SELF _board_jump '$wid' '$group'"
@@ -1400,6 +1399,10 @@ cmd_board_actions() {   # wid name group cwd [here]
 _kel_actions_or_dump() {   # title item...
   local title="$1"; shift
   local -a items=( "$@" )
+  # fzf is only needed past this point — the dump branch below is pure data
+  # shuffling, no fzf involved, and the regression suite's macOS runner does
+  # not have fzf installed. `need fzf` here (unconditionally) failed those
+  # tests for a dependency the dump path never actually uses.
   if [ -n "${KEL_DUMP_ITEMS:-}" ]; then
     local i=0 lbl
     while [ "$i" -lt "${#items[@]}" ]; do
@@ -1413,6 +1416,7 @@ _kel_actions_or_dump() {   # title item...
     done
     return 0
   fi
+  need fzf
   # Each item's own letter key is bound DIRECTLY and hard-coded into the bind
   # string — not read back out of the row via {2}. Confirmed by testing, not
   # assumed: fzf's {2} field substitution works fine when the become() target
@@ -1448,7 +1452,6 @@ _kel_actions_or_dump() {   # title item...
 # highlighted; that menu is now `kel cheat` instead (see tmux/kel.conf), so
 # this is their one home rather than two.
 cmd_board_fleet_actions() {
-  need tmux; need fzf
   local -a items=(
     "the fleet dashboard (kel top)"                 t  "$SELF top"
     "edit config.toml"                              c  "$SELF config"
@@ -2452,8 +2455,14 @@ cmd_statusline() {
 
   local bar='' i filled=$(( (${pct:-0} + 9) / 10 ))
   [ "$filled" -gt 10 ] && filled=10
+  # ${bar}, not $bar, immediately before the literal block character: bash on
+  # the macOS CI runner (non-UTF-8 locale) mis-tokenizes "$bar█" — it reads
+  # part of the multi-byte character's bytes as if they extended the variable
+  # name, then reports THAT as an unbound variable. Braces make the name
+  # boundary explicit regardless of what bytes follow. Found from a real CI
+  # failure, not by inspection — this predates the board-hub work.
   for ((i=0; i<10; i++)); do
-    if [ "$i" -lt "$filled" ]; then bar="$bar█"; else bar="$bar░"; fi
+    if [ "$i" -lt "$filled" ]; then bar="${bar}█"; else bar="${bar}░"; fi
   done
   local cc='\033[32m'                                  # green
   [ "${pct:-0}" -ge "$KEL_CTX_WARN" ] && cc='\033[33m'  # yellow
