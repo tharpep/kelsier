@@ -13,7 +13,8 @@
 # no tokens spent.  Everything is torn down on the way out, including on
 # failure.
 #
-# Requires: tmux, jq, git.  ~40s.
+# Requires: tmux, jq, git.  ~2 min on an M-series Mac (2026-09-01). The suite
+# prints its pass/fail count at the end.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -260,7 +261,11 @@ ok "  ...and leaves it where it was"    '[ "$(tmux display-message -p -t "$OW" "
 # move still does its own job on an agent kel manages.  Driven from the window
 # adopted above rather than from agent `a`: `a` runs the fake agent (sleep
 # 9999), so send-keys there types into sleep, not into a shell.
-in_win_until "$PW" '[ -f "$SESSIONS/coppermind/plainwin.json" ]' "'$KEL' move coppermind > '$WORK/mv2.out' 2>&1"
+#
+# `>` creates the target file when the shell sets up the redirect. That happens
+# before jq writes and before the source record is removed. A predicate that
+# waits only on the target therefore returns mid-move.
+in_win_until "$PW" '[ -f "$SESSIONS/coppermind/plainwin.json" ] && [ ! -f "$SESSIONS/api-gw/plainwin.json" ]' "'$KEL' move coppermind > '$WORK/mv2.out' 2>&1"
 ok "move relocates a managed agent"     '[ -f "$SESSIONS/coppermind/plainwin.json" ] && [ ! -f "$SESSIONS/api-gw/plainwin.json" ]'
 ok "  ...and rewrites .group"           '[ "$(jq -r .group "$SESSIONS/coppermind/plainwin.json")" = coppermind ]'
 ok "  ...and the window followed it"    '[ "$(tmux display-message -p -t "$PW" "#{session_name}")" = keltest/coppermind ]'

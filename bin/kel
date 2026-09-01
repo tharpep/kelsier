@@ -1177,7 +1177,19 @@ cmd_move() {
 
   _kel_relocate "$KW_WID" "$KW_TARGET"
   mkdir -p "$SESSIONS_DIR/$KW_TARGET"
-  jq --arg g "$KW_TARGET" '.group=$g' "$meta" > "$(meta_path "$KW_TARGET" "$KW_NAME")" && rm -f "$meta"
+  # `jq … > target && rm source` truncates the target before jq runs. A failed
+  # jq leaves a corrupt record in the target. The && then skips the rm, so the
+  # source record survives. The agent ends up filed in two groups.
+  local tmp; tmp="$(mktemp "$SESSIONS_DIR/$KW_TARGET/.mv.XXXXXX")" \
+    || die "kel move: cannot stage a record in [$KW_TARGET]"
+  if jq --arg g "$KW_TARGET" '.group=$g' "$meta" > "$tmp" \
+     && mv -f "$tmp" "$(meta_path "$KW_TARGET" "$KW_NAME")"; then
+    rm -f "$meta"
+  else
+    rm -f "$tmp"
+    # the window already moved, so say that rather than implying nothing did
+    die "kel move: '$KW_NAME''s window moved to [$KW_TARGET] but its record could not be rewritten — 'kel adopt $KW_TARGET' from that window to re-file it"
+  fi
   set_last_group "$KW_TARGET"
   _kel_drop_empty_group "$KW_GROUP"
 
