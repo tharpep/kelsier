@@ -360,7 +360,13 @@ if command -v go >/dev/null 2>&1 && (cd "$HERE/.." && go build -o "$GOBIN_FLEET"
   for d in $("$KEL" _fleet | jq -r '.agents[].cwd // empty' | sort -u); do
     git -C "$d" status --porcelain >/dev/null 2>&1 || true
   done
-  norm() { jq -S 'del(.generated_at)'; }
+  # generated_at and activity are both clock readings, and the two
+  # implementations are sampled a moment apart. `activity` is tmux's
+  # #{window_activity}: on 2026-09-01 the bare-flag comparison failed on Linux
+  # CI with bash reading 1788274440 and Go reading 1788274441, one second later.
+  # Comparing it by value asserts a property neither side can hold. Reduced to
+  # presence, so a side that stops reporting it at all is still caught.
+  norm() { jq -S 'del(.generated_at) | .agents |= map(.activity |= (. != null))'; }
   for flag in "" "--dirty" "--land"; do
     "$KEL" _fleet $flag | norm > "$WORK/bash.json"
     KEL_FLEET_BIN=/nonexistent "$KEL" _fleet $flag | norm > "$WORK/bash2.json"

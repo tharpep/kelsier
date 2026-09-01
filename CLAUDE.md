@@ -295,11 +295,9 @@ What v0.9 did instead was subtract *confusion*, decided by inspection:
 - state dir `0700`, `pr = "off"` to close the one network call, and the usage
   counter (`kel _usage`)
 
-**Next: v1.0.** `install.sh` has now run on a Mac — 2026-09-01, macOS 26.6,
-tmux 3.7c, go 1.27.0. All 14 `kel doctor` probes came back green, both Go
-binaries built, and the suite passes there. Nothing was displaced on that
-machine, so the statusLine-chaining path is still unexercised.
-
+**Next: v1.0.** `install.sh` has run on a Mac as of 2026-09-01 — every doctor
+probe green, both Go binaries built, the suite passing there.
 `install/macos-tools.sh` remains syntax-checked and nothing more. It installs
 around fifteen formulae, appends a block to `~/.zshrc` and installs Node, so it
 needs a machine you are willing to provision. That is the last gate.
+`rollout.md` § v0.9-hardening has what else that pass changed.

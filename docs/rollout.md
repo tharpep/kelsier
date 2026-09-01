@@ -780,6 +780,62 @@ deleted along with it.
 - ~~docs pass~~ — **done** alongside each change rather than as a sweep, per
   the house rule that a behaviour change updates the docs in the same commit.
 
+## v0.9-hardening — the Mac, and what was quietly wrong  ·  **done**
+
+**Trigger:** the target machine became a work MacBook, and the repo got read
+cold at the same time. One new command; everything else was already broken or
+already false.
+
+**The Mac.** `install.sh` ran on macOS for the first time — 26.6, tmux 3.7c, go
+1.27.0. Every doctor probe green, both Go binaries built, the suite passing
+there. That machine had no prior `statusLine` or hooks, so install.sh's
+chaining path remains unexercised on every platform.
+`install/macos-tools.sh` has still never run: that is the v1.0 gate.
+
+**Correctness**
+
+- `kel move` wrote the target record with `jq … > target && rm source`, which
+  truncates the target before jq runs. A failed jq left a corrupt record in the
+  target and, `&&` having short-circuited, the intact one in the source — the
+  agent filed in two groups. Staged through mktemp now.
+- `fleet_json`'s record slurp handed `cat` an empty array when there were no
+  records. bash 3.2 calls that unbound and aborts the subshell; 4.4+ gives cat
+  no arguments, so it reads stdin and blocks on a terminal. Reachable only on
+  the bash fallback — the no-toolchain install v1.0 commits to.
+- `kel statusline` mapped a null `used_percentage` to 0, so a full context
+  window read as a confident green `0%` before the first API call and after
+  every `/compact`.
+- `prune_state` reaped `.state` and `.ctx` and left `.stash`. SessionEnd covers
+  a session's own entry, `/clear` included; nothing fires when a session dies
+  with its terminal.
+- `kel config` was in neither completion file, having shipped in v0.9.
+- `kel doctor` printed a literal backslash before the tilde in its cache path.
+
+**Truth.** `spec.md` §8 told the reader to adopt an unmanaged window with
+`kel move`, which has refused exactly that since v0.9. The README said Go was
+optional and everything still worked without it, while `kel top` dies without
+the binary. `install.sh` advertised `kel restart` in two places, removed with no
+alias. The suite's case count and runtime were stated three ways and none
+matched. `roadmap.html` is deleted — hand-maintained against this file, linked
+from nowhere, five milestones behind.
+
+**New.** `kel update` (§11a), and three doctor probes for the ways an install
+goes quiet without saying so: a moved clone, managed settings disabling hooks
+while the entries remain, an upstream nobody fetched.
+
+**The statusLine row** reads more of what Claude Code already sends it: repo and
+worktree identity, absolute tokens past `KEL_CTX_WARN`, the seven-day and spend
+quotas with reset times, non-default modes, the `--agent` name. Render-only —
+`.ctx` stays at seven fields, so the bash/Go contract is untouched. Subagent
+cost is not among it and cannot be: Task-tool subagents report through a
+separate `subagentStatusLine`, and no per-subagent dollar figure exists in
+either payload.
+
+**One flake closed.** The bash/Go differential compared `activity` — tmux's
+`#{window_activity}` — by value across two samples taken a moment apart, and
+failed once on Linux CI with a one-second difference. Reduced to a presence
+check, which is the property either side can actually hold.
+
 ## v1.0 — shareable
 
 **v1.0 is a product milestone, not an implementation one.** It previously read
@@ -794,12 +850,8 @@ starts, the install is reversible, and someone who is not the author can run
 
 How much of it is Go by then is an outcome, not a requirement.
 
-**Where the gate stands.** `git clone && ./install.sh` was exercised on a Mac
-for the first time on 2026-09-01 (macOS 26.6, tmux 3.7c, go 1.27.0): 14/14
-`kel doctor` probes green, both Go binaries built, full suite passing. That
-machine had no prior `statusLine` or hooks, so the chaining path install.sh
-takes when it displaces one is still untested on any platform.
-`install/macos-tools.sh` has still never been executed.
+**Where the gate stands.** `git clone && ./install.sh` is exercised on a Mac as
+of 2026-09-01; `install/macos-tools.sh` is not. See v0.9-hardening above.
 
 ### v2.0 — all Go, if ever
 
