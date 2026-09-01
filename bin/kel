@@ -565,9 +565,25 @@ cmd_kill() {
 
   [ -n "$wid" ] && tmux kill-window -t "$wid" 2>/dev/null || true
 
-  if [ "$iso" = "worktree" ] && [ -n "$repo" ] && [ -d "$cwd" ]; then
+  # deliberately NOT gated on [ -d "$cwd" ]: that used to skip this whole
+  # block whenever the worktree directory was gone (rm -rf'd by hand, or a
+  # file manager), which left git's own worktree record behind — pointing at
+  # a directory that no longer exists — permanently locking the branch
+  # ("used by worktree") until someone ran `git worktree prune` by hand.
+  # `git worktree remove` handles a missing directory fine on its own,
+  # confirmed directly rather than assumed: it exits 0 and cleans the
+  # phantom entry, force or not. `git worktree prune` is a fallback for
+  # remove failing for some other reason — it only touches entries whose
+  # directory is already gone, never a live one, so it cannot be the thing
+  # that deletes work.
+  if [ "$iso" = "worktree" ] && [ -n "$repo" ] && [ -n "$cwd" ]; then
     if git -C "$repo" worktree remove ${force:+--force} "$cwd" 2>/dev/null; then
       say "removed worktree $cwd  (branch $branch kept)"
+    elif git -C "$repo" worktree prune 2>/dev/null; then
+      # prune is repo-wide, not targeted at $cwd -- it only removes entries
+      # whose directory is already gone, so this can undersell (nothing left
+      # to prune) but never overclaim removing something still live
+      say "ran git worktree prune on $repo  (branch $branch kept)"
     else
       warn "couldn't remove worktree — do it manually: git -C $repo worktree remove ${force:+--force} $cwd"
     fi
@@ -642,8 +658,15 @@ cmd_prune() {
       warn "kept '$g/$n' — worktree has unsaved work  (kel kill $g/$n -f)"
       kept=$((kept + 1)); continue
     fi
-    if [ "$iso" = worktree ] && [ -n "$repo" ] && [ -d "$cwd" ]; then
+    # same fix as cmd_kill, and the same reason: NOT gated on [ -d "$cwd" ].
+    # git worktree remove handles a missing directory fine on its own; the
+    # -d gate was what let a hand-deleted worktree directory leave git's own
+    # record behind, permanently locking the branch until someone ran
+    # git worktree prune by hand. prune here is the same belt-and-suspenders
+    # fallback — repo-wide, only ever touches entries already gone.
+    if [ "$iso" = worktree ] && [ -n "$repo" ] && [ -n "$cwd" ]; then
       git -C "$repo" worktree remove ${force:+--force} "$cwd" 2>/dev/null \
+        || git -C "$repo" worktree prune 2>/dev/null \
         || warn "left worktree $cwd (remove by hand)"
     fi
     rm -f "$meta"

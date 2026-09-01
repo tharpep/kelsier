@@ -249,6 +249,13 @@ gitignored paths** — anything it leaves that git would report as a change make
 agent's only copy of real work — commit & push, or `-f`). Full example in
 `examples/kel-setup`.
 
+**If you delete a worktree directory by hand** (`rm -rf`, a file manager) —
+don't; `kel kill` is what removes it — `kel kill` and `kel prune` still clean
+up git's own worktree record for it (v0.9: they used to skip that step
+whenever the directory was already gone, which left the branch permanently
+locked — "used by worktree" — until someone ran `git worktree prune`
+themselves).
+
 ## Keys
 
 `kel.conf` also turns on the mouse (click a pane to focus, drag borders to

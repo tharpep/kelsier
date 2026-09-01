@@ -673,6 +673,28 @@ testing stopped for the remainder of the pass once this was caught.
 That is the whole card. What it did **not** do is answer the docket below,
 which still wants use rather than reasoning.
 
+## Orphaned worktrees after a hand-deleted directory  ·  **fixed**
+
+Reported externally, reproduced exactly as described before touching
+anything: `rm -rf` a worktree's directory by hand, then `kel kill` it. The
+window and metadata went; `git worktree remove` never ran, because it was
+gated on `[ -d "$cwd" ]`, and git's own worktree record was left pointing at
+a directory that no longer existed — `git worktree list` kept showing it as
+`prunable`, and deleting the branch failed with "used by worktree" until
+someone ran `git worktree prune` by hand.
+
+`git worktree remove` handles a missing directory fine on its own, confirmed
+directly: exit 0, force or not, and the phantom entry is gone. The `-d` gate
+was simply wrong. Fixed in `cmd_kill`, and `cmd_prune` had the identical
+bug reached a different way (a dead agent, not a killed one) — found while
+fixing the first, not separately reported. Both now fall back to a repo-wide
+`git worktree prune` if `remove` itself fails for some other reason; `prune`
+only ever touches entries whose directory is already gone, so it cannot be
+the thing that deletes work. `cmd_prune` had no test coverage at all before
+this. 6 new tests, including one per command that deliberately reintroduces
+the `-d` gate and confirms the test fails — the guard was checked to actually
+bite, not just added.
+
 ## The prune pass — after v1.0, gated on use
 
 **Theme:** subtract. Everything above was added on the strength of an argument.

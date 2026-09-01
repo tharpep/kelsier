@@ -647,6 +647,39 @@ ok "a dirty worktree is refused"        '[[ "$out" == *refusing* ]]'
 ok "  ...and the window survives"       '[ "$(wins)" = 1 ]'
 ok "  ...and --force gets through"      '"$KEL" kill api-gw/wt -f >/dev/null 2>&1; [ "$(wins)" = 0 ]'
 
+# a worktree directory removed by hand (rm -rf, a file manager) BEFORE kill
+# used to leave git's own worktree record behind, permanently locking the
+# branch ("used by worktree") until someone ran `git worktree prune` by
+# hand — kel kill silently skipped the whole removal block because it
+# required the directory to still exist. Reported externally, reproduced,
+# fixed: `git worktree remove` handles a missing directory fine on its own.
+section "kill cleans up a worktree whose directory is already gone"
+reset
+K api-gw new wt2 -w --agent 'sleep 9999' >/dev/null 2>&1
+WT2="$WORK/repos/.kel-worktrees/api-gw-wt2"
+[ -d "$WT2" ] || { echo "setup failed: $WT2 missing"; exit 1; }
+rm -rf "$WT2"
+out="$("$KEL" kill api-gw/wt2 2>&1)"
+ok "kill still succeeds"                '[[ "$out" == *killed* ]]'
+ok "  ...and the phantom entry is gone" '! git -C "$WORK/repos/api-gw" worktree list | grep -q wt2'
+ok "  ...so the branch can be deleted"  'git -C "$WORK/repos/api-gw" branch -D wt2 >/dev/null 2>&1'
+
+# kel prune had the identical bug, reached a different way: a DEAD agent
+# (its window gone, not killed through kel) whose worktree directory was also
+# removed by hand. cmd_prune has no other test coverage at all before this.
+section "prune cleans up a dead agent's worktree the same way"
+reset
+K api-gw new wt3 -w --agent 'sleep 9999' >/dev/null 2>&1
+WT3="$WORK/repos/.kel-worktrees/api-gw-wt3"
+[ -d "$WT3" ] || { echo "setup failed: $WT3 missing"; exit 1; }
+rm -rf "$WT3"
+tmux kill-window -t "$(window_of api-gw wt3)" 2>/dev/null
+wait_until '[ -n "$("$KEL" ls 2>/dev/null | grep wt3)" ]'   # record still exists, window does not
+out="$("$KEL" prune 2>&1)"
+ok "prune reports it"                   '[[ "$out" == *"pruned 1"* ]]'
+ok "  ...and the phantom entry is gone" '! git -C "$WORK/repos/api-gw" worktree list | grep -q wt3'
+ok "  ...so the branch can be deleted"  'git -C "$WORK/repos/api-gw" branch -D wt3 >/dev/null 2>&1'
+
 # ---------------------------------------------------------------- state
 section "Notification maps to what it actually means (#14)"
 reset
