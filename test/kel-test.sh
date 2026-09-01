@@ -321,6 +321,12 @@ ok "  ...and _fleet agrees"              '[ "$("$KEL" _fleet | jq -r ".agents[]|
 reset
 ok "an empty fleet is {agents:[]}"       '[ "$("$KEL" _fleet | jq -c ".agents")" = "[]" ]'
 ok "  ...and still exits 0"              '"$KEL" _fleet >/dev/null 2>&1'
+# Forced onto the bash reader: with kel-fleet built, the Go path answers and
+# never exercises the record slurp. Zero records used to leave the array empty,
+# which bash 3.2 reports as unbound and 4.4+ turns into a `cat` with no
+# arguments that reads stdin. Stderr is the half a non-tty suite can observe.
+ok "  ...with nothing on stderr"         '[ -z "$(KEL_FLEET_BIN=/nonexistent "$KEL" _fleet 2>&1 >/dev/null)" ]'
+ok "  ...and the bash reader agrees"     '[ "$(KEL_FLEET_BIN=/nonexistent "$KEL" _fleet 2>/dev/null | jq -c ".agents")" = "[]" ]'
 
 section "the Go kel-fleet agrees with the bash one (v0.6 seam)"
 GOBIN_FLEET="$WORK/kel-fleet"

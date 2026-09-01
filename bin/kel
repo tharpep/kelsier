@@ -876,8 +876,13 @@ _fleet_bash() {
     ctxs="$ctxs$wid	$line"$'\n'
   done
 
-  # every record in ONE slurp
-  local -a rf=()
+  # every record in ONE slurp.  Seeded with /dev/null so the array is never
+  # empty: `cat "${rf[@]}"` on an empty array fails two different ways
+  # depending on the bash. 3.2 treats it as unbound under `set -u` and aborts
+  # the subshell; 4.4+ expands it to nothing, so cat gets no arguments, reads
+  # stdin, and blocks forever on a terminal. /dev/null adds no records to any of
+  # the three consumers below.
+  local -a rf=(/dev/null)
   for f in "$SESSIONS_DIR"/*/*.json; do [ -e "$f" ] && rf+=( "$f" ); done
 
   # dirty is keyed by cwd: it is a property of the directory, not the window
