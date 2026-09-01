@@ -1580,7 +1580,17 @@ cmd_board() {
     --bind "ctrl-g:become($SELF go {1})" \
     --bind "ctrl-r:reload($SELF _board_rows)" \
     --bind "ctrl-k:execute($SELF _board_kill {1} {2})+reload($SELF _board_rows)" \
-    --bind "ctrl-n:become(tmux command-prompt -p 'new agent:' \"run-shell \\\"cd {5} && $SELF new %%\\\"\")" \
+    # ctrl-n used to become() straight into _ask_new (same target tab's "n"
+    # item uses) as a one-key shortcut for "new agent in its folder". Cut,
+    # not fixed: become()'d directly from THIS fzf into a script that itself
+    # opens a second fzf via command substitution reliably fails to render
+    # that inner fzf (confirmed live — the popup exits nonzero the instant
+    # ctrl-n fires), where the identical target reached via tab's one extra
+    # hop (this fzf -> action-list fzf -> _ask_new) works every time. That
+    # smells like an fzf/tmux become()-depth interaction, not a bug in
+    # _ask_new; not worth hand-rolling a second live fzf-in-fzf hop just to
+    # save one keystroke tab -> n already covers. If revisiting, start there
+    # rather than re-deriving this from scratch.
     --bind "ctrl-f:become($SELF _board_fleet)" \
     --color 'footer:italic,border:8' \
     >/dev/null 2>&1 || true

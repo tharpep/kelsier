@@ -110,21 +110,33 @@ shows the current group in full plus `⟨api·1 infra·1⟩` for the rest.
 
 `kel board` — a `display-popup` running `fzf` over every agent: fuzzy filter, a
 preview pane (metadata, recent pane output, git status). `enter` jumps to the
-highlighted agent; **`tab`** opens a labelled `tmux display-menu` acting on it
-(jump / new agent in its dir / rename / go to its group / kill) — the discoverable
-counterpart to the hidden accelerators `ctrl-n` / `ctrl-k` / `ctrl-g` / `ctrl-r`,
-which stay bound. Opened by **`Ctrl+Space`** (no prefix) or `prefix b`. Since the
-`tab` menu is invoked through fzf `become` rather than a key binding, its
-`display-menu` needs an explicit `-c <client>`. The old `display-menu`
-quick-jump is retired; `kel menu` is a one-release alias for `kel board`.
+highlighted agent; **`tab`** becomes into a second `fzf` list acting on it
+(jump / new agent in its dir / rename / go to its group / kill), plus the
+hidden accelerators `ctrl-k` / `ctrl-g` / `ctrl-r` for the same handful of
+actions. Opened by **`Ctrl+Space`** (no prefix) or `prefix b`. The old
+`display-menu` quick-jump is retired; `kel menu` is a one-release alias for
+`kel board`.
+
+Both `tab` and `ctrl-f` (below) become() into a *second `fzf` list*, never a
+`tmux display-menu` or `command-prompt` — tmux allows only one client-side
+overlay at a time, the board's own popup already owns that slot, and a second
+overlay TYPE silently fails to draw from inside it (confirmed live: exit 0,
+nothing rendered). become()-chaining fzf into another fzf is the one overlay
+transition tmux actually supports here. This is also why the board has no
+direct "new agent" accelerator: even become()'d fzf-into-fzf has a depth
+limit — reached in one hop straight from the board's own fzf, a target that
+itself opens a nested fzf reliably fails to render that inner one, where the
+identical target reached via `tab`'s one extra hop works. Free-text prompts
+(name, rename, group) go through `_kel_ask`, an fzf `--print-query` list with
+zero rows, for the same reason `command-prompt` is off the table.
 
 **`ctrl-f` — the fleet menu (v0.9).** Everything that is not about one
 highlighted agent: the dashboard (`kel top`), `kel config`, and
 sweep/restore/prune/doctor. Before this the board could only ever select an
 agent; these five commands lived solely in the `prefix k` menu, unreachable
-from the board no matter which row you had highlighted. `ctrl-f` opens a
-second `tmux display-menu` (the same `become`-plus-`-c <client>` shape as
-`tab`'s) that is not scoped to any row.
+from the board no matter which row you had highlighted. `ctrl-f` becomes()
+into a second `fzf` list (same mechanism as `tab`'s) that is not scoped to
+any row.
 
 ### 5c. Rejected: the two-slot / swap-pane architecture
 
