@@ -175,6 +175,12 @@ ok "pr on reaches gh"                   '[ -f "$WORK/gh.calls" ]'
 rm -f "$WORK/gh.calls" "$XDG_STATE_HOME/kel/pr-cache/"* 2>/dev/null
 PATH="$WORK/nogh2:$PATH" KEL_PR=off "$KEL" _prstate "$GHR" main --pr >/dev/null 2>&1
 ok "  ...and pr = off does not"         '[ ! -f "$WORK/gh.calls" ]'
+# Invariant 3 names this case in its own wording — "an expired gh token must not
+# render as no PR" — and nothing asserted it until 2026-09-01. A gh that exits
+# nonzero against a real github remote must read `unknown`, never a state that
+# looks like a settled answer. Cache cleared first, or a prior call answers.
+rm -f "$XDG_STATE_HOME/kel/pr-cache/"* 2>/dev/null
+ok "  ...and a failing gh reads unknown" '[ "$(PATH="$WORK/nogh2:$PATH" "$KEL" _prstate "$GHR" main --pr)" = unknown ]'
 # local git answers first and short-circuits: a repo with unpushed work never
 # reaches the gh half at all, whatever pr is set to
 rm -f "$WORK/gh.calls"
@@ -672,6 +678,10 @@ K api-gw new wt -w --agent 'sleep 9999' >/dev/null 2>&1
 echo wip > "$WORK/repos/.kel-worktrees/api-gw-wt/scratch.txt"
 out="$("$KEL" kill api-gw/wt 2>&1)"
 ok "a dirty worktree is refused"        '[[ "$out" == *refusing* ]]'
+# Invariant 1 says the refusal "shows exactly what is at risk", and until
+# 2026-09-01 only the word `refusing` was checked. bin/kel prints
+# `git status --short`, so the at-risk path is nameable and worth asserting.
+ok "  ...and names the file at risk"    '[[ "$out" == *scratch.txt* ]]'
 ok "  ...and the window survives"       '[ "$(wins)" = 1 ]'
 ok "  ...and --force gets through"      '"$KEL" kill api-gw/wt -f >/dev/null 2>&1; [ "$(wins)" = 0 ]'
 
@@ -885,6 +895,41 @@ ok "  ...and left HEAD alone"              '[ "$(UHEAD)" = "$before" ]'
 # a non-clone install must say so rather than half-running
 mkdir -p "$WORK/nogit/bin" && cp "$KEL" "$WORK/nogit/bin/kel"
 ok "refuses when it is not a git clone"  '[[ "$("$WORK/nogit/bin/kel" update 2>&1 || true)" == *"not a git clone"* ]]'
+
+section "the docs keep up with the code"
+# Two hand-written lists of things bin/kel already knows. That is the shape that
+# rots here: spec.md §11 was missing `gh authenticated` and `statusLine wired`
+# until 2026-09-01, and `kel config` was in neither completion file from v0.9
+# until the same day. Both are counted rather than string-matched — the wording
+# differs on purpose ("the wired kel path still resolves" vs "…resolves"), and a
+# mapping table to reconcile that would be the burden these guards remove.
+
+# §11's table folds "tmux present" and "tmux >= 3.0" into one row, and its
+# "clone level with its upstream" row is rendered directly rather than through
+# probe(). Both adjustments are named here so a future reader can re-derive them.
+DPROBES=$(awk '/^cmd_doctor\(\)/,/^}/' "$HERE/../bin/kel" | grep -cE '\$\(probe ')
+DROWS=$(awk '/^## 11\. Capability probe/,/^### 11a/' "$HERE/../docs/spec.md" \
+        | grep '^| ' | grep -v '^| Probe' | grep -vc 'clone level')
+ok "every doctor probe has a spec row"   '[ "$DPROBES" = "$(( DROWS + 1 ))" ]'
+ok "  ...and there are some to check"    '[ "$DPROBES" -ge 12 ]'
+
+# The four machine-readable command lists: the dispatcher, the header comment
+# `kel help` renders, and both completions. -h/--help/help/cheat are excluded
+# with a reason — the first three are flags rather than commands, and `cheat` is
+# documented under the header's "internal" heading while still being completable.
+DISP=$(awk '/^  case "\$cmd" in/,/^  esac/' "$HERE/../bin/kel" \
+       | grep -oE '^    [a-z|-]+\)' | tr -d ' )' | tr '|' '\n' \
+       | grep -vE '^(hook|statusline|status-line|snapshot|jump|attach|list|menu|help|cheat|-h|--help)$' \
+       | grep -v '^_' | grep -v '^$' | sort -u)
+HELP=$(awk '/^# internal \(/{exit} /^#   kel [a-z]/{print $3}' "$HERE/../bin/kel" | sort -u)
+CBASH=$(sed -n 's/.*subcmds="\([^"]*\)".*/\1/p' "$HERE/../completions/kel.bash" \
+        | tr ' ' '\n' | grep -vE '^(help|cheat)$' | sort -u)
+CZSH=$(awk '/subcmds=\(/,/^  \)/' "$HERE/../completions/kel.zsh" \
+       | grep -oE "'[a-z-]+:" | tr -d "':" | grep -vE '^(help|cheat)$' | sort -u)
+ok "the dispatcher and kel help agree"   '[ "$DISP" = "$HELP" ]'
+ok "  ...and the bash completion too"    '[ "$DISP" = "$CBASH" ]'
+ok "  ...and the zsh completion too"     '[ "$DISP" = "$CZSH" ]'
+ok "  ...over a real number of commands" '[ "$(printf "%s\n" "$DISP" | grep -c .)" -ge 15 ]'
 
 section "statusline records context without a live agent"
 reset

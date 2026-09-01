@@ -1,7 +1,9 @@
 # kelsier — machine setup
 
-Target: **WSL2 Ubuntu**, terminal-only, no GUI. Also the reference for setting
-`kel` up on a second machine — the steps are identical after the distro exists.
+Target: **WSL2 Ubuntu**, terminal-only, no GUI. This is a dated record of one
+machine, not a current-state document — see the stamp below. macOS is provisioned
+by `install/macos-tools.sh` instead, and has been the primary machine since
+2026-08-31; the steps here still apply to a second Linux box.
 
 > Package landscape verified against web + `agy_research` on **2026-08-28**.
 > Re-check the version notes if you're reading this much later.

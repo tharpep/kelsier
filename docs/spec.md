@@ -552,7 +552,9 @@ or `jq` is missing.
 | `jq` present | metadata + the hook merge |
 | `node` on `PATH` | Claude Code needs it; catches a broken WSL PATH |
 | `claude` on `PATH` | the default agent |
+| `gh` authenticated | PR state for `kel sweep` and `kel top`'s LAND column |
 | kel hooks wired in `settings.json` | state detection |
+| kel `statusLine` wired | context % and cost, per agent |
 | the wired kel path resolves | `install.sh` records an absolute path into the clone; moving it silences every hook |
 | hooks not disabled by managed settings | `allowManagedHooksOnly` / `disableAllHooks` stop hooks firing while the entries remain, so "wired" alone reads true against a dead install |
 | clone level with its upstream | `kel update` has something to apply |

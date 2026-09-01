@@ -34,30 +34,26 @@ v1.0 — not a product chasing an audience.
 
 ---
 
-## Layout
+## What `ls` won't tell you
 
-```
-bin/kel              the tool — one bash script, and the fallback for all of Go
-go.mod               module github.com/tharpep/kelsier
-cmd/kel-fleet/       the Go fleet reader; bin/kel uses it when installed
-cmd/kel-top/         the fleet dashboard (Bubble Tea v2) — Go only, no fallback
-internal/fleet/      the fleet document, ported from _fleet_bash
-tmux/kel.conf        keybindings, status line, hooks; sourced from ~/.tmux.conf
-install.sh           symlinks kel, sources kel.conf, merges hooks + statusLine
-                     into ~/.claude/settings.json (jq, non-clobbering, backs up)
-install/             machine provisioning (apt + Homebrew, see Portability)
-completions/         bash + zsh completion
-test/kel-test.sh     the regression suite — run it before every commit
-docs/spec.md         design and rationale
-docs/rollout.md      build order, current status, what's next   <- start here
-docs/backlog.md      candidates, with a gate on each; tags [fits]/[borderline]/[violates]
-docs/usage.md        user-facing reference
-docs/setup.md        provisioning a machine
-```
+The tree is self-describing. These relationships are not.
 
-`bin/kel` is organised as `cmd_<name>` functions with a `main` dispatcher at the
-bottom. Internal subcommands are prefixed `_` (`_board_rows`, `_board_preview`,
-…) and are wired into tmux or fzf, not typed by hand.
+| | |
+|---|---|
+| `bin/kel` | the whole tool, and the permanent fallback for every Go surface |
+| `cmd/kel-fleet` | a port of `bin/kel`'s `_fleet_bash`. The suite asserts the two emit an identical document; a disagreement is a failure, not a curiosity |
+| `cmd/kel-top` | **Go only, no fallback.** `kel top` dies without the binary instead of degrading. Do not assume it mirrors `kel-fleet` |
+| `internal/fleet` | the fleet document, shared by both Go binaries |
+| `install.sh` | merges into `~/.claude/settings.json` with jq, non-clobbering, and backs it up. Every line it writes outside this repo has an inverse in `--uninstall` |
+| `docs/rollout.md` | **start here.** The source of truth for what to work on next — `spec.md` section numbers are not a build order |
+| `docs/backlog.md` | candidates, each with a *gate*: the specific pain that unlocks it. Its *Rejected* section rules several good-sounding ideas out already |
+
+`bin/kel` is `cmd_<name>` functions with a `main` dispatcher at the bottom.
+Internal subcommands are `_`-prefixed (`_board_rows`, `_fleet`, …) and are wired
+into tmux or fzf, never typed by hand. Helpers are plain snake_case
+(`ctx_field`, `resolve_pane`, `si_units`) — the `_` prefix means "dispatcher
+entry", not "private", so a new helper that takes one reads as a subcommand that
+isn't.
 
 ---
 
@@ -105,26 +101,19 @@ hook). `kel jump` matches `waiting` only.
 
 ## Invariants — do not break these
 
-1. **`kel kill` must never destroy the only copy of work.** It refuses on
-   uncommitted or unpushed changes in a worktree and shows exactly what is at
-   risk. `-f` overrides. This is the one unforgivable bug in this category of
-   tool; treat any change near it with suspicion and test it.
-2. **A restore must not be able to eat its own snapshot.** Rebuilding panes
-   fires kel's own `after-split-window` / `pane-exited` hooks, which run
-   `kel snapshot` in the background. `restore_from_snapshot` takes the
-   `.restoring` lockfile and reads from a private `mktemp` copy. The lock is a
-   **file, not an env var** — the hooks spawn a fresh `kel` from the tmux
-   server, which inherits nothing.
-3. **Never report a guess as a fact.** A dead agent must not read `working`; an
-   expired `gh` token must not render as "no PR"; an unknown value gets its own
-   distinct display, never a plausible-looking default. The status bar's whole
-   value is that you can trust it.
-4. **kel never sends keys into an agent pane** except the initial launch
-   command, and never splits, resizes or re-points a user's panes.
-5. **Hot paths stay cheap.** `kel statusline` runs on a 300 ms debounce and is
-   cancelled if it overruns; `kel status-line` runs on every bar redraw. One
-   `jq` pass, one atomic write, and only call `refresh-client -S` when the
-   rendered value actually changed.
+The **kind** column is the honest one. `guarded` means an assertion in
+`test/kel-test.sh` checks it; `partial` means one clause is checked and another
+is not; `prohibition` means it holds by review and no integration run could
+establish it. An unlabelled invariant would read as verified, which is why the
+column exists rather than a trailing sentence.
+
+| # | invariant | kind | what actually proves it |
+|---|---|---|---|
+| 1 | **`kel kill` must never destroy the only copy of work.** Refuses on uncommitted or unpushed changes in a worktree, shows what is at risk, `-f` overrides. The one unforgivable bug in this category of tool — treat any change near it with suspicion. | partial | `"a dirty worktree is refused"` greps the output for `refusing` and counts windows. **"Shows exactly what is at risk" is unguarded** — nothing checks the message names the files. |
+| 2 | **A restore must not be able to eat its own snapshot.** Rebuilding panes fires kel's own `after-split-window` / `pane-exited` hooks, which run `kel snapshot` in the background. `restore_from_snapshot` takes the `.restoring` lockfile and reads a private `mktemp` copy. The lock is a **file, not an env var** — the hooks spawn a fresh `kel` from the tmux server, which inherits nothing. | guarded | three real restore cycles diff `snapshot.json` before and after; separately, a fresh lock is proven to block a `kel snapshot` write and a stale or unparseable one is proven not to. |
+| 3 | **Never report a guess as a fact.** A dead agent must not read `working`; an expired `gh` token must not render as "no PR"; an unknown value gets its own distinct display, never a plausible-looking default. | partial | dead-not-working and null-context-not-`0%` are both asserted. **The `gh` clause this invariant names is unguarded** — only "no remote" and "`gh` absent" are covered, never "token fails against a real remote". |
+| 4 | **kel never sends keys into an agent pane** except the initial launch command, and never splits, resizes or re-points a user's panes. | prohibition | nothing, deliberately. "Never, across a whole codebase" is not establishable by one integration run; it holds by reviewing the `send-keys` call sites, of which there are five (launch, restore's pane replay, twice in relaunch). |
+| 5 | **Hot paths stay cheap.** `kel statusline` runs on a 300 ms debounce and is cancelled if it overruns; `kel status-line` runs on every bar redraw. One `jq` pass, one atomic write, and only call `refresh-client -S` when the rendered value actually changed. | ⚠ unguarded | nothing. `"...but hot paths are not counted"` sounds like this and is not: it asserts only that hot-path commands skip `usage.log`. `refresh-client` appears nowhere in the suite. |
 
 ---
 
@@ -164,41 +153,45 @@ bugs in this repo were invisible to inspection and obvious on the first run.
 
 ## Traps already paid for
 
-- **`IFS=$'\t' read` silently shifts fields.** Tab is IFS *whitespace*, so bash
+Tagged the same way as the invariants: `guarded` has an assertion, `unguarded`
+relies on you remembering, `principle` is a fact about bash, tmux or Claude Code
+with nothing in kel to assert against. Re-breaking an `unguarded` one is silent.
+
+- `[guarded]` **`IFS=$'\t' read` silently shifts fields.** Tab is IFS *whitespace*, so bash
   folds runs of it into one delimiter and drops leading/trailing empties. One
   empty field (an unset model name) made kel report cost as the context
   percentage. Read multi-field JSON **one field per line** instead.
-- **`fzf --popup` needs a tty**; a tmux key binding has none, so
+- `[unguarded]` **`fzf --popup` needs a tty**; a tmux key binding has none, so
   `run-shell` + `fzf --popup` dies with *inappropriate ioctl for device* and the
   key silently does nothing. Use tmux's `display-popup`, and pass `KEL_*`
   across with `-e` — a popup runs a fresh shell off the tmux **server's**
   environment, not the caller's.
-- **tmux hooks fire during kel's own operations.** Anything that splits or
+- `[principle]` **tmux hooks fire during kel's own operations.** Anything that splits or
   closes panes will re-enter `kel snapshot`. Check before adding a hook.
-- **Claude Code's `Notification` is not one event.** Branch on
+- `[guarded]` **Claude Code's `Notification` is not one event.** Branch on
   `notification_type`; mapping them all to `waiting` made the jump key lie.
-- **Hook payloads carry no token/cost data** — that comes from `statusLine`,
+- `[principle]` **Hook payloads carry no token/cost data** — that comes from `statusLine`,
   which is a separate settings key with a different payload shape.
-- **`context_window.used_percentage` is `null`, not `0`**, before the first API
+- `[guarded]` **`context_window.used_percentage` is `null`, not `0`**, before the first API
   call and again right after `/compact`. `// 0` in the jq turns "not measured"
   into a confident green `0%` on a full context window. Keep it empty and render
   the unknown as unknown.
-- **`agent.name` in a `statusLine` payload is not a subagent.** It marks a
+- `[partial]` **`agent.name` in a `statusLine` payload is not a subagent.** It marks a
   session started with `claude --agent`. Task-tool subagents never invoke this
   command — they go through a separate `subagentStatusLine` setting carrying a
   `tasks[]` array. No per-subagent cost is exposed in either payload, so a
   combined main-plus-subagents dollar figure cannot be computed.
-- **`kel new` sends the agent command with `send-keys`**, so there is a brief
+- `[principle]` **`kel new` sends the agent command with `send-keys`**, so there is a brief
   window where the pane still shows a bare shell and `effective_state` reads
   `dead`. Harmless in practice; do not "fix" it by polling. Tests must wait for
   the process (`agent_up` in the suite) — v0.6 made the fleet read 3x faster
   and immediately started losing that race.
-- **`command -v` on a binary that does *not* exist costs ~76ms on WSL2.** It
+- `[unguarded]` **`command -v` on a binary that does *not* exist costs ~76ms on WSL2.** It
   walks all of `$PATH`, and 28 of this machine's 44 entries are Windows dirs
   under `/mnt/c`. The Go seam therefore stats one known path
   (`$KEL_FLEET_BIN`) instead. Never put a `command -v` for an optional binary
   on a hot path.
-- **An unconditional `mkdir -p` is not free** — three already-existing dirs
+- `[unguarded]` **An unconditional `mkdir -p` is not free** — three already-existing dirs
   measured ~10ms, paid by every invocation including each bar redraw.
 
 ---
