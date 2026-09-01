@@ -1524,18 +1524,43 @@ cmd_board_rename() {   # wid new
 # Same ${TMUX_PANE:+-t "$TMUX_PANE"} shape as _kel_window_target (kel move /
 # kel adopt): a bare `display-message -p` resolves against the CLIENT's
 # active window, not necessarily the pane the key was pressed in.
-cmd_here_actions() {
+cmd_here_actions() {   # [wid name group cwd] — only set when re-entered from its own popup
   need tmux
-  local tp="${TMUX_PANE:-}" wid name cwd group
-  wid="$(tmux display-message -p ${tp:+-t "$tp"} '#{window_id}')"
-  name="$(tmux display-message -p ${tp:+-t "$tp"} '#{window_name}')"
-  cwd="$(tmux display-message -p ${tp:+-t "$tp"} '#{pane_current_path}')"
-  local sess; sess="$(tmux display-message -p ${tp:+-t "$tp"} '#{session_name}')"
-  case "$sess" in
-    "$KEL_PREFIX")   group="$KEL_PREFIX" ;;
-    "$KEL_PREFIX"/*) group="${sess#"$KEL_PREFIX"/}" ;;
-    *) die "this window isn't in a kel group" ;;
-  esac
+  local wid name group cwd
+  if [ -n "${KEL_IN_POPUP:-}" ] && [ "$#" -ge 4 ]; then
+    wid="$1" name="$2" group="$3" cwd="$4"
+  else
+    local tp="${TMUX_PANE:-}"
+    wid="$(tmux display-message -p ${tp:+-t "$tp"} '#{window_id}')"
+    name="$(tmux display-message -p ${tp:+-t "$tp"} '#{window_name}')"
+    cwd="$(tmux display-message -p ${tp:+-t "$tp"} '#{pane_current_path}')"
+    local sess; sess="$(tmux display-message -p ${tp:+-t "$tp"} '#{session_name}')"
+    case "$sess" in
+      "$KEL_PREFIX")   group="$KEL_PREFIX" ;;
+      "$KEL_PREFIX"/*) group="${sess#"$KEL_PREFIX"/}" ;;
+      *) die "this window isn't in a kel group" ;;
+    esac
+  fi
+  # Same tty requirement cmd_board's fzf has, and the same fix — self-wrap in
+  # a popup rather than assume one is already open. prefix m binds straight
+  # to run-shell -b (kel.conf), which has no tty of its own: confirmed live,
+  # not assumed, after prefix m silently did nothing but flash "returned 2"
+  # in the message line, the exact "fzf --popup needs a tty" trap this file
+  # already documents elsewhere — cmd_board_actions only had a tty when
+  # become()'d from the board's own already-open popup (tab), never when
+  # reached this way. wid/name/group/cwd must be read BEFORE opening the
+  # popup: once inside one, "current pane" means the popup's own throwaway
+  # pane, not the window prefix m was pressed from — so they're threaded
+  # through as arguments on re-entry instead of re-derived.
+  if [ -z "${KEL_IN_POPUP:-}" ]; then
+    local -a penv=( -e KEL_IN_POPUP=1 ) v
+    for v in KEL_SESSION KEL_AGENT KEL_GROUP KEL_WORKTREES KEL_CTX_WARN XDG_STATE_HOME; do
+      [ -n "${!v:-}" ] && penv+=( -e "$v=${!v}" )
+    done
+    exec tmux display-popup -B "${penv[@]}" \
+      -w "${KEL_BOARD_W:-90%}" -h "${KEL_BOARD_H:-85%}" \
+      -E "'$SELF' _here '$wid' '$name' '$group' '$cwd'"
+  fi
   cmd_board_actions "$wid" "$name" "$group" "$cwd" here
 }
 
@@ -2797,7 +2822,7 @@ main() {
     _ask_new_wt)     migrate_meta; cmd_ask_new_wt "$@" ;;
     _ask_rename)     migrate_meta; cmd_ask_rename "$@" ;;
     _ask_move)       migrate_meta; cmd_ask_move "$@" ;;
-    _here)           cmd_here_actions ;;                  # prefix m
+    _here)           cmd_here_actions "$@" ;;              # prefix m
     restore)      migrate_meta; cmd_restore "$@" ;;
     relaunch)     migrate_meta; cmd_relaunch "$@" ;;
     top)          cmd_top "$@" ;;
