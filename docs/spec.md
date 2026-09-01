@@ -211,7 +211,8 @@ An agent is one `tmux` window and one working directory. kel-managed agents
 get a metadata record; a hand-made `prefix c` window is tracked for state but
 has no metadata and shows as `(unmanaged)` (every "new agent" menu item routes
 through `kel new`, so those are managed). Adopt a `prefix c` window with
-`kel move`.
+`kel adopt`. `kel move` refuses an unmanaged window and points at `kel adopt`,
+so that relocating an agent can never silently start tracking a new one.
 
 `~/.local/state/kel/sessions/<group>/<name>.json`:
 

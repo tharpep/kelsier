@@ -109,7 +109,7 @@ chmod +x "$KEL"
 ln -sf "$KEL" "$BIN_DIR/kel"
 # remove pre-v0.1 loose scripts
 rm -f "$BIN_DIR/kel-status" "$BIN_DIR/kel-jump" "$BIN_DIR/kel-cheat"
-echo "  kel  (new kill ls go move rename board restore restart prune doctor cheat + internals)"
+echo "  kel  (new kill ls go move rename board restore relaunch prune doctor cheat + internals)"
 
 say "shell completion"
 # bash: XDG completions dir is loaded lazily by bash-completion >= 2.x
@@ -219,6 +219,6 @@ cat <<EOF
     kel new <name>      new window + agent   (-w = git worktree, --group G)
     kel ls              list every agent, grouped by repo (with context %)
     Ctrl+Space          the board — find an agent    ·   prefix m   manage this one
-    kel restart [name]  relaunch a crashed agent in its own window
+    kel relaunch [name] relaunch a crashed agent in its own window
     kel kill <name>     close one      ·   kel doctor    check the machine
 EOF

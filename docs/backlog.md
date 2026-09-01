@@ -194,7 +194,7 @@ same footprint, more signal.
 
 ## Tier 2 — worktree & fleet hygiene
 
-### 6. Merge-readiness  ·  `[fits — status only]`
+### 6. Merge-readiness  ·  `[fits — status only]`  ·  **shipped in v0.7 as the LAND column**
 
 `kel new -w` makes spawning five worktrees trivial and does nothing for the
 other end of the day, when five branches need to land. For each worktree agent,
@@ -227,7 +227,9 @@ negative. Concretely:
 - `kel doctor` gets a `gh auth status` probe, so the fix is one command away
   and the failure has a named home rather than a silent dash
 
-**Gate:** when you've felt the integration pile-up.
+**Gate:** ~~when you've felt the integration pile-up.~~ Shipped — `land_of` /
+`pr_state_of`, `internal/fleet/land.go`, the **LAND** column in `kel top`, and
+the three-valued unknown handling above came through intact.
 
 ### 7. Git dirty state — dashboard-only  ·  `[fits]`  ·  **in the fleet document since v0.6**
 

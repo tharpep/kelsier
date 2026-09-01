@@ -301,14 +301,13 @@ tmux session per repo.**
 ## State files
 
 `~/.local/state/kel/`
-- `<window-id>.ctx` — `<pct> <cost> <in_tokens> <ctx_size> <rate_5h> <epoch>
-  <model>`, written by `kel statusline` from the JSON Claude Code hands its
-  status-line command. This is how kel knows an agent's context usage and cost
-  **without interrupting it** — no `/context`, no reading the transcript. The
-  bar shows `·NN%` only from `KEL_CTX_WARN` (default 70) up; `kel ls`, `--json`
-  and the board preview always show it. Pruned with the window.
-- `<window-id>.state` — `<state> <epoch> <note>`, written by the hooks, pruned when the
-  window is gone
+- `<window-id>.ctx` — written by `kel statusline` from the JSON Claude Code
+  hands its status-line command. This is how kel knows an agent's context usage
+  and cost **without interrupting it** — no `/context`, no reading the
+  transcript. The bar shows `·NN%` only from `KEL_CTX_WARN` (default 70) up;
+  `kel ls`, `--json` and the board preview always show it. Pruned with the
+  window.
+- `<window-id>.state` — written by the hooks, pruned when the window is gone
 - `sessions/<group>/<name>.json` — one record per kel-managed agent. Keyed by
   group *and* name, so two repos can both have a `docs` agent; disambiguate on
   the command line with `kel kill <group>/<name>`.
@@ -316,6 +315,9 @@ tmux session per repo.**
 - `.stash/<claude-session-id>` — pane id from SessionStart, for hooks that don't
   inherit `$TMUX_PANE`
 - `doctor.json` — last `kel doctor` result
+
+The field layout of `.ctx` and `.state` is in `CLAUDE.md` under *The on-disk
+contract*. Both are positional formats, so they live in one place.
 
 Events → states: `SessionStart`→idle, `UserPromptSubmit`→working,
 `Notification`→waiting, `Stop`→done, `SessionEnd`→cleared.

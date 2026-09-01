@@ -412,7 +412,7 @@ and does nothing for the five branches that need to land.
 - **#8** `kel sweep` — batch teardown of merged, clean, pushed agents.
 - **#12** `.kel/group` per-directory override.
 
-## v0.9a — the system around the agent
+## v0.9a — the system around the agent  ·  **done**
 
 **Theme:** kel manages the *system around* the agent, never the agent. That is
 the pitch, sharper than "know which agent is blocked" — which, since
@@ -813,42 +813,3 @@ live is a real feature of a tool you bend to this week's workflow.
 - Session templates moved **onto** the backlog as `kel new --preset`
   (`backlog.md` #10). The reversal is deliberate: it's tmux layout automation,
   not agent-wrapping.
-
----
-
-## Testing v0.1 before v0.2
-
-### Surface check (once, ~10 min)
-
-- [ ] `kel new a` from inside a repo → window + `claude` starts, you land on it
-- [ ] `kel new b --no-agent` → window, no agent
-- [ ] `kel new c -w` from a repo with a `.kel/setup` → worktree on branch `c`,
-      setup ran, you're in it
-- [ ] `kel ls` → all three, right isolation / branch / dirty
-- [ ] `kel kill a` → window gone
-- [ ] make an uncommitted change in `c`'s worktree, `kel kill c` → **refuses**,
-      shows the diff; `kel kill c -f` → removes it, branch kept
-- [ ] `prefix d`, then `kel` → back exactly where you were, agents still running
-- [ ] kill the session (`tmux kill-session -t kel`), `kel ls` → sessions show
-      `dead`; `kel restore -c` → windows rebuilt, agents resuming
-- [ ] `` prefix ` `` with one agent `waiting` → jumps to it
-- [ ] `prefix k` → cheatsheet; status bar shows `*` / `?` / `!` as agents work
-
-### Real use (the actual test — ~1–2 weeks)
-
-Run your genuine parallel work through `kel`. Watch for:
-
-**v0.1 is working** if — you `kel new` without thinking about tmux, `` prefix ` ``
-is reflexive, you stop opening throwaway terminals to check on an agent, and
-`kel restore` gets you back after a reboot.
-
-**v0.1 needs a fix first** (not v0.2) if — hooks misfire (state stuck / wrong),
-`kel kill` ever loses work, the status line lies, or `restore` doesn't
-faithfully rebuild.
-
-**Go to v0.2** when — you hit **10+ agents across 2+ repos in a normal week**, or
-you notice you keep losing which window belongs to which project, or the status
-line is too wide to read. Not before.
-
-**Stay flat** if — you top out around 5–6 agents and they're usually one repo at
-a time. Then v0.2 is dead weight and the flat model wins.

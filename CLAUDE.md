@@ -133,7 +133,7 @@ hook). `kel jump` matches `waiting` only.
 ```sh
 bash -n bin/kel && bash -n install.sh      # syntax
 go vet ./... && go build ./...              # Go, if installed
-test/kel-test.sh                            # 197 cases, ~90s
+test/kel-test.sh                            # ~2 min; it prints its own count
 ```
 
 Go is **optional**: `bin/kel` falls back to its bash implementation whenever

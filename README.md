@@ -44,9 +44,9 @@ Explicit, because each is a thing this project will be tempted into.
 
 ## Status
 
-**v0.8** — working, in daily use, MIT. Linux and macOS green in CI on every
-push. `docs/rollout.md` is the build order and the source of truth for what is
-next.
+**v0.9** — working, in daily use, MIT. CI runs the full suite on Linux and
+macOS on every push. `docs/rollout.md` is the build order and the source of
+truth for what is next.
 
 ## What it looks like
 
@@ -115,10 +115,12 @@ degrades that column rather than blacking it out.
 git clone https://github.com/tharpep/kelsier && cd kelsier && ./install.sh
 ```
 
-Needs `tmux` >= 3.0, `jq`, and `git`; `fzf` for the board. Go is **optional** —
-it builds a faster fleet reader and the dashboard, and everything still works
-without it. `./install.sh --uninstall` reverses every change it made and leaves
-your agent records alone. `kel doctor` tells you what you have.
+Needs `tmux` >= 3.0, `jq`, and `git`; `fzf` for the board. Go is **optional**
+for everything except `kel top` — it builds a faster fleet reader, and `bin/kel`
+falls back to its own bash implementation without it. The dashboard is Go only
+and says so rather than degrading. `./install.sh --uninstall` reverses every
+change it made and leaves your agent records alone. `kel doctor` tells you what
+you have.
 
 `docs/usage.md` is the reference · `docs/rollout.md` is the build order ·
 `docs/spec.md` is the design · `examples/config.toml` is every setting.
