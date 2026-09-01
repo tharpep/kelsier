@@ -30,7 +30,7 @@ rollout wins.
 | ~~v0.6~~ **done** | ~~`_fleet --json`~~ · ~~#2~~ (folds #3, #7) · Go seam · ~~#5~~ **cut, see R6** |
 | ~~v0.7~~ **done** | ~~#6~~ · ~~#8~~ · ~~#12~~ |
 | v0.8 | #11 · config file (un-parked below) |
-| the TUI pass | #35 (upstream of the rest) · #17–#31 · #32–#34 · #36 |
+| the TUI pass | #35 (upstream of the rest) · #17–#31 · #32–#34 · #36 · #37 |
 | unscheduled | #9 · #10 · #16 · everything under *Parked* |
 
 **Tags.** `[fits]` — inside "just bookkeeping, never wrap the agent."
@@ -383,8 +383,8 @@ The coverage row is the one that turns "the UI lacks things" from taste into a
 table. It is also structurally blind to the capability row, which is why that row
 was assembled from the author's own account rather than derived.
 
-**Standing design decision (2026-09-01).** Three rules, and the third is the one
-that constrains fixes:
+**Standing design decision (2026-09-01).** Four rules. The third constrains fixes;
+the fourth was added after the first draft of this section broke it repeatedly.
 
 1. Every capability has a bash command. Already true.
 2. The commonly-used ones need **both** a prefix key **and** a path from
@@ -397,10 +397,15 @@ that constrains fixes:
    a submenu is strictly more steps"* — and then added `ctrl-f`, which reintroduced
    depth on a different axis. Both halves of that commit were right about their own
    problem; together they produced the current shape.
+4. **The user uses kel. tmux is under the hood.** So "that is native tmux" is not a
+   reason a gap is acceptable — if the thing being acted on is a kel concept, kel
+   should own the verb. Terminal concerns (scrolling, copy mode) are the exception,
+   not the pattern. See #37.
 
-This makes "is X reachable from Ctrl+Space" checkable, and "how many keypresses"
-countable. Several items below only count as gaps under rule 2, and several
-candidate fixes are ruled out by rule 3.
+This makes "is X reachable from Ctrl+Space" checkable, "how many keypresses"
+countable, and "whose surface answers this" answerable. Several items below only
+count as gaps under rules 2 and 4, and several candidate fixes are ruled out by
+rule 3.
 
 ### 35. Common actions cost three levels  ·  `[capability]`  ·  *open*
 
@@ -757,6 +762,39 @@ this way (`reset` uses `tmux -f /dev/null start-server`), so the fixture exists.
 Prove-can-fail by pointing the probe at a new server instead of the attached one —
 which reproduces the current bug and is the assertion that matters most here.
 
+### 37. kel-level concepts served by raw tmux surfaces  ·  `[capability]`  ·  *open*
+
+**Error.** The user uses kel; tmux is under the hood. Three binds break that:
+
+| bind | gives you | kel already has |
+|---|---|---|
+| `prefix g` (`kel.conf:72`) | `choose-tree -Zs` — tmux's session tree, listing sessions named `kel/misc` in tmux's vocabulary | `cmd_go` with no argument, a group picker built from `group_sessions` (`bin/kel:1085-1088`) |
+| `prefix \|` (`:78`) | `split-window -h` | nothing — see #32 |
+| `prefix -` (`:79`) | `split-window -v` | nothing — see #32 |
+
+`prefix g` is the clearest: a kel key, on a kel concept, answered by a tmux
+surface, when the kel equivalent is one function call away. The wheel binds
+(`:39-40`) are *not* in this category — scrolling is a terminal concern and
+delegating it is correct.
+
+This axis was missed on the first pass because the audit accepted "that is native
+tmux" as a reason something was fine. Under "the user uses kel", delegating a kel
+concept to tmux is the finding, not the excuse. Recorded because the same reasoning
+will look reasonable again next time.
+
+**Surface.** Enumerate binds in `kel.conf` that invoke tmux directly, and for each
+ask whether the thing being acted on is a kel concept (a group, an agent, a pane
+kel tracks) or a terminal concept (scrolling, copy mode). The first list should be
+empty; today it has three entries.
+
+**Fix.** Point `prefix g` at `kel go`. Panes depend on #32 and the addressing
+question in #22 — whether a pane is a thing kel can name — so they are not fixable
+independently.
+
+**Test.** A guard asserting no `kel.conf` bind acts on a group, agent or window
+through a bare tmux command, with the terminal-concept binds listed as exemptions
+carrying that reason. Prove-can-fail by pointing a bind back at `choose-tree`.
+
 ### Capability gaps — kel has no notion of the thing
 
 Assembled from the author's account, because the coverage guard cannot see these
@@ -766,13 +804,15 @@ is invisible to it.
 ### 32. Panes are discovered, never managed  ·  `[capability]`  ·  *open*
 
 **Error.** `prefix |` and `prefix -` are bound and live, and `kel cheat` documents
-them — verified against `tmux list-keys`. So splitting works. What does not exist
-is any kel-level pane action: no "open a pane here" from Ctrl+Space, no way to
-open a pane *for* something (an editor, a shell, a git view), and no pane row in
-`tab`'s menu. kel learns about a pane only after tmux made it (`:1256-1257`).
-Under the Ctrl+Space decision this counts as a gap even though the keybind works,
-because the primary entry offers nothing. Invariant 4 forbids kel *rearranging* a
-user's panes; it does not forbid offering to create one.
+them — verified against `tmux list-keys`. So a split happens, **as tmux**, which is
+not the same as kel supporting panes: the keys are raw `split-window`, kel is not
+involved, and it learns about the result only afterwards (`:1256-1257`). There is
+no kel-level pane action anywhere — nothing from `Ctrl+Space`, no way to open a
+pane *for* something (an editor, a shell, a git view), no pane item in `tab`'s
+menu. Under the Ctrl+Space decision and #37 this is a gap regardless of the keybind
+working, because the primary entry offers nothing and the thing being acted on is a
+pane kel will have to track. Invariant 4 forbids kel *rearranging* a user's panes;
+it does not forbid offering to create one.
 
 **Surface.** A coverage question phrased over capabilities rather than commands:
 from Ctrl+Space, can the user create a pane? Today, no.
@@ -843,6 +883,12 @@ means.
 - **One interaction model or two.** The board filters live with no mode; `kel top`
   needs `/` to enter one. `q` quits `kel top` and types into the board's filter.
   Reload is `ctrl-r` in one and `r` in the other.
+- **Whether `kel cheat` should teach tmux at all.** Its WINDOWS and PANES columns
+  document `prefix c`, `&`, `z`, `x` and the arrows — native tmux keys kel never
+  binds. Under rule 4 there are two defensible answers and they lead opposite ways:
+  kel owns those verbs and the columns become kel commands, or kel is explicitly a
+  layer over tmux and teaching its keys is a service. Today it does the second while
+  the rest of the tool argues for the first.
 
 
 
