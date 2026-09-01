@@ -794,6 +794,13 @@ starts, the install is reversible, and someone who is not the author can run
 
 How much of it is Go by then is an outcome, not a requirement.
 
+**Where the gate stands.** `git clone && ./install.sh` was exercised on a Mac
+for the first time on 2026-09-01 (macOS 26.6, tmux 3.7c, go 1.27.0): 14/14
+`kel doctor` probes green, both Go binaries built, full suite passing. That
+machine had no prior `statusLine` or hooks, so the chaining path install.sh
+takes when it displaces one is still untested on any platform.
+`install/macos-tools.sh` has still never been executed.
+
 ### v2.0 — all Go, if ever
 
 Retiring `bin/kel` is its own decision, taken after v1.0 with evidence from
