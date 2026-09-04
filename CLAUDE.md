@@ -193,6 +193,23 @@ with nothing in kel to assert against. Re-breaking an `unguarded` one is silent.
   on a hot path.
 - `[unguarded]` **An unconditional `mkdir -p` is not free** — three already-existing dirs
   measured ~10ms, paid by every invocation including each bar redraw.
+- `[guarded]` **`run-shell` shows stdout, never stderr — and `-E` is tmux 3.6+.**
+  `man tmux`: *"any output to stdout is displayed in view mode after the command
+  finishes."* `die`/`warn` write to stderr, so a keybinding's error vanished. The
+  flag that fixes this properly (`run-shell -E`) does not exist below 3.6, and
+  kel's floor is 3.0 — a `-E`'d bind dies with *unknown flag -E* and takes the
+  whole key with it. Use a literal `2>&1` inside the command string instead.
+  `backlog.md` #19 recorded the opposite of all of this for two releases.
+- `[principle]` **fzf's `become()` is `execve(2)` and one-way; `execute()` returns.**
+  So `become()` is right for a bind that *navigates away* (`enter`, `ctrl-g`) and
+  wrong for one that *acts* (`tab`, `ctrl-n`, `ctrl-f`, `ctrl-k`), which must come
+  back with `+reload(...)`. A `become()`'d command also inherits fzf's own
+  descriptors, which is how `>/dev/null 2>&1` on the fzf call silenced every
+  action reachable from the board.
+- `[unguarded]` **`prune_state` is not `kel prune`.** `cmd_prune` reaps dead
+  *agents*; `prune_state` reaps orphaned state files and is called from `cmd_ls`
+  and `cmd_attach`. A test that drives `kel prune` to exercise `prune_state`
+  passes vacuously.
 
 ---
 

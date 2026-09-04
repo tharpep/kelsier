@@ -836,11 +836,21 @@ either payload.
 failed once on Linux CI with a one-second difference. Reduced to a presence
 check, which is the property either side can actually hold.
 
-## The TUI pass — audited 2026-09-01, not started
+## The TUI pass — audited 2026-09-01, designed in `interface.md`, not started
 
 **Dated record.** This section is a point-in-time finding, not a current-state
 claim. The work items live in `backlog.md` § *The TUI pass*, each with
 Error / Surface / Fix / Test.
+
+**The design that answers them is `interface.md`** (2026-09-01), which merges the
+board, `kel top` and `kel cheat` into one surface. Most of those entries are now
+specified there rather than pending — `interface.md` §12 lists which, and which
+are still genuinely open. Read the design first; the backlog entries are the
+evidence it was built from, not the plan.
+
+**The build order is `interface-build.md`** — six phases, each with its own
+definition of done. That file is a work order and is deleted when the last phase
+lands; this section keeps the status.
 
 **Trigger:** the author's own account — *"it's not a good UI"* — while the v1.0
 gate was otherwise closing. Auditing it first, deliberately, rather than fixing

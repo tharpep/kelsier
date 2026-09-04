@@ -108,6 +108,11 @@ shows the current group in full plus `⟨api·1 infra·1⟩` for the rest.
 
 ### 5b. The board (v0.3, built; navigator in v0.4)
 
+> **Superseded by `interface.md`.** That file merges the board, `kel top` and
+> `kel cheat` into one surface and deletes `ctrl-f`. What follows describes what
+> is *built* today and stays accurate as a record of it; it is no longer the
+> design being aimed at.
+
 `kel board` — a `display-popup` running `fzf` over every agent: fuzzy filter, a
 preview pane (metadata, recent pane output, git status). `enter` jumps to the
 highlighted agent; **`tab`** becomes into a second `fzf` list acting on it

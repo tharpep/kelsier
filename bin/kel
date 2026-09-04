@@ -407,6 +407,14 @@ dead_sessions() {
 
 prune_state() {
   local live f wid panes pane
+  # cmd_board's preview snapshot traps its own removal, which covers every
+  # ordinary exit. A popup killed outright (SIGKILL, a closed terminal) skips
+  # the trap and leaks one file per board open — the same shape as the .stash
+  # entries below, which is the leak this function already exists to catch.
+  # -mmin, not stat: BSD wants `stat -f %m` where GNU wants `-c %Y`, and the
+  # portability table in CLAUDE.md says remove the dependency rather than pick
+  # a flag. An hour is far longer than any board stays open.
+  find "$STATE_DIR" -maxdepth 1 -name '.board-preview.*' -mmin +60 -delete 2>/dev/null || true
   live="$(tmux list-windows -a -F '#{window_id}' 2>/dev/null || true)"
   [ -n "$live" ] || return 0
   for f in "$STATE_DIR"/*.state "$STATE_DIR"/*.ctx; do
@@ -1317,9 +1325,15 @@ cmd_board_rows() {
   } | sort
 }
 
-cmd_board_preview() {   # name group
-  local name="$1" group="$2"
-  fleet_json | jq -r --arg n "$name" --arg g "$group" '
+cmd_board_preview() {   # name group [docfile]
+  # Under `set -u`, `local name="$1"` blew up with "$1: unbound variable" the
+  # moment fzf's own {2} expanded empty — this is the argument guard
+  # cmd_board_kill already got right; ${1:-} keeps a missing/empty argument
+  # from ever reaching a bare parameter expansion.
+  local name="${1:-}" group="${2:-}" docfile="${3:-}"
+  [ -n "$name" ] || return 0
+
+  local _filter='
     def money: (. * 100 | round) as $c | "\($c / 100 | floor).\((($c % 100) | tostring) | if length == 1 then "0" + . else . end)";
     (.agents[] | select(.group == $g and .name == $n)) // empty
     | if .managed then
@@ -1331,10 +1345,24 @@ cmd_board_preview() {   # name group
         "group      \(.group)", "(unmanaged window — no metadata)"
       end,
       (if .note        then "says       \(.note)" else empty end),
+      (if .land        then "land       \(.land.code)\(if (.land.n // 0) > 0 then " (\(.land.n))" else "" end)" else empty end),
       (if .context     then "context    \(.context.pct)% of \((.context.size / 1000 | floor))k  (\(.context.in_tokens) tokens used)",
                             "cost       $\(.context.cost_usd | money)\(if .context.model then "   ·  \(.context.model)" else "" end)"
                        else empty end),
       (if (.compactions // 0) > 0 then "compacted  \(.compactions) time(s)" else empty end)'
+
+  # docfile is the ONE fleet_json --land snapshot cmd_board computed before
+  # fzf started (see there) — never re-derived here on every cursor move, and
+  # never fleet_json --dirty inline, which would fork `git status` per
+  # distinct cwd in the fleet. A caller with no snapshot to hand (a direct
+  # `kel _board_preview name group` — the test suite is one) still gets a
+  # correct answer, just not the cheap one; the board's own fzf binding
+  # always passes a docfile, so this fallback is off the hot path.
+  if [ -n "$docfile" ] && [ -r "$docfile" ]; then
+    jq -r --arg n "$name" --arg g "$group" "$_filter" "$docfile"
+  else
+    fleet_json --land | jq -r --arg n "$name" --arg g "$group" "$_filter"
+  fi
 
   local wid; wid="$(kel_windows | awk -F'\t' -v n="$name" -v g="$group" '$2==g && $5==n{print $4; exit}')"
   if [ -n "$wid" ]; then
@@ -1591,7 +1619,7 @@ cmd_here_actions() {   # [wid name group cwd] — only set when re-entered from 
     done
     exec tmux display-popup -B "${penv[@]}" \
       -w "${KEL_BOARD_W:-90%}" -h "${KEL_BOARD_H:-85%}" \
-      -E "'$SELF' _here '$wid' '$name' '$group' '$cwd'"
+      -EE "'$SELF' _here '$wid' '$name' '$group' '$cwd'"
   fi
   cmd_board_actions "$wid" "$name" "$group" "$cwd" here
 }
@@ -1622,8 +1650,37 @@ cmd_board() {
     # (tab's action list, ctrl-f's fleet list, the ask prompts), since they
     # all render inside this SAME popup, each drawing its own border.
     exec tmux display-popup -B "${penv[@]}" \
-      -w "${KEL_BOARD_W:-90%}" -h "${KEL_BOARD_H:-85%}" -E "'$SELF' board"
+      -w "${KEL_BOARD_W:-90%}" -h "${KEL_BOARD_H:-85%}" -EE "'$SELF' board"
   fi
+
+  # The preview used to call fleet_json (or, worse, the proposed fix of
+  # fleet_json --dirty) itself on EVERY cursor move: roughly five tmux forks,
+  # two jq and two git calls each time the highlight moved a row, and --dirty
+  # specifically shells `git status --porcelain` for every distinct cwd in
+  # the fleet (see fleet_json above), turning one git fork per keystroke into
+  # N. The fix is to compute the document ONCE, here, before fzf starts, and
+  # have cmd_board_preview read the snapshot instead of re-deriving it. This
+  # necessarily means the preview's land/context/etc are a snapshot from when
+  # the board opened, not live — capture-pane and the uncommitted-files git
+  # call inside cmd_board_preview stay per-agent and live, since those are
+  # the one thing that must reflect the screen right now, and are cheap.
+  # --land also gets us the land column data the preview renders.
+  local preview_doc=''
+  preview_doc="$(mktemp "$STATE_DIR/.board-preview.XXXXXX" 2>/dev/null)" || preview_doc=''
+  if [ -n "$preview_doc" ]; then
+    fleet_json --land > "$preview_doc" 2>/dev/null || true
+    trap 'rm -f "$preview_doc"' EXIT
+  fi
+
+  # ctrl-r is the one place the snapshot above is allowed to cost again. The
+  # rows reload from live data; without regenerating the doc the preview would
+  # keep rendering context/cost/land from board-open time NEXT TO fresh rows,
+  # which is invariant 3's failure mode — a stale number that looks measured.
+  # Two fleet_json passes on an explicit refresh is the honest price; the
+  # whole point of the snapshot is that nothing pays it per keystroke.
+  local rbind="reload($SELF _board_rows)"
+  [ -n "$preview_doc" ] &&
+    rbind="execute-silent($SELF _fleet --land > '$preview_doc')+$rbind+refresh-preview"
 
   # A `#` comment placed between two `\`-continued lines of the fzf
   # invocation below silently truncates the WHOLE command at that point —
@@ -1640,17 +1697,17 @@ cmd_board() {
     --layout reverse --info inline --height '100%' \
     --border rounded --border-label ' kel ' \
     --footer 'enter jump · tab actions · ctrl-f dashboard/config/sweep…' \
-    --preview "$SELF _board_preview {2} {1}" \
+    --preview "$SELF _board_preview {2} {1} '$preview_doc'" \
     --preview-window 'right,45%,wrap,border-left' \
     --bind "enter:become($SELF _board_jump {6} {1})" \
-    --bind "tab:become($SELF _board_actions {6} {2} {1} {5})" \
+    --bind "tab:execute($SELF _board_actions {6} {2} {1} {5})+reload($SELF _board_rows)" \
     --bind "ctrl-g:become($SELF go {1})" \
-    --bind "ctrl-r:reload($SELF _board_rows)" \
+    --bind "ctrl-r:$rbind" \
     --bind "ctrl-k:execute($SELF _board_kill {1} {2})+reload($SELF _board_rows)" \
-    --bind "ctrl-n:become($SELF _ask_new {5})" \
-    --bind "ctrl-f:become($SELF _board_fleet)" \
+    --bind "ctrl-n:execute($SELF _ask_new {5})+reload($SELF _board_rows)" \
+    --bind "ctrl-f:execute($SELF _board_fleet)+reload($SELF _board_rows)" \
     --color 'footer:italic,border:8' \
-    >/dev/null 2>&1 || true
+    || true
 }
 
 # kel menu  —  deprecated alias for the board (kept one release for muscle memory)
@@ -1933,7 +1990,7 @@ cmd_top() {
       [ -n "${!v:-}" ] && penv+=( -e "$v=${!v}" )
     done
     exec tmux display-popup "${penv[@]}" \
-      -w "${KEL_TOP_W:-90%}" -h "${KEL_TOP_H:-80%}" -T ' kel top ' -E "'$KEL_TOP_BIN'"
+      -w "${KEL_TOP_W:-90%}" -h "${KEL_TOP_H:-80%}" -T ' kel top ' -EE "'$KEL_TOP_BIN'"
   fi
   exec "$KEL_TOP_BIN" "$@"
 }
@@ -2274,7 +2331,7 @@ cmd_config() {
   if [ -n "${TMUX:-}" ] && [ -z "${KEL_IN_POPUP:-}" ]; then
     exec tmux display-popup -e KEL_IN_POPUP=1 \
       -w "${KEL_CONFIG_W:-90%}" -h "${KEL_CONFIG_H:-85%}" -T ' kel config ' \
-      -E "'$SELF' config"
+      -EE "'$SELF' config"
   fi
   exec "$ed" "$cfg"
 }

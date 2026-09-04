@@ -494,22 +494,35 @@ to build it"` (`bin/kel:1924`) — reachable in the suite by pointing
 **Test.** The source guard, plus the `KEL_TOP_BIN` case above. Prove-can-fail by
 reverting one popup to `-E`.
 
-### 19. tmux keybindings drop stderr  ·  `[defect]`  ·  *open*
+### 19. tmux keybindings drop stderr  ·  `[defect]`  ·  **fixed, Phase 0** — *diagnosis was wrong*
 
-**Error.** `C-Space`, `b`, `m` and `t` (`tmux/kel.conf:56,57,66,69`) use
-`run-shell -b`. `-b` backgrounds the command and tmux discards its output; `-E`
-is what redirects it. So every `die`/`warn` from `cmd_board`,
-`cmd_here_actions` and `cmd_top` fired from a keybinding is dropped before it
-reaches a pane.
+**Error, as originally written and wrong:** *"`-b` backgrounds the command and
+tmux discards its output; `-E` is what redirects it."*
 
-**Surface.** A source guard: any `run-shell` invoking `kel` in `kel.conf` must
-pass `-E`. The failure is invisible at runtime by construction, which is what
-makes the source check the honest instrument here rather than a shortcut.
+tmux never discarded it. `man tmux`, `run-shell`: *"If `-C` is not given, any
+output to **stdout** is displayed in view mode … after the command finishes. If
+the command fails, the exit status is also displayed."* Stdout was always shown.
+`die` and `warn` write to **stderr**, which is not. That is the whole defect.
 
-**Fix.** Add `-E` to those four binds, or route them through `display-popup`
-which already has a pane to write to.
+**And the proposed fix would have broken kel.** `run-shell -E` does not exist
+before **tmux 3.6** — the synopsis on 3.4 is `run-shell [-bC]`, and
+`tmux source-file` on a `-E`'d `run-shell` dies with *unknown flag -E*
+(confirmed live on 3.4). kel's documented floor is tmux ≥ 3.0. Adding `-E` as
+this entry instructed would have silently broken `C-Space`, `prefix b`,
+`prefix m` and `prefix t` on every tmux from 3.0 to 3.5.x.
 
-**Test.** The source guard, proven to fail by removing `-E` from one bind.
+**Fix, as shipped.** A literal `2>&1` inside the invoked command string, which
+folds stderr into the stdout tmux already displays, on any tmux back to 3.0. The
+snapshot hooks (`kel.conf:47-49`) stay bare — fire-and-forget on purpose.
+
+**Test.** Guards that all four foreground binds carry `2>&1`, that the hooks do
+not, that the config sources cleanly under a real tmux, and — kept as a
+regression guard — that the literal `-E` flag does **not** source on this tmux.
+
+**The lesson, since it is the second time here.** The entry reasoned about tmux
+from the flag name rather than from the man page, and named a fix nobody ran.
+CLAUDE.md already says to drive anything hook- or keybinding-shaped with a real
+tmux server; that applies to writing the backlog entry, not only to fixing it.
 
 ### 20. `_run`'s pause holds a popup open over nothing  ·  `[defect]`  ·  *open*
 

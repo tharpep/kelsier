@@ -931,6 +931,120 @@ ok "  ...and the bash completion too"    '[ "$DISP" = "$CBASH" ]'
 ok "  ...and the zsh completion too"     '[ "$DISP" = "$CZSH" ]'
 ok "  ...over a real number of commands" '[ "$(printf "%s\n" "$DISP" | grep -c .)" -ge 15 ]'
 
+section "errors cannot be swallowed (Phase 0 — interface.md §7)"
+# display-popup: a single -E closes the popup the instant shell-command exits
+# — including a `die`, so the message a human needed never rendered. Two -E
+# closes only on success, leaving a failure on screen. cmd_run_popup is the
+# one deliberate exception: its shell-command ends in its OWN "[any key]"
+# pause, so the message is always read before the popup's shell exits at all
+# — independent of -E vs -EE — and it must keep a single -E. Counted, not
+# string-matched to a line number, because every edit here shifts what
+# interface.md cited as bin/kel:1592 / 1624 / 1935 / 2275.
+POPUP_EE=$(grep -c -- '-EE' "$HERE/../bin/kel")
+ok "the four board/top/config popups use -EE, not a single -E" '[ "$POPUP_EE" = 4 ]'
+POPUP_SINGLE_E=$(grep -cE '(^|[^E-])-E([^E]|$)' "$HERE/../bin/kel")
+ok "  ...and only cmd_run_popup's is still a single -E"        '[ "$POPUP_SINGLE_E" = 1 ]'
+ok "  ...and that one IS cmd_run_popup's"                      \
+  'awk "/^cmd_run_popup\(\)/,/^}/" "$HERE/../bin/kel" | grep -qE "(^|[^E-])-E([^E]|\$)"'
+# prove the guard bites: turn one -EE back into a single -E in a scratch
+# copy, the same edit this phase would be undone by, and confirm the count
+# guard would now fail.
+sed 's/-EE "'"'"'\$SELF'"'"' board"/-E "'"'"'\$SELF'"'"' board"/' \
+    "$HERE/../bin/kel" > "$WORK/kel-popup-revert"
+ok "  ...and reverting one -EE is caught"  '[ "$(grep -c -- "-EE" "$WORK/kel-popup-revert")" != 4 ]'
+
+# run-shell in kel.conf: tmux only added a -E flag to run-shell (redirect
+# stderr into the stdout run-shell already shows on failure) in 3.6 — this
+# machine's tmux is 3.4, and `tmux source-file` on a -E'd run-shell dies with
+# "unknown flag -E", confirmed live below. That would have broken every key
+# this phase touches on kel's own documented tmux >= 3.0 floor, so the fix
+# actually shipped is the portable equivalent: a literal `2>&1` inside the
+# invoked command, which every tmux back to 3.0 already displays on failure
+# via run-shell's built-in view-mode behaviour — NOT the `-E` flag
+# interface.md's corollary literally names. The snapshot hooks
+# (client-detached, after-split-window, pane-exited) stay fire-and-forget on
+# purpose either way — do not add this to them.
+CONF="$HERE/../tmux/kel.conf"
+KELBINDS=$(grep -n 'run-shell -b .*local/bin/kel ' "$CONF" | grep -v 'kel snapshot')
+ok "kel.conf's 4 foreground key binds exist"           '[ "$(printf "%s\n" "$KELBINDS" | grep -c .)" = 4 ]'
+ok "  ...and all 4 surface run-shell's stderr"          '[ "$(printf "%s\n" "$KELBINDS" | grep -c "2>&1")" = 4 ]'
+ok "  ...but the snapshot hooks stay fire-and-forget"   '! grep -q "kel snapshot.*2>&1" "$CONF"'
+ok "  ...and this config actually sources under tmux"  \
+  'tmux -S "$TMUX_TMPDIR/guard.sock" new-session -d -s guardtest 2>/dev/null
+   rc=0; tmux -S "$TMUX_TMPDIR/guard.sock" source-file "$CONF" 2>/dev/null || rc=$?
+   tmux -S "$TMUX_TMPDIR/guard.sock" kill-server 2>/dev/null
+   [ "$rc" = 0 ]'
+# prove it would NOT source with the literal -E flag interface.md names —
+# this is the "spec turned out wrong" case, kept as a regression guard.
+sed 's/run-shell -b "\(\$HOME[^"]*\)"/run-shell -b -E "\1"/' "$CONF" > "$WORK/kel-conf-dash-E"
+ok "  ...confirmed: a literal -E flag does NOT source on this tmux" \
+  'tmux -S "$TMUX_TMPDIR/guard2.sock" new-session -d -s guardtest2 2>/dev/null
+   rc=0; tmux -S "$TMUX_TMPDIR/guard2.sock" source-file "$WORK/kel-conf-dash-E" 2>/dev/null || rc=$?
+   tmux -S "$TMUX_TMPDIR/guard2.sock" kill-server 2>/dev/null
+   [ "$rc" != 0 ]'
+# prove the stderr-redirect guard bites: drop one 2>&1 in a scratch copy.
+sed 's/kel board 2>&1"/kel board"/' "$CONF" > "$WORK/kel-conf-revert"
+REVERTED=$(grep -n 'run-shell -b .*local/bin/kel ' "$WORK/kel-conf-revert" | grep -v 'kel snapshot')
+ok "  ...and dropping one 2>&1 is caught"  '[ "$(printf "%s\n" "$REVERTED" | grep -c "2>&1")" != 4 ]'
+
+# `"$SELF" …` invocations: bin/kel has 175 legitimate /dev/null probes, so the
+# rule is narrower than "no /dev/null" — no kel surface hides ANOTHER kel
+# subcommand's own output behind one. The board's own fzf used to (the
+# trailing `|| true` already absorbed fzf's exit status, so the redirect was
+# only ever hiding fzf's OWN stderr, plus everything any `become()`'d or
+# `execute()`'d "$SELF" call underneath it printed).
+ok "the board's fzf no longer redirects its own output to /dev/null" \
+  '! awk "/^cmd_board\(\)/,/^}/" "$HERE/../bin/kel" | grep -q ">/dev/null 2>&1"'
+# prove it: put the redirect back in a scratch copy, the same place it lived.
+sed "s/    --color 'footer:italic,border:8' \\\\/    --color 'footer:italic,border:8' \\\\\\n    >\/dev\/null 2>\&1/" \
+    "$HERE/../bin/kel" > "$WORK/kel-redirect-revert"
+ok "  ...and re-adding it is caught" \
+  'awk "/^cmd_board\(\)/,/^}/" "$WORK/kel-redirect-revert" | grep -q ">/dev/null 2>&1"'
+
+section "the preview argument guard (#21) and the once-computed doc (§4b)"
+# cmd_board_kill already got this right; cmd_board_preview did not — under
+# set -u, `local name="$1"` threw "$1: unbound variable" the moment fzf's
+# own {2} expanded empty (a genuinely reachable state, not hypothetical).
+ok "zero arguments: exits 0, no diagnostic"  '_e=$("$KEL" _board_preview 2>&1); [ $? = 0 ] && [ -z "$_e" ]'
+ok "one argument: exits 0, no diagnostic"    '_e=$("$KEL" _board_preview somename 2>&1); [ $? = 0 ]'
+# the two existing checks further down ("the reason is kept" / "the board
+# preview shows it") call `_board_preview name group` with NO docfile — that
+# is cmd_board_preview's fallback path (see there), proving it still works
+# standalone. The board's own fzf binding is the only caller that passes the
+# mktemp'd snapshot as a third argument.
+
+# Navigation verbs leave the board; action verbs come back to it. become() is
+# execve(2) and one-way, which is CORRECT for enter (jump) and ctrl-g (kel go
+# switches the client to another group — returning to a board drawn over a
+# client that just moved is the bug, not the fix). tab/ctrl-n/ctrl-f/ctrl-k
+# act on the fleet and must return with fresh rows. Phase 0 converted ctrl-g
+# by mistake; this guard is why that does not come back.
+BOARD_FZF="$(sed -n '/cmd_board_rows | SHELL/,/--color/p' "$KEL")"
+ok "navigation binds exec away (enter, ctrl-g)" \
+  '[ "$(printf "%s\n" "$BOARD_FZF" | grep -c "enter:become\|ctrl-g:become")" = 2 ]'
+ok "  ...and action binds return to the board"  \
+  '[ "$(printf "%s\n" "$BOARD_FZF" | grep -c "tab:execute\|ctrl-n:execute\|ctrl-f:execute\|ctrl-k:execute")" = 4 ]'
+# ctrl-r reloads the ROWS from live data. Without regenerating the snapshot
+# too, the preview would keep rendering context/cost/land from board-open
+# time beside those fresh rows — invariant 3's failure mode, a stale figure
+# that looks measured.
+ok "ctrl-r regenerates the snapshot, not just the rows" \
+  'grep -q "execute-silent(.*_fleet --land > " "$KEL" && grep -q "refresh-preview" "$KEL"'
+
+# The trap covers every ordinary exit; a popup killed outright skips it and
+# leaks one file per board open. Same shape as the .stash leak prune_state
+# already reaps — and prune_state ignoring a new state file is a bug this repo
+# has shipped once already.
+# NOTE: prune_state is NOT `kel prune` (cmd_prune reaps dead *agents* and never
+# calls it). Its callers are cmd_ls and cmd_attach, so `kel ls` is what drives
+# it here — a naming collision worth knowing before you debug this test.
+touch "$STATE/.board-preview.stale" && touch -t 202501010000 "$STATE/.board-preview.stale"
+touch "$STATE/.board-preview.fresh"
+"$KEL" ls >/dev/null 2>&1 || true
+ok "prune reaps a stale board-preview snapshot"  '[ ! -e "$STATE/.board-preview.stale" ]'
+ok "  ...and leaves a live one alone"            '[ -e "$STATE/.board-preview.fresh" ]'
+rm -f "$STATE/.board-preview.fresh"
+
 section "statusline records context without a live agent"
 reset
 NEW api-gw a
