@@ -1019,11 +1019,22 @@ ok "one argument: exits 0, no diagnostic"    '_e=$("$KEL" _board_preview somenam
 # client that just moved is the bug, not the fix). tab/ctrl-n/ctrl-f/ctrl-k
 # act on the fleet and must return with fresh rows. Phase 0 converted ctrl-g
 # by mistake; this guard is why that does not come back.
+#
+# interface-build.md Phase 1 moved the KEY half of five of these binds into
+# the keymap file (one awk pass in cmd_board), so the literal strings "enter"
+# and "ctrl-g" no longer appear in this block — ${k_jump} and ${k_go} do. The
+# become()-vs-execute() shape this guard actually cares about is unchanged;
+# only where the key comes from moved. The values are checked separately,
+# against the keymap file itself, in the Phase 1 section below.
 BOARD_FZF="$(sed -n '/cmd_board_rows | SHELL/,/--color/p' "$KEL")"
 ok "navigation binds exec away (enter, ctrl-g)" \
-  '[ "$(printf "%s\n" "$BOARD_FZF" | grep -c "enter:become\|ctrl-g:become")" = 2 ]'
+  '[ "$(printf "%s\n" "$BOARD_FZF" | grep -c "k_jump}:become\|k_go}:become")" = 2 ]'
 ok "  ...and action binds return to the board"  \
-  '[ "$(printf "%s\n" "$BOARD_FZF" | grep -c "tab:execute\|ctrl-n:execute\|ctrl-f:execute\|ctrl-k:execute")" = 4 ]'
+  '[ "$(printf "%s\n" "$BOARD_FZF" | grep -c "tab:execute\|k_new}:execute\|k_fleet}:execute\|k_kill}:execute")" = 4 ]'
+# prove the guard still bites after the indirection: become() a key that
+# should execute() (the same mistake Phase 0's own note above records).
+ok "  ...and become()-ing an action key is still caught" \
+  '[ "$(printf "%s" "$BOARD_FZF" | sed "s/k_kill}:execute/k_kill}:become/" | grep -c "k_new}:execute\|k_fleet}:execute\|k_kill}:execute")" != 4 ]'
 # ctrl-r reloads the ROWS from live data. Without regenerating the snapshot
 # too, the preview would keep rendering context/cost/land from board-open
 # time beside those fresh rows — invariant 3's failure mode, a stale figure
@@ -1044,6 +1055,105 @@ touch "$STATE/.board-preview.fresh"
 ok "prune reaps a stale board-preview snapshot"  '[ ! -e "$STATE/.board-preview.stale" ]'
 ok "  ...and leaves a live one alone"            '[ -e "$STATE/.board-preview.fresh" ]'
 rm -f "$STATE/.board-preview.fresh"
+
+section "the keymap becomes a file (Phase 1 — interface-build.md)"
+KEYMAP="$HERE/../cmd/kel-top/keymap.tsv"
+ok "the keymap file exists"                      '[ -f "$KEYMAP" ]'
+BAD_ROWS="$(awk -F'\t' '!/^#/ && $0!="" && NF!=5' "$KEYMAP")"
+ok "  ...and every row has exactly 5 columns"    '[ -z "$BAD_ROWS" ]'
+
+# scope action -> its 3rd dump column (the KEY that dump's own idiom chose).
+dumpkeys_lookup() {   # dump-output  scope  action
+  printf '%s\n' "$1" | awk -F'\t' -v s="$2" -v a="$3" '$1==s && $2==a {print $3}'
+}
+DUMP_BASH="$("$KEL" _dumpkeys)"
+
+# bash reads the same file bin/kel:1626 onward defines — resolved values, not
+# just "a file exists somewhere". These are the exact literals Phase 0's
+# guard above used to hard-code; this is where they actually live now.
+ok "bash resolves jump to enter"                 '[ "$(dumpkeys_lookup "$DUMP_BASH" agent jump)" = enter ]'
+ok "  ...kill to ctrl-k"                         '[ "$(dumpkeys_lookup "$DUMP_BASH" agent kill)" = ctrl-k ]'
+ok "  ...new to ctrl-n"                          '[ "$(dumpkeys_lookup "$DUMP_BASH" agent new)" = ctrl-n ]'
+ok "  ...go to ctrl-g"                           '[ "$(dumpkeys_lookup "$DUMP_BASH" fleet go)" = ctrl-g ]'
+ok "  ...sweep (the ctrl-f gateway) to ctrl-f"   '[ "$(dumpkeys_lookup "$DUMP_BASH" fleet sweep)" = ctrl-f ]'
+# an unknown action fails rather than resolving to something plausible —
+# invariant 3, applied to a lookup instead of a rendered field.
+ok "an unknown action has no bash_key"           '[ -z "$(dumpkeys_lookup "$DUMP_BASH" agent nope)" ]'
+
+# The collision test, written before any UI work touches the keymap — the
+# guard interface-build.md Phase 1 item 5 exists for. It runs directly
+# against the DATA FILE, independent of whether either implementation has
+# wired an action up yet (kel-top's Update() has not, on purpose — Phase 1
+# "does not wire them up"). Nav keys are the ones with a real case in
+# kel-top's Update(): j/k/g/G/s///r/q/esc. `enter` is deliberately excluded
+# from that set and NOT a bug in this guard: main.go has no case for it
+# (confirmed below), and interface.md §5b assigns it to `jump` by design
+# ("Go-to-group is not a per-agent key ... enter covers it"). Any OTHER
+# action claiming a nav key, or claiming enter instead of jump, must still
+# fail — both are checked.
+MAINGO="$HERE/../cmd/kel-top/main.go"
+# Not a plain grep for `case "enter"`: filter mode (m.filtOn) legitimately
+# has one — "enter"/"esc" close the filter box — which is a different
+# question from whether NORMAL mode's switch (the one navigation keys and a
+# future jump bind live in) handles it. That switch starts right after
+# `n := len(m.visible())`, the same anchor used to build `n` inside it.
+ok "enter really is unhandled in kel-top's normal mode today" \
+  '! awk "/n := len\\(m\\.visible\\(\\)\\)/,0" "$MAINGO" | grep -q "case \"enter\""'
+collide() {   # keymap-file-path -> one line per collision found, empty if none
+  awk -F'\t' '
+    !/^#/ && NF==5 {
+      scope=$1; action=$2; key=$3
+      if (scope=="agent") {
+        if (key=="j"||key=="k"||key=="g"||key=="G"||key=="s"||key=="/"||key=="r"||key=="q"||key=="esc") {
+          if (!(action=="jump" && key=="enter")) print "nav-collision: " scope "/" action " -> " key
+        }
+        if (key=="enter" && action!="jump") print "nav-collision: " scope "/" action " -> " key
+      }
+      if (seen[scope,key]++) print "dup-key: " scope "/" key " (" action " and " first[scope,key] ")"
+      else first[scope,key]=action
+    }
+  ' "$1"
+}
+ok "no go_key collides with a navigation key, and no scope reuses one" \
+  '[ -z "$(collide "$KEYMAP")" ]'
+# prove it: interface-build.md names the exact regression — kill on k, in a
+# table where k is cursor-up. A real tab, not a sed \t escape: BSD sed does
+# not interpret \t in the pattern (CLAUDE.md's portability table), so this
+# builds the search/replace strings with the actual byte instead. Written to
+# a scratch copy; the real file is never touched.
+TAB="$(printf '\t')"
+KEYMAP_BAD="$WORK/keymap-kill-k.tsv"
+sed "s/^agent${TAB}kill${TAB}x${TAB}/agent${TAB}kill${TAB}k${TAB}/" "$KEYMAP" > "$KEYMAP_BAD"
+ok "  ...and setting kill to k is caught"        '[[ "$(collide "$KEYMAP_BAD")" == *"agent/kill -> k"* ]]'
+
+# Both implementations expose the same action set (scope+action), read from
+# the same file — the guarantee interface.md §2 actually makes ("both
+# implementations expose the same action set"), not that they share keys
+# (they deliberately do not: §2, "Idioms deliberately differ").
+ACTIONS_FILE="$(awk -F'\t' '!/^#/ && NF==5 {print $1"/"$2}' "$KEYMAP" | sort)"
+ACTIONS_BASH="$(printf '%s\n' "$DUMP_BASH" | awk -F'\t' '{print $1"/"$2}' | sort)"
+ok "bash's dump matches the file (nothing dropped or mangled)" '[ "$ACTIONS_FILE" = "$ACTIONS_BASH" ]'
+# GOBIN_TOP was already built (and its own action-content checked) in the
+# "kel top renders and sorts" section above; reused here rather than built a
+# second time.
+if [ -x "$GOBIN_TOP" ]; then
+  DUMP_GO="$("$GOBIN_TOP" --dump-keys)"
+  ACTIONS_GO="$(printf '%s\n' "$DUMP_GO" | awk -F'\t' '{print $1"/"$2}' | sort)"
+  ok "bash and Go dumps agree on the action set" '[ "$ACTIONS_BASH" = "$ACTIONS_GO" ]'
+  # the go:embed guard the build asked for: kel-top was built from THIS
+  # keymap.tsv (go:embed reads it at compile time), so its embedded copy and
+  # the on-disk file agreeing here is exactly what proves a later edit to
+  # the file WITHOUT a rebuild — install.sh rebuilds every run, but a stray
+  # `go build` skipped, or a dev edit before reinstalling, would not — is
+  # what turns into drift, not silence.
+  ok "  ...Go's embedded copy matches the on-disk file" '[ "$ACTIONS_FILE" = "$ACTIONS_GO" ]'
+  # prove that guard can fail: simulate a file edited after the binary was
+  # built (a row added, in this case) without a rebuild.
+  ACTIONS_FILE_EDITED="$(printf '%s\nfleet/bogus\n' "$ACTIONS_FILE" | sort)"
+  ok "  ...and a file edited after the build is caught" '[ "$ACTIONS_FILE_EDITED" != "$ACTIONS_GO" ]'
+else
+  echo "  skip  (no Go toolchain)"
+fi
 
 section "statusline records context without a live agent"
 reset

@@ -1624,6 +1624,53 @@ cmd_here_actions() {   # [wid name group cwd] — only set when re-entered from 
   cmd_board_actions "$wid" "$name" "$group" "$cwd" here
 }
 
+# ---------------------------------------------------------------------------
+# The keymap file  —  docs/interface.md §6 / §5b-c, interface-build.md Phase 1
+# ---------------------------------------------------------------------------
+# One file, both implementations read it — not generated from Go (this has to
+# work with no Go toolchain installed at all, which is install.sh's whole
+# point) and not hand-duplicated (that was `kel cheat`, and it was wrong about
+# five keys). It lives under cmd/kel-top/ because `go:embed` cannot reach
+# outside its own package's directory — `//go:embed ../keymap.tsv` fails to
+# compile, confirmed against a scratch module, not assumed — so bash reaches
+# the SAME physical file the other way: by walking up from its own resolved
+# path, same shape as cmd_update's $root.
+keymap_file() {
+  local root; root="$(dirname "$(dirname "$(_real_self)")")"
+  printf '%s/cmd/kel-top/keymap.tsv' "$root"
+}
+
+# scope\taction\tgo_key\tbash_key\thelp, comment and blank lines dropped.
+# Never `IFS=$'\t' read` on this — CLAUDE.md's first trap: tab is IFS
+# *whitespace*, so a run of it folds to one delimiter and an empty field
+# shifts everything after it. awk -F'\t' splits on the literal byte instead,
+# which does not fold or drop. This is not a hot path (read at board-open,
+# a handful of times, never per keystroke), so the extra awk fork per lookup
+# is not the cost invariant 5 is about.
+keymap_rows() {
+  local f; f="$(keymap_file)"
+  [ -f "$f" ] || { warn "kel: keymap file missing — expected $f"; return 1; }
+  awk -F'\t' '!/^#/ && NF==5' "$f"
+}
+
+# There is deliberately no per-action lookup helper here. One existed and was
+# called five times from cmd_board, which re-resolved the path and re-scanned
+# the file each time — 48ms onto board open. cmd_board reads all five keys in
+# a single awk pass instead (see there). A helper whose only honest use is
+# "call me once" is not a helper; if a second caller ever needs one key, give
+# it the same one-pass shape rather than reviving this.
+
+# scope\taction\tKEY, the board's OWN idiom's key (bash_key) — not go_key,
+# which kel-top's --dump-keys prints from the same file. The two idioms
+# deliberately do not share keys (interface.md §2: "Idioms deliberately
+# differ" — the board's fzf is a live type-to-filter picker, so a bare letter
+# goes into the query, not to a binding). test/kel-test.sh diffs the
+# (scope,action) columns of both dumps; that agreement, not the key column,
+# is what §2 actually promises.
+cmd_dumpkeys() {
+  keymap_rows | awk -F'\t' '{print $1"\t"$2"\t"$4}'
+}
+
 cmd_board() {
   need tmux; need fzf; need jq
   [ -n "${TMUX:-}" ] || die "kel board runs inside tmux"
@@ -1682,6 +1729,38 @@ cmd_board() {
   [ -n "$preview_doc" ] &&
     rbind="execute-silent($SELF _fleet --land > '$preview_doc')+$rbind+refresh-preview"
 
+  # interface-build.md Phase 1: these five keys come from the keymap file
+  # instead of being hard-coded a second time here — one file, not a mirror
+  # that can drift out from under it. The VALUES are unchanged (enter,
+  # ctrl-k, ctrl-n, ctrl-g, and ctrl-f as the fleet-wide gateway); only where
+  # they come from moved. ctrl-r stays literal below: it reloads, which is a
+  # navigation key like j/k/g/G, not a row in the keymap file.
+  # ONE awk pass, not five separate lookups. Doing it per key
+  # re-resolved _real_self, re-derived the path and re-scanned the whole file:
+  # measured 48ms added to board open, against the ~90ms fleet_json snapshot
+  # this same function computes once precisely so the preview does not pay it
+  # per keystroke. Spending half that back on five reads of a 17-line file is
+  # the shape invariant 5 exists to catch, and it was cheap to not do.
+  # Read one field per LINE, never `IFS=$'\t' read` — CLAUDE.md's first trap.
+  local kmv; kmv="$(keymap_rows | awk -F'\t' '
+    $1=="agent" && $2=="jump"  { j=$4 }
+    $1=="agent" && $2=="kill"  { k=$4 }
+    $1=="agent" && $2=="new"   { n=$4 }
+    $1=="fleet" && $2=="go"    { g=$4 }
+    $1=="fleet" && $2=="sweep" { f=$4 }
+    END { print j; print k; print n; print g; print f }')" || kmv=''
+  local k_jump k_kill k_new k_go k_fleet
+  { read -r k_jump; read -r k_kill; read -r k_new; read -r k_go; read -r k_fleet; } <<KEYMAP
+$kmv
+KEYMAP
+  # An empty fzf --bind key binds nothing to nothing, silently — invariant 3:
+  # an unknown must not render as a plausible-looking default.
+  for _kmk in "$k_jump" "$k_kill" "$k_new" "$k_go" "$k_fleet"; do
+    case "$_kmk" in
+      ''|'-') die "kel: $(keymap_file) is missing a board key the board needs — reinstall, or run kel doctor" ;;
+    esac
+  done
+
   # A `#` comment placed between two `\`-continued lines of the fzf
   # invocation below silently truncates the WHOLE command at that point —
   # confirmed live and the hard way: an earlier explanatory comment sat
@@ -1699,13 +1778,13 @@ cmd_board() {
     --footer 'enter jump · tab actions · ctrl-f dashboard/config/sweep…' \
     --preview "$SELF _board_preview {2} {1} '$preview_doc'" \
     --preview-window 'right,45%,wrap,border-left' \
-    --bind "enter:become($SELF _board_jump {6} {1})" \
+    --bind "${k_jump}:become($SELF _board_jump {6} {1})" \
     --bind "tab:execute($SELF _board_actions {6} {2} {1} {5})+reload($SELF _board_rows)" \
-    --bind "ctrl-g:become($SELF go {1})" \
+    --bind "${k_go}:become($SELF go {1})" \
     --bind "ctrl-r:$rbind" \
-    --bind "ctrl-k:execute($SELF _board_kill {1} {2})+reload($SELF _board_rows)" \
-    --bind "ctrl-n:execute($SELF _ask_new {5})+reload($SELF _board_rows)" \
-    --bind "ctrl-f:execute($SELF _board_fleet)+reload($SELF _board_rows)" \
+    --bind "${k_kill}:execute($SELF _board_kill {1} {2})+reload($SELF _board_rows)" \
+    --bind "${k_new}:execute($SELF _ask_new {5})+reload($SELF _board_rows)" \
+    --bind "${k_fleet}:execute($SELF _board_fleet)+reload($SELF _board_rows)" \
     --color 'footer:italic,border:8' \
     || true
 }
@@ -2180,6 +2259,20 @@ cmd_doctor() {
     printf '  \033[2m·\033[0m %s\n' "fleet reader: bash (build kel-fleet for a faster one)" >&2; r_go=false
   fi
   r_pass=$(probe   "tmux allow-passthrough on"        "tmux/kel.conf sets it — tmux source-file ~/.tmux.conf" bash -c 'tmux start-server \; show -gv allow-passthrough 2>/dev/null | grep -qx on')
+
+  # The keymap file became load-bearing in Phase 1: the board reads its own
+  # bind keys from it, so a missing file is a dead board rather than a
+  # degraded one. That is the right call — an fzf --bind with an empty key
+  # binds nothing to nothing, silently — but a hard dependency with no probe
+  # is how an install goes quiet, which is the thing v0.9's three new probes
+  # were added to stop.
+  # Data rows start at column 0 with a lowercase scope (agent/fleet); every
+  # other line is a `#` comment or blank. Deliberately NOT an awk one-liner
+  # here: this runs through `probe`'s `bash -c`, and the nested quoting needed
+  # to get -F"\t" and && through two levels of shell silently produced a probe
+  # that failed with the file present — caught only by running it.
+  r_keymap=$(probe "the keymap file is readable"      "reinstall, or check cmd/kel-top/keymap.tsv in the clone" \
+    bash -c '[ -r "$1" ] && grep -q "^[a-z]" "$1"' _ "$(keymap_file)")
 
   # install.sh writes the absolute path of the clone it ran from into
   # settings.json. Move or rename that clone and every hook plus the statusLine
@@ -3087,6 +3180,7 @@ main() {
     _board_kill)     cmd_board_kill "$@" ;;
     _board_actions)  cmd_board_actions "$@" ;;
     _board_fleet)    cmd_board_fleet_actions ;;
+    _dumpkeys)       cmd_dumpkeys ;;                    # for tests — interface-build.md Phase 1
     _board_rename)   migrate_meta; cmd_board_rename "$@" ;;
     _ask_new)        migrate_meta; cmd_ask_new "$@" ;;
     _ask_new_wt)     migrate_meta; cmd_ask_new_wt "$@" ;;

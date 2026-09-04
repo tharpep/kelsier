@@ -3,6 +3,7 @@
 //
 //	kel top            interactive  (j/k scroll, s sort, / filter, q quit)
 //	kel top --once     render one frame to stdout and exit
+//	kel top --dump-keys  print the keymap's action set — see keymap.go
 //
 // Read-only by design: it never acts on an agent. The board (Ctrl+Space) owns
 // actions, and keeping that boundary is why this can refresh under you without
@@ -494,8 +495,19 @@ func main() {
 		switch a {
 		case "--once":
 			once = true
+		case "--dump-keys":
+			// Phase 1 (interface-build.md): prove the embedded keymap.tsv
+			// parses and expose its action set for test/kel-test.sh to
+			// diff against bin/kel's _dumpkeys — see keymap.go.
+			rows, err := loadKeymap()
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "kel-top: %v\n", err)
+				os.Exit(1)
+			}
+			fmt.Print(dumpKeys(rows))
+			return
 		case "-h", "--help":
-			fmt.Fprintln(os.Stderr, "usage: kel-top [--once]")
+			fmt.Fprintln(os.Stderr, "usage: kel-top [--once] [--dump-keys]")
 			return
 		default:
 			fmt.Fprintf(os.Stderr, "kel-top: unknown flag %s\n", a)

@@ -18,7 +18,7 @@ comes before any UI work, because everything else forks without it.
   first run; the first draft of this spec bound `k` to kill in a table where `k`
   is cursor-up, and no amount of reading caught it.
 
-**Status.** 0 ☑ · 1 ☐ · 2 ☐ · 3 ☐ · 4 ☐ · 5 ☐
+**Status.** 0 ☑ · 1 ☑ · 2 ☐ · 3 ☐ · 4 ☐ · 5 ☐
 
 **Phase 0 landed 2026-09-04.** Suite 255 → 274. Two corrections it forced back
 into this file: item 3's `-E` does not exist before tmux 3.6 and would have
@@ -26,6 +26,22 @@ broken every key it touched (`backlog.md` #19 has the corrected diagnosis), and
 `ctrl-g` is a navigation verb — it keeps `become()`, like `enter`. Measured: the
 preview dropped ~80ms → ~71ms per cursor move, with a one-time ~90ms at board
 open. The remainder is the deliberately-live `capture-pane`.
+
+**Phase 1 landed 2026-09-04.** Suite 274 → 290. The keymap lives at
+`cmd/kel-top/keymap.tsv` — under the Go package, because `go:embed` cannot
+reach outside its own directory; bash walks up from `_real_self` to the same
+physical file. Three corrections it forced:
+
+- item 5's navigation list named `enter`, which §5b assigns to `jump` — the
+  guard would have rejected the design it exists to protect. It now allows
+  `jump` to claim `enter` and no other action to claim any working nav key.
+- reading the five board keys with one lookup call each added **48ms to board
+  open** — over half the cost of the snapshot Phase 0 introduced for exactly
+  this reason. One awk pass instead: ~15ms. The per-action helper was deleted
+  rather than left as a tempting shim.
+- the keymap became load-bearing (a missing file is a dead board, not a
+  degraded one), so `kel doctor` gained a probe for it. A hard dependency with
+  no probe is how an install goes quiet.
 
 ---
 
@@ -79,6 +95,20 @@ The measurement from item 6 is in the commit message.
 ---
 
 ## Phase 1 — The keymap becomes a file
+
+**Phase 1 landed 2026-09-04.** Suite 274 → 290. One correction the collision
+guard forced back into this file: item 5's nav-key list below reads
+`j k g G s / r q esc enter`, but `enter` is not actually a functioning nav key
+today — `kel-top`'s normal-mode `Update()` has no case for it (only filter
+mode's `enter`/`esc` closes the filter box, a different switch). §5b assigns
+`enter` to `jump` by design ("`enter` currently matches no case and does
+nothing... Go-to-group is not a per-agent key... `enter` covers it"). The
+guard's actual rule, as shipped: no *other* per-agent action may claim a
+working nav key (`j k g G s / r q esc`), and no action but `jump` may claim
+`enter` — both directions are checked and both are proven to fail (see
+`test/kel-test.sh`, "the keymap becomes a file" section). Treating `enter` as
+a plain member of the nav-key set, as item 5 originally read, would make the
+guard reject the very design it exists to protect.
 
 **Goal.** One data file both implementations read. Nothing renders differently
 yet. This is first because every later phase forks the keymap without it.

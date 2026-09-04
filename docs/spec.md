@@ -564,6 +564,7 @@ or `jq` is missing.
 | hooks not disabled by managed settings | `allowManagedHooksOnly` / `disableAllHooks` stop hooks firing while the entries remain, so "wired" alone reads true against a dead install |
 | clone level with its upstream | `kel update` has something to apply |
 | `allow-passthrough on` | Neovim OSC 52 clipboard through tmux |
+| the keymap file is readable | the board reads its own bind keys from `cmd/kel-top/keymap.tsv`; missing means a dead board, not a degraded one |
 
 The upstream probe does **not** fetch. A probe that needs the network is one
 people stop running, so it compares against the last fetch and says that is what

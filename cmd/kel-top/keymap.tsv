@@ -1,0 +1,57 @@
+# kelsier keymap — docs/interface.md §6.
+#
+# One file, both implementations read it. Not generated from Go: bash has to
+# work with no Go toolchain installed at all (install.sh's whole point), so a
+# file "generated" by a binary that by definition might not exist would be
+# the exact fork this table exists to prevent. Not hand-duplicated either —
+# that was `kel cheat`, and it was wrong about five keys.
+#
+# Lives here, under cmd/kel-top/, not at the repo root: `go:embed` cannot
+# reach outside its own package's directory (`//go:embed ../keymap.tsv` is a
+# compile error, confirmed, not assumed). bash reaches this same physical
+# file by repo root instead (see keymap_file() in bin/kel) — one file, two
+# ways in, neither is a copy of the other.
+#
+# go_key is the Go surface's (kel-top's) single-shot key, chosen against the
+# navigation keys that already exist there (j/k/g/G/s// /r/q/esc) — see the
+# collision guard in test/kel-test.sh, which is what makes a repeat of the
+# first `interface.md` draft (kill bound to k, k already meaning cursor-up)
+# a test failure instead of a live bug. `enter` is the one deliberate
+# exception: it currently matches no case in kel-top's Update() (a keypress
+# with no effect), reserved for exactly the row `jump` occupies below.
+#
+# bash_key is the fzf board's OWN idiom, not a mirror of go_key — the board
+# is a live type-to-filter picker, so bare letters go into the query, not to
+# a binding (interface.md §2). "tab" and "prefix-m" name the MENU that reaches
+# an action rather than a dedicated key: tab opens the board's per-agent
+# action list (bin/kel: cmd_board_actions) where move/adopt/relaunch are not
+# offered (they act on "whichever window I was invoked from", which only
+# prefix m's version — cmd_here_actions — actually is); "ctrl-f" is the one
+# key that opens the whole fleet-wide list (cmd_board_fleet_actions) and so
+# is shared by five rows here on purpose (§5a: "ctrl-f mixes both, which is
+# why it reads as too much and not enough simultaneously" — Phase 5 unmixes
+# it). "-" marks an action Phase 1 records but the fallback does not reach
+# yet: update and ls are plain `kel` subcommands with no board path today,
+# and shutdown (#33) does not exist in bash at all yet.
+#
+# This phase wires neither column up. It is data, read by both sides and
+# proven to agree (`--dump-keys` / `_dumpkeys`) — nothing renders differently.
+#
+# scope	action	go_key	bash_key	help
+agent	jump	enter	enter	jump to it
+agent	kill	x	ctrl-k	kill it (confirms)
+agent	rename	c	tab	rename it
+agent	new	n	ctrl-n	new agent in its dir
+agent	worktree	w	tab	new worktree agent there
+agent	move	m	prefix-m	move it to another group
+agent	adopt	a	prefix-m	adopt this window into kel (unmanaged rows only)
+agent	relaunch	l	prefix-m	relaunch it (after a crash)
+fleet	sweep	:sweep	ctrl-f	close agents whose work merged
+fleet	restore	:restore	ctrl-f	rebuild the whole workspace
+fleet	prune	:prune	ctrl-f	forget dead records (closes nothing)
+fleet	doctor	:doctor	ctrl-f	check the machine
+fleet	config	:config	ctrl-f	edit config.toml
+fleet	update	:update	-	pull the clone this kel runs from
+fleet	ls	:ls	-	list every agent
+fleet	go	:go	ctrl-g	go to a group
+fleet	shutdown	:shutdown	-	snapshot, end every group (never removes a worktree)
