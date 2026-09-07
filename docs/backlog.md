@@ -611,12 +611,28 @@ per-agent one.
 **Test.** A guard asserting every action named in `cmd_cheat` alongside a key is
 bound to that key. Prove-can-fail by swapping two key names.
 
-### 25. A malformed record makes an agent vanish from `kel top`  ·  `[defect]`  ·  *open*
+### 25. A malformed record makes an agent vanish from `kel top`  ·  `[defect]`  ·  **fixed, Phase 2** — *the title understated it*
 
-**Error.** `internal/fleet/fleet.go:254-256` drops a record whose JSON fails to
-unmarshal and continues. The agent disappears from the dashboard with no
-indication — a silent omission where invariant 3 requires a distinct display for
-an unknown.
+**Error, as originally written:** Go's `internal/fleet` drops a record whose JSON
+fails to unmarshal and continues, so one agent disappears from the dashboard.
+True, and the smaller half.
+
+**What bash did was worse.** `fleet_json` fed every session file to a single
+`jq --slurpfile`, which aborts on the first bad value in the concatenated
+stream. One truncated record therefore emitted **nothing at all** — not a
+missing agent, an empty document. Reproduced on `3d296cb`:
+`jq: Bad JSON in --slurpfile records`, empty stdout. Everything that reads the
+fleet goes blank at once: the board, `kel ls`, the status line, `kel jump`.
+
+So the title is wrong in two ways — it was not confined to `kel top`, and it was
+not a vanishing *agent*. A single half-written file, which is what a crash
+during a record write leaves behind, blanked the whole tool.
+
+**Fix.** Both sides, per `interface.md`'s "both or neither" rule for anything in
+the shared document: bash validates each file with `jq -e .` before it enters the
+slurp; Go emits a placeholder. Each renders `state: "unreadable"` carrying the
+group and name from the path, and the corrupt record now lives in the bash/Go
+differential fixture so the two cannot diverge on it.
 
 **Surface.** Write a deliberately corrupt record and assert the fleet document
 still accounts for it.

@@ -18,7 +18,18 @@ comes before any UI work, because everything else forks without it.
   first run; the first draft of this spec bound `k` to kill in a table where `k`
   is cursor-up, and no amount of reading caught it.
 
-**Status.** 0 ☑ · 1 ☑ · 2 ☐ · 3 ☐ · 4 ☐ · 5 ☐
+**Status.** 0 ☑ · 1 ☑ · 2 ☑ · 3 ☐ · 4 ☐ · 5 ☐
+
+**Phase 2 landed 2026-09-07.** Suite 290 → 305. Two corrections:
+
+- item 4's `55 / 64 / 76` were computed for the *un*-reordered column order and
+  stated next to an instruction to reorder. The real gates are 59 / 67 / 76, and
+  they are now derived from the column widths so they cannot drift again.
+- **#25 was much worse than its title.** Go dropped one record; bash's
+  `jq --slurpfile` aborted the entire stream, so one truncated session file
+  emitted an empty document and blanked the board, `kel ls`, the bar and
+  `kel jump` together. Both sides fixed, and the corrupt record now sits in the
+  differential fixture. `backlog.md` #25 carries the corrected account.
 
 **Phase 0 landed 2026-09-04.** Suite 255 → 274. Two corrections it forced back
 into this file: item 3's `-E` does not exist before tmux 3.6 and would have
@@ -155,7 +166,11 @@ its own layout.
    no-op message.
 4. **Column thresholds are off by two.** `showLand := w >= 74` against a
    76-column budget draws LAND into space that does not exist at w=74–75. Correct
-   to 55 / 64 / 76. Then apply the §4a preference: LAND outranks CTX and `$`.
+   to **59 / 67 / 76** — and derive them from the column widths rather than
+   writing them down. Then apply the §4a preference: LAND outranks CTX and `$`.
+   (This item first said 55 / 64 / 76, which are correct only for the
+   *un*-reordered order — the numbers and the reorder instruction were computed
+   against different layouts.)
 5. **Delete the false comment** at `main.go:358-360` — "whatever is dropped gives
    its width back to what remains" is untrue; freed width flows only to `wLast`,
    which is already hidden by then.

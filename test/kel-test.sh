@@ -306,6 +306,26 @@ mv "$SESSIONS/api-gw/c.json" "$SESSIONS/api-gw/ghost.json"
 jq '.name="ghost"' "$SESSIONS/api-gw/ghost.json" > "$WORK/g" && mv "$WORK/g" "$SESSIONS/api-gw/ghost.json"
 ok "an orphaned record shows as dead"    '[ "$("$KEL" _fleet | jq -r ".agents[]|select(.name==\"ghost\")|.state")" = dead ]'
 ok "  ...with a null window_id"          '[ "$("$KEL" _fleet | jq -r ".agents[]|select(.name==\"ghost\")|.window_id")" = null ]'
+# #25: a record whose JSON does not even parse must still render, distinctly
+# -- not vanish, and (the worse bug this actually was) not take the rest of
+# the document with it. Before the fix, --slurpfile aborted on the first bad
+# value it hit in the concatenated stream, so this single corrupt file used
+# to zero out every OTHER agent's entry too, not just its own.
+# Forced onto the bash reader, like the empty-fleet checks above: a dev
+# machine that has ever run install.sh has a real kel-fleet sitting at
+# $KEL_FLEET_BIN's default, and this fix needs to be proven against the
+# bash THIS WORKTREE just changed, not whatever Go binary happens to be
+# lying around from a previous install.
+BEFORE_N="$(KEL_FLEET_BIN=/nonexistent "$KEL" _fleet | jq '.agents | length')"
+printf 'not json {{{' > "$SESSIONS/api-gw/garbage.json"
+ok "a corrupt record keeps the other agents" \
+  '[ "$(KEL_FLEET_BIN=/nonexistent "$KEL" _fleet | jq ".agents | length")" = "$((BEFORE_N + 1))" ]'
+ok "  ...and renders itself as unreadable" \
+  '[ "$(KEL_FLEET_BIN=/nonexistent "$KEL" _fleet | jq -r ".agents[]|select(.name==\"garbage\")|.state")" = unreadable ]'
+ok "  ...named from its path, group included" \
+  '[ "$(KEL_FLEET_BIN=/nonexistent "$KEL" _fleet | jq -r ".agents[]|select(.name==\"garbage\")|.group")" = api-gw ]'
+ok "  ...and _fleet still exits 0"       'KEL_FLEET_BIN=/nonexistent "$KEL" _fleet >/dev/null 2>&1'
+rm -f "$SESSIONS/api-gw/garbage.json"
 # An agent that crashes right after SessionStart (idle) used to stay reading
 # "idle" forever: the dead-check only looked at working/waiting/throttled,
 # treating idle as "no signal yet" when it is actually a real one -- SessionStart
@@ -359,6 +379,11 @@ if command -v go >/dev/null 2>&1 && (cd "$HERE/.." && go build -o "$GOBIN_FLEET"
   tmux new-window -d -t '=keltest/api-gw' -n stray 2>/dev/null      # unmanaged
   cp "$SESSIONS/coppermind/sazed.json" "$SESSIONS/coppermind/ghost.json"
   jq '.name="ghost"' "$SESSIONS/coppermind/ghost.json" > "$WORK/g" && mv "$WORK/g" "$SESSIONS/coppermind/ghost.json"
+  # #25, kept in the differential too (item 6: "both sides, or neither" --
+  # bash's --slurpfile and Go's json.Unmarshal fail in unrelated ways, so
+  # only running this through both implementations proves they now agree on
+  # the fix, not just that each one independently stopped crashing).
+  printf 'not json {{{' > "$SESSIONS/api-gw/garbage.json"
   # Warm every index first. The first `git status` in a fresh worktree
   # refreshes .git/index, so whichever implementation runs first can legitimately
   # see a different count from the second — a real source of nondeterminism that
@@ -407,11 +432,124 @@ if command -v go >/dev/null 2>&1 && (cd "$HERE/.." && go build -o "$GOBIN_TOP" .
   ok "triage puts waiting first"           '[[ "$(frame | sed -n 2p)" == *blocked*waiting* ]]'
   ok "  ...working above idle"             '[ "$(frame | grep -n busy | cut -d: -f1)" -lt "$(frame | grep -n idler | cut -d: -f1)" ]'
   ok "shows context and cost"              '[[ "$(frame)" == *"93%"* && "$(frame)" == *"18.70"* ]]'
-  ok "draws the key hints"                 '[[ "$(frame)" == *"j/k scroll"*"q quit"* ]]'
+  ok "draws the key hints"                 '[[ "$(frame)" == *"down"* && "$(frame)" == *"q/esc/ctrl+c quit"* ]]'
+  # Phase 2 / #27: these six were handled and appeared in no hint line.
+  # help.Model renders from keys.go's bindings now, so they come back for
+  # free -- checked individually rather than trusted on the strength of that
+  # claim.
+  ok "  ...g and G, previously undocumented"     '[[ "$(frame)" == *"g top"* && "$(frame)" == *"G bottom"* ]]'
+  ok "  ...r, previously undocumented"           '[[ "$(frame)" == *"r reload"* ]]'
+  ok "  ...esc and ctrl+c, previously undocumented" '[[ "$(frame)" == *"q/esc/ctrl+c quit"* ]]'
+  # backspace only has meaning in filter mode, which --once cannot reach (it
+  # renders one frame with no keys processed) -- checked below instead, in
+  # the interactive tmux pane already needed for the enter no-op test.
   ok "80 cols still fits the table"        '[ "$(frame 80 | head -1 | wc -L)" -le 80 ]'
   ok "50 cols drops columns, not rows"     '[ "$(frame 50 | grep -cE "^.? *(api-gw|coppermind) ")" = 3 ]'
   ok "  ...and stays within 50"            '[ "$(frame 50 | wc -L)" -le 50 ]'
   ok "no trailing whitespace on any row"   '! frame | grep -q " $"'
+
+  # #4/§4a: LAND outranks CTX and $, and the show/hide gates are derived from
+  # the column widths rather than hand-copied -- which is exactly how the
+  # previous numbers (58/66/74 against a 76-column budget) drifted. Proven by
+  # rendering, not by re-deriving the arithmetic a second time here.
+  widths_ok() {
+    local w got
+    for w in 50 55 58 59 60 64 65 66 67 68 74 75 76 77 80 85 90; do
+      got="$(frame "$w" | wc -L)"
+      if [ "$got" -gt "$w" ]; then
+        echo "    overflow: w=$w rendered $got" >&2
+        return 1
+      fi
+    done
+    return 0
+  }
+  ok "width sweep 50-90 never overflows the table" 'widths_ok'
+  ok "  ...and LAND shows before CTX and \$ as it widens" \
+    '[[ "$(frame 60 | head -1)" == *LAND* && "$(frame 60 | head -1)" != *CTX* ]]'
+
+  # #6/#26: header and footer drop before the body is ever asked below one
+  # row. LINES drives this the same way COLUMNS already drives the width
+  # sweep above -- there is no real terminal in this suite either.
+  heights_ok() {
+    local h out n
+    for h in 1 2 3 4; do
+      out="$(COLUMNS=100 LINES="$h" "$GOBIN_TOP" --once 2>/dev/null)"
+      n="$(printf '%s\n' "$out" | awk 'END{print NR}')"
+      if [ "$n" -gt "$h" ]; then
+        echo "    overflow: h=$h rendered $n lines" >&2
+        return 1
+      fi
+    done
+    return 0
+  }
+  ok "height sweep 1-4 never overflows the terminal" 'heights_ok'
+
+  # #3/#27, the bidirectional guard: every key Update() matches is one of
+  # keys.go's bindings (dumped here), and every binding in the dump is one
+  # Update() actually matches -- checked by hand against this literal list
+  # rather than against keys.go itself, so a change to one side without the
+  # other is a real diff, not a tautology.
+  EXPECTED_HELP_KEYS="$(sort <<'EOF'
+normal	k
+normal	up
+normal	j
+normal	down
+normal	g
+normal	home
+normal	G
+normal	end
+normal	s
+normal	/
+normal	r
+normal	enter
+normal	?
+normal	q
+normal	esc
+normal	ctrl+c
+filter	enter
+filter	esc
+filter	backspace
+filter	ctrl+c
+EOF
+)"
+  ACTUAL_HELP_KEYS="$("$GOBIN_TOP" --dump-help-keys | awk -F'\t' '{print $1"\t"$2}' | sort)"
+  ok "the bidirectional help guard (every handled key <-> every documented one)" \
+    '[ "$EXPECTED_HELP_KEYS" = "$ACTUAL_HELP_KEYS" ]'
+  # prove it can fail: drop one binding from the actual side and confirm the
+  # comparison above would have caught it.
+  ACTUAL_MINUS_G="$(printf '%s\n' "$ACTUAL_HELP_KEYS" | grep -v '^normal	g$')"
+  ok "  ...and a missing key would be caught" '[ "$EXPECTED_HELP_KEYS" != "$ACTUAL_MINUS_G" ]'
+
+  # #3: enter now matches a case in normal mode -- an explicit no-op, not a
+  # keypress with no effect and no case to find it in (Phase 2's "must not:
+  # no actions yet" is the reason it stays a no-op). Driven through a real
+  # tmux pane rather than reasoned about, per CLAUDE.md's testing guidance.
+  TWIN="$(tmux new-window -d -P -F '#{window_id}' -t '=keltest/api-gw' -n kt "COLUMNS=100 LINES=24 $GOBIN_TOP")"
+  wait_until "tmux capture-pane -p -t '$TWIN' 2>/dev/null | grep -q GROUP"
+  # The cursor marker exists from the very first frame (on row 0), so waiting
+  # for it to merely be PRESENT races the keypress: it can be satisfied by
+  # the frame rendered before "j" was even processed. Wait for it to move
+  # OFF that first row instead -- a positive, unambiguous signal that "j" has
+  # actually been applied -- before capturing the position enter must not
+  # then change.
+  CUR0="$(tmux capture-pane -p -t "$TWIN" 2>/dev/null | grep -n '›')"
+  tmux send-keys -t "$TWIN" j
+  wait_until "[ \"\$(tmux capture-pane -p -t '$TWIN' 2>/dev/null | grep -n '›')\" != '$CUR0' ]"
+  CUR1="$(tmux capture-pane -p -t "$TWIN" 2>/dev/null | grep -n '›')"
+  tmux send-keys -t "$TWIN" Enter
+  sleep 0.3   # nothing to wait FOR: asserting silence, same idiom as #1's notify test
+  CUR2="$(tmux capture-pane -p -t "$TWIN" 2>/dev/null | grep -n '›')"
+  ok "enter is a genuine no-op in normal mode (#3)" '[ "$CUR1" = "$CUR2" ]'
+  ok "  ...and the program is still running, not crashed" \
+    '[ "$(tmux list-panes -t "$TWIN" -F "#{pane_current_command}" 2>/dev/null)" != bash ]'
+  # backspace was the sixth undocumented key (#27) and only means anything in
+  # filter mode, which --once cannot reach -- this is the one check in this
+  # section that needs the live pane rather than a rendered frame.
+  tmux send-keys -t "$TWIN" /
+  wait_until "tmux capture-pane -p -t '$TWIN' 2>/dev/null | grep -q backspace"
+  ok "backspace, previously undocumented, in filter mode's hints" \
+    '[[ "$(tmux capture-pane -p -t "$TWIN" 2>/dev/null)" == *backspace* ]]'
+  tmux kill-window -t "$TWIN" 2>/dev/null
 else
   echo "  skip  (no Go toolchain)"
 fi
@@ -1085,26 +1223,31 @@ ok "an unknown action has no bash_key"           '[ -z "$(dumpkeys_lookup "$DUMP
 # against the DATA FILE, independent of whether either implementation has
 # wired an action up yet (kel-top's Update() has not, on purpose — Phase 1
 # "does not wire them up"). Nav keys are the ones with a real case in
-# kel-top's Update(): j/k/g/G/s///r/q/esc. `enter` is deliberately excluded
-# from that set and NOT a bug in this guard: main.go has no case for it
-# (confirmed below), and interface.md §5b assigns it to `jump` by design
-# ("Go-to-group is not a per-agent key ... enter covers it"). Any OTHER
-# action claiming a nav key, or claiming enter instead of jump, must still
-# fail — both are checked.
+# kel-top's Update(): j/k/g/G/s///r/q/esc/?. `enter` is deliberately excluded
+# from that set and NOT a bug in this guard: interface.md §5b assigns it to
+# `jump` by design ("Go-to-group is not a per-agent key ... enter covers
+# it"). Any OTHER action claiming a nav key, or claiming enter instead of
+# jump, must still fail — both are checked.
 MAINGO="$HERE/../cmd/kel-top/main.go"
-# Not a plain grep for `case "enter"`: filter mode (m.filtOn) legitimately
-# has one — "enter"/"esc" close the filter box — which is a different
-# question from whether NORMAL mode's switch (the one navigation keys and a
-# future jump bind live in) handles it. That switch starts right after
-# `n := len(m.visible())`, the same anchor used to build `n` inside it.
-ok "enter really is unhandled in kel-top's normal mode today" \
-  '! awk "/n := len\\(m\\.visible\\(\\)\\)/,0" "$MAINGO" | grep -q "case \"enter\""'
+# Phase 1 recorded the opposite of this on purpose ("enter really is
+# unhandled... today") as a dated fact, not a permanent one: Phase 2 item 3
+# was exactly to stop that being true (#27, "a keypress with no effect and no
+# case to find it"). Matched on m.keys.Jump rather than a literal
+# `case "enter"` string because Update() no longer switches on raw strings
+# at all (key.Matches against keys.go's bindings, in both modes) — a plain
+# grep for the old literal would now silently pass for the wrong reason
+# (there is no `case "enter"` ANYWHERE any more, handled or not) instead of
+# actually proving the case exists in NORMAL mode specifically. That switch
+# starts right after `n := len(m.visible())`, the same anchor used to build
+# `n` inside it.
+ok "enter now matches a case in kel-top's normal mode (#3, #27)" \
+  'awk "/n := len\\(m\\.visible\\(\\)\\)/,0" "$MAINGO" | grep -q "m.keys.Jump"'
 collide() {   # keymap-file-path -> one line per collision found, empty if none
   awk -F'\t' '
     !/^#/ && NF==5 {
       scope=$1; action=$2; key=$3
       if (scope=="agent") {
-        if (key=="j"||key=="k"||key=="g"||key=="G"||key=="s"||key=="/"||key=="r"||key=="q"||key=="esc") {
+        if (key=="j"||key=="k"||key=="g"||key=="G"||key=="s"||key=="/"||key=="r"||key=="q"||key=="esc"||key=="?") {
           if (!(action=="jump" && key=="enter")) print "nav-collision: " scope "/" action " -> " key
         }
         if (key=="enter" && action!="jump") print "nav-collision: " scope "/" action " -> " key

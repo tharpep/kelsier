@@ -906,7 +906,24 @@ _fleet_bash() {
   # stdin, and blocks forever on a terminal. /dev/null adds no records to any of
   # the three consumers below.
   local -a rf=(/dev/null)
-  for f in "$SESSIONS_DIR"/*/*.json; do [ -e "$f" ] && rf+=( "$f" ); done
+  # #25: a record that fails to parse must render as a visibly wrong row, not
+  # vanish -- and not take the WHOLE document down with it either, which is
+  # what happened before this loop existed: --slurpfile aborts on the first
+  # bad JSON value it hits in the concatenated stream, so one corrupt file
+  # used to zero out every other agent too. Validate each file on its own
+  # before it goes anywhere near that slurp; a bad one is named from its path
+  # (group/name), the only part of it that survives a parse failure.
+  local unreadable='' grp nm
+  for f in "$SESSIONS_DIR"/*/*.json; do
+    [ -e "$f" ] || continue
+    if jq -e . "$f" >/dev/null 2>&1; then
+      rf+=( "$f" )
+    else
+      grp="${f%/*}"; grp="${grp##*/}"
+      nm="${f##*/}"; nm="${nm%.json}"
+      unreadable="$unreadable$grp	$nm"$'\n'
+    fi
+  done
 
   # dirty is keyed by cwd: it is a property of the directory, not the window
   local dirty=''
@@ -939,6 +956,7 @@ _fleet_bash() {
   jq -n --slurpfile records <(cat "${rf[@]}" 2>/dev/null) \
         --arg wins "$wins" --arg panes "$panes" --arg states "$states" \
         --arg ctxs "$ctxs" --arg dirtyraw "$dirty" --arg landraw "$land" \
+        --arg unreadableraw "$unreadable" \
         --arg prefix "$KEL_PREFIX" --arg cur_sess "$cur_sess" --arg cur_wid "$cur_wid" '
     def rows($s): ($s // "") | split("\n") | map(select(length > 0) | split("\t"));
     def num: (tonumber? // null);
@@ -950,6 +968,7 @@ _fleet_bash() {
 
     rows($wins) as $W | rows($panes) as $P | rows($states) as $S
     | rows($ctxs) as $C | rows($dirtyraw) as $DR | rows($landraw) as $LR
+    | rows($unreadableraw) as $U
     | (reduce $P[]  as $p ({}; .[$p[0]] += [$p[1]]))  as $panemap
     | (reduce $S[]  as $s ({}; .[$s[0]] = {state:$s[1], since:($s[2]|num),
         note:(if ($s[3] // "") == "" then null else $s[3] end)}))  as $statemap
@@ -999,6 +1018,18 @@ _fleet_bash() {
               compactions:($r.compactions // null),
               dirty:($dirtymap[($r.cwd // "")] // null),
               land:($landmap[($r.cwd // "")] // null),
+              panes:[], activity:null, context:null } ]
+      # #25: a record that failed to parse renders as a visibly wrong row,
+      # not vanish. group/name come from the path -- the only part of it
+      # that survives a parse failure -- and every other field is null, the
+      # same shape the no-live-window agent above uses.
+      + [ $U[]
+          | { group:.[0], name:.[1], window_id:null, index:null,
+              current:false, managed:true,
+              state:"unreadable", state_since:null, note:null,
+              isolation:null, branch:null, repo:null, cwd:null,
+              agent:null, claude_session:null, compactions:null,
+              dirty:null, land:null,
               panes:[], activity:null, context:null } ]
     | { generated_at:(now|todate),
         current:{ group:(if $cur_sess == "" then null else groupof($cur_sess) end),

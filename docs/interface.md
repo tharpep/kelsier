@@ -1,8 +1,11 @@
 # kelsier — the interface
 
-**Status:** design, not built. Written 2026-09-01, corrected 2026-09-04 after a
-cold review found three of its factual claims wrong. Corrections are marked
-where they changed a conclusion, not silently folded in.
+**Status:** written 2026-09-01; corrected 2026-09-04 after a cold review found
+three of its factual claims wrong, and again as each phase reached the code.
+Corrections are marked where they changed a conclusion, not silently folded in —
+this document has been wrong in every phase so far, and the record of *how* is
+worth more than a clean read. Phases 0–2 of `interface-build.md` are built;
+3–5 are not.
 
 Supersedes `spec.md` §5b. `spec.md` still owns the substrate, the record format
 and the state model; this file owns everything the user touches.
@@ -112,7 +115,13 @@ Two real defects found in the same block, neither previously recorded:
 
 - **Off-by-two.** `showLand := w >= 74` (`main.go:363`) against a 76-column
   budget. At w=74–75 LAND is drawn into space that does not exist. Correct
-  thresholds are 55 / 64 / 76.
+  thresholds, once §4a's reorder puts LAND ahead of CTX and `$`, are
+  **59 / 67 / 76** — verified by rendering, not by arithmetic. (This file first
+  said 55 / 64 / 76, which are the gates for the *un*-reordered column order;
+  stating a fix and a reorder together, computed against different orders, is
+  the kind of error that only shows up when someone builds it.) They are now
+  derived from the column widths in code rather than written down, so the
+  numbers cannot drift from the layout again.
 - **A false comment.** "Whatever is dropped gives its width back to what
   remains" (`main.go:358-360`) is untrue: freed width flows only into `wLast`,
   and by the time anything drops, `showLast` is already false. It goes nowhere.
@@ -272,6 +281,17 @@ fleet       sweep     :sweep   ctrl-f     tear down finished agents
 - Go binds via `key.Binding` built from this file; footer and `?` render from it.
 - bash binds its `ctrl-*` column and prints the same file for `?`.
 - both expose a dump so a guard can compare action sets (§2).
+
+**The file holds actions, not navigation** — a distinction Phase 2 found and
+this section originally missed. `j`/`k`/`g`/`G`/`s`/`/`/`r`/`q` are `kel top`'s
+own movement keys; the fzf board gets its navigation from fzf itself, so there
+is no bash counterpart for them to stay in sync *with*. Putting them in a shared
+file would mean maintaining a column only one reader ever consults. They live in
+`cmd/kel-top/keys.go` as one `key.Binding` struct that both `Update()` and the
+help view read, so the drift this section exists to prevent is still closed —
+just by a second mechanism rather than the file. The one crossing is `enter`:
+its key is reserved in the file's `agent/jump` row, so its *help text* comes
+from there rather than being written twice.
 
 `kel cheat` stops being a page; the command survives only as "print this file."
 

@@ -1,9 +1,10 @@
 // kel-top is the fleet dashboard: one read-only view of every agent, sorted
 // so the row that needs you is always at the top.
 //
-//	kel top            interactive  (j/k scroll, s sort, / filter, q quit)
-//	kel top --once     render one frame to stdout and exit
-//	kel top --dump-keys  print the keymap's action set — see keymap.go
+//	kel top                 interactive  (j/k scroll, s sort, / filter, ? help, q quit)
+//	kel top --once          render one frame to stdout and exit
+//	kel top --dump-keys     print the keymap's action set — see keymap.go
+//	kel top --dump-help-keys  print the navigation keymap's key set — see keys.go
 //
 // Read-only by design: it never acts on an agent. The board (Ctrl+Space) owns
 // actions, and keeping that boundary is why this can refresh under you without
@@ -17,6 +18,8 @@ import (
 	"strings"
 	"time"
 
+	"charm.land/bubbles/v2/help"
+	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
 	"github.com/tharpep/kelsier/internal/fleet"
 )
@@ -238,6 +241,8 @@ type model struct {
 	height   int
 	ctxWarn  float64
 	quitting bool
+	keys     keys
+	help     help.Model
 }
 
 type tickMsg time.Time
@@ -286,16 +291,15 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, refresh()
 
 	case tea.KeyPressMsg:
-		k := msg.String()
 		if m.filtOn {
-			switch k {
-			case "enter", "esc":
+			switch {
+			case key.Matches(msg, m.keys.FilterDone):
 				m.filtOn = false
-			case "backspace":
+			case key.Matches(msg, m.keys.FilterBack):
 				if len(m.filter) > 0 {
 					m.filter = m.filter[:len(m.filter)-1]
 				}
-			case "ctrl+c":
+			case key.Matches(msg, m.keys.FilterQuit):
 				m.quitting = true
 				return m, tea.Quit
 			default:
@@ -308,31 +312,39 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		n := len(m.visible())
-		switch k {
-		case "q", "esc", "ctrl+c":
+		switch {
+		case key.Matches(msg, m.keys.Quit):
 			m.quitting = true
 			return m, tea.Quit
-		case "j", "down":
+		case key.Matches(msg, m.keys.Down):
 			if m.cursor < n-1 {
 				m.cursor++
 			}
-		case "k", "up":
+		case key.Matches(msg, m.keys.Up):
 			if m.cursor > 0 {
 				m.cursor--
 			}
-		case "g", "home":
+		case key.Matches(msg, m.keys.Top):
 			m.cursor = 0
-		case "G", "end":
+		case key.Matches(msg, m.keys.Bottom):
 			m.cursor = n - 1
-		case "s":
+		case key.Matches(msg, m.keys.Sort):
 			m.mode = (m.mode + 1) % 3
 			sortAgents(m.agents, m.mode, time.Now().Unix())
 			m.cursor = 0
-		case "/":
+		case key.Matches(msg, m.keys.Filter):
 			m.filtOn = true
 			m.filter = ""
-		case "r":
+		case key.Matches(msg, m.keys.Reload):
 			m.reload()
+		case key.Matches(msg, m.keys.ToggleHelp):
+			m.help.ShowAll = !m.help.ShowAll
+		case key.Matches(msg, m.keys.Jump):
+			// #3/#27: an explicit no-op, not a keypress with no effect and
+			// no case to find it in. Phase 2 changes what this surface
+			// SAYS, not what it does (interface-build.md "Phase 2 ...
+			// must not: no actions yet") -- the real jump is Phase 4
+			// (interface.md §5b), reusing this same binding.
 		}
 	}
 	return m, nil
@@ -346,31 +358,42 @@ func (m model) render() string {
 	rows := m.visible()
 	now := time.Now().Unix()
 
-	// fixed columns, then LAST OUTPUT gets whatever is left
+	// fixed columns, then LAST OUTPUT gets whatever is left. Column order
+	// is GROUP AGENT STATE FOR LAND CTX $ (interface.md §4a): LAND moved
+	// ahead of CTX and $ because it names an action, where a dollar figure
+	// names something already spent.
 	const (
 		wGroup = 10
 		wAgent = 14
 		wState = 11
 		wFor   = 6
+		wLand  = 11
 		wCtx   = 7
 		wCost  = 8
-		wLand  = 11
 	)
-	// Column priority as the window narrows. LAND outranks LAST OUTPUT
-	// deliberately: it names an action, where a truncated prompt string mostly
-	// does not. Whatever is dropped gives its width back to what remains.
-	showCtx := w >= 58
-	showCost := w >= 66
-	showLand := w >= 74
-	fixed := 2 + wGroup + 1 + wAgent + 1 + wState + 1 + wFor + 1
+	// Show/hide gates are derived from the column widths, not hand-copied
+	// numbers -- that hand-copying is exactly how the previous version drifted
+	// (showLand:=w>=74 against a budget that actually needed 76: two columns'
+	// worth of space that did not exist got drawn into). Each gate is "the
+	// fixed width needed once everything up to and including this column is
+	// shown", so turning a column on can never cost more than the terminal
+	// actually has.
+	base := 2 + wGroup + 1 + wAgent + 1 + wState + 1 + wFor + 1
+	gateLand := base + wLand + 1
+	gateCtx := gateLand + wCtx + 1
+	gateCost := gateCtx + wCost + 1
+	showLand := w >= gateLand
+	showCtx := w >= gateCtx
+	showCost := w >= gateCost
+	fixed := base
+	if showLand {
+		fixed += wLand + 1
+	}
 	if showCtx {
 		fixed += wCtx + 1
 	}
 	if showCost {
 		fixed += wCost + 1
-	}
-	if showLand {
-		fixed += wLand + 1
 	}
 	wLast := w - fixed
 	showLast := wLast >= 12
@@ -378,25 +401,42 @@ func (m model) render() string {
 	var b strings.Builder
 	hdr := "  " + pad("GROUP", wGroup) + " " + pad("AGENT", wAgent) + " " +
 		pad("STATE", wState) + " " + pad("FOR", wFor)
+	if showLand {
+		hdr += " " + pad("LAND", wLand)
+	}
 	if showCtx {
 		hdr += " " + pad("CTX", wCtx)
 	}
 	if showCost {
 		hdr += " " + pad("$", wCost)
 	}
-	if showLand {
-		hdr += " " + pad("LAND", wLand)
-	}
 	if showLast {
 		hdr += " " + "LAST OUTPUT"
 	}
-	b.WriteString(dim + strings.TrimRight(truncate(hdr, w), " ") + reset + "\n")
+
+	// #26: header and footer used to print unconditionally while only the
+	// body was clamped to a minimum of one row, so a 1- or 2-row terminal
+	// overflowed it. Drop the footer first, then the header, before the
+	// body is ever asked to shrink below one row.
+	showHeader, showFooter := true, true
+	body := m.height - 3 // header + blank line + footer
+	if body < 1 {
+		showFooter = false
+		body = m.height - 1 // header only
+		if body < 1 {
+			showHeader = false
+			body = m.height
+			if body < 1 {
+				body = 1
+			}
+		}
+	}
+
+	if showHeader {
+		b.WriteString(dim + strings.TrimRight(truncate(hdr, w), " ") + reset + "\n")
+	}
 
 	// window the rows to the space we have
-	body := m.height - 3
-	if body < 1 {
-		body = 1
-	}
 	if m.cursor < m.top {
 		m.top = m.cursor
 	}
@@ -424,6 +464,14 @@ func (m model) render() string {
 		}
 		line := marker + pad(a.Group, wGroup) + " " + pad(a.Name, wAgent) + " " +
 			col + pad(st, wState) + reset + " " + pad(forCol, wFor)
+		if showLand {
+			lt, lc := landCell(a.Land)
+			if lc != "" {
+				line += " " + lc + pad(lt, wLand) + reset
+			} else {
+				line += " " + pad(lt, wLand)
+			}
+		}
 		if showCtx {
 			c := "-"
 			cc := ""
@@ -453,14 +501,6 @@ func (m model) render() string {
 			}
 			line += " " + pad(c, wCost)
 		}
-		if showLand {
-			lt, lc := landCell(a.Land)
-			if lc != "" {
-				line += " " + lc + pad(lt, wLand) + reset
-			} else {
-				line += " " + pad(lt, wLand)
-			}
-		}
 		if showLast {
 			out := ""
 			if a.WindowID != nil {
@@ -471,15 +511,41 @@ func (m model) render() string {
 		b.WriteString(tidy(line) + "\n")
 	}
 
-	// footer
-	foot := fmt.Sprintf("j/k scroll   s sort: %s   / filter   q quit", m.mode)
-	if m.filtOn {
-		foot = "filter: " + m.filter + "▌   enter/esc done"
-	} else if m.filter != "" {
-		foot = fmt.Sprintf("filter %q (%d/%d)   s sort: %s   / refilter   q quit",
-			m.filter, len(rows), len(m.agents), m.mode)
+	if !showFooter {
+		return strings.TrimSuffix(b.String(), "\n")
 	}
-	b.WriteString("\n" + dim + truncate("  "+foot, w) + reset)
+
+	// footer: a plain label plus help.Model's own rendering of m.keys
+	// (keys.go) -- the same bindings Update() matches against, so a key
+	// cannot appear here without being handled, or be handled without
+	// appearing here. `?` toggles the short/full view.
+	label := fmt.Sprintf("sort: %s", m.mode)
+	if m.filtOn {
+		label = "filter: " + m.filter + "▌"
+	} else if m.filter != "" {
+		label = fmt.Sprintf("filter %q (%d/%d)   sort: %s", m.filter, len(rows), len(m.agents), m.mode)
+	}
+	const indent, sep = "  ", "   "
+	avail := w - len([]rune(indent)) - len([]rune(label)) - len([]rune(sep))
+	if avail < 1 {
+		avail = 1
+	}
+	m.help.SetWidth(avail)
+	var helpTxt string
+	if m.filtOn {
+		helpTxt = m.help.View(filterHelp(m.keys))
+	} else {
+		helpTxt = m.help.View(normalHelp(m.keys))
+	}
+	// help.Model's own SetWidth truncation is best-effort: its ellipsis check
+	// only fires while the running total is still comfortably under budget,
+	// so a narrow `avail` (found by rendering the width sweep, not by reading
+	// this) can walk straight past it and print everything anyway. Styles are
+	// zeroed in main() so helpTxt carries no ANSI, which is what makes a
+	// plain rune truncate a safe backstop here.
+	helpTxt = truncate(helpTxt, avail)
+	foot := strings.TrimRight(indent+dim+label+reset+sep+helpTxt, " ")
+	b.WriteString("\n" + foot)
 	return b.String()
 }
 
@@ -506,8 +572,20 @@ func main() {
 			}
 			fmt.Print(dumpKeys(rows))
 			return
+		case "--dump-help-keys":
+			// Phase 2: the bidirectional guard's data half. Same shape as
+			// --dump-keys above but for the navigation bindings in keys.go,
+			// which have no bash-side counterpart — test/kel-test.sh diffs
+			// this against a hand-kept expected set instead.
+			rows, err := loadKeymap()
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "kel-top: %v\n", err)
+				os.Exit(1)
+			}
+			fmt.Print(dumpHelpKeys(newKeys(helpTextFor(rows, "agent", "jump"))))
+			return
 		case "-h", "--help":
-			fmt.Fprintln(os.Stderr, "usage: kel-top [--once] [--dump-keys]")
+			fmt.Fprintln(os.Stderr, "usage: kel-top [--once] [--dump-keys] [--dump-help-keys]")
 			return
 		default:
 			fmt.Fprintf(os.Stderr, "kel-top: unknown flag %s\n", a)
@@ -515,7 +593,20 @@ func main() {
 		}
 	}
 
-	m := model{mode: sortTriage, ctxWarn: 70, width: 100, height: 24}
+	rows, err := loadKeymap()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "kel-top: %v\n", err)
+		os.Exit(1)
+	}
+	m := model{
+		mode: sortTriage, ctxWarn: 70, width: 100, height: 24,
+		keys: newKeys(helpTextFor(rows, "agent", "jump")),
+		help: help.New(),
+	}
+	// Plain, not styled: render() applies its own `dim` to the whole footer
+	// and, more importantly, needs the truncate() backstop below to be safe
+	// against ANSI, which only holds if help.Model's own output carries none.
+	m.help.Styles = help.Styles{}
 	if v := os.Getenv("KEL_CTX_WARN"); v != "" {
 		var n float64
 		if _, err := fmt.Sscanf(v, "%f", &n); err == nil {
@@ -529,6 +620,12 @@ func main() {
 			fmt.Sscanf(w, "%d", &m.width)
 		}
 		m.height = len(m.agents) + 4
+		// LINES lets the test suite drive the 1-4 row height sweep (#26)
+		// without a real terminal — COLUMNS above is the same idea, already
+		// relied on by the width sweep.
+		if h := os.Getenv("LINES"); h != "" {
+			fmt.Sscanf(h, "%d", &m.height)
+		}
 		fmt.Println(m.render())
 		return
 	}

@@ -246,14 +246,18 @@ func Load(o Options) Doc {
 	}
 
 	var records []record
+	var unreadable []string // sessions/<group>/<name>.json that failed to parse — #25
 	for _, f := range globSorted(filepath.Join(sessionsDir, "*", "*.json")) {
 		b, err := os.ReadFile(f)
 		if err != nil {
+			unreadable = append(unreadable, f)
 			continue
 		}
 		var r record
 		if json.Unmarshal(b, &r) == nil {
 			records = append(records, r)
+		} else {
+			unreadable = append(unreadable, f)
 		}
 	}
 	recGroup := func(r record) string {
@@ -379,6 +383,19 @@ func Load(o Options) Doc {
 			a.Land = lands[*r.Cwd]
 		}
 		agents = append(agents, a)
+	}
+
+	// #25: a record that fails to parse must render as a visibly wrong row,
+	// not vanish — invariant 3 (never report a guess as a fact; an unknown
+	// gets its own distinct display). group/name come from the path, the
+	// only part that survives a parse failure; every other field is null,
+	// the same shape the "no live window" agent above uses.
+	for _, f := range unreadable {
+		agents = append(agents, Agent{
+			Group: filepath.Base(filepath.Dir(f)),
+			Name:  strings.TrimSuffix(filepath.Base(f), ".json"),
+			State: sp("unreadable"), Managed: true, Panes: []string{},
+		})
 	}
 
 	cur := Current{}

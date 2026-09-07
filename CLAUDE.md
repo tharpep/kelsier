@@ -206,6 +206,13 @@ with nothing in kel to assert against. Re-breaking an `unguarded` one is silent.
   back with `+reload(...)`. A `become()`'d command also inherits fzf's own
   descriptors, which is how `>/dev/null 2>&1` on the fzf call silenced every
   action reachable from the board.
+- `[guarded]` **`jq --slurpfile` aborts the whole stream on one bad file.** It is not
+  per-record: a single truncated `sessions/*.json` — what a crash mid-write
+  leaves — made `fleet_json` emit *nothing*, blanking the board, `kel ls`, the
+  bar and `kel jump` at once. Validate each file (`jq -e .`) before it enters the
+  slurp. Go's `json.Unmarshal` fails per-record instead, so the two
+  implementations degrade differently on the same input and only the
+  differential catches it.
 - `[unguarded]` **`prune_state` is not `kel prune`.** `cmd_prune` reaps dead
   *agents*; `prune_state` reaps orphaned state files and is called from `cmd_ls`
   and `cmd_attach`. A test that drives `kel prune` to exercise `prune_state`
