@@ -90,7 +90,7 @@ had already answered.
 ### Step 4 — the sidebar  ·  *next, being planned*
 
 Not started. To be planned in conversation before any code; the questions it
-has to answer first are in `spec.md` §5c. A draft order, for that discussion:
+it had to answer first are decided in `spec.md` §5c. A draft order:
 
 1. **The fleet document learns every pane** — kind (agent / server / shell,
    from the process), cwd, and git position per worktree (branch,

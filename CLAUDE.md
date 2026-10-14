@@ -295,7 +295,7 @@ fleet reader). Go is now required.
 **Next is step 4, the sidebar — and it is planned in conversation before any
 code.** The layout is decided — a sidebar pane in every window, measured
 against the `swap-pane` alternative in `spec.md` §5b. `rollout.md` § v0.10 has
-a draft order and `spec.md` §5c the questions still open. Do not start building
+a draft order and `spec.md` §5c the decisions made so far. Do not start building
 on the strength of the draft.
 
 Bubble Tea is **v2** (`charm.land/bubbletea/v2`, `View() tea.View`,

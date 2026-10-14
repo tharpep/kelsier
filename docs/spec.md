@@ -200,18 +200,18 @@ full-screen program's grid (`src/main/ipc/pty/ipc/resize-visibility.ts`,
 `stablyai/orca`). **Never resize a pane you are not showing, and show a layout
 where it already is** — which is exactly what a sidebar per window does.
 
-### 5c. Still open — for the step-4 planning
+### 5c. Decided in the step-4 planning (2026-10-14)
 
-- **Groups.** Whether sessions-per-repo survive, now that the sidebar groups by
-  repo itself. One session for everything would make `select-window` the only
-  navigation verb.
-- **The panel's form.** A real pane (stays open while you work, costs width in
-  every window) or a `display-popup` (no layout cost, modal).
-- **Sidebar width** — fixed, or remembered per user; it must be the same in
-  every window or switching will look like it jumps.
-- **Idle and wake** — hook vs control mode, measured for the cost of each.
-- **Restore** — rebuilds windows and splits as today, then adds the sidebar
-  pane to each; the `.restoring` lock must cover the hooks that adds.
+| question | decision |
+|---|---|
+| groups | **one `kel` tmux session for everything.** The sidebar groups by repo → worktree from each pane's directory; sessions-per-repo would only duplicate that and make navigation two-level. `group` stays in the records as the repo label (no format change); `.kel/group` keeps working as a display grouping; restore merges old per-repo sessions into the one |
+| the panel | **a `display-popup` first** (~90%) for `yazi`, `lazygit`, plan and tasks — no layout cost, nothing resizes. A pinned right-hand pane only if the popup gets reopened constantly |
+| sidebar width | **fixed, 32 columns by default**, `sidebar_width` in config, identical in every window. Hide/show applies to every window at once and resizes the user's panes, so it is a rare gesture |
+| idle and wake | **hook-driven.** Hidden sidebars sleep; `session-window-changed` wakes the shown one; it refreshes when kel's state hooks fire, plus a slow fallback poll. Control mode only if this proves insufficient |
+| restore | **rebuild windows and splits as today, then add a sidebar to each, under the existing `.restoring` lock.** Snapshots skip `@kel-sidebar` panes, so a restore cannot duplicate them. The author found the old restore hard to work with — the rebuild is a chance to simplify it, not just extend it |
+| scope | **only kel's session.** Panes in other tmux sessions are not part of the workspace |
+| focus | **one key to focus the sidebar** (`prefix Space` proposed); `enter` jumps to the selected pane, `esc` returns where you were; mouse clicks work. `` prefix ` `` is unchanged |
+| keys | `j`/`k` move · `enter` jump · `/` filter · `n` new agent · `w` new worktree agent · `x` kill (kill-safety intact) · `r` rename · `f` files · `g` git · `p` plan/tasks · `?` help. All in the footer, none deeper than one key |
 
 ---
 
