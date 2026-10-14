@@ -1,7 +1,9 @@
 # kel — usage
 
-`kel` is one command. `tmux` does the multiplexing underneath; you rarely type
-`tmux` directly any more.
+The reference for what exists **today**. kel is mid-pivot (v0.10, see
+`rollout.md`): the old board and menus are gone and the sidebar that replaces
+them is not built yet, so for now kel is the commands below, the status bar,
+`kel top` and jump-to-blocked.
 
 ## Install
 
@@ -11,14 +13,20 @@ tmux source-file ~/.tmux.conf     # pick up kel.conf changes
 # first install only: restart running Claude sessions so they load the hooks
 ```
 
-`install.sh` symlinks `bin/kel` to `~/.local/bin`, makes `~/.tmux.conf` source
-`tmux/kel.conf`, and merges the 7 state hooks + the `statusLine` into
-`~/.claude/settings.json`. **`./install.sh --uninstall` reverses all of it** —
-symlinks, completions, the `~/.tmux.conf` line, the `~/.zshrc` fpath line and
-the `settings.json` merge, restoring any `statusLine` kel displaced. It leaves
-`~/.local/state/kel` alone, because uninstalling the tool must not be able to
-lose your work; `--uninstall --purge` removes that too, after asking
-(non-clobbering, idempotent — a `.kel-bak.<epoch>` copy is kept each run).
+Needs `tmux` ≥ 3.0, `jq`, `git` and **Go** — `install.sh` builds `kel-fleet`
+and `kel-top` and fails if it cannot. It symlinks `bin/kel` into
+`~/.local/bin`, makes `~/.tmux.conf` source `tmux/kel.conf`, and merges the
+state hooks and the `statusLine` into `~/.claude/settings.json`, keeping the
+newest three backups of each file it edits.
+
+**`./install.sh --uninstall` reverses all of it**, restoring any `statusLine`
+kel displaced, and leaves `~/.local/state/kel` alone — uninstalling must not be
+able to lose work. `--uninstall --purge` removes that too, after asking.
+
+**Upgrading from v0.9:** a running tmux server keeps the old bindings
+(`Ctrl+Space`, `prefix b`, `prefix m`, `prefix k`) until it restarts —
+`source-file` adds bindings, it does not remove them. `tmux kill-server` (after
+`kel snapshot`) or unbind them by hand.
 
 ## Commands
 
@@ -32,346 +40,155 @@ kel new <name> --no-agent      just make the window, don't start the agent
 kel new <name> --agent CMD     run CMD instead of `claude`
 kel kill <name>        close the window; remove the worktree if it was one
 kel kill <name> -f     ...even with uncommitted / unpushed work
-kel ls [--json]        list every agent, grouped by repo (state, context %, cost)
-                       --json emits the fleet document: {generated_at, current,
-                       agents:[...]}.  v0.6 changed this from a bare array —
-                       the list is now under .agents
-kel go [<group>]       switch to a group  (no arg: list the groups)
-kel move [<group>]     change THIS agent's group
-kel adopt [<group>]    make THIS window a kel agent — a plain `prefix c`
-                       window, your editor, lazygit. With no group, both use
-                       the repo the PANE is standing in, else $KEL_GROUP,
-                       else `misc`
-kel rename <newname>   rename THIS window and keep its metadata record in sync
-kel board              browse agents AND panes — your editor, lazygit, a shell;
-                       enter jumps to the pane itself  (Ctrl+Space
-                       or prefix b).  enter jumps; tab = act on the highlighted
-                       agent (jump / new here / rename / go to group / kill)
+kel ls [--json]        every agent, grouped by repo (state, context %, cost);
+                       --json is the fleet document {generated_at, current, agents}
+kel rename <newname>   rename THIS window and keep its record in sync
+kel top                every agent, sorted so the one needing you is first —
+                       state, time in state, LAND, context, cost, last output.
+                       j/k scroll, s sort, / filter, q quit   (prefix t)
 kel sweep [-n] [-f]    close out every finished agent whose branch has landed;
-                       reports anything dirty, unpushed or unmerged instead of
-                       touching it. -n shows what it would do
-kel top                the fleet dashboard (also prefix t) — every agent, sorted
-                       with a LAND column naming what each branch still needs
-                       (dirty / unpushed / behind / no PR / in review / merged)
-                       by who needs you. j/k scroll, s cycles sort
-                       (triage/ctx/cost), / filters, q quits. Needs the Go
-                       build; `kel doctor` says whether you have it
-kel relaunch [name]    relaunch ONE crashed agent in its existing window (-f to
-                       force while something is still running there)
+                       anything dirty, unpushed or unmerged is reported, never
+                       touched. -n shows the plan first
+kel relaunch [name]    relaunch ONE crashed agent in its existing window
 kel restore [-c] [-s]  rebuild the workspace after a kill / reboot
                        (-c resume conversations; -s force the snapshot)
 kel prune [-f]         discard dead agent records (and their worktrees)
-kel doctor             probe the machine, cache to ~/.local/state/kel/doctor.json
+kel doctor             check the machine; every failure prints its fix
+kel config             edit config.toml (seeded from the example, once)
 kel update             fast-forward the clone kel runs from, then re-run
-                       install.sh. Refuses on a dirty tree, a detached HEAD, a
-                       branch with no upstream, or a non-fast-forward — the
-                       clone is usually a checkout you also work in
+                       install.sh. Refuses on a dirty tree, detached HEAD,
+                       no upstream, or a non-fast-forward
 ```
 
-Internal (wired into tmux / Claude Code, you won't call these):
-`kel status-line [group]`, `kel jump`, `kel snapshot`, `kel cheat`,
-`kel hook <EVENT>`, `kel statusline`, `kel _board_*`. `kel menu` is a deprecated alias for
-`kel board` — kept one release for muscle memory.
+Internal (wired into tmux / Claude Code): `kel status-line`, `kel jump`,
+`kel snapshot`, `kel hook <EVENT>`, `kel statusline`, `kel _fleet`.
 
-**What you have actually reached for.** `kel _usage` prints a count per
-subcommand, from a log kel appends to on each command you run — epoch and name
-only, never arguments. Hot paths and background work are excluded, so it is
-gestures rather than noise. `usage = "off"` records nothing. Both the counter
-and `_usage` are scaffolding for the prune pass and go away with it.
+**Removed in v0.10:** `kel board` / `kel menu`, `kel cheat`, `kel go`,
+`kel move`, `kel adopt`, `kel _usage`. Use `prefix g` (tmux's session tree) to
+switch groups until the sidebar lands.
 
-**What kel writes, and where.** Everything lives in
-`${XDG_STATE_HOME:-~/.local/state}/kel/`, which kel keeps at mode `0700` — the
-records carry repo paths, branch names and Claude session ids, and a
-`<window>.state` file carries Claude Code's notification text, which is the
-agent quoting a command back at you.
+## Keys
 
-**What leaves the machine.** One call, `gh api repos/<slug>/pulls`, and only
-from `kel sweep`. It never fires for a repo whose `origin` is not on
-`github.com`, and `pr = "off"` disables it outright — `land` then runs on local
-git alone, which still answers dirty / unpushed / merged / behind. kel makes no
-other network call and never sends anything to an agent API: it does not wrap
-Claude Code, so your code reaches Anthropic by exactly the path it would from a
-bare terminal.
+`prefix` is `Ctrl+b`.
 
-**Shell completion.** `install.sh` drops a bash completion into
-`~/.local/share/bash-completion/completions/kel` and a zsh one on the zsh
-`fpath` (`~/.local/share/zsh/site-functions/_kel`, plus an `fpath+=` line in
-`~/.zshrc` if that file exists — run `compinit` or restart the shell).
-`kel kill <TAB>` completes agent names; `kel go <TAB>` / `kel move <TAB>`
-complete group names.
+| | |
+|---|---|
+| `` prefix ` `` | jump to the next agent **waiting** on you — any group |
+| `prefix t` | `kel top` |
+| `prefix g` | pick a group (tmux session tree) |
+| `prefix 1..9` / `n` / `p` / `w` | move between agents in the group (native tmux) |
+| `prefix ,` | rename this window (routes through `kel rename`) |
+| `prefix \|` / `-` | split, keeping the current directory |
+| `prefix [` | scroll mode for a shell pane (`q` to leave) |
+| mouse wheel | scroll an agent's conversation (mapped to PageUp/Down) |
+| `prefix d` | detach — agents keep running; `kel` to return |
 
-Settings live in `~/.config/kel/config.toml`, overridden by a per-repo
-`.kel/config.toml`, overridden by the env vars below. **`kel config`** opens it
-in `$VISUAL`/`$EDITOR` (falling back to `nvim`/`vim`/`vi`/`nano`, whichever is
-on `$PATH`), seeding it from `examples/config.toml` the first time — every key
-arrives commented out, with its default, ready to uncomment. Before v0.9 this
-file had no path into it from inside the tool at all: no `--help` line, no
-mention in the cheat sheet, nothing. Env knobs: `KEL_NOTIFY` (states worth interrupting you for, default `waiting`;
-e.g. `"waiting dead"`), `KEL_NOTIFY_CMD` (a command taking title + body — see
-`setup.md`; kel always does a `tmux display-message` regardless),
-`KEL_CTX_WARN` (context % at which the bar starts showing it, default `70`),
-`KEL_BOARD_W` / `KEL_BOARD_H` (board popup size),
-`KEL_GROUP` (force every `kel new` into one group — see below; a `.kel/group`
-file pins a directory and everything under it, for monorepos that don't split
-on git root, and `KEL_GROUP` still outranks it),
-`KEL_SESSION` (session-name prefix, default `kel`), `KEL_AGENT` (default
-`claude`), `KEL_WORKTREES` (default `<repo>/../.kel-worktrees`),
-`KEL_RESTORE_CMDS` (pane commands to re-run on restore).
+`kel.conf` also turns on the mouse (to select text, hold Shift while you drag),
+counts windows from 1, and labels each pane.
 
-## The model — groups
+## Groups — for now
 
-**A group is a tmux session.** `kel/api` — the group *is* `api`, there's no
-separate layer; the `group` field in the metadata just records which one a
-window belongs to.
+**A group is a tmux session**, `kel/<group>`, and by default a group is a repo:
+`kel new` reads `$PWD` at that moment and uses the git root's basename. `--group
+G` or `$KEL_GROUP` override it; a `.kel/group` file pins a directory and
+everything under it (`$KEL_GROUP` still wins). Non-repo agents go to `misc`.
 
-**By default a group is a repo.** `kel new` reads `$PWD` *at that moment*,
-walks up to the git root, and uses its basename: `~/code/api` → group `api` →
-session `kel/api`. `--group G` overrides; non-repo agents fall into `misc`.
-That's the only moment the group is chosen — kel never watches your `cd`.
+The sidebar groups by repo on its own, so sessions-per-group may not survive
+the pivot (`spec.md` §5b).
 
-**Want one flat workspace instead?** `export KEL_GROUP=work` in `~/.bashrc` —
-now every `kel new` lands in `kel/work` no matter the repo, so `prefix 1-9`
-reaches every agent like plain tabs. `kel new x --group foo` still peels one
-off into its own group when you want that.
+**window vs pane:** `kel new` makes a **window** — one agent. `prefix | / -`
+makes a **pane** inside it, for your own editor, shell or tests. kel tracks
+state per window, so a second agent belongs in its own window.
 
-**Monorepos.** One git root = one default group, so every service in a monorepo
-lands together. Split them with `kel new checkout-svc --group payments` per
-agent, or `export KEL_GROUP=payments` in the shell you work that service from.
-(A per-directory `.kel/group` file is on the backlog — only if this bites.)
-
-**Outside a repo**, `kel new` / `kel move` fall into a `misc` group and say so;
-pass `--group NAME` (or `kel move NAME`) to name it something real.
-
-**Relocating a window** — `cd` to another repo in a shell pane, run `kel move`;
-the window (agent and all) hops into that repo's group and you follow it,
-nothing restarts. `kel move <group>` for an explicit target.
-
-**Adopting a window** — `kel adopt` (or `prefix m` → `a`) makes a window kel
-does not track into a managed agent, in place or in a group you name. That is
-what a hand-made `prefix c` window needs, and what the board's unmanaged pane
-rows are asking for. Until v0.9 this was a silent fallback inside `kel move`,
-reachable only if you happened to run the wrong command on the right window;
-`move` now refuses and points here.
-
-**window vs pane vs group:**
-- `kel new <name>` → a new **window** (tab) = a new agent. The kel way to add one.
-- `prefix | / -` → a new **pane** (split) inside a window — for *your* stuff
-  (editor, shell, tests), not agents. kel tracks state per window, so a
-  second agent belongs in its own window.
-- a **group** is decided when you run `kel new` — from your directory's git
-  root (or `--group` / `KEL_GROUP`), once. kel does not watch `cd`; a window
-  never changes group on its own.
-
-- The status bar shows only the current group's windows, plus `⟨api·1 web·2⟩`
-  naming the other groups that have agents blocked on you. Inside a group: native `prefix 1-9` / `n` / `p`
-  / `w`.
-- Between groups: native `prefix (` / `)` cycle, `prefix g` group tree,
-  `kel go <group>`, or the board (`Ctrl+Space`) → `enter` (jump) / `tab` → "go
-  to its group".
-- `` prefix ` `` (jump to next **waiting** agent) is **global** — it crosses
-  group boundaries. That's the point of it: go to whoever's blocked, not to a
-  specific group.
-- `kel` (bare, from a shell) is **directory-aware**, like `claude`: run inside a
-  repo, it attaches that repo's group — or, if nothing is running there yet,
-  starts an agent for it (`kel new <repo>`) and drops you in. `KEL_GROUP`
-  overrides the target. Run it outside any repo and it falls back to your last
-  group. (After a reboot the snapshot-rebuild prompt still takes priority.)
-
-**Status line.** The group you're in, in full, plus a badge for the rest:
+## The status bar
 
 ```
-[api] 0:auth-fix? [1:rate-limit*] 2:docs   ⟨infra·1 web·2⟩
+[api-gw] 1:auth-fix? [2:rate-limit·91%*] 3:docs   ⟨infra·1 web·2⟩
 ```
 
-`?` waiting on you · `*` working · `!` done · `x` = the agent process died
-without a clean exit (SIGKILL / OOM / crash — `kel kill` or `kel relaunch` it) · bare =
-idle · `[ ]` = current window · `⟨infra·1 web·2⟩` = other groups with agents
-blocked on you, busiest first, capped at three then `+N` (hit `` ` `` to reach
-them). In a non-kel tmux session the bar shows a compact
-`[kel] N agents · M waiting`.
+`?` waiting on you · `*` working · `!` done · `~` throttled (waiting on quota,
+resumes itself) · `x` dead (the process exited without a clean stop — `kel
+relaunch` or `kel kill` it) · bare = idle · `[ ]` current window · `·91%`
+context, shown from `KEL_CTX_WARN` (default 70) up · `⟨…⟩` other groups with
+agents blocked on you. If `kel-fleet` is missing the bar says so in red rather
+than going blank.
 
-The `x` / `dead` state is a read-time check, not a hook: if the record says
-`working` / `waiting` but the window's only process is a bare shell, the agent
-is gone. It still shows on the board so you can act on it.
+## Detach, kill, reboot
 
-**Managed vs unmanaged.** `kel new` writes a metadata record — and so do both
-menu paths' "new agent here" now (they route through `kel new`). Only tmux's
-own `prefix c` makes an *unmanaged* window: still state-tracked, shown in
-`kel ls` as `(unmanaged)`, and `kel kill` on it just closes the window (adopt it
-into kel with **`kel adopt`**). State is keyed by window id, so two windows may even
-share a name.
-
-## Detach vs kill
-
-**`prefix d` detaches** — the group and every agent keep running; `kel`
-reattaches you. Round-trips perfectly; agents survive a full tmux detach.
-
-**Killing** a group (`prefix &` on its last window, `tmux kill-session`)
-ends its agent processes. `kel ls` then shows it as `dead`; `kel new` reclaims
-the record, `kel kill` / `kel prune` discard it.
-
-**A reboot / crash** takes down everything. kel snapshots the whole workspace —
-every group, window, pane layout, and per-pane directory — on detach and
-whenever the shape changes (`~/.local/state/kel/snapshot.json`, with one
-generation kept as `snapshot.json.prev`). Starting `kel` with no live workspace
-offers to rebuild it: **y** rebuilds, **n** starts fresh and won't ask again for
-that snapshot, **d** discards the saved workspace. A new snapshot is a new
-question, so `n` never hides a workspace you actually have. The next time
-you run `kel` it offers to rebuild it:
+**`prefix d` detaches** and snapshots; every agent keeps running and `kel`
+brings you back. **Killing** a session ends its agents; `kel ls` then shows
+them `dead`. **After a reboot**, `kel` offers to rebuild the whole workspace —
+every group, window, split and directory, agents resumed by session id:
 
 ```
 kel rebuild your workspace? 3 group(s), 9 window(s)  [Y/n]
 ```
 
-Yes → every group, window, and split comes back in place, agents resumed
-(`--resume <session-id>`), your editor / lazygit panes re-launched. `kel
-restore` does the same non-interactively; `kel restore -s` forces the snapshot
-even if some sessions are still live.
-
-Plain `prefix d` detaches and snapshots in one step (the `client-detached`
-hook) — there is no separate key. Agents keep running; `kel` brings you back to
-your last group.
+**n** starts fresh and will not ask again for that snapshot; **d** discards
+it. `kel restore` does the same non-interactively.
 
 ## Isolation
 
-`inplace` (default) — the agent edits your actual checkout. Right for most
-tasks. `kel ls` shows this as **`repo`** in the WHERE column; `inplace` is the
-word stored on disk, kept so the record format does not change.
+`inplace` (default, shown as **`repo`**) — the agent edits your checkout.
+`-w` — a linked worktree on a new branch, so two agents can work one repo. kel
+then runs the repo's **`.kel/setup`** if present (env `$KEL_REPO`,
+`$KEL_WORKTREE`), which must only create gitignored paths: anything git would
+report as a change makes `kel kill` refuse. Example in `examples/kel-setup`.
 
-`--worktree` — a linked git worktree on a new branch, so two agents can work the
-same repo without colliding. kel then runs the repo's **`.kel/setup`** if
-present:
+`kel kill` and `kel prune` also clean up git's own worktree record when the
+directory was deleted by hand.
 
-```
-.kel/setup      # executable, runs in the new worktree
-                # env: $KEL_REPO (origin repo)  $KEL_WORKTREE (this path)
-```
+## Settings
 
-Use it to install deps / copy `.env` / warm caches. **It must only create
-gitignored paths** — anything it leaves that git would report as a change makes
-`kel kill` refuse to remove the worktree (the point: kel never deletes an
-agent's only copy of real work — commit & push, or `-f`). Full example in
-`examples/kel-setup`.
+`~/.config/kel/config.toml`, overridden by a per-repo `.kel/config.toml`,
+overridden by an exported `KEL_*` env var. `kel config` opens it, seeded from
+`examples/config.toml`, which lists every key with its default. The ones you
+are likely to want: `notify` (states worth interrupting you for), `notify_cmd`
+(a desktop-notification command — `setup.md` has recipes), `ctx_warn`, `pr =
+"off"` (no network call at all), `worktrees`, `restore_cmds`.
 
-**If you delete a worktree directory by hand** (`rm -rf`, a file manager) —
-don't; `kel kill` is what removes it — `kel kill` and `kel prune` still clean
-up git's own worktree record for it (v0.9: they used to skip that step
-whenever the directory was already gone, which left the branch permanently
-locked — "used by worktree" — until someone ran `git worktree prune`
-themselves).
+## What kel writes, and what leaves the machine
 
-## Keys
+Everything lives in `${XDG_STATE_HOME:-~/.local/state}/kel/`, mode `0700`:
 
-`kel.conf` also turns on the mouse (click a pane to focus, drag borders to
-resize, wheel to scroll — **to select text, hold Shift while you drag**, since
-mouse mode owns a plain drag), counts windows from 1, and labels each pane.
-**window = a tab, one per agent; pane = a split inside a window; group = one
-tmux session per repo.**
+- `sessions/<group>/<name>.json` — one record per managed agent
+- `<window-id>.state` — state from the hooks, including Claude Code's
+  notification text (the agent quoting a command back at you)
+- `<window-id>.ctx` — context, cost and model from `kel statusline`
+- `snapshot.json` (+ `.prev`), `doctor.json`, `last-group`, `pr-cache/`,
+  `.stash/`
 
-`prefix` is `Ctrl+b`. Four keys carry the whole tool:
+Field layouts are in `CLAUDE.md` under *The on-disk contract*.
 
-- **`` prefix ` ``** — jump to whoever's waiting on you (any group)
-- **`Ctrl+Space`** (or `prefix b`) — the board, and the hub for everything
-  else (v0.9). `enter` jumps to the highlighted agent; `tab` opens a labelled
-  menu to *act* on it (jump / new here / new worktree / rename / go to its
-  group / kill); `ctrl-f` opens a SECOND menu that is not about any one
-  agent — the dashboard, `kel config`, and sweep/restore/prune/doctor. Before
-  v0.9 the board could only ever select an agent; those five commands lived
-  solely in `prefix k`, with no relation to the highlighted row.
-- **`prefix m`** — the exact same per-agent menu as the board's `tab`, for
-  whichever window you're standing in, without opening the board first — plus
-  three items that only make sense standing in the window they act on: move
-  to a group, adopt (if it isn't a kel agent yet), relaunch after a crash.
-- **`prefix k`** — `kel cheat`, the full keybinding + command reference.
-  Before v0.9 this was an action menu; every item in it turned out to already
-  be reachable elsewhere (a native tmux default, an existing kel binding, or
-  now `ctrl-f` / `prefix m`), so it reverted to being what its own "show me
-  around" item already pointed at.
-
-| | |
-|---|---|
-| `Ctrl+Space` / `prefix b` | the board — filter, preview; `enter` jump, `tab` agent actions, `ctrl-f` fleet actions |
-| `prefix m` | the board's `tab` menu, for wherever you're standing, plus move / adopt / relaunch |
-| `prefix 0..9` / `n` / `p` / `w` | move between agents in the group |
-| `` prefix ` `` | jump to the next agent **waiting** on you — any group |
-| `prefix g` / `prefix (` `)` | pick / cycle groups |
-| `prefix ,` | rename this window (routes through `kel rename`) |
-| `prefix k` | `kel cheat` — this reference |
-| `prefix [` | tmux scroll mode for a shell pane (`q` to leave) |
-| mouse wheel / PgUp PgDn | scroll an agent's conversation (kel maps the wheel to PageUp/Down) |
-| `prefix \|` / `-` | split a window (agent + editor); arrows or click to focus; `z` zoom |
-| `prefix d` | detach — agents keep running; `kel` to return |
-
-## State files
-
-`~/.local/state/kel/`
-- `<window-id>.ctx` — written by `kel statusline` from the JSON Claude Code
-  hands its status-line command. This is how kel knows an agent's context usage
-  and cost **without interrupting it** — no `/context`, no reading the
-  transcript. The bar shows `·NN%` only from `KEL_CTX_WARN` (default 70) up;
-  `kel ls`, `--json` and the board preview always show it. Pruned with the
-  window.
-- `<window-id>.state` — written by the hooks, pruned when the window is gone
-- `sessions/<group>/<name>.json` — one record per kel-managed agent. Keyed by
-  group *and* name, so two repos can both have a `docs` agent; disambiguate on
-  the command line with `kel kill <group>/<name>`.
-- `last-group` — the group `kel` bare reattaches to
-- `.stash/<claude-session-id>` — pane id from SessionStart, for hooks that don't
-  inherit `$TMUX_PANE`
-- `doctor.json` — last `kel doctor` result
-
-The field layout of `.ctx` and `.state` is in `CLAUDE.md` under *The on-disk
-contract*. Both are positional formats, so they live in one place.
+**One network call**, `gh api repos/<slug>/pulls`, and only from `kel sweep`
+(the `--pr` path). Never for a repo whose `origin` is not on `github.com`,
+never for one whose work is still uncommitted or unpushed, and never with `pr =
+"off"`. Nothing else leaves the machine; kel does not wrap Claude Code.
 
 ## Claude Code's own row
 
 `install.sh` wires `kel statusline` as Claude Code's `statusLine`, so this row
-appears in **every** Claude Code session on the machine, kel or not. Inside a
-kel window it is prefixed with the agent's group and name; everywhere else that
-slot shows the repo the payload reports.
+appears in **every** Claude Code session on the machine:
 
 ```
 tharpep/kelsier@auth-fix · opus-5[1m] fast xhigh · ███░░░░░░░ 25% ctx · $31.90 · 5h 74% (39m)
 ```
 
-Everything past the model is conditional, so the common row stays short:
-
 | segment | appears when |
 |---|---|
 | `owner/name@worktree` | outside a kel window, and the payload names a repo |
 | `fast` `xhigh` `no-think` | those modes are not at their defaults |
-| `250k/1M` after the bar | context is at `KEL_CTX_WARN` (default 70) or above |
+| `250k/1M` after the bar | context is at `KEL_CTX_WARN` or above |
 | `$N.NN` | cost is non-zero |
 | `5h` / `7d` / `spend` + reset | that quota is at 50% or above |
 | an agent name | the session was started with `claude --agent` |
 
-`ctx ?` in place of the bar means the context window has not been measured yet —
-Claude Code reports it as unknown before the first reply and again right after
-`/compact`. It is not the same as `0%`, and kel will not overwrite a recorded
-figure with it.
-
-**Subagent cost is not in this row.** Task-tool subagents report through a
-separate `subagentStatusLine` setting, and neither payload exposes a per-subagent
-dollar figure, so a main-plus-subagents total cannot be computed. The `$` shown
-is whatever Claude Code attributes to this session.
-
-Events → states: `SessionStart`→idle, `UserPromptSubmit`→working,
-`Notification`→waiting, `Stop`→done, `SessionEnd`→cleared.
+`ctx ?` means not measured yet (before the first reply, and right after
+`/compact`) — not `0%`. Subagent cost is not in this row; no payload exposes it.
 
 ## Known limits
 
-- **Two agents side by side in one window.** It works — both run fine — but
-  kel's state tracking is per *window*, so the status bar shows one state for
-  the pair and `kel jump` treats them as one. `kel ls` shows
-  `auth (claude|claude)` so at least it's visible. One agent per window is the
-  model; genuine first-class side-by-side agents would need state keyed by pane.
+- **Two agents in one window** run fine, but state is per window, so the bar
+  shows one state for the pair.
 - **Restored panes run a fresh shell** unless the command was an agent or on
-  the `KEL_RESTORE_CMDS` allowlist (nvim, lazygit, htop, …). Set
-  `KEL_RESTORE_CMDS` to extend it.
-
-## Migrating from the flat session (pre-v0.2)
-
-The old single `kel` session keeps working. Its records get a `group` field
-(from the repo) on the next `kel` command; the live windows stay put until you
-kill / recreate them, and new `kel new` calls create per-repo sessions. The old
-`kel` group drains on its own over a few days.
+  `restore_cmds` (nvim, lazygit, htop, …).

@@ -1,8 +1,14 @@
 # kelsier — working notes for agents
 
-`kel` is a terminal workspace for running several coding agents at once. `tmux`
-does the multiplexing; `kel` does the bookkeeping. One bash script, one tmux
-config fragment, one installer. No runtime, no build.
+`kel` is a terminal workspace for running several coding agents at once, and
+for seeing what each one is doing, where, and to what — the views an IDE gives
+you, in the terminal. `tmux` does the multiplexing; `kel` does the bookkeeping.
+Go for everything that reads or renders; bash for the hooks, the installer, and
+the mutating commands until they move.
+
+**kel is mid-pivot (v0.10).** The old interface — an fzf board, two menus and a
+cheat sheet — was deleted; an Orca-shaped sidebar replaces it and is being
+designed. `v0.9.0` is the tag for the old design.
 
 Read `docs/spec.md` for the design and `docs/rollout.md` for the build order and
 current status. **`rollout.md` is the source of truth for what to work on next.**
@@ -18,12 +24,14 @@ to verify a change, and the traps that have already cost time.
 This is about **the agent's interface**, not kel's. kel must never wrap Claude
 Code, proxy its API calls, inject prompts, or manage its context — an agent in a
 kel window is byte-identical to one in a bare terminal. kel's *own* interface
-(the board, the status bar, `kel top`) is explicitly in scope and worth
-investing in; it is what makes the tool get used. Do not cite the line above as
-an argument against improving kel's own UX.
+(the sidebar, the status bar, `kel top`) is explicitly in scope and is the whole
+point of the pivot. Do not cite the line above as an argument against improving
+kel's own UX.
 
 Non-goals, held firm: not a harness, not a terminal, not a multiplexer, not a
-file manager, not a daemon, not cloud-anything, not a team tool. `docs/spec.md`
+file manager / editor / git client (kel *opens* `yazi`, `$EDITOR` and `lazygit`
+in the right place, it never reimplements them), not a daemon, not
+cloud-anything, not a team tool. `docs/spec.md`
 §2 has the full list and `docs/backlog.md` has a *Rejected* section with
 rationale — check it before proposing a feature, several good-sounding ideas are
 already ruled out there.
@@ -40,17 +48,17 @@ The tree is self-describing. These relationships are not.
 
 | | |
 |---|---|
-| `bin/kel` | the whole tool, and the permanent fallback for every Go surface |
-| `cmd/kel-fleet` | a port of `bin/kel`'s `_fleet_bash`. The suite asserts the two emit an identical document; a disagreement is a failure, not a curiosity |
-| `cmd/kel-top` | **Go only, no fallback.** `kel top` dies without the binary instead of degrading. Do not assume it mirrors `kel-fleet` |
+| `bin/kel` | the hooks, the statusline adapter, and the mutating commands (`new`, `kill`, `restore`, `sweep`…) until they move to Go. No longer reads the fleet itself |
+| `cmd/kel-fleet` | **the only fleet reader** since v0.10. `bin/kel`'s `fleet_json` runs it and fails loudly without it — there is no bash fallback any more |
+| `cmd/kel-top` | `kel top`, and the seed of the sidebar |
 | `internal/fleet` | the fleet document, shared by both Go binaries |
-| `install.sh` | merges into `~/.claude/settings.json` with jq, non-clobbering, and backs it up. Every line it writes outside this repo has an inverse in `--uninstall` |
+| `install.sh` | requires Go and builds both binaries. Merges into `~/.claude/settings.json` with jq, non-clobbering, keeping the newest three backups. Every line it writes outside this repo has an inverse in `--uninstall` |
 | `docs/rollout.md` | **start here.** The source of truth for what to work on next — `spec.md` section numbers are not a build order |
 | `docs/backlog.md` | candidates, each with a *gate*: the specific pain that unlocks it. Its *Rejected* section rules several good-sounding ideas out already |
 
 `bin/kel` is `cmd_<name>` functions with a `main` dispatcher at the bottom.
-Internal subcommands are `_`-prefixed (`_board_rows`, `_fleet`, …) and are wired
-into tmux or fzf, never typed by hand. Helpers are plain snake_case
+Internal subcommands are `_`-prefixed (`_fleet`, `_cfgdump`) and are wired into
+tmux or the tests, never typed by hand. Helpers are plain snake_case
 (`ctx_field`, `resolve_pane`, `si_units`) — the `_` prefix means "dispatcher
 entry", not "private", so a new helper that takes one reads as a subcommand that
 isn't.
@@ -60,9 +68,9 @@ isn't.
 ## The on-disk contract
 
 State lives in `${XDG_STATE_HOME:-~/.local/state}/kel/`. **This format is the
-interface**, not the language — the Go migration (rollout § v0.6) depends on
-both implementations reading and writing it identically. Changing it is a
-breaking change; migrate old records in `migrate_meta`.
+interface**, not the language — bash writes most of it and Go reads it, and a
+desktop app may one day read it too (spec §12c). Changing it is a breaking
+change; migrate old records in `migrate_meta`.
 
 | path | contents |
 |---|---|
@@ -73,7 +81,7 @@ breaking change; migrate old records in `migrate_meta`.
 | `.restoring` | lockfile held during a restore (see Invariants) |
 | `.stash/<claude-session-id>` | pane id from `SessionStart`, for hooks with no `$TMUX_PANE` |
 | `doctor.json`, `last-group` | cached probe results, last-used group |
-| `usage.log` | `<epoch> <subcommand>` per user gesture — scaffolding for the prune pass, delete it with that card |
+| `pr-cache/<owner>__<repo>.json` | PR list from `gh`, plus `.at` with the fetch epoch |
 
 **The directory is `0700`.** The records carry repo paths, branch names and
 Claude session ids, and `<window-id>.state` carries Claude Code's notification
@@ -85,11 +93,12 @@ text — the agent quoting a command back at you, greps and file paths included.
 State is keyed by **window id**, metadata by **group + name**. tmux auto-names
 every `claude` window `claude`, so name-keyed state would collide.
 
-**Read it through `fleet_json`, never by re-deriving.** `kel _fleet [--dirty]`
-turns all of the above into one JSON document, and `ls` / `--json` / the board /
-`status-line` are each a `jq` over it. Adding a field means adding it there
-once. This replaced `gather_rows`, whose 13 positional TSV fields caused three
-bugs. It is also the contract the Go `kel-fleet` must match.
+**Read it through `fleet_json`, never by re-deriving.** `kel _fleet [--dirty]
+[--land] [--pr]` — that is, `kel-fleet` — turns all of the above into one JSON
+document, and `ls` / `--json` / `status-line` / the completions / `kel top` all
+read it. Adding a field means adding it there once, in Go. The sidebar will need
+more (every pane, its process, git position per worktree); it goes into the
+document, not into the sidebar.
 
 ### Agent states
 
@@ -109,11 +118,13 @@ column exists rather than a trailing sentence.
 
 | # | invariant | kind | what actually proves it |
 |---|---|---|---|
-| 1 | **`kel kill` must never destroy the only copy of work.** Refuses on uncommitted or unpushed changes in a worktree, shows what is at risk, `-f` overrides. The one unforgivable bug in this category of tool — treat any change near it with suspicion. | partial | `"a dirty worktree is refused"` greps the output for `refusing` and counts windows. **"Shows exactly what is at risk" is unguarded** — nothing checks the message names the files. |
-| 2 | **A restore must not be able to eat its own snapshot.** Rebuilding panes fires kel's own `after-split-window` / `pane-exited` hooks, which run `kel snapshot` in the background. `restore_from_snapshot` takes the `.restoring` lockfile and reads a private `mktemp` copy. The lock is a **file, not an env var** — the hooks spawn a fresh `kel` from the tmux server, which inherits nothing. | guarded | three real restore cycles diff `snapshot.json` before and after; separately, a fresh lock is proven to block a `kel snapshot` write and a stale or unparseable one is proven not to. |
-| 3 | **Never report a guess as a fact.** A dead agent must not read `working`; an expired `gh` token must not render as "no PR"; an unknown value gets its own distinct display, never a plausible-looking default. | partial | dead-not-working and null-context-not-`0%` are both asserted. **The `gh` clause this invariant names is unguarded** — only "no remote" and "`gh` absent" are covered, never "token fails against a real remote". |
-| 4 | **kel never sends keys into an agent pane** except the initial launch command, and never splits, resizes or re-points a user's panes. | prohibition | nothing, deliberately. "Never, across a whole codebase" is not establishable by one integration run; it holds by reviewing the `send-keys` call sites, of which there are five (launch, restore's pane replay, twice in relaunch). |
-| 5 | **Hot paths stay cheap.** `kel statusline` runs on a 300 ms debounce and is cancelled if it overruns; `kel status-line` runs on every bar redraw. One `jq` pass, one atomic write, and only call `refresh-client -S` when the rendered value actually changed. | ⚠ unguarded | nothing. `"...but hot paths are not counted"` sounds like this and is not: it asserts only that hot-path commands skip `usage.log`. `refresh-client` appears nowhere in the suite. |
+| 1 | **`kel kill` must never destroy the only copy of work.** Refuses on uncommitted or unpushed changes in a worktree, names what is at risk, `-f` overrides. The one unforgivable bug in this category of tool — treat any change near it with suspicion. When `kill` moves to Go, its tests move first. | guarded | `"a dirty worktree is refused"` checks the refusal, that the window survives, and `"...and names the file at risk"` that the path is in the message. |
+| 2 | **A restore must not be able to eat its own snapshot.** Rebuilding panes fires kel's own `after-split-window` / `pane-exited` hooks, which run `kel snapshot` in the background. `restore_from_snapshot` takes the `.restoring` lockfile and reads a private `mktemp` copy. The lock is a **file, not an env var** — the hooks spawn a fresh `kel` from the tmux server, which inherits nothing. The workspace design (`swap-pane`, a holding session) will add hook traffic; re-check this then. | guarded | three real restore cycles diff `snapshot.json` before and after; a fresh lock is proven to block a write and a stale or unparseable one is proven not to. |
+| 3 | **Never report a guess as a fact.** A dead agent must not read `working`; a failing `gh` must not render as "no PR"; a missing `kel-fleet` must not render as "no agents"; an unknown value gets its own distinct display, never a plausible-looking default. | guarded | dead-not-working, null-context-not-`0%`, `"a failing gh reads unknown"`, and `"a missing kel-fleet fails loudly"` (plus the bar saying so). |
+| 4 | **kel never types into an agent pane** except the initial launch command. Moving a pane (`swap-pane`, `join-pane`) is allowed — the workspace design depends on it — but kel never alters what runs in one or sends it keys. **Changed in v0.10:** the old rule also forbade splitting or re-pointing panes; the sidebar needs to. | prohibition | nothing, deliberately — "never, across a codebase" holds by reviewing the `send-keys` call sites (launch, restore's pane replay, relaunch). |
+| 5 | **Hot paths stay cheap.** `kel statusline` runs on a 300 ms debounce and is cancelled if it overruns; `kel status-line` runs on every bar redraw. One `jq` pass, one atomic write, and only call `refresh-client -S` when the rendered value actually changed. | ⚠ unguarded | nothing. `refresh-client` appears nowhere in the suite. |
+| 6 | **One surface.** Every interactive kel gesture lives in the sidebar (or is a CLI command). No second board, no menus, no cheat sheet — four overlapping surfaces with four key schemes is what v0.10 deleted. A new view is a sidebar mode or a panel tab. | prohibition | review. |
+| 7 | **Embed, don't build.** Files, diffs, editing and git are `yazi`, `lazygit`, `$EDITOR`. kel decides where they open and at which directory; it never renders a tree or a diff itself (`backlog.md` R4, R5). | prohibition | review. |
 
 ---
 
@@ -121,15 +132,15 @@ column exists rather than a trailing sentence.
 
 ```sh
 bash -n bin/kel && bash -n install.sh      # syntax
-go vet ./... && go build ./...              # Go, if installed
-test/kel-test.sh                            # ~2 min; it prints its own count
+go vet ./... && go build ./... && go test ./...
+test/kel-test.sh                            # ~1 min; it prints its own count
 ```
 
-Go is **optional**: `bin/kel` falls back to its bash implementation whenever
-`$KEL_FLEET_BIN` is absent, and `./install.sh` works with no toolchain. But
-where Go exists, the suite builds `kel-fleet` and asserts the two produce an
-identical document — that differential is the entire safety net for the port,
-so a disagreement is a failure, not a curiosity.
+Go is **required**. The suite builds `kel-fleet` and `kel-top` from this
+checkout into its own work dir and points `$KEL_FLEET_BIN` / `$KEL_TOP_BIN` at
+them, so a stale binary in `~/.local/bin` is never what gets tested. The bash
+↔ Go differential that guarded the port went with the bash reader; Go unit
+tests (`internal/fleet/*_test.go`) cover what the suite cannot reach.
 
 CI (`.github/workflows/ci.yml`) runs exactly this on `ubuntu-latest` and
 `macos-latest` on every push, plus `/bin/bash -n bin/kel` on macOS to catch
@@ -142,8 +153,9 @@ and `KEL_SESSION=keltest`. Agents are faked with `sleep 9999`, so nothing
 reaches an API. Any test you add must keep all three.
 
 Run it before every commit. It covers: cross-group name collisions, ambiguous
-`kill` resolution, rename/move scoping, legacy record migration, three
-consecutive restore cycles with snapshot integrity, and worktree kill-safety.
+`kill` resolution, rename scoping, legacy record migration, three consecutive
+restore cycles with snapshot integrity, worktree kill-safety, land state, the
+one network call and its off switch, and `kel top`'s rendering.
 
 For anything involving hooks or the status line, drive it with a real tmux
 server and a synthetic JSON payload rather than reasoning about it — several
@@ -161,11 +173,6 @@ with nothing in kel to assert against. Re-breaking an `unguarded` one is silent.
   folds runs of it into one delimiter and drops leading/trailing empties. One
   empty field (an unset model name) made kel report cost as the context
   percentage. Read multi-field JSON **one field per line** instead.
-- `[unguarded]` **`fzf --popup` needs a tty**; a tmux key binding has none, so
-  `run-shell` + `fzf --popup` dies with *inappropriate ioctl for device* and the
-  key silently does nothing. Use tmux's `display-popup`, and pass `KEL_*`
-  across with `-e` — a popup runs a fresh shell off the tmux **server's**
-  environment, not the caller's.
 - `[principle]` **tmux hooks fire during kel's own operations.** Anything that splits or
   closes panes will re-enter `kel snapshot`. Check before adding a hook.
 - `[guarded]` **Claude Code's `Notification` is not one event.** Branch on
@@ -200,19 +207,16 @@ with nothing in kel to assert against. Re-breaking an `unguarded` one is silent.
   kel's floor is 3.0 — a `-E`'d bind dies with *unknown flag -E* and takes the
   whole key with it. Use a literal `2>&1` inside the command string instead.
   `backlog.md` #19 recorded the opposite of all of this for two releases.
-- `[principle]` **fzf's `become()` is `execve(2)` and one-way; `execute()` returns.**
-  So `become()` is right for a bind that *navigates away* (`enter`, `ctrl-g`) and
-  wrong for one that *acts* (`tab`, `ctrl-n`, `ctrl-f`, `ctrl-k`), which must come
-  back with `+reload(...)`. A `become()`'d command also inherits fzf's own
-  descriptors, which is how `>/dev/null 2>&1` on the fzf call silenced every
-  action reachable from the board.
-- `[guarded]` **`jq --slurpfile` aborts the whole stream on one bad file.** It is not
-  per-record: a single truncated `sessions/*.json` — what a crash mid-write
-  leaves — made `fleet_json` emit *nothing*, blanking the board, `kel ls`, the
-  bar and `kel jump` at once. Validate each file (`jq -e .`) before it enters the
-  slurp. Go's `json.Unmarshal` fails per-record instead, so the two
-  implementations degrade differently on the same input and only the
-  differential catches it.
+- `[guarded]` **One corrupt record must not blank the fleet.** A truncated
+  `sessions/*.json` — what a crash mid-write leaves — once made the bash reader
+  emit *nothing* (`jq --slurpfile` aborts the whole stream). Go fails per
+  record and renders it `unreadable`; the suite asserts the other agents
+  survive. Any new bash that slurps records needs a `jq -e .` per file first.
+- `[guarded]` **A promise tested only in one implementation is not tested.**
+  `pr = off` and "dirty work never reaches `gh`" were asserted against bash's
+  own helpers for releases, while `kel-fleet` — which answered whenever it was
+  installed — broke both. Assert a promise through the path that actually runs
+  (`kel _fleet`), never through an internal helper.
 - `[unguarded]` **`prune_state` is not `kel prune`.** `cmd_prune` reaps dead
   *agents*; `prune_state` reaps orphaned state files and is called from `cmd_ls`
   and `cmd_attach`. A test that drives `kel prune` to exercise `prune_state`
@@ -244,6 +248,7 @@ a GNU flag for a BSD one:
 
 `install/` covers both: `10-system-tools.sh` + `20-user-tools.sh` for
 Debian/Ubuntu, `macos-tools.sh` (Homebrew, one script, no sudo) for the Mac.
+Both install Go, which is required.
 Keep them in step when the toolchain changes.
 
 **Do not solve portability with containers.** kel drives the *host's* tmux
@@ -280,41 +285,19 @@ under its own work dir.
 
 ## Where things stand
 
-**v0.6 is done** — `kel _fleet --json` (one computed view), the Go `kel-fleet`
-behind the fallback seam, and `kel top`. `#5` peek was cut; the reasoning is in
-`backlog.md` R6.
+**v0.10, the pivot, is in progress.** Steps 1–3 are done: `v0.9.0` tagged as
+the marker for the old design; the docs rewritten to the new one; the old
+surfaces deleted (board, menus, `kel cheat`, `go` / `move` / `adopt`, the bash
+fleet reader). Go is now required.
 
-Go is a strangler fig on `main`: bash stays the permanent fallback *and* the
-differential-test oracle, read surfaces port first, mutating commands last or
-never. `rollout.md` § v0.6 has the rules — follow them rather than re-deriving
-the strategy. Bubble Tea is **v2** (`charm.land/bubbletea/v2`, `View() tea.View`,
+**Next is step 4, the sidebar — and it is planned in conversation before any
+code.** `rollout.md` § v0.10 has a draft order; `spec.md` §5b has the questions
+it must answer first, including the v0.2 spec's concrete objections to the
+`swap-pane` architecture the author has now chosen. Do not start building it
+on the strength of the draft.
+
+Bubble Tea is **v2** (`charm.land/bubbletea/v2`, `View() tea.View`,
 `tea.KeyPressMsg`); almost every tutorial online is v1 and will not compile.
 
-**v0.7, v0.8 and v0.9a are done** too: land state, `kel sweep`, `.kel/group`,
-`install.sh --uninstall`, `config.toml`, the README, pane-border state, and the
-board learning panes rather than only agents.
-
-**v0.9 shipped as a clarity pass, not the prune pass.** The prune pass asks
-*did I reach for it*, and nothing recorded an answer — so it was gated on
-something no amount of work could produce, while sitting last in front of v1.0.
-It has moved to its own card **after v1.0** and no longer blocks it.
-
-What v0.9 did instead was subtract *confusion*, decided by inspection:
-
-- eight bugs, two of which made shipped surfaces silently inert (the shell
-  completions had been dead since v0.6; `kel ls --json` could emit English)
-- `kel ls` grew a column header, and `inplace` renders as `repo`
-- `doctor` prescribes a fix per failed probe; `install/macos-tools.sh` added
-- **`kel adopt`** split out of `kel move`, which now refuses rather than
-  silently adopting
-- **`kel restart` is now `kel relaunch`** — no alias — and the two menus agree
-  on every key they share
-- state dir `0700`, `pr = "off"` to close the one network call, and the usage
-  counter (`kel _usage`)
-
-**Next: v1.0.** `install.sh` has run on a Mac as of 2026-09-01 — every doctor
-probe green, both Go binaries built, the suite passing there.
-`install/macos-tools.sh` remains syntax-checked and nothing more. It installs
-around fifteen formulae, appends a block to `~/.zshrc` and installs Node, so it
-needs a machine you are willing to provision. That is the last gate.
-`rollout.md` § v0.9-hardening has what else that pass changed.
+Versioning is in `rollout.md`: `0.x` carries no promise, `0.10` follows `0.9`,
+and `v0.10.0` is tagged when the sidebar is usable.

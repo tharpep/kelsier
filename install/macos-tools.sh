@@ -19,7 +19,8 @@ command -v brew >/dev/null 2>&1 || {
 }
 
 say "Homebrew packages"
-# kel itself needs only tmux, git and jq; fzf is needed for `kel board`.
+# kel itself needs tmux, git, jq and Go (below); yazi and lazygit are what
+# the sidebar's panel will open.
 # The rest is the same working set the Linux scripts install.
 brew install \
   tmux git jq fzf \
@@ -27,9 +28,8 @@ brew install \
   gh neovim lazygit yazi git-delta tealdeer \
   zoxide fnm
 
-say "Go (optional — builds kel-fleet and kel top)"
-# kel works without Go: bin/kel falls back to its bash fleet reader, and
-# `kel top` says so plainly rather than dying.
+say "Go (required — builds kel-fleet and kel-top)"
+# Required since v0.10: there is no bash fleet reader any more.
 if command -v go >/dev/null 2>&1; then
   echo "  already installed: $(go version)"
 else

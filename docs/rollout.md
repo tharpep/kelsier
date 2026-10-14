@@ -1,931 +1,130 @@
 # kelsier — rollout
 
-The constraint is **"will I actually adopt this,"** not "can it be built." Each
-stage ships the minimum that answers a real question; the next stage waits for
-daily use to produce a specific pain.
+The build order and the current status. **This file is the source of truth for
+what to work on next**; `spec.md` section numbers are not a build order.
+`backlog.md` holds candidates that are not on the path yet, each with a gate.
 
-`spec.md` section numbers are not a build order. This file is. `docs/backlog.md`
-holds candidates that aren't on the path yet, and what each one is waiting for.
+The constraint has always been **"will I actually adopt this,"** not "can it
+be built." v0.10 exists because, by that measure, v0.9 failed: the author built
+it and did not love using it.
 
 ---
 
-## v0 — status line + jump-to-blocked  ·  **done** (`beaf4d4`)
-
-**Question:** does an always-visible state line plus jump-to-blocked fix the
-sprawl? **Verified end-to-end** with real Claude Code 2026-08-28 — Claude Code
-does pass tmux context to hook subprocesses.
-
-- state adapter: 5 Claude Code hooks → `<state> <epoch>` per window, keyed by
-  window id, atomic writes, `refresh-client -S` to redraw now
-- pane resolution: `$TMUX_PANE` → `SessionStart` stash → lone pane matching cwd
-- `status-left` fleet line (current window bracketed), `` prefix ` `` jump,
-  `prefix k` cheatsheet
-- `install.sh` merges hooks into `settings.json` without clobbering
-
-## v0.1 — session lifecycle  ·  **done** (`c6606ea`)
-
-**Trigger:** hand-rolling `tmux new-window` + `cd` + `git worktree` every time.
-
-- consolidated the loose scripts into one `kel` command (subcommands: `new`,
-  `kill`, `ls`, `restore`, `doctor`, `status-line`, `jump`, `cheat`, `hook`)
-- `kel new <name> [-w] [--agent] [--no-agent]` — window + agent, inplace or in a
-  git worktree; worktree runs the repo's `.kel/setup` (v0.2's hook, folded in)
-- `kel kill` removes the worktree; refuses on uncommitted / unpushed unless `-f`
-- `kel ls [--json]`; `kel doctor` cached to `doctor.json`
-- graceful kill/reboot: dead sessions in `kel ls`, `kel restore [-c]` rebuilds
-  windows from metadata (`-c` → `<agent> --continue`), `kel new` reclaims a dead
-  record, stale `*.state` auto-pruned
-- **one flat tmux session `kel`** — every agent is a window in it
-
-**Testing before v0.2:** see the checklist at the bottom of this file.
-
-## v0.2 — grouping by repo + a selectable fleet menu  ·  **done**
-
-> **v0.2.1** added: `kel move` (relocate a window to another group), `KEL_GROUP`
-> (one flat group), the session→agent/group rename, all-lowercase keys, plus:
-> mouse on + smart wheel-scroll (PageUp/Dn to full-screen
-> TUIs), 1-indexed windows, pane labels, pane commands in `kel ls`, and
-> **workspace snapshot / restore** — `kel` rebuilds every group, window, and
-> split (agents resumed) after a reboot. (Detach + snapshot ended up on plain
-> `prefix d` via the `client-detached` hook — no separate key.)
-
-> **Shipped.** One tmux session per repo (`kel/<group>`); `kel jump` global;
-> status line = current group + `⟨+N waiting⟩`; `kel go`, the `kel menu`
-> quick-jump, `prefix g` group tree; `group` metadata field + auto-migration
-> from the flat session. `kel restore` rebuilds into groups. (v0.4 retired the
-> `kel menu` quick-jump — the board replaced it.)
-
-**Trigger:** the flat `kel` session overflows — routinely running agents across
-several repos at once, so the status line is cramped, `prefix 1-9` runs out, and
-unrelated projects share one list. **Do not build until flat use actually hits
-this** (see the v0.1 test plan — the specific signal is "10+ agents across 2+
-repos in a normal week" or "I keep losing which window is which project").
-
-Two things land together: sessions grouped by repo, and the first
-*select-and-see* surface beyond commands (`kel menu`). Commands stay the primary
-path; the menu and, later, the board are faster surfaces onto the same ops.
-
-### Grouping
-
-The grouping unit is the repo. One tmux session per repo, named after it;
-`kel new` targets the session for wherever it was run (`--group <g>` to
-override, `~`-rooted agents fall into `misc`). Group *switching* is mostly
-native tmux (`prefix s` tree, `prefix (` / `)` cycle) — kel only adds the
-state-aware pieces.
-
-```
-session "api-gateway"   auth-fix?   rate-limit*   docs
-session "coppermind"    sazed!      atium-check
-session "infra"         tf-upgrade
-```
-
-- **`kel jump` goes global** — next `waiting` agent in *any* group, switching
-  sessions if needed. Stable cycle order (group name, then window index).
-- **Status line — option A (minimal).** Current group in full; every other group
-  collapses to one badge:
-  `[api-gateway] 0:auth-fix? [1:rate-limit*] 2:docs   ⟨+2 waiting⟩`
-  You don't need to know *which* group — `` prefix ` `` takes you there. (Option
-  B, per-group badges, only if you later miss knowing which project is blocked.)
-- `kel ls` grows group headers; `kel restore` / `kel prune` operate across all
-  groups; `kel` bare lands in the last-used group (tracked in a
-  `last-group` state file).
-- `kel go <group>` — new; `switch-client` to that group, shell-completion on
-  group names.
-- session metadata gains a `group` field.
-- **Migration:** existing flat-session records get `group` from their `repo`
-  basename on first v0.2 run; live windows stay where they are until killed /
-  recreated. No forced move — the old `kel` group empties over a few days.
-
-### `kel menu` — the selectable fleet view
-
-`kel menu` (and a `prefix` binding, e.g. `prefix m`) generates a **dynamic**
-`tmux display-menu`: a floating list of every agent across every group, each
-showing its state, press a key to jump there.
-
-```
- ┌ kel ───────────────────┐
- │ api-gateway            │
- │  1  auth-fix       ?   │
- │  2  rate-limit     *   │
- │ coppermind            │
- │  3  sazed         !   │
- │  4  atium-check       │
- │ ─────────────────────  │
- │  n  new agent here    │
- │  `  next waiting      │
- └───────────────────────┘
-```
-
-Native tmux, ~30–40 lines to build the menu string. No scroll, single-key
-items — good to ~15–20 agents. Past that (or when you want filter / sort /
-browse) is the v0.3 board.
-
-`prefix g` → native `choose-tree -Zs` for a plain group picker; a state-aware
-group menu can come later if the plain one isn't enough.
-
-### Build order
-
-1. `group` field + `kel new` targeting group sessions
-2. `kel jump` cross-session
-3. `kel ls` grouped
-4. `kel restore` / `kel prune` across groups
-5. `kel go` + `prefix g`
-6. `kel menu` (dynamic display-menu)
-7. two-level status line (option A) — last, it's the fiddliest
-8. metadata auto-migration
-
-~180–230 lines net. No new dependencies. Fiddliest parts: the status-line
-width handling and the `kel jump` cycle order.
-
-### Risks
-
-- **Session name collision** — two repos both named `api`. `--group` override +
-  document; rare enough.
-- **Status-line clutter** — option A sidesteps it; if even that feels noisy,
-  drop to just the current group's windows and rely on `` ` `` for cross-group.
-- **The flat→grouped transition** — a few days of a `kel` group alongside real
-  groups until the old one empties.
-
-## v0.3 — the board (popup)  ·  **done**
-
-> **Shipped** on `fzf` (not a hand-rolled TUI or Bubble Tea). `kel board` /
-> `prefix b`: a `display-popup` with fuzzy filter, a preview pane (metadata +
-> recent output + git status), and binds — enter jump, ctrl-n new, ctrl-k kill,
-> ctrl-g go-to-group, ctrl-r refresh. ~50 lines.
-
-**Trigger:** `kel menu` stops being enough — more than ~20 agents, or you want
-filter / sort / browse across everything at once.
-
-- `kel board` as a `display-popup` TUI (shell TUI, or Bubble Tea if it needs the
-  structure) — the cross-group navigator, filter, jump, new, kill
-- transient: opens over the current window, never occupies a pane
-
-## v0.4 — UX & learnability pass  ·  **done**
-
-> A review (mine + Gemini via agy) found the core loop solid but flagged
-> friction for someone learning the tool. No new features.
-
-- **One job per key.** The old `display-menu` quick-jump is retired (`kel menu`
-  is a one-release alias for `kel board`). It took two review passes (mine, then
-  Gemini 3.1 Pro on the first cut) to land the final shape:
-  - **`` prefix ` ``** — jump to whoever's waiting
-  - **`Ctrl+Space` / `prefix b`** — the board: *find* an agent. Compact
-    `--footer` (`enter jump · tab actions`); `enter` jumps, **`tab`** opens a
-    labelled `tmux display-menu` on the highlighted agent (jump / new here /
-    rename / go to group / kill). `ctrl-n/k/g/r` stay bound, unadvertised.
-  - **`prefix m`** — *manage* the agent you're on (rename / move / new sibling /
-    kill). A `display-menu`, not the board.
-  - **`prefix k`** — the "new to kel?" primer (tmux primitives + "browse agents"
-    + "show me around").
-
-  The first cut had the board on three keys with a truncating single-line
-  header; the fix was the footer + `tab` menu, and repointing `prefix m` from
-  the board to "manage".
-- **Bugs.** `kel rename <new>` (+ `prefix ,`) renames a window *and* its
-  metadata record — a bare `rename-window` used to desync it so `kel kill`
-  couldn't clean up; `kel kill` now also finds a record by window id as a
-  fallback. Both menu "new agent" paths route through `kel new` (managed). The
-  board's `ctrl-k` always confirms; `ctrl-n` uses tmux's own prompt. A crashed
-  agent (no clean exit) now reads as `dead` / `x` instead of stuck on `working`.
-- **Learnability.** First run (and `kel` with zero agents) prints the three keys
-  that matter. Shell completion for bash + zsh (`install.sh` wires it) —
-  subcommands, agent names for `kill`, group names for `go` / `move`. The
-  copy-text tip (Shift+drag) moved up into `kel cheat`'s model section.
-- **Dir-aware `kel`.** Bare `kel` now keys off the current directory the way
-  `claude` does: inside a repo it attaches that repo's group, or starts an agent
-  for it if nothing's running there. `KEL_GROUP` overrides; outside a repo it
-  still falls back to the last-used group; the reboot snapshot-rebuild prompt
-  still wins.
-- **Group model.** `kel new` / `kel move` outside a repo now warn about the
-  `misc` fallback. `kel move` warns when relocating a worktree agent to a
-  mismatched group (cosmetic only). Monorepo guidance documented in `usage.md`;
-  a `.kel/group` file stays on the backlog.
-
-**Backlog from this round** is folded into `docs/backlog.md`, along with a
-post-v0.4 review pass (human + Gemini via `agy`). `install.sh --uninstall` and
-the `.kel/group` per-dir override carried over as #11 / #12; context-broadcast
-between agents is now explicitly rejected there (R1 — `CLAUDE.md` covers it).
-
-## v0.4.1 — two bugs and the context adapter  ·  **done**
-
-**Trigger:** an end-to-end exercise of v0.4 (a real tmux server, simulated
-hooks, repeated reboot/restore cycles) plus a re-read of the Claude Code docs
-instead of working from memory.
-
-### Bugs
-
-- **`kel restore` destroyed the snapshot it restored from.** Rebuilding panes
-  fires kel's own `after-split-window` / `pane-exited` hooks, which run
-  `kel snapshot` in the background over the file the restore is still reading —
-  and restore re-read it with a fresh `jq` per field per window, so it also
-  truncated itself. Measured on 2 groups / 4 windows / 5 panes: the snapshot
-  was reduced to one window 3/3 runs; the restore dropped a whole group once
-  and two of three windows once. Fixed with a `.restoring` lockfile (a file,
-  not an env var — the hooks spawn a separate `kel` from the tmux server) plus
-  a private `mktemp` copy to read from, and `snapshot.json.prev` as a spare
-  generation. An actual reboot never corrupted the snapshot; only `restore` did.
-- **Agent names were one global namespace.** `sessions/<name>.json` meant a
-  second repo could not have an agent called `docs` — in a tool organised
-  around one session per repo, exactly the names you reuse. Records moved to
-  `sessions/<group>/<name>.json`; `resolve_agent` takes `name` or
-  `group/name`, prefers the group you are standing in, and lists candidates
-  instead of guessing. Existing flat records are filed on next run.
-
-### `kel statusline` — context and cost, without interrupting the agent
-
-Hook payloads carry no token or cost data. **`statusLine` does**, and it was the
-interface the backlog's parked cost entry was waiting for — documented and
-versioned, not a transcript scrape. Claude Code pipes a JSON blob on every
-conversation update; `kel statusline` takes one `jq` pass over it and records
-`<wid>.ctx`.
-
-- **records** context %, cost, tokens, context size, 5-hour rate-limit burn,
-  and model, per agent window
-- **surfaces** on the tmux bar (only from `KEL_CTX_WARN`, default 70, up — the
-  bar stays minimal), as a `CTX` column plus cost in `kel ls`,
-  `context_pct` / `cost_usd` in `--json`, and two lines in the board preview
-- **renders** Claude Code's own status row: `kel <group>/<agent> · <model> ·
-  ▓▓▓░ 42% ctx · $1.23 · 5h 71%`
-- **costs** ~38 ms per invocation against a 300 ms debounce, and only calls
-  `refresh-client -S` when the integer percent actually moves — `#(kel
-  status-line)` is not free and this fires several times a second
-- `install.sh` wires it the way it wires hooks, and preserves any statusLine it
-  displaces to `~/.claude/statusline-prev`, chained after kel's own row
-- `kel doctor` probes that it is wired
-
-Two things worth remembering from building it: bash folds runs of tab (an IFS
-whitespace character) into a single delimiter, so `IFS=$'\t' read` silently
-shifts every value after an empty field — the payload is read one field per
-line instead. And a malformed payload must never overwrite a good `.ctx`, so
-the write is gated on a non-zero `context_window_size`.
-
-**Not** built here, and now in `backlog.md` #14–#16: `Notification` fidelity
-(kel still maps every notification to `waiting`, including `idle_prompt`),
-compaction counters, and the permission hooks.
-
-## v0.5 — tell the truth, and tell me out of band  ·  **done**
-
-**Theme:** signal, not surfaces. Everything here is hook/state work in the layer
-v0.4.1 just warmed up; nothing new to look at.
-
-- ~~**#14** notification fidelity~~ — **done** (`84f7329`). `Notification` maps to
-  what it means; `throttled` is a real state; `kel jump` stopped lying.
-- ~~**#15** compaction counter~~ — **done**. `PreCompact` increments
-  `compactions` on the record and deliberately leaves `.state` alone
-  (compaction is mid-turn; the agent is still working). Catches what context %
-  can't — context % drops back down after each compaction and looks healthy
-  again. In the board preview and `--json`, not on the bar.
-  The `SessionStart` matcher sub-item was **dropped**: the documented payload
-  has no field naming the trigger, and matchers select which hook entry runs
-  rather than appearing in the payload. Achievable with a matcher-scoped entry
-  in `settings.json` if it ever matters; guessing at a field name was the
-  alternative, and that is how you get a silent wrong branch.
-- ~~**#13** restart-in-place~~ — **done**. `kel restart [name] [-f]`, also on
-  `prefix m`. Same window, worktree, branch and conversation. The liveness
-  guard asks the *pane*, not the state file: the first cut used
-  `effective_state` and would have double-launched a freshly-started agent,
-  which has no `.state` yet.
-- ~~**#1** fleet notifications~~ — **done**. Hook-driven, never polled. Two
-  gates: only on a *transition into* a notifying state, and only when you are
-  not already looking (window active **and** a client attached). `KEL_NOTIFY`
-  picks the states. Delivery is one `notify()` function — `tmux
-  display-message` plus a backgrounded `$KEL_NOTIFY_CMD`; no platform
-  detection, recipes in `setup.md`, and that function is the seam if that
-  changes. Backgrounding avoids `setsid`, which macOS lacks.
-- ~~**#4** informative badge~~ — **done**. `⟨api·1 infra·1⟩`, capped at three
-  groups then `+N`. `kel jump` now also reports where it landed and for how
-  long. `humanize_secs` was written here because v0.6's `kel top` FOR column
-  needs it too.
-- **macOS portability** — added to this card because it blocks a machine that
-  is already in use. `bin/kel` uses no bash 4+ features, so the language is
-  fine (macOS ships bash 3.2); three GNU coreutils assumptions are not, and all
-  three fail *silently*:
-  - `prune_state`'s `sed 's/\.\(state\|ctx\)$//'` — `\|` is a GNU BRE
-    extension, so on BSD sed the extension is never stripped and **live state
-    files are deleted on every `kel ls`**
-  - `snapshot`'s `stat -c %Y` (BSD is `stat -f %m`) — falls back to `0`, so the
-    `.restoring` lock always reads stale and **the restore protection added in
-    v0.4.1 is disabled**
-  - `cmd_doctor`'s `sort -V` — absent from BSD sort, so the `tmux >= 3.0` probe
-    misreports
-
-  Taking a wrong branch quietly is the worst failure mode for a tool whose
-  value is being trustworthy (invariant 3 in `CLAUDE.md`). `install/` is
-  apt-only and is a separate, larger job — not in this card.
-
-  **Done.** All three are now dependency-free rather than swapped for a BSD
-  spelling. A fourth turned up while fixing them: a unix socket path caps
-  around 104 chars and macOS sets `$TMPDIR` to a long `/var/folders/...` path,
-  so the test suite's `TMUX_TMPDIR` now lives directly under `/tmp`.
-- **CI** — `.github/workflows/ci.yml` runs syntax + the suite on
-  `ubuntu-latest` and `macos-latest`, plus `/bin/bash -n bin/kel` on macOS
-  against the stock 3.2. This is what stops the GNU-isms coming back; fixing
-  them by hand was the one-off. Deliberately no shellcheck yet — a red build
-  should mean exactly one thing.
-
-## v0.6 — one place to look  ·  *Go enters here*  ·  **done**
-
-**Theme:** one computed view of the fleet, and a dashboard on top of it.
-
-- **`kel _fleet --json`** — fleet state computed **once**, consumed by `ls`,
-  `--json`, the board, `status-line` and `kel top`. Today every surface
-  re-derives it, positionally, over TSV. That plumbing caused both of v0.4.1's
-  real bugs: adding one field meant touching four consumers, and bash folding a
-  run of tabs (IFS whitespace) shifted every value after an empty field, so an
-  unset model name reported cost as the context percentage. This is the fix,
-  and it is also the port boundary (below).
-- **#2** `kel top` (folds in **#3** durations/stall and **#7** dirty) — now
-  worth building, because it finally has columns the bar doesn't already show:
-  CTX, cost, compactions.
-- ~~**#5** peek~~ — **cut**, now `backlog.md` R6. The board preview and
-  `kel top`'s LAST OUTPUT column between them answer "what is this thing
-  doing" twice over, and paying a keybinding to avoid a keystroke is a bad
-  trade in a tool whose premise is that switching costs one key. If the want
-  returns it belongs inside `kel top` as a row expander, not as its own
-  command.
-- **Also shipped here:** declining the rebuild prompt is now durable. Saying
-  no used to last exactly one invocation, so a workspace you had finished with
-  asked again on every single `kel`. The refusal is remembered against that
-  snapshot's timestamp — a *new* snapshot is a new question and still asks —
-  and the prompt grew a `d` to discard the saved workspace outright.
-
-### Why Go starts here, and not with a rewrite
-
-Two components, and they are exactly where Go pays:
-
-- **`_fleet`** is the hot path (`status-line` on every refresh, `statusline`
-  every 300 ms), it is N sequential `tmux` calls plus N `jq` forks, and it is
-  where both type bugs lived. Speed, concurrency and types, one component.
-- **`kel top`** is new, has no bash version to keep in sync, and is precisely
-  what Bubble Tea is for.
-
-**Strangler fig, not a parallel branch.** Both implementations live on `main`
-and the migration unit is the *subcommand*:
-
-```
-bin/kel        bash — the dispatcher.  Always works.  No Go required.
-go/            Go source
-  -> kel-fleet built by install.sh when `go` is on PATH
-```
-
-`gather_rows` becomes "use `kel-fleet` if it exists, else the bash path" — one
-`if`. Rules that make this hold:
-
-- **the on-disk format is the contract**, not the language: `sessions/<group>/<name>.json`,
-  `<wid>.state`, `<wid>.ctx`, `snapshot.json`. Either implementation must read
-  and write them identically, so any command can be either one on any day.
-- **bash stays the fallback, permanently, until v1.0 says otherwise** — but
-  *not* for the portability reason first given here. That argument was that a
-  work laptop might not get a Go toolchain; the work laptop is a **MacBook**,
-  and Go cross-compiles to it (`GOOS=darwin GOARCH=arm64`) from the Linux
-  desktop, so it needs no toolchain at all. The honest position is the
-  inverse: **Go is the more portable half.** Its stdlib behaves identically on
-  Linux and macOS, while bash's value depends on which `sed` and `stat` are
-  installed — see the v0.5 card. The real reasons to keep bash are no build
-  step, edit-in-place on a tool you bend weekly, and having a second
-  implementation to differential-test against. Those are enough; portability is
-  not one of them, and if anything macOS is an argument for moving *sooner*.
-- **the bash implementation is the test oracle.** Differential-test Go against
-  it — same state dir, same JSON — on top of the existing 28-case suite. This
-  is the specific answer to "a rewrite re-earns every bug you just fixed."
-- **short feature branches per component**, never a long-lived `go` branch: you
-  would daily-drive one and let the other rot, land fixes twice, and stop
-  dogfooding the version you are trying to ship.
-- **target Bubble Tea v2** (Feb 2026 — declarative `View`, new renderer, with
-  matching Lip Gloss v2 / Bubbles v2). Nearly every tutorial and model answer
-  still describes v1. This is a deliberate choice, not a default.
-
-**Mutating commands port last, or never.** `kel kill`'s uncommitted/unpushed
-check is the one place a bug is unforgivable (§10). Read/render surfaces are
-pure functions of on-disk state — if the Go `ls` is wrong, nothing is lost.
-
-## v0.7 — landing the work
-
-**Theme:** the other end of the day. `kel new -w` makes five worktrees trivial
-and does nothing for the five branches that need to land.
-
-- **#6** merge-readiness via `gh` — ahead/behind from plain `git`, PR state from
-  `gh pr status --json`. The column is **three-valued**: ready / not-ready /
-  **unknown**. An expired `gh` token exits non-zero with empty stdout, which is
-  byte-identical to "there is no PR" — rendering that as not-ready is the same
-  class of lie as a bar that says `working` for a dead agent.
-- **#8** `kel sweep` — batch teardown of merged, clean, pushed agents.
-- **#12** `.kel/group` per-directory override.
-
-## v0.9a — the system around the agent  ·  **done**
-
-**Theme:** kel manages the *system around* the agent, never the agent. That is
-the pitch, sharper than "know which agent is blocked" — which, since
-`claude agents` shipped, is a thing Anthropic does for its own sessions and
-only its own. kel's claim is the terminal staying navigable: across agents,
-across repos, and across agent-and-not-agent, with nothing owning your session.
-
-Came out of a landscape read (2026-08-31) of Claude Squad, agent-deck, amux,
-NTM, tmai, tmux-agent, tmux-agent-indicator, sesh, dmux/muxtree, Zellij, and
-Claude Code's own agent view / cross-session messaging.
-
-Ordered by how directly each serves that pitch.
-
-### B′. Parity from inside  ·  the biggest gap, and it was invisible
-
-The author enters with `kel` once and then lives inside tmux. Under that
-workflow these are **unreachable**, because no key or menu offers them:
-
-| missing | why it matters |
+## Versioning, plainly
+
+kel uses `MAJOR.MINOR.PATCH` with the usual meaning for a `0.x` project:
+
+- **`0.x` means "still changing; anything may break."** It carries no promise,
+  and nothing requires 1.0 to follow 0.9. After `0.9` comes `0.10`, `0.11`, …
+  — as many as it takes. A redesign is exactly what `0.x` is for.
+- **A minor bump (`0.10` → `0.11`)** marks a usable step: something you would
+  install and daily-drive. **A patch (`0.10.0` → `0.10.1`)** is a fix to it.
+- **`1.0` means "I will stop breaking things"** — the on-disk format, the
+  commands and the keys are stable enough that someone else can rely on them.
+  It is a promise, not a size.
+- **A release is a tag plus notes.** `git tag -a v0.10.0 -m "…" && git push
+  origin v0.10.0`, then `gh release create v0.10.0 --generate-notes`. Once
+  someone other than the author installs kel, attach prebuilt `kel-fleet` /
+  `kel-top` binaries to the release (GoReleaser, or a CI job that
+  cross-compiles `GOOS=linux,darwin` × `GOARCH=amd64,arm64`) — Go being
+  required means a machine with no toolchain otherwise cannot install it.
+
+Tags so far: **`v0.9.0`**, cut 2026-10-14 as the marker for the old design
+before the pivot. The next tag is `v0.10.0`, when the sidebar is usable.
+
+---
+
+## History, condensed
+
+Everything up to the pivot, in full, is `git show v0.9.0:docs/rollout.md`.
+
+| version | what it added |
 |---|---|
-| `kel new -w` | *worktree* creation. Every "new agent" path — board `tab`→n, board `ctrl-n`, `prefix m`→n, `prefix k`→n — makes a plain in-place agent. The isolation story is shell-only, which means it effectively does not exist. |
-| `kel sweep` | the command that closes out the day. Shipped in v0.7 with no key. |
-| `kel restore` / `kel prune` / `kel doctor` | rare, but stranded |
-
-Fix: the "new agent" prompt asks in-place vs worktree, and the rare commands
-get menu entries — they do not each need a keybinding, and the key budget is
-deliberate.
-
-### A. State on the pane border and window title
-
-State lives only on the status bar: one line, at the bottom, that you have to
-look *at*. When Claude Code is full-screen a coloured pane border is peripheral
-vision instead. kel already sets `pane-border-status` and already has the
-state from its hooks; it just never colours it. Prior art:
-`tmux-agent-indicator`, which reaches the same states through the same hooks
-and paints borders, window titles and status icons.
-
-### B. The board learns panes, not just agents
-
-`Ctrl+Space` lists agents. Your nvim pane, lazygit, a scratch shell — invisible.
-That is the literal "can't move between Claude Code and any other terminal
-thing" complaint. `tmux-agent` ships five switchers; the one worth copying is
-"all panes, with directory and branch context."
-
-### F. Propagate kel's name into Claude Code
-
-`kel new auth-fix` should launch `claude --name auth-fix`, so `/list-agents`,
-`@mentions` and `kel ls` agree on the name **you chose** rather than Claude's
-auto-generated one. One line, no user-visible surface.
-
-Speculative — the benefit only lands if cross-session messaging gets used — but
-it has the nice property that if it is never used there is nothing to prune,
-because there is no surface. `kel rename` cannot rename a *running* Claude
-session (`/rename` is interactive-only), so names drift until that agent
-restarts. That is a footnote, not something to build around.
-
-### Considered and not taken
-
-- **C. A scratch-shell popup.** The only delta over `prefix |` is that a split
-  resizes the agent's pane and makes Claude Code's TUI reflow. Real, but not
-  worth a keybinding. Dropped.
-- **D. Reaching a repo with no agent yet** (`sesh` merges tmux sessions +
-  zoxide frecency + configured projects). Reading shell history to guess where
-  you want to go is invasive, and it is someone else's data. A non-invasive
-  version could use kel's *own* record history instead — but bare `kel` is
-  already directory-aware, and the moment you want a brand-new repo is a moment
-  you are plausibly already in a shell. **Parked as probably unnecessary.**
-- **E. Delivering into a session** via `CLAUDE_CODE_MESSAGING_SOCKET`, which
-  Claude Code exports to hooks. Looked promising and mostly is not: agent-to-
-  agent awareness is shared context between agents, already rejected as R1;
-  you messaging another agent is first-party cross-session messaging, which kel
-  would be reimplementing; and routing kel's own notifications into a session
-  pollutes that agent's context and costs tokens for what a tmux message does
-  free. What remains is kel telling an agent a system fact it cannot know, like
-  "you were killed and restarted mid-task." **Parked**, with the reasoning
-  recorded so it is not re-proposed as an obviously good idea.
-- **Floating panes** (Zellij). A *persistent* floating pane is tabs with extra
-  steps — it recreates the sprawl kel exists to fix. A *transient* popup does
-  not, which is why the board and `kel top` already use one.
-- **Auto-compaction watchdogs** (amux), **broadcast/approval machinery** (NTM),
-  **owning the agent UI** (Claude Squad, agent-deck). All cross the non-goals.
-
-### Known interaction: Claude Code's agent view
-
-`claude agents` manages *its own* background sessions and only those —
-interactive sessions started in a terminal do not appear until backgrounded.
-But pressing `←` or `/bg` inside a kel window hands that session to Claude
-Code's supervisor and leaves the kel window holding a dead pane. Same class as
-the Agent Teams entry in `backlog.md`. Recorded so it is recognised rather than
-debugged.
-
-## v0.9-clarity — the pass that did not need evidence  ·  **done**
-
-Split out of v0.9 below. The prune pass asks *did I reach for it*, and that
-question has no data yet: on 2026-08-31 the state dir held one record ever, no
-snapshot, and no config file the user had written. But the target machine
-became a work MacBook, which justifies polish now — on the input that *is*
-available, which is inspection.
-
-So: not "remove what is unused" but "remove what is confusing or broken",
-decided by reading. Landed so far —
-
-- **five bugs**, two of which made shipped surfaces silently inert: the shell
-  completions had been dead since v0.6 (and their `group/name` filter had never
-  worked), `kel ls --json` could emit English, `prefix k` bound `w` twice, the
-  badge docs were three versions stale, and doctor mislabelled `gh`.
-- **`kel ls`** got a column header, and `inplace` renders as `repo`.
-- **doctor** prescribes a fix per failed probe, and `install/macos-tools.sh`
-  provisions a Mac.
-- **`kel adopt`** split out of `kel move`; `move` refuses instead of silently
-  adopting. Found two latent bugs in the shared code while splitting it: both
-  commands resolved the *active* window rather than the caller's pane, and took
-  their group from `#{client_session}` rather than from the window's own
-  session.
-
-- **`restart` → `relaunch`**, no alias, and the two menus reconciled: `w`, `n`,
-  `g`, `r` and `x` now mean the same thing in `prefix m` and `prefix k`, and `s`
-  is unambiguously sweep. Menu labels state what each command *touches* —
-  sweep closes windows, prune only forgets records.
-
-**Addendum, same day: walking through it as a fresh user.** Reading catches
-staleness; only actually running the tool catches behaviour. Doing that — bare
-`kel` in an empty repo, the cheat sheet, the board, `adopt`/`move`/`sweep`/
-`relaunch`, invariant 1 on a dirty worktree — found:
-
-- The two "what does `prefix m` do" summaries (the cheat sheet and the
-  first-run `quickstart()` shown on a bare `kel` with nothing running) still
-  said "rename / move / kill / new sibling" — missing `adopt` and `relaunch`,
-  the two newest items in that exact menu.
-- `kel _usage` was filed under "internal (wired by install.sh)" in `--help`.
-  Nothing wires it; it is a diagnostic meant to be typed, like `doctor`. Moved
-  next to `doctor`, with an honest note that it is unwired scaffolding.
-- **A real one, found only by triggering it live, not by reading:** an agent
-  that fires `SessionStart` (state `idle`) and then crashes before its first
-  prompt was reported `idle` forever — no glyph, no colour, nothing to say it
-  had died. The dead-check only looked at `working` / `waiting` / `throttled`,
-  treating `idle` as "no signal yet" when it is a real one. Worse, it was wrong
-  the same way in three independent places — `effective_state()`, the
-  `_fleet_bash` jq pipeline, and `internal/fleet/fleet.go` — which is exactly
-  what the Go/bash differential test cannot catch: it only proves the two
-  agree, and here they agreed on the wrong answer. Fixed in all three, and the
-  differential fixture now carries an idle-then-crashed agent so a future
-  divergence between them would be caught.
-- Confirmed by testing, not fixed: `land_of` gives an in-place (non-worktree)
-  agent standing on trunk the code `clean`, never `merged` — `merged` requires
-  a branch to compare against the base, and trunk has none. `kel sweep` without
-  `-f` only accepts `merged`, so for anyone who never runs `kel new -w`, sweep
-  is close to a no-op by construction, and nothing says so. Left as a finding,
-  not a fix: whether "clean" should sweep by default is a product call, not a
-  bug — `clean` is also the fallback for "not a git repo at all", so treating
-  it as automatically safe is not obviously right either.
-
-**Second addendum: the board becomes the hub.** Different in kind from
-everything above — not a bug found by using the tool, but a redesign proposed
-by the user after using it: three menus (`prefix k`, `prefix m`, board `tab`)
-covering overlapping ground, `prefix k` acting like a menu while `kel cheat`
-(the actual reference) sat one level down inside it as a single item, and the
-board only ever able to *select* an agent — no path from it to the dashboard,
-to config, or to sweep/restore/prune/doctor.
-
-The shape that came out of that discussion: the board is the hub, with a
-second action layer for everything that isn't about one agent, and dedicated
-prefixes stay as fast, direct doors to the same destinations rather than being
-removed.
-
-- **`kel config`** — config.toml had no path into it from inside the tool at
-  all (this was true before the board work started; found the same way as the
-  idle/dead bug, by trying to use the feature). Opens it in `$VISUAL`/
-  `$EDITOR`, seeded from `examples/config.toml` the first time. Needed a small
-  fix to get right: `$SELF` stays a symlink (kel is always symlinked, never
-  copied), so a naive relative path from it looks in the wrong place —
-  confirmed by testing through the real installed symlink, not just reasoning
-  about it. `readlink -f` would resolve it in one call; that flag is GNU-only,
-  so `_real_self` walks the chain by hand.
-- **The board gains `ctrl-f`** — a second `tmux display-menu`, not scoped to
-  any row: the dashboard, `kel config`, and sweep/restore/prune/doctor. The
-  same `become()`-into-a-menu mechanism `tab` already used, applied to
-  something that isn't per-agent.
-- **`prefix m` and the board's `tab` are now the SAME menu.** `cmd_here_actions`
-  gathers the current window's own wid/name/group/cwd and calls the exact
-  function `tab` calls, with an extra that turns on three items — move,
-  adopt, relaunch — that only know how to act on "whichever pane I was
-  invoked from," which is correct for `prefix m` (always the window you're
-  standing in) and would be wrong for an arbitrary highlighted board row.
-  One action list, reachable two ways, instead of two that drift.
-- **`prefix k` reverts to `kel cheat`, no menu.** Checked item by item: every
-  single thing the old menu offered was already reachable somewhere else — a
-  native tmux default it was silently wrapping (`prefix w`/`[`/`z`/`&`/`d`
-  were never touched by kel), an existing kel binding (`prefix |`/`-`/`,`),
-  or now `ctrl-f` / `prefix m`. Wrapping "press prefix, then press the native
-  key" in a submenu was strictly more steps than pressing the native key.
-
-Fourteen new tests. The menu-key-uniqueness guard from the first addendum
-moved with the menus: `prefix k`/`prefix m` no longer live in `tmux.conf`, so
-a text-parsing extractor over that file can no longer see them at all. It now
-runs the real `cmd_board_actions` / `cmd_board_fleet_actions` functions with a
-`KEL_DUMP_ITEMS` flag that prints the menu's items instead of opening it —
-exercising the actual conditional logic (the move/adopt/relaunch branch),
-not a static guess at its shape. Verified against the tool itself, not just
-the test suite: planted a real duplicate key in `bin/kel`, confirmed the
-suite caught it, reverted.
-
-**Third addendum: tab and ctrl-f did not actually work.** The user reported it
-plainly — "tab and ctrl-f just close the board" — and it took driving a real
-attached tmux client through a pty, not headless commands, to see why:
-`tmux display-menu` and `command-prompt` cannot render while a `display-popup`
-is already open, confirmed directly rather than inferred. The board is always
-a popup, so both were dead on arrival from the day they were built. Fixed by
-`become()`-chaining into a second `fzf` list instead — the same overlay type
-the popup already has open — which surfaced a second hard limit (three
-chained `become()`s never render, only two) that broke free-text prompting
-until each action's letter key was bound directly rather than read back
-through fzf's `{2}` substitution. Verified by actually creating an agent
-through the fixed flow, not just watching it render.
-
-A visual pass followed, at the user's request, same method: the board's
-popup and fzf's own border were both drawing a frame with the same "kel"
-label, and the ask-prompt used fzf's default (bottom-anchored) layout instead
-of `--layout reverse`, burying it under ~35 blank lines. Both fixed. Left
-open: the small action lists inherit the board's full popup size, since a
-`become()`'d fzf cannot resize the popup around it, and board rows are
-unpadded tab-separated text, so differently-named agents do not align.
-
-**Fourth addendum: the rest of the visual review.** Two more findings acted
-on, one investigated and left alone rather than forced:
-
-- Board rows were unpadded tab-separated text, so differently-named agents
-  did not line up. Padding the real `group`/`name` fields directly would have
-  broken every exact-match lookup downstream (`_board_preview`,
-  `_board_jump`, `cmd_go`, `_board_kill`, `_board_actions` all compare
-  against the raw values) — the existing suite's `awk '$2=="agent1"'`
-  assertions already prove those fields stay raw, since padding would have
-  failed them. Fixed by adding a seventh, padding-only display field instead,
-  shown via `--with-nth 7`, leaving 1-6 untouched.
-- The old `tmux display-menu`'s blank, unselectable separators between
-  action groups (new/worktree/rename | move/adopt/relaunch | go/kill; and in
-  the fleet menu, dashboard/config | sweep group | cheat) had no equivalent
-  in fzf — there is no such thing as an unselectable row — so the groups
-  just ran together. Fixed with a real row: a dim divider, no letter-key
-  bind, and a `true` command so pressing enter on it by accident is a safe
-  no-op rather than an error.
-- Investigated and left alone: the small menus (6-9 items) still stretch to
-  fill the board's full ~85%-of-screen popup, because a `become()`'d fzf
-  cannot resize the popup around it. Tried shrinking it directly — any
-  `--height` below 100%, absolute or percentage, breaks the render entirely
-  for a second-level `become()`'d fzf inside an already-open popup, the same
-  class of failure the tab/ctrl-f bug itself was. Confirmed by testing, not
-  guessed at: `--height 100%` is a hard requirement here, not a preference.
-
-Also recorded for the account, not because the user asked to see it: the
-live-pty method that found and verified all of this killed the real
-default-socket tmux server a second and third time during this pass, despite
-a hard-coded isolation wrapper built specifically to prevent it — the failure
-both times was a bash block that fell back to bare `tmux` without exporting
-`TMUX_TMPDIR` at all, bypassing the wrapper rather than defeating it. Live
-testing stopped for the remainder of the pass once this was caught.
-
-That is the whole card. What it did **not** do is answer the docket below,
-which still wants use rather than reasoning.
-
-## Orphaned worktrees after a hand-deleted directory  ·  **fixed**
-
-Reported externally, reproduced exactly as described before touching
-anything: `rm -rf` a worktree's directory by hand, then `kel kill` it. The
-window and metadata went; `git worktree remove` never ran, because it was
-gated on `[ -d "$cwd" ]`, and git's own worktree record was left pointing at
-a directory that no longer existed — `git worktree list` kept showing it as
-`prunable`, and deleting the branch failed with "used by worktree" until
-someone ran `git worktree prune` by hand.
-
-`git worktree remove` handles a missing directory fine on its own, confirmed
-directly: exit 0, force or not, and the phantom entry is gone. The `-d` gate
-was simply wrong. Fixed in `cmd_kill`, and `cmd_prune` had the identical
-bug reached a different way (a dead agent, not a killed one) — found while
-fixing the first, not separately reported. Both now fall back to a repo-wide
-`git worktree prune` if `remove` itself fails for some other reason; `prune`
-only ever touches entries whose directory is already gone, so it cannot be
-the thing that deletes work. `cmd_prune` had no test coverage at all before
-this. 6 new tests, including one per command that deliberately reintroduces
-the `-d` gate and confirms the test fails — the guard was checked to actually
-bite, not just added.
-
-## The prune pass — after v1.0, gated on use
-
-**Theme:** subtract. Everything above was added on the strength of an argument.
-This is where each one has to survive contact with having actually been used.
-
-Go through every shipped surface and give it a verdict — **keep**,
-**simplify**, or **cut** — on one question: *did I reach for it?* Not "is it
-defensible", which everything here is, but whether it earned its place. peek
-was cut before it was built (`backlog.md` R6) and cost nothing; cutting
-something already built costs a commit and a docs edit, which is still almost
-nothing.
-
-There is no deprecation contract to honour — one user, no installs to break —
-so the only question is what v1.0 should contain. Shipping v1.0 carrying dead
-weight is a worse mistake than having built something that later gets cut.
-
-**Not everything unwinds equally, and that should bias what gets built:**
-
-| cheap to remove | sticky |
-|---|---|
-| a column, a sort mode, a subcommand, a `--flag` | a **keybinding** — muscle memory outlives the feature |
-| anything computed at read time | the **on-disk format** — needs a migration |
-
-Prefer a column over a keybinding, and a flag over a format change. `land` is a
-column and could vanish in one commit; `prefix t` is stickier; `<wid>.ctx` is
-the stickiest thing in the tool.
-
-### The docket
-
-Named now so the pass does not start from a blank page. Each needs a verdict,
-not a defence.
-
-| | the question |
-|---|---|
-| `kel top` sort modes | Does anything but triage get used? If `s` never gets pressed, three modes are two too many. |
-| `throttled` as its own state | Distinct glyph, distinct colour, its own branch in the hook. Did knowing "quota, not you" ever change what you did? |
-| compaction counter | `×3` beside CTX. Is it signal, or is context % already enough? |
-| `⟨api·1 infra·1⟩` badge | Richer than the old `+N waiting`. Do you read the group names, or just notice that the badge is there? |
-| `kel restart` | `sweep` now clears the graveyard. Is restart-in-place still reached for, or is `kel new` fine? |
-| `kel move` | Shipped in v0.2 and barely mentioned since. |
-| `config.toml` | Newest and least proven. If every setting stayed default for a month, it is a file nobody edits. |
-| `--pr` / land's gh half | The only part that touches the network. Local git covers four of the eight codes. |
-| `prefix k` primer | Written for a newcomer. There is one user and he wrote it. |
-
-### What is out of scope here
-
-Not a rewrite, not a redesign, and not an argument about the non-goals — those
-are settled. Only: remove what is not used, and simplify what is used but
-overbuilt.
-
-**Gate:** a stretch of ordinary use with the whole feature set present, on both
-machines. This is the one card in the file that genuinely cannot be rushed,
-because its input is evidence rather than reasoning.
-
-**It is no longer a v0.9 card, and it no longer blocks v1.0.** It sat last in
-front of v1.0 while being gated on something no amount of work could produce,
-which pinned a product milestone to a wait. v0.9 shipped as the clarity pass;
-this runs when the evidence exists.
-
-**The instrument exists now.** `kel _usage` reads a counter that appends one
-line — epoch and subcommand name, never arguments — per command you actually
-run. Hot paths, the fleet read, the board preview and background snapshots are
-excluded, so the log is gestures rather than noise. `usage = "off"` disables
-it. Both the counter and `_usage` are scaffolding for this card and should be
-deleted along with it.
-
-## v0.8 — someone else could install this  ·  **done**
-
-- ~~**#11** `install.sh --uninstall`~~ — **done**. Every line install.sh
-  writes outside the repo has an inverse; settings.json is unwired surgically
-  so your own hooks survive, a displaced statusLine is restored rather than
-  deleted, and the state dir is kept unless you also pass --purge. Verified as
-  a round-trip in a throwaway HOME seeded to look like a machine that already
-  had its own config.
-- ~~**config.toml**~~ — **done**. User file, overridden by a per-repo one,
-  overridden by an exported `KEL_*`. A flat `key = value` subset rather than a
-  parser, and fork-free unless a config actually exists — the first cut used
-  `git rev-parse` and cost 5ms on every bar redraw. `examples/config.toml`
-  lists every key and is parsed by a test so it cannot rot.
-- ~~README leading with the layout and the jump key; MIT~~ — **done**. It now
-  opens with what the bar and the dashboard actually look like, then the jump
-  key, then the commands.
-- ~~docs pass~~ — **done** alongside each change rather than as a sweep, per
-  the house rule that a behaviour change updates the docs in the same commit.
-
-## v0.9-hardening — the Mac, and what was quietly wrong  ·  **done**
-
-**Trigger:** the target machine became a work MacBook, and the repo got read
-cold at the same time. One new command; everything else was already broken or
-already false.
-
-**The Mac.** `install.sh` ran on macOS for the first time — 26.6, tmux 3.7c, go
-1.27.0. Every doctor probe green, both Go binaries built, the suite passing
-there. That machine had no prior `statusLine` or hooks, so install.sh's
-chaining path remains unexercised on every platform.
-`install/macos-tools.sh` has still never run: that is the v1.0 gate.
-
-**Correctness**
-
-- `kel move` wrote the target record with `jq … > target && rm source`, which
-  truncates the target before jq runs. A failed jq left a corrupt record in the
-  target and, `&&` having short-circuited, the intact one in the source — the
-  agent filed in two groups. Staged through mktemp now.
-- `fleet_json`'s record slurp handed `cat` an empty array when there were no
-  records. bash 3.2 calls that unbound and aborts the subshell; 4.4+ gives cat
-  no arguments, so it reads stdin and blocks on a terminal. Reachable only on
-  the bash fallback — the no-toolchain install v1.0 commits to.
-- `kel statusline` mapped a null `used_percentage` to 0, so a full context
-  window read as a confident green `0%` before the first API call and after
-  every `/compact`.
-- `prune_state` reaped `.state` and `.ctx` and left `.stash`. SessionEnd covers
-  a session's own entry, `/clear` included; nothing fires when a session dies
-  with its terminal.
-- `kel config` was in neither completion file, having shipped in v0.9.
-- `kel doctor` printed a literal backslash before the tilde in its cache path.
-
-**Truth.** `spec.md` §8 told the reader to adopt an unmanaged window with
-`kel move`, which has refused exactly that since v0.9. The README said Go was
-optional and everything still worked without it, while `kel top` dies without
-the binary. `install.sh` advertised `kel restart` in two places, removed with no
-alias. The suite's case count and runtime were stated three ways and none
-matched. `roadmap.html` is deleted — hand-maintained against this file, linked
-from nowhere, five milestones behind.
-
-**New.** `kel update` (§11a), and three doctor probes for the ways an install
-goes quiet without saying so: a moved clone, managed settings disabling hooks
-while the entries remain, an upstream nobody fetched.
-
-**The statusLine row** reads more of what Claude Code already sends it: repo and
-worktree identity, absolute tokens past `KEL_CTX_WARN`, the seven-day and spend
-quotas with reset times, non-default modes, the `--agent` name. Render-only —
-`.ctx` stays at seven fields, so the bash/Go contract is untouched. Subagent
-cost is not among it and cannot be: Task-tool subagents report through a
-separate `subagentStatusLine`, and no per-subagent dollar figure exists in
-either payload.
-
-**One flake closed.** The bash/Go differential compared `activity` — tmux's
-`#{window_activity}` — by value across two samples taken a moment apart, and
-failed once on Linux CI with a one-second difference. Reduced to a presence
-check, which is the property either side can actually hold.
-
-## The TUI pass — audited 2026-09-01, designed in `interface.md`, not started
-
-**Dated record.** This section is a point-in-time finding, not a current-state
-claim. The work items live in `backlog.md` § *The TUI pass*, each with
-Error / Surface / Fix / Test.
-
-**The design that answers them is `interface.md`** (2026-09-01), which merges the
-board, `kel top` and `kel cheat` into one surface. Most of those entries are now
-specified there rather than pending — `interface.md` §12 lists which, and which
-are still genuinely open. Read the design first; the backlog entries are the
-evidence it was built from, not the plan.
-
-**The build order is `interface-build.md`** — six phases, each with its own
-definition of done. That file is a work order and is deleted when the last phase
-lands; this section keeps the status.
-
-**Trigger:** the author's own account — *"it's not a good UI"* — while the v1.0
-gate was otherwise closing. Auditing it first, deliberately, rather than fixing
-what was easiest to see.
-
-**What the audit found.** Nothing is unwired: all 46 dispatcher entries are
-reachable by a bind, menu, doc or test. The problem is in three layers.
-
-*The UI could not report its own failures.* Four independent mechanisms: the
-board's fzf runs with `>/dev/null 2>&1` and every bind uses `become()`, which
-execs in place inheriting those descriptors; four popups use single `-E`, which
-closes them on any exit including a `die`; four `kel.conf` binds use
-`run-shell -b` without `-E`, which drops stderr; and `_run`'s `[any key]` pause
-fixes the third mechanism but not the first, so it holds a popup open over an
-empty screen. The worst instance is `kel kill`'s uncommitted-work refusal —
-invariant 1's safety message — swallowed when the kill goes through the board.
-This is why "check every button" stops: the buttons often ran and said nothing.
-
-*Depth.* Nine actions sit three keypresses deep with no shorter route. `7e80559`
-removed `prefix k`'s and `prefix m`'s menus — both one level — on the reasoning
-that submenus add steps, and the same commit added `ctrl-f`, which reintroduced
-depth for kel's own fleet actions. Both halves were right about their own problem.
-
-*Asymmetry.* `config`, `sweep`, `restore`, `prune` and `doctor` have no prefix
-key; `move`, `adopt` and `relaunch` have no `Ctrl+Space` path at all. The two
-surfaces documented as "the same menu" do not offer the same actions. `kel ls`
-and `kel update` have no TUI path whatsoever.
-
-**Method limit, recorded because it shaped the result.** Coverage was derived by
-asking "does every command have a TUI path", which is structurally blind to
-capabilities that are not commands. Closing kel, managing a pane, and seeing git
-state in the primary flow were invisible to that method and came from the author
-instead. A derived guard cannot find a gap in its own vocabulary.
+| v0 | the status bar as the fleet; `` prefix ` `` jump-to-blocked |
+| v0.1 | `kel new` / `kill` / `ls`; kill refuses to lose work |
+| v0.2 | grouping by repo (one tmux session per repo) |
+| v0.3 – v0.4 | the fzf board; a learnability pass; dead-agent detection |
+| v0.4.1 | `kel statusline` — context % and cost without interrupting the agent |
+| v0.5 | notification fidelity, compaction counter, relaunch-in-place, fleet notifications; macOS fixes; CI on Linux + macOS |
+| v0.6 | the fleet document (`kel _fleet`); Go enters (`kel-fleet`, `kel top`) |
+| v0.7 | land state, `kel sweep`, `.kel/group` |
+| v0.8 | `install.sh --uninstall`, `config.toml`, the README |
+| v0.9 | pane-border state, a clarity pass, `kel adopt`, `kel relaunch`, `0700` state dir, the Mac install |
+
+What carries forward unchanged: the state directory and its format, the hooks,
+the fleet document, kill-safety, worktree creation, snapshot/restore, the
+statusline adapter. What did not: every interactive surface.
+
+---
+
+## v0.10 — the pivot  ·  *in progress*
+
+**Theme:** one surface. An Orca-shaped workspace in the terminal: a persistent
+sidebar of every pane, the selected pane in the main slot, IDE views (files,
+git, plan, tasks) in a panel. Design in `spec.md` §5.
+
+### Step 1 — tag the old design  ·  **done**
+
+`v0.9.0`, pushed. Every deleted surface is recoverable from it.
+
+### Step 2 — rewrite the docs to the new design  ·  **done**
+
+`spec.md`, this file, `usage.md`, `backlog.md`, the README and `CLAUDE.md`
+rewritten. `interface.md` and `interface-build.md` deleted — they designed the
+TUI pass over the old board, which no longer exists.
+
+### Step 3 — delete the old surfaces  ·  **done** (`622ae90`)
+
+- the fzf board, both menus, `kel cheat`, the popup runner and sweep UI
+- `kel go` / `move` / `adopt` — groups-as-sessions is on its way out, and the
+  sidebar lists every pane, so adopting one means nothing
+- the bash fleet reader and its land/PR helpers. **Go is now required**;
+  `install.sh` fails without it, and a missing `kel-fleet` fails loudly
+- the keymap file and the usage counter (it existed to gate this very pass)
+
+`bin/kel` went from 3,247 lines to about 1,950. Moving the bash-only tests onto
+`kel-fleet` found two real bugs, both fixed with tests that fail without the
+fix: `kel-fleet` ignored `pr = off`, and it called `gh` for repos that local git
+had already answered.
+
+### Step 4 — the sidebar  ·  *next, being planned*
+
+Not started. To be planned in conversation before any code; the questions it
+has to answer first are in `spec.md` §5b. A draft order, for that discussion:
+
+1. **The fleet document learns every pane** — kind (agent / server / shell,
+   from the process), cwd, and git position per worktree (branch,
+   ahead/behind, dirty). Data first, in `kel-fleet`, so the sidebar and any
+   later GUI read the same thing.
+2. **The workspace shell** — the holding session, the workspace window, the
+   `swap-pane` mechanics, and what restore does with them. Prove it by hand
+   on a real tmux server before building UI on it.
+3. **The sidebar** — `kel top` grown into it: repo → worktree → pane, about
+   eight keys, all in its footer. Navigation and jump first; `n`ew / `x` kill
+   / `r`ename by calling the existing `bin/kel` commands.
+4. **The panel** — files (`yazi`), git (`lazygit`), opened at the selected
+   pane's directory.
+5. **Plan and tasks** — the plan from `~/.claude/plans/*.md`; the task list
+   from the session transcript the hooks already point at.
+6. **Automations** — last, and only once the rest is daily-driven.
+
+`v0.10.0` is tagged when 1–3 are usable.
+
+---
 
 ## v1.0 — shareable
 
-**v1.0 is a product milestone, not an implementation one.** It previously read
-"Go + Bubble Tea single static binary," which would have been reached without
-kelsier getting better at anything, while `install.sh --uninstall` — a blocker
-by the backlog's own words — sat outside the definition.
-
-**v1.0 means:** the loop is closed (you know which agent is blocked, why, how
-deep it is, and what it cost), the worktree lifecycle ends as cleanly as it
-starts, the install is reversible, and someone who is not the author can run
-`git clone && ./install.sh` and have it work — with or without Go.
-
-**And the TUI is one the author will stand behind.** Added 2026-09-01, because
-without it this definition reads as met while the author's position is that it
-is not. This criterion is **author judgment with no trigger** — deliberately no
-acceptance test, no checklist, no proxy metric. Inventing one would let the
-document declare v1.0 ready over the author's objection, which is the failure
-the criterion exists to prevent. The audit in *The TUI pass* above is the
-starting evidence, not the bar.
-
-How much of it is Go by then is an outcome, not a requirement.
-
-**Where the gate stands.** `git clone && ./install.sh` is exercised on a Mac as
-of 2026-09-01; `install/macos-tools.sh` is not. See v0.9-hardening above.
-
-### v2.0 — all Go, if ever
-
-Retiring `bin/kel` is its own decision, taken after v1.0 with evidence from
-running both. It needs: every subcommand ported and differentially tested, a
-release pipeline (so a machine without a toolchain gets a binary rather than
-nothing), and an honest answer to what is lost — editing a script and having it
-live is a real feature of a tool you bend to this week's workflow.
+**v1.0 is a promise, not a size**: the on-disk format, the commands and the
+sidebar's keys will stop changing under you. It means the author daily-drives
+the sidebar and stands behind it — author judgment, deliberately with no proxy
+metric — and someone who is not the author can install it on Linux or a Mac
+from a release, without a Go toolchain.
 
 ---
 
 ## Explicitly not on the path
 
-- **Two-slot / swap-pane architecture** — cut, rationale in `spec.md` §5c.
-  Revisit only with a concrete pain the popup board cannot address.
-- Diff view in an `ops` panel, PR status on the row, attach-to-external —
-  candidates in `spec.md`; none committed, none blocking.
-- Session templates moved **onto** the backlog as `kel new --preset`
-  (`backlog.md` #10). The reversal is deliberate: it's tmux layout automation,
-  not agent-wrapping.
+- Anything that wraps, proxies or injects into the agent (`spec.md` §2).
+- A bespoke file viewer, diff viewer or editor — the panel embeds `yazi`,
+  `lazygit` and `$EDITOR` (`backlog.md` R4, R5).
+- A daemon. The sidebar runs while it is open and not otherwise.
