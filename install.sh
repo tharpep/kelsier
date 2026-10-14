@@ -126,7 +126,7 @@ chmod +x "$KEL"
 ln -sf "$KEL" "$BIN_DIR/kel"
 # remove pre-v0.1 loose scripts
 rm -f "$BIN_DIR/kel-status" "$BIN_DIR/kel-jump" "$BIN_DIR/kel-cheat"
-echo "  kel  (new kill ls rename top restore relaunch sweep prune doctor config update + internals)"
+echo "  kel  (new kill ls rename top sidebar restore relaunch sweep prune doctor config update + internals)"
 
 say "shell completion"
 # bash: XDG completions dir is loaded lazily by bash-completion >= 2.x
@@ -217,17 +217,21 @@ jq --arg k "$KEL" '.statusLine = {type:"command", command:($k + " statusline")}'
 echo "  wired: statusLine  (context % / cost per agent)"
 
 say "done"
-cat <<EOF
+# Quoted on purpose: nothing below is a variable, and an unquoted heredoc
+# reads the backtick in "prefix `" as the start of a command substitution —
+# which is how this message once died with "bad substitution".
+cat <<'EOF'
 
   Reload:
-    tmux source-file ~/.tmux.conf   # picks up kel.conf  (kill-server for a clean slate)
+    kel snapshot && tmux kill-server   # then `kel` — a restart is what drops
+                                       # hooks and keys an older kel.conf set
     first install only: restart running Claude Code sessions so they load the hooks
 
   Use:
-    kel                 go to (or start) this repo's agent
+    kel                 go to (or start) this repo's agent — never asks anything
     kel new <name>      new window + agent   (-w = git worktree, --group G)
-    kel ls              list every agent, grouped by repo (with context %)
+    kel restore         bring back the previous workspace   (--list to choose)
+    kel sidebar off|on  the pane on the left of every window
     prefix t            kel top — every agent at a glance   ·   prefix `  next waiting
-    kel relaunch [name] relaunch a crashed agent in its own window
     kel kill <name>     close one      ·   kel doctor    check the machine
 EOF

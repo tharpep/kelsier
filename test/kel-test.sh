@@ -1143,6 +1143,13 @@ ok "  ...and the bash completion too"    '[ "$DISP" = "$CBASH" ]'
 ok "  ...and the zsh completion too"     '[ "$DISP" = "$CZSH" ]'
 ok "  ...over a real number of commands" '[ "$(printf "%s\n" "$DISP" | grep -c .)" -ge 12 ]'
 
+# install.sh's closing message once died with "bad substitution" — a backtick
+# in an unquoted heredoc — which `bash -n` cannot see: it only fails when run.
+# Render it the way install.sh does, without running the install.
+INSTALL_MSG="$(sed -n "/^cat <<'EOF'/,/^EOF/p" "$HERE/../install.sh")"
+ok "install.sh's closing message renders" \
+  '[ -n "$INSTALL_MSG" ] && out="$(bash -c "$INSTALL_MSG" 2>&1)" && [[ "$out" == *"kel restore"* ]] && [[ "$out" != *"bad substitution"* ]]'
+
 section "errors cannot be swallowed"
 # display-popup: a single -E closes the popup the instant shell-command exits
 # — including a `die`, so the message a human needed never rendered. Two -E
