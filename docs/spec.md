@@ -470,6 +470,27 @@ state-changing commands) writes the full shape to `snapshot.json`, keeping one
 `.prev`. A restore holds a `.restoring` lockfile so the hooks it trips cannot
 overwrite the file it is reading (invariant 2).
 
+**Restore is by choice, like `claude --resume`** *(designed 2026-10-14, built
+in M0).* Until v0.10, `kel` put a rebuild prompt in front of you whenever a
+snapshot existed and the server was down — every first `kel` after a reboot,
+whatever you came to do. The author's account: they never quite understood
+what it was asking and were just trying to move on. So:
+
+- **`kel` always just opens.** No prompt, ever.
+- **`kel restore`** rebuilds the most recent previous workspace, resuming
+  conversations by default (resuming is why you restore; the old `-c` becomes
+  the default). **`kel restore --list`** picks an earlier one.
+- **A passive hint, not a question:** when an unrestored workspace exists, the
+  startup text says so once — `previous workspace: 3 windows · kel restore` —
+  and later the sidebar footer can carry it.
+- **Starting fresh must not destroy the old workspace.** The snapshot hooks
+  rewrite `snapshot.json` within seconds of anything changing, and `.prev` is
+  one generation. So when `kel` starts with no server and a snapshot exists, it
+  first moves it into `snapshots/<epoch>.json` (the newest five kept), and
+  `kel restore` reads from there. Invariant 1's spirit, applied to layouts.
+- The declined-snapshot machinery (`snapshot-declined`, the `n` / `d` answers)
+  is deleted: with no question there is nothing to remember declining.
+
 **`kel kill` on a worktree refuses** when there are uncommitted or unpushed
 changes, and names what is at risk. Deleting an agent's only copy of its work
 is the one unforgivable bug in this category of tool (invariant 1).

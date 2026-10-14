@@ -92,15 +92,23 @@ had already answered.
 Agreed 2026-10-14. Each milestone ends with something to try, and the suite
 stays green throughout. The decisions behind it are `spec.md` §5c and §7.
 
-**M0 — one session** *(bash, small)*  ·  *next*
+**M0 — one session, and restore by choice** *(bash)*  ·  *next*
 - `kel new` puts every window in a single `kel` session; `group` stays in the
   records as the repo label (no on-disk format change)
 - the bar, `kel` (attach) and `prefix g` simplify — `prefix g` goes
-- restore merges a v0.9 per-repo snapshot into the one session
-- *try:* everything works as today, in one session; `prefix 1..9` reaches
-  every agent
-- *tests:* the suite's session counts adapted; a v0.9 multi-session snapshot
-  restores into one session
+- `kel` never prompts: a snapshot from a dead server is archived to
+  `snapshots/<epoch>.json` (newest five kept) and the workspace opens fresh,
+  with a one-line hint (`spec.md` §10)
+- `kel restore` rebuilds the newest archived workspace, conversations resumed
+  by default; `--list` picks an earlier one; a v0.9 multi-session snapshot
+  restores into the one session
+- the declined-snapshot file and its prompt answers are deleted
+- *try:* reboot, run `kel` — it just opens; `kel restore` brings it all back;
+  `prefix 1..9` reaches every agent
+- *tests:* session counts adapted; `kel` with a snapshot present opens without
+  prompting; the old workspace survives a fresh start and `kel restore`
+  brings it back; `--list` shows the archive; the archive caps at five; a v0.9
+  multi-session snapshot restores into one session
 
 **M1 — the fleet learns every pane** *(Go, `kel-fleet`)*
 - a `panes[]` list in the fleet document: window, kind (agent / server /
@@ -155,8 +163,9 @@ stays green throughout. The decisions behind it are `spec.md` §5c and §7.
 where the tmux-hook risk lives, so it is proven before any UI depends on it;
 M3 is the first thing that feels different.
 
-**Open:** what made the old restore hard to work with. M0 and M2 both rebuild
-restore, which is the chance to fix it rather than extend it.
+**Restore, answered:** what made it hard was the prompt — it stood between
+the author and whatever they came to do, asking a question they did not
+understand. M0 removes it (`spec.md` §10).
 
 ---
 
