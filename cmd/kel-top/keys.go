@@ -11,16 +11,6 @@ import (
 // same values (key.Matches) and the footer's help.Model renders help text
 // from these same values — one struct, so a key cannot go undocumented
 // (#27) or documented-but-unhandled without this file changing too.
-//
-// This is a DIFFERENT list from keymap.tsv (keymap.go): that file is
-// per-agent and fleet-wide actions Phase 3/4 wire up, read by both bin/kel
-// and kel-top. Navigation has no bash-side counterpart to stay in sync
-// with, so it lives here instead of duplicating a file that would only ever
-// have one reader. The one exception is Jump: its key is "enter", already
-// reserved in keymap.tsv's agent/jump row, so its HELP TEXT is sourced from
-// there (interface.md §6: "help renders from the file") rather than
-// hand-written a second time — Jump itself stays a no-op this phase (#3);
-// only Phase 4 gives it the real action.
 type keys struct {
 	Up, Down, Top, Bottom              key.Binding
 	Sort, Filter, Reload               key.Binding
@@ -28,10 +18,7 @@ type keys struct {
 	FilterDone, FilterBack, FilterQuit key.Binding
 }
 
-func newKeys(jumpHelp string) keys {
-	if jumpHelp == "" {
-		jumpHelp = "jump to it" // keymap.tsv's own text for this row; belt and suspenders
-	}
+func newKeys() keys {
 	return keys{
 		Up:         key.NewBinding(key.WithKeys("k", "up"), key.WithHelp("k/↑", "up")),
 		Down:       key.NewBinding(key.WithKeys("j", "down"), key.WithHelp("j/↓", "down")),
@@ -40,7 +27,7 @@ func newKeys(jumpHelp string) keys {
 		Sort:       key.NewBinding(key.WithKeys("s"), key.WithHelp("s", "sort")),
 		Filter:     key.NewBinding(key.WithKeys("/"), key.WithHelp("/", "filter")),
 		Reload:     key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "reload")),
-		Jump:       key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", jumpHelp)),
+		Jump:       key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "jump to it")),
 		ToggleHelp: key.NewBinding(key.WithKeys("?"), key.WithHelp("?", "help")),
 		Quit:       key.NewBinding(key.WithKeys("q", "esc", "ctrl+c"), key.WithHelp("q/esc/ctrl+c", "quit")),
 		FilterDone: key.NewBinding(key.WithKeys("enter", "esc"), key.WithHelp("enter/esc", "done")),
@@ -81,23 +68,11 @@ func (k filterHelp) FullHelp() [][]key.Binding {
 	return [][]key.Binding{{k.FilterDone, k.FilterBack, k.FilterQuit}}
 }
 
-// helpTextFor looks up one keymap.tsv row's help column. Used only for Jump,
-// which is the one navigation key that already has an entry there.
-func helpTextFor(rows []keyBinding, scope, action string) string {
-	for _, r := range rows {
-		if r.Scope == scope && r.Action == action {
-			return r.Help
-		}
-	}
-	return ""
-}
-
 // dumpHelpKeys is --dump-help-keys' payload: one line per literal key
 // ("k/up" expands to two lines), scope-prefixed by mode since Jump's "enter"
 // and FilterDone's "enter" are different bindings in different modes. This
-// is the bidirectional guard's data half — test/kel-test.sh asserts it
-// against a hand-kept expected set, the same shape as the keymap.tsv parity
-// guard in keymap.go.
+// is the guard's data half — test/kel-test.sh asserts it against a
+// hand-kept expected set.
 func dumpHelpKeys(k keys) string {
 	var b strings.Builder
 	add := func(mode string, bnd key.Binding) {

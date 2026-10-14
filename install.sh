@@ -19,6 +19,17 @@ KEL="$KEL_DIR/bin/kel"
 
 say() { printf '\033[1;33m>>> %s\033[0m\n' "$*"; }
 
+# Every run used to leave one more settings.json.kel-bak.<epoch> behind, never
+# reaping any — twenty-one of them on the author's machine.  Keep the newest
+# three.  The suffix is a 10-digit epoch, so the glob's lexical order IS
+# chronological; no `ls -t`, no `sort -V` (BSD has neither the same way).
+backup() {   # file — copy it aside, then trim to the newest three
+  cp "$1" "$1.kel-bak.$(date +%s)"
+  local all=( "$1".kel-bak.* ) n i
+  n=${#all[@]}
+  for (( i = 0; i < n - 3; i++ )); do rm -f "${all[$i]}"; done
+}
+
 command -v jq   >/dev/null || { echo "kel: jq is required"   >&2; exit 1; }
 command -v tmux >/dev/null || { echo "kel: tmux is required" >&2; exit 1; }
 
@@ -44,7 +55,7 @@ if [ "${1:-}" = "--uninstall" ]; then
     rm -f "$f" && echo "  removed $f"
   done
   if [ -f "$HOME/.zshrc" ] && grep -qF "$ZSH_FPATH_DIR" "$HOME/.zshrc"; then
-    cp "$HOME/.zshrc" "$HOME/.zshrc.kel-bak.$(date +%s)"
+    backup "$HOME/.zshrc"
     grep -vF -e "# kelsier completion" -e "fpath+=($ZSH_FPATH_DIR)" "$HOME/.zshrc" > "$HOME/.zshrc.new" \
       && mv "$HOME/.zshrc.new" "$HOME/.zshrc"
     echo "  removed the fpath line from ~/.zshrc (backed up)"
@@ -53,13 +64,13 @@ if [ "${1:-}" = "--uninstall" ]; then
   if [ -f "$HOME/.config/tmux/tmux.conf" ]; then TMUX_CONF="$HOME/.config/tmux/tmux.conf"; else TMUX_CONF="$HOME/.tmux.conf"; fi
   SRC_LINE="source-file $KEL_DIR/tmux/kel.conf"
   if [ -f "$TMUX_CONF" ] && grep -qF "$SRC_LINE" "$TMUX_CONF"; then
-    cp "$TMUX_CONF" "$TMUX_CONF.kel-bak.$(date +%s)"
+    backup "$TMUX_CONF"
     grep -vF -e "# kelsier" -e "$SRC_LINE" "$TMUX_CONF" > "$TMUX_CONF.new" && mv "$TMUX_CONF.new" "$TMUX_CONF"
     echo "  removed the source-file line from $TMUX_CONF (backed up)"
   fi
 
   if [ -f "$SETTINGS" ]; then
-    cp "$SETTINGS" "$SETTINGS.kel-bak.$(date +%s)"
+    backup "$SETTINGS"
     tmp="$(mktemp)"
     # drop kel's hook entries and, if kel displaced one, restore the statusLine
     # it replaced rather than just deleting ours
@@ -101,6 +112,12 @@ if [ "${1:-}" = "--uninstall" ]; then
   exit 0
 fi
 
+command -v go >/dev/null || {
+  echo "kel: Go is required (kel-fleet and kel-top are built from source)" >&2
+  echo "     install/20-user-tools.sh (Debian/Ubuntu) or install/macos-tools.sh" >&2
+  exit 1
+}
+
 say "directories"
 mkdir -p "$BIN_DIR" "$STATE_DIR" "$STATE_DIR/sessions" "$STATE_DIR/.stash"
 
@@ -109,7 +126,7 @@ chmod +x "$KEL"
 ln -sf "$KEL" "$BIN_DIR/kel"
 # remove pre-v0.1 loose scripts
 rm -f "$BIN_DIR/kel-status" "$BIN_DIR/kel-jump" "$BIN_DIR/kel-cheat"
-echo "  kel  (new kill ls go move rename board restore relaunch prune doctor cheat + internals)"
+echo "  kel  (new kill ls rename top restore relaunch sweep prune doctor config update + internals)"
 
 say "shell completion"
 # bash: XDG completions dir is loaded lazily by bash-completion >= 2.x
@@ -147,29 +164,21 @@ else
   echo "  added source-file line to $TMUX_CONF"
 fi
 
-say "kel-fleet + kel-top (Go, optional)"
-# The Go fleet reader is a speed-up, never a requirement: bin/kel falls back to
-# its own bash implementation when the binary is absent, which is what keeps
-# `git clone && ./install.sh` working on a machine with no toolchain.
-if command -v go >/dev/null 2>&1; then
-  if (cd "$KEL_DIR" && go build -o "$BIN_DIR/kel-fleet" ./cmd/kel-fleet) 2>/dev/null; then
-    echo "  built $BIN_DIR/kel-fleet  ($(go version | awk '{print $3}'))"
-  else
-    echo "  kel-fleet build FAILED — kel will use the bash implementation"
-  fi
-  if (cd "$KEL_DIR" && go build -o "$BIN_DIR/kel-top" ./cmd/kel-top) 2>/dev/null; then
-    echo "  built $BIN_DIR/kel-top     (prefix t)"
-  else
-    echo "  kel-top build FAILED — 'kel top' will be unavailable"
-  fi
-else
-  echo "  go not installed — using the bash implementation (this is fine)"
-fi
+say "kel-fleet + kel-top (Go)"
+# Required since v0.10: the bash fleet reader is gone, so a failed build is a
+# failed install.  The compiler's own output is left visible — hiding it is
+# how a broken build used to read as "fine, using bash".
+for b in kel-fleet kel-top; do
+  (cd "$KEL_DIR" && go build -o "$BIN_DIR/$b" "./cmd/$b") \
+    || { echo "kel: building $b failed" >&2; exit 1; }
+  echo "  built $BIN_DIR/$b"
+done
+echo "  ($(go version | awk '{print $3}'))"
 
 say "Claude Code hooks -> $SETTINGS"
 mkdir -p "$HOME/.claude"
 [ -f "$SETTINGS" ] || echo '{}' > "$SETTINGS"
-cp "$SETTINGS" "$SETTINGS.kel-bak.$(date +%s)"
+backup "$SETTINGS"
 tmp="$(mktemp)"
 jq --arg k "$KEL" '
   # drop any prior kel hook entry (old "kel-hook.sh ..." or new "kel hook ...")
@@ -192,7 +201,7 @@ echo "  wired: SessionStart UserPromptSubmit Notification Stop SessionEnd PreCom
 
 say "Claude Code statusLine -> $SETTINGS"
 # kel's statusLine reports this agent's context window / cost, and records them
-# so the tmux bar, `kel ls` and the board can show them without interrupting
+# so the tmux bar, `kel ls` and `kel top` can show them without interrupting
 # the agent.  If you already had a statusLine, keep it and chain it after ours.
 PREV="$(jq -r '.statusLine.command // ""' "$SETTINGS")"
 PREV_FILE="$HOME/.claude/statusline-prev"
@@ -218,7 +227,7 @@ cat <<EOF
     kel                 go to (or start) this repo's agent
     kel new <name>      new window + agent   (-w = git worktree, --group G)
     kel ls              list every agent, grouped by repo (with context %)
-    Ctrl+Space          the board — find an agent    ·   prefix m   manage this one
+    prefix t            kel top — every agent at a glance   ·   prefix `  next waiting
     kel relaunch [name] relaunch a crashed agent in its own window
     kel kill <name>     close one      ·   kel doctor    check the machine
 EOF

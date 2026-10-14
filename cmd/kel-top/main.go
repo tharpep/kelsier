@@ -3,12 +3,11 @@
 //
 //	kel top                 interactive  (j/k scroll, s sort, / filter, ? help, q quit)
 //	kel top --once          render one frame to stdout and exit
-//	kel top --dump-keys     print the keymap's action set — see keymap.go
 //	kel top --dump-help-keys  print the navigation keymap's key set — see keys.go
 //
-// Read-only by design: it never acts on an agent. The board (Ctrl+Space) owns
-// actions, and keeping that boundary is why this can refresh under you without
-// ever doing something you did not ask for.
+// Read-only for now: it never acts on an agent. v0.10 deleted the fzf board
+// that used to own actions; this is the seed of the sidebar that replaces it
+// (docs/rollout.md § v0.10), and acting arrives with that.
 package main
 
 import (
@@ -341,10 +340,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.help.ShowAll = !m.help.ShowAll
 		case key.Matches(msg, m.keys.Jump):
 			// #3/#27: an explicit no-op, not a keypress with no effect and
-			// no case to find it in. Phase 2 changes what this surface
-			// SAYS, not what it does (interface-build.md "Phase 2 ...
-			// must not: no actions yet") -- the real jump is Phase 4
-			// (interface.md §5b), reusing this same binding.
+			// no case to find it in. The real jump arrives with the
+			// sidebar (docs/rollout.md § v0.10), reusing this binding.
 		}
 	}
 	return m, nil
@@ -359,7 +356,7 @@ func (m model) render() string {
 	now := time.Now().Unix()
 
 	// fixed columns, then LAST OUTPUT gets whatever is left. Column order
-	// is GROUP AGENT STATE FOR LAND CTX $ (interface.md §4a): LAND moved
+	// is GROUP AGENT STATE FOR LAND CTX $: LAND moved
 	// ahead of CTX and $ because it names an action, where a dollar figure
 	// names something already spent.
 	const (
@@ -561,31 +558,13 @@ func main() {
 		switch a {
 		case "--once":
 			once = true
-		case "--dump-keys":
-			// Phase 1 (interface-build.md): prove the embedded keymap.tsv
-			// parses and expose its action set for test/kel-test.sh to
-			// diff against bin/kel's _dumpkeys — see keymap.go.
-			rows, err := loadKeymap()
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "kel-top: %v\n", err)
-				os.Exit(1)
-			}
-			fmt.Print(dumpKeys(rows))
-			return
 		case "--dump-help-keys":
-			// Phase 2: the bidirectional guard's data half. Same shape as
-			// --dump-keys above but for the navigation bindings in keys.go,
-			// which have no bash-side counterpart — test/kel-test.sh diffs
-			// this against a hand-kept expected set instead.
-			rows, err := loadKeymap()
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "kel-top: %v\n", err)
-				os.Exit(1)
-			}
-			fmt.Print(dumpHelpKeys(newKeys(helpTextFor(rows, "agent", "jump"))))
+			// the guard's data half: test/kel-test.sh diffs this against a
+			// hand-kept expected set, so a key cannot go undocumented
+			fmt.Print(dumpHelpKeys(newKeys()))
 			return
 		case "-h", "--help":
-			fmt.Fprintln(os.Stderr, "usage: kel-top [--once] [--dump-keys] [--dump-help-keys]")
+			fmt.Fprintln(os.Stderr, "usage: kel-top [--once] [--dump-help-keys]")
 			return
 		default:
 			fmt.Fprintf(os.Stderr, "kel-top: unknown flag %s\n", a)
@@ -593,14 +572,9 @@ func main() {
 		}
 	}
 
-	rows, err := loadKeymap()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "kel-top: %v\n", err)
-		os.Exit(1)
-	}
 	m := model{
 		mode: sortTriage, ctxWarn: 70, width: 100, height: 24,
-		keys: newKeys(helpTextFor(rows, "agent", "jump")),
+		keys: newKeys(),
 		help: help.New(),
 	}
 	// Plain, not styled: render() applies its own `dim` to the whole footer

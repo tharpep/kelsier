@@ -14,8 +14,8 @@ import (
 // after it. Control characters that survive anyway are stripped here.
 //
 // This is NOT part of the fleet document — it is a per-refresh read for
-// `kel top` only. Adding it to Doc would change the contract the bash and Go
-// implementations are diffed against, for data no other surface wants.
+// `kel top` only: a capture-pane per window is too costly for the bar's
+// redraw path, and no other surface wants it.
 func LastOutput(windowIDs []string) map[string]string {
 	out := make(map[string]string, len(windowIDs))
 	var mu sync.Mutex

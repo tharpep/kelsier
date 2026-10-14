@@ -112,7 +112,16 @@ func prTTL() int64 {
 // prRefresh refetches when the cache is stale. One request per repo, not per
 // branch: `gh pr status` costs ~2s and answers for one branch, while the pulls
 // endpoint costs ~0.6s and answers for all of them.
+//
+// `pr = off` (KEL_PR, exported by bin/kel's config loader) stops it: this is
+// the one call in kel that leaves the machine.  Only the bash reader used to
+// honour it, so with kel-fleet installed the setting silently did nothing —
+// invisible until the bash reader was deleted and its test had to move here.
 func prRefresh(dir string) {
+	switch os.Getenv("KEL_PR") {
+	case "0", "off", "no", "false":
+		return
+	}
 	f := prCacheFile(dir)
 	if f == "" {
 		return
@@ -260,6 +269,20 @@ func landOf(dir, branch string, wantPR bool) *Land {
 }
 
 // landMap classifies each distinct worktree once, concurrently.
+// localAnswer reports whether landOf will stop at dirty or unpushed — the two
+// codes that need no PR state — mirroring its first two checks.
+func localAnswer(dir string) bool {
+	if out, ok := git(dir, "status", "--porcelain"); ok && countLines(out) > 0 {
+		return true
+	}
+	if hasRemote(dir) {
+		if out, ok := git(dir, "log", "--oneline", "HEAD", "--not", "--remotes"); ok && countLines(out) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
 func landMap(records []record, wantPR bool) map[string]*Land {
 	type job struct{ cwd, branch string }
 	seen := map[string]job{}
@@ -278,10 +301,15 @@ func landMap(records []record, wantPR bool) map[string]*Land {
 	}
 	// refresh each repo's PR cache once, before fanning out, so N worktrees of
 	// one repo make one request rather than racing N of them
+	//
+	// A worktree with uncommitted or unpushed work is answered by local git
+	// alone (dirty / unpushed outrank every PR state), so it must not be the
+	// reason kel talks to github.com — spec.md promises that, and only the
+	// bash reader used to keep it.
 	if wantPR {
 		done := map[string]bool{}
 		for _, j := range seen {
-			if s := repoSlug(j.cwd); s != "" && !done[s] {
+			if s := repoSlug(j.cwd); s != "" && !done[s] && !localAnswer(j.cwd) {
 				done[s] = true
 				prRefresh(j.cwd)
 			}

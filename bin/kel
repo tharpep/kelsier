@@ -9,15 +9,7 @@
 #   kel kill <name> [-f]       close the window; remove the worktree; -f overrides
 #                              the uncommitted / unpushed check
 #   kel ls [--json]            list agents, grouped by repo
-#   kel go [<group>]           switch to a group (no arg: list groups)
-#   kel move [<group>]         change a managed agent's group
-#   kel adopt [<group>]        start tracking an unmanaged window as an agent
-#                              (no arg for either: the group for the repo the
-#                              PANE is standing in, else $KEL_GROUP, else misc)
 #   kel rename <newname>       rename the current window (keeps metadata in sync)
-#   kel board                  fzf fleet browser — filter / preview / act
-#                              (Ctrl+Space or prefix b; enter jumps, tab = agent
-#                              actions, ctrl-f = dashboard/config/sweep/etc.)
 #   kel restore [-c] [-s]      rebuild the workspace after a kill / reboot
 #                              (-c resume conversations, -s force the snapshot)
 #   kel relaunch [name] [-f]   relaunch a crashed agent in its existing window
@@ -32,14 +24,11 @@
 #                              commented out with its default)
 #   kel update                 fast-forward the clone kel runs from, then
 #                              re-run install.sh (refuses on a dirty tree)
-#   kel _usage                 what you have actually reached for (prune pass)
-#                              — scaffolding, not wired anywhere; run it yourself
 #
 # internal (wired by install.sh; some are fine to type, none are the point):
 #   kel status-line [group]    render tmux status-left
 #   kel jump                   jump to the next waiting agent, any group (prefix `)
 #   kel snapshot               save the workspace shape (hooks call this)
-#   kel cheat                  keybinding reference (also: prefix k, prefix ?)
 #   kel hook <EVENT>           Claude Code state hook
 #   kel statusline             Claude Code statusLine — context % / cost
 set -uo pipefail
@@ -113,7 +102,7 @@ STATUSLINE_PREV="$HOME/.claude/statusline-prev"   # a statusLine kel displaced
 KEL_CTX_WARN="${KEL_CTX_WARN:-70}"                # show context on the bar from here up
 KEL_NOTIFY="${KEL_NOTIFY:-waiting}"               # states worth interrupting you for
 # The running script's own absolute path, preferred over a PATH lookup: kel
-# re-invokes itself (sweep, the board menus, tmux bindings) and resolving that
+# re-invokes itself (sweep, tmux bindings) and resolving that
 # through PATH breaks whenever kel is not installed — a fresh clone, or CI.
 # That failed silently, because the re-invocation just did nothing.
 SELF="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)/$(basename "${BASH_SOURCE[0]}")"
@@ -407,14 +396,6 @@ dead_sessions() {
 
 prune_state() {
   local live f wid panes pane
-  # cmd_board's preview snapshot traps its own removal, which covers every
-  # ordinary exit. A popup killed outright (SIGKILL, a closed terminal) skips
-  # the trap and leaks one file per board open — the same shape as the .stash
-  # entries below, which is the leak this function already exists to catch.
-  # -mmin, not stat: BSD wants `stat -f %m` where GNU wants `-c %Y`, and the
-  # portability table in CLAUDE.md says remove the dependency rather than pick
-  # a flag. An hour is far longer than any board stays open.
-  find "$STATE_DIR" -maxdepth 1 -name '.board-preview.*' -mmin +60 -delete 2>/dev/null || true
   live="$(tmux list-windows -a -F '#{window_id}' 2>/dev/null || true)"
   [ -n "$live" ] || return 0
   for f in "$STATE_DIR"/*.state "$STATE_DIR"/*.ctx; do
@@ -702,366 +683,24 @@ cmd_prune() {
 # --------------------------------------------------------------------------
 # kel ls
 # --------------------------------------------------------------------------
-# --------------------------------------------------------------------------
-# land state  —  "what would it take to land this branch?"  (#6)
-# --------------------------------------------------------------------------
-# One column, one verb per row.  ready/not-ready would collapse five different
-# situations that each imply a different next action; naming the action is the
-# whole point of a fleet glance.  It stops at *which* action — never what
-# changed.  The moment you want the diff, that is lazygit (backlog R5).
+# The fleet document comes from the Go kel-fleet; there is no bash fallback
+# any more (v0.10 dropped it — keeping two implementations byte-identical cost
+# more than the fallback ever saved).  Missing or failing, it fails LOUDLY: an
+# empty fleet would read as "no agents", which is a guess reported as a fact.
 #
-# Precedence, most-blocking first:
-#   dirty N    uncommitted work                 -> commit it
-#   unpushed N commits only you have            -> push
-#   merged     its PR landed                    -> sweepable
-#   review     PR open                          -> wait, or nudge
-#   behind N   base moved under you             -> rebase
-#   no_pr      pushed, no PR                    -> open one
-#   clean      nothing to say
-#   unknown    gh could not answer the PR half
-#
-# The first two and `behind` are pure local git: no network, no token. Only the
-# PR states need gh, so an expired token costs you those three and leaves the
-# rest honest — the column degrades, it does not go dark.
-base_ref() {   # repo-dir -> the branch this one is trying to land on
-  local d="$1" b
-  b="$(git -C "$d" symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null)" && { printf '%s' "$b"; return; }
-  for b in origin/main origin/master main master; do
-    git -C "$d" rev-parse --verify --quiet "$b" >/dev/null 2>&1 && { printf '%s' "$b"; return; }
-  done
-}
-
-land_of() {   # cwd [branch] [--pr]  ->  code	n
-  local d="$1" br="${2:-}" want_pr="${3:-}" n
-  [ -n "$d" ] && git -C "$d" rev-parse --git-dir >/dev/null 2>&1 || { printf 'clean	'; return; }
-  # an inplace agent has no recorded branch — ask the worktree
-  [ -n "$br" ] && [ "$br" != "-" ] || br="$(git -C "$d" rev-parse --abbrev-ref HEAD 2>/dev/null)"
-
-  n="$(git -C "$d" status --porcelain 2>/dev/null | grep -c . || true)"
-  [ "${n:-0}" -gt 0 ] && { printf 'dirty	%s' "$n"; return; }
-
-  if has_remote "$d"; then
-    n="$(git -C "$d" log --oneline HEAD --not --remotes 2>/dev/null | grep -c . || true)"
-    [ "${n:-0}" -gt 0 ] && { printf 'unpushed	%s' "$n"; return; }
-  fi
-
-  # "merged" outranks `behind`: it is sweepable regardless, and an open PR is
-  # someone else's turn.  Ask git BEFORE gh — if HEAD is already an ancestor of
-  # the base, the work is in, and that is true for a local remote, a non-GitHub
-  # remote, and offline.  gh only adds the squash-merge case, where the commit
-  # is rewritten and the ancestor test cannot see it.
-  local base_m; base_m="$(base_ref "$d")"
-  if [ -n "$base_m" ] && [ "$br" != "${base_m#origin/}" ]; then
-    if git -C "$d" merge-base --is-ancestor HEAD "$base_m" 2>/dev/null; then
-      printf 'merged	'; return
-    fi
-  fi
-
-  local pr; pr="$(pr_state_of "$d" "$br" "$want_pr")"
-  case "$pr" in
-    merged) printf 'merged	';  return ;;
-    open)   printf 'review	';  return ;;
-  esac
-
-  local base behind
-  base="$(base_ref "$d")"
-  # standing on the base branch itself: nothing to land, and "no PR" would be
-  # suggesting an action that does not exist
-  [ -n "$base" ] && [ "$br" = "${base#origin/}" ] && { printf 'clean\t'; return; }
-  if [ -n "$base" ]; then
-    behind="$(git -C "$d" rev-list --count "HEAD...$base" --right-only 2>/dev/null || true)"
-    [ "${behind:-0}" -gt 0 ] && { printf 'behind	%s' "$behind"; return; }
-    # nothing ahead of base means there is nothing to land: a freshly created
-    # worktree branch should not nag you to open a PR for zero commits
-    local ahead; ahead="$(git -C "$d" rev-list --count "$base...HEAD" --right-only 2>/dev/null || true)"
-    [ "${ahead:-0}" -eq 0 ] 2>/dev/null && { printf 'clean	'; return; }
-  fi
-
-  case "$pr" in
-    none)    printf 'no_pr	' ;;
-    unknown) printf 'unknown	' ;;
-    *)       printf 'clean	' ;;   # na, or nothing left to say
-  esac
-}
-
-# --- the PR half: ONE gh call per repo, cached ------------------------------
-# `gh pr status` costs ~2s and answers for one branch; `gh api .../pulls`
-# costs ~0.6s and answers for all of them.  With six worktrees off one repo
-# that is one request instead of six, and it is cached besides.  Nothing on a
-# refresh path ever fetches: without --pr this reads the cache or says unknown.
-PR_CACHE_DIR="$STATE_DIR/pr-cache"
-PR_CACHE_TTL="${KEL_PR_TTL:-300}"
-
-repo_slug() {   # cwd -> owner/repo, or empty when it isn't a GitHub remote
-  local u; u="$(git -C "$1" remote get-url origin 2>/dev/null)" || return 0
-  case "$u" in
-    *github.com[:/]*) ;;
-    *) return 0 ;;
-  esac
-  u="${u##*github.com}"; u="${u#:}"; u="${u#/}"; u="${u%.git}"
-  case "$u" in */*) printf '%s' "$u" ;; esac
-}
-
-pr_cache_file() { # cwd -> cache path, or empty
-  local slug; slug="$(repo_slug "$1")"; [ -n "$slug" ] || return 0
-  printf '%s/%s.json' "$PR_CACHE_DIR" "${slug//\//__}"
-}
-
-pr_refresh() {  # cwd — refetch when the cache is stale; silent on any failure
-  # `pr = off` — the one call in kel that leaves the machine.  It sends a repo
-  # slug to github.com and gets branch names back, which is fine on a personal
-  # box and is a policy question on a work one.  Off means land falls back to
-  # local git, which already answers dirty / unpushed / merged / behind; only
-  # the open-PR and squash-merge cases are lost.
-  case "${KEL_PR:-on}" in 0|off|no|false) return 0 ;; esac
-  local f slug age
-  f="$(pr_cache_file "$1")"; [ -n "$f" ] || return 0
-  slug="$(repo_slug "$1")"
-  if [ -f "$f" ]; then
-    local ts=0; read -r ts < "$f.at" 2>/dev/null || ts=0
-    case "$ts" in ''|*[!0-9]*) ts=0 ;; esac
-    age=$(( $(date +%s) - ts ))
-    [ "$age" -lt "$PR_CACHE_TTL" ] && return 0
-  fi
-  command -v gh >/dev/null 2>&1 || return 0
-  mkdir -p "$PR_CACHE_DIR"
-  local tmp; tmp="$(mktemp "$PR_CACHE_DIR/.p.XXXXXX")" || return 0
-  if gh api "repos/$slug/pulls?state=all&per_page=100" \
-       --jq '[.[] | {branch: .head.ref, merged: (.merged_at != null), state: .state}]' \
-       > "$tmp" 2>/dev/null && [ -s "$tmp" ]; then
-    mv -f "$tmp" "$f"; date +%s > "$f.at"
-  else
-    # an empty array is a legitimate answer (no PRs); a failure is not
-    if [ -f "$tmp" ] && [ "$(cat "$tmp")" = "[]" ]; then
-      printf '[]' > "$f"; date +%s > "$f.at"
-    fi
-    rm -f "$tmp"
-  fi
-}
-
-pr_state_of() { # cwd branch [--pr] -> merged | open | none | unknown | na
-  # `na` is not `unknown`: a repo with no GitHub remote has no PR question to
-  # answer, so it should read clean rather than as a failure to find out.
-  local d="$1" br="${2:-}" want="${3:-}" f
-  [ -n "$(repo_slug "$d")" ] || { printf 'na'; return; }
-  [ -n "$br" ] && [ "$br" != "-" ] || { printf 'unknown'; return; }
-  [ "$want" = "--pr" ] && pr_refresh "$d"
-  f="$(pr_cache_file "$d")"
-  [ -n "$f" ] && [ -f "$f" ] || { printf 'unknown'; return; }
-  jq -r --arg b "$br" '
-    [.[] | select(.branch == $b)] as $m
-    | if   ($m | length) == 0             then "none"
-      elif ($m | any(.merged))            then "merged"
-      elif ($m | any(.state == "open" or .state == "OPEN")) then "open"
-      else "none" end' "$f" 2>/dev/null || printf 'unknown'
-}
-# --------------------------------------------------------------------------
-# kel _fleet [--dirty]   —  ONE computed view of the whole fleet, as JSON
-# --------------------------------------------------------------------------
-# Every surface used to derive this for itself: gather_rows fed ls / --json /
-# the board over 13 positional TSV fields, and cmd_status_line re-derived its
-# own on every bar redraw.  They disagreed by construction, and the positional
-# plumbing caused three separate bugs.  This is the single answer, and the
-# contract the Go implementation has to match (spec.md 12).
-#
-# Cost discipline: the old path spent one `tmux list-panes` per window inside
-# effective_state plus a `jq` per record.  This spends two tmux calls and two
-# jq calls total, whatever the fleet size.  --dirty is opt-in because
-# `git status` per worktree is the expensive part and the bar never shows it.
-_fleet_bash() {
-  command -v jq >/dev/null 2>&1 || { printf '{"agents":[]}\n'; return 0; }
-  local want_dirty=0 want_land=0 want_pr=''
-  for a in "$@"; do
-    case "$a" in
-      --dirty) want_dirty=1 ;;
-      --land)  want_land=1; want_dirty=1 ;;
-      --pr)    want_pr=--pr; want_land=1; want_dirty=1 ;;
-    esac
-  done
-
-  local wins panes cur_sess='' cur_wid=
-  wins="$(tmux list-windows -a -F '#{session_name}	#{window_index}	#{window_id}	#{window_name}	#{window_activity}' 2>/dev/null || true)"
-  panes="$(tmux list-panes -a -F '#{window_id}	#{pane_current_command}' 2>/dev/null || true)"
-  IFS=' ' read -r cur_sess cur_wid < <(tmux display-message -p '#{client_session} #{window_id}' 2>/dev/null || true)
-
-  # state + ctx with builtins only, no fork per file
-  local states='' ctxs='' f wid st ep note line
-  for f in "$STATE_DIR"/*.state; do
-    [ -e "$f" ] || continue
-    wid="${f##*/}"; wid="${wid%.state}"
-    read -r st ep note < "$f" 2>/dev/null || continue
-    states="$states$wid	$st	$ep	$note"$'\n'
-  done
-  for f in "$STATE_DIR"/*.ctx; do
-    [ -e "$f" ] || continue
-    wid="${f##*/}"; wid="${wid%.ctx}"
-    IFS= read -r line < "$f" 2>/dev/null || continue
-    ctxs="$ctxs$wid	$line"$'\n'
-  done
-
-  # every record in ONE slurp.  Seeded with /dev/null so the array is never
-  # empty: `cat "${rf[@]}"` on an empty array fails two different ways
-  # depending on the bash. 3.2 treats it as unbound under `set -u` and aborts
-  # the subshell; 4.4+ expands it to nothing, so cat gets no arguments, reads
-  # stdin, and blocks forever on a terminal. /dev/null adds no records to any of
-  # the three consumers below.
-  local -a rf=(/dev/null)
-  # #25: a record that fails to parse must render as a visibly wrong row, not
-  # vanish -- and not take the WHOLE document down with it either, which is
-  # what happened before this loop existed: --slurpfile aborts on the first
-  # bad JSON value it hits in the concatenated stream, so one corrupt file
-  # used to zero out every other agent too. Validate each file on its own
-  # before it goes anywhere near that slurp; a bad one is named from its path
-  # (group/name), the only part of it that survives a parse failure.
-  local unreadable='' grp nm
-  for f in "$SESSIONS_DIR"/*/*.json; do
-    [ -e "$f" ] || continue
-    if jq -e . "$f" >/dev/null 2>&1; then
-      rf+=( "$f" )
-    else
-      grp="${f%/*}"; grp="${grp##*/}"
-      nm="${f##*/}"; nm="${nm%.json}"
-      unreadable="$unreadable$grp	$nm"$'\n'
-    fi
-  done
-
-  # dirty is keyed by cwd: it is a property of the directory, not the window
-  local dirty=''
-  if [ "$want_dirty" = 1 ]; then
-    local cwd seen=''
-    while IFS= read -r cwd; do
-      [ -n "$cwd" ] || continue
-      case "$seen" in *"|$cwd|"*) continue ;; esac
-      seen="$seen|$cwd|"
-      git -C "$cwd" rev-parse --git-dir >/dev/null 2>&1 || continue
-      dirty="$dirty$cwd	$(git -C "$cwd" status --porcelain 2>/dev/null | grep -c . || printf 0)"$'\n'
-    done < <(cat "${rf[@]}" 2>/dev/null | jq -r '.cwd // empty')
-  fi
-
-  # land: one row per distinct worktree.  --pr may refresh the PR cache (one
-  # gh call per repo); without it this is pure local git and never touches the
-  # network, which is what keeps it safe on a refresh path.
-  local land=''
-  if [ "$want_land" = 1 ]; then
-    local lcwd lbr seenl='' lres
-    while IFS=$'	' read -r lcwd lbr; do
-      [ -n "$lcwd" ] || continue
-      case "$seenl" in *"|$lcwd|"*) continue ;; esac
-      seenl="$seenl|$lcwd|"
-      lres="$(land_of "$lcwd" "$lbr" $want_pr)"
-      land="$land$lcwd	$lres"$'\n'
-    done < <(cat "${rf[@]}" 2>/dev/null | jq -r '[.cwd // "", .branch // ""] | @tsv')
-  fi
-
-  jq -n --slurpfile records <(cat "${rf[@]}" 2>/dev/null) \
-        --arg wins "$wins" --arg panes "$panes" --arg states "$states" \
-        --arg ctxs "$ctxs" --arg dirtyraw "$dirty" --arg landraw "$land" \
-        --arg unreadableraw "$unreadable" \
-        --arg prefix "$KEL_PREFIX" --arg cur_sess "$cur_sess" --arg cur_wid "$cur_wid" '
-    def rows($s): ($s // "") | split("\n") | map(select(length > 0) | split("\t"));
-    def num: (tonumber? // null);
-    def isshell: . as $c | (["bash","zsh","fish","sh","dash","tmux"] | index($c)) != null;
-    def groupof($s):
-      if   $s == $prefix                    then $prefix
-      elif ($s | startswith($prefix + "/")) then ($s[($prefix|length)+1:])
-      else null end;
-
-    rows($wins) as $W | rows($panes) as $P | rows($states) as $S
-    | rows($ctxs) as $C | rows($dirtyraw) as $DR | rows($landraw) as $LR
-    | rows($unreadableraw) as $U
-    | (reduce $P[]  as $p ({}; .[$p[0]] += [$p[1]]))  as $panemap
-    | (reduce $S[]  as $s ({}; .[$s[0]] = {state:$s[1], since:($s[2]|num),
-        note:(if ($s[3] // "") == "" then null else $s[3] end)}))  as $statemap
-    | (reduce $C[]  as $c ({}; .[$c[0]] = {pct:($c[1]|num), cost_usd:($c[2]|num),
-        in_tokens:($c[3]|num), size:($c[4]|num),
-        rate_5h:(($c[5]|num) | if . == -1 then null else . end),
-        at:($c[6]|num), model:(if ($c[7] // "") == "" then null else $c[7] end)}))  as $ctxmap
-    | (reduce $DR[] as $d ({}; .[$d[0]] = ($d[1]|num)))  as $dirtymap
-    | (reduce $LR[] as $l ({}; .[$l[0]] = {code:$l[1], n:($l[2]|num)}))  as $landmap
-    | (reduce $records[] as $r ({}; .[(($r.group // "misc") + " " + $r.name)] = $r))  as $recmap
-    | [ $W[]
-        | groupof(.[0]) as $g | select($g != null)
-        | .[2] as $wid | .[3] as $nm
-        | ($panemap[$wid] // [])            as $pl
-        | ($statemap[$wid] // null)         as $stt
-        | ($recmap[$g + " " + $nm] // null) as $rec
-        # idle is a real signal (SessionStart already fired), not "no signal
-        # yet" -- that case is $raw == null, untouched by this branch. Third
-        # copy of this exact check: the standalone effective_state() function
-        # above and internal/fleet/fleet.go each had it independently and
-        # were fixed for the same reason.
-        | (($stt.state // null) as $raw
-           | if ($raw == "idle" or $raw == "working" or $raw == "waiting" or $raw == "throttled")
-                and (([$pl[] | select(isshell | not)] | length) == 0)
-             then "dead" else $raw end)     as $eff
-        | { group:$g, name:$nm, window_id:$wid, index:(.[1]|num),
-            current: (.[0] == $cur_sess and $wid == $cur_wid),
-            managed: ($rec != null),
-            state:$eff, state_since:($stt.since // null), note:($stt.note // null),
-            isolation:($rec.isolation // null), branch:($rec.branch // null),
-            repo:($rec.repo // null), cwd:($rec.cwd // null),
-            agent:($rec.agent // null), claude_session:($rec.claude_session // null),
-            compactions:($rec.compactions // null),
-            dirty:($dirtymap[($rec.cwd // "")] // null),
-            land:($landmap[($rec.cwd // "")] // null),
-            panes:$pl, activity:(.[4]|num), context:($ctxmap[$wid] // null) } ]
-      # records with no live window. Same liveness rule as meta_is_live: the
-      # window must match BOTH the recorded id and the recorded name.
-      + [ $records[] as $r
-          | select([ $W[] | select(.[2] == $r.window_id and .[3] == $r.name) ] | length == 0)
-          | { group:($r.group // "misc"), name:$r.name, window_id:null, index:null,
-              current:false, managed:true,
-              state:"dead", state_since:null, note:null,
-              isolation:($r.isolation // null), branch:($r.branch // null),
-              repo:($r.repo // null), cwd:($r.cwd // null),
-              agent:($r.agent // null), claude_session:($r.claude_session // null),
-              compactions:($r.compactions // null),
-              dirty:($dirtymap[($r.cwd // "")] // null),
-              land:($landmap[($r.cwd // "")] // null),
-              panes:[], activity:null, context:null } ]
-      # #25: a record that failed to parse renders as a visibly wrong row,
-      # not vanish. group/name come from the path -- the only part of it
-      # that survives a parse failure -- and every other field is null, the
-      # same shape the no-live-window agent above uses.
-      + [ $U[]
-          | { group:.[0], name:.[1], window_id:null, index:null,
-              current:false, managed:true,
-              state:"unreadable", state_since:null, note:null,
-              isolation:null, branch:null, repo:null, cwd:null,
-              agent:null, claude_session:null, compactions:null,
-              dirty:null, land:null,
-              panes:[], activity:null, context:null } ]
-    | { generated_at:(now|todate),
-        current:{ group:(if $cur_sess == "" then null else groupof($cur_sess) end),
-                  window_id:(if $cur_wid == "" then null else $cur_wid end) },
-        agents:. }'
-}
-
-# The seam: a Go kel-fleet takes over when installed, bash answers otherwise.
 # Deliberately a stat of one known path, NOT `command -v`.  Looking up a binary
 # that does not exist walks all of $PATH, and on WSL2 $PATH carries the Windows
-# directories under /mnt/c — that miss measured 62ms, six times the cost of
-# everything else this function does put together.
+# directories under /mnt/c — that miss measured 62ms.
 fleet_json() {
-  # Fall back on ANY failure, not just a missing binary.  bin/kel updates the
-  # moment you pull; kel-fleet only updates when you re-run install.sh, so a
-  # stale binary that rejects a newly-added flag is the normal state of things
-  # for a minute — and it must degrade to bash rather than break the command.
-  if [ -x "$KEL_FLEET_BIN" ]; then
-    local out
-    if out="$("$KEL_FLEET_BIN" "$@" 2>/dev/null)" && [ -n "$out" ]; then
-      printf '%s\n' "$out"; return 0
-    fi
-  fi
-  _fleet_bash "$@"
+  [ -x "$KEL_FLEET_BIN" ] || die "kel-fleet is not built — run ./install.sh (needs Go)"
+  "$KEL_FLEET_BIN" "$@" || die "kel-fleet failed — a stale binary? re-run ./install.sh"
 }
-
 
 cmd_ls() {
   need tmux; need jq
   prune_state
   local doc
-  if [ "${1:-}" = "--json" ]; then doc="$(fleet_json --dirty)"; else doc="$(fleet_json)"; fi
+  if [ "${1:-}" = "--json" ]; then doc="$(fleet_json --dirty)" || exit 1; else doc="$(fleet_json)" || exit 1; fi
   [ "${1:-}" = "--json" ] || repaint_all "$doc"
 
   # --json is answered BEFORE the empty check: a consumer asked for JSON and
@@ -1114,714 +753,6 @@ cmd_ls() {
   fi
   return 0
 }
-
-# --------------------------------------------------------------------------
-# kel go
-# --------------------------------------------------------------------------
-cmd_go() {
-  need tmux
-  local g="${1:-}"
-  if [ -z "$g" ]; then
-    local gs; gs="$(group_sessions)"
-    [ -n "$gs" ] || { echo "no groups yet"; return 0; }
-    local cur; cur="$(current_group)"
-    printf '%s\n' "$gs" | while read -r x; do
-      [ "$x" = "$cur" ] && printf '* %s\n' "$x" || printf '  %s\n' "$x"
-    done
-    return 0
-  fi
-  local s; s="$(sess "$g")"
-  tmux has-session -t "=$s" 2>/dev/null || die "no group '$g'  (kel go with no arg lists them)"
-  set_last_group "$g"; snapshot
-  if in_tmux; then tmux switch-client -t "=$s"
-  elif [ -t 1 ]; then tmux attach -t "=$s"
-  fi
-}
-
-# --------------------------------------------------------------------------
-# kel move   — change the group of a managed agent
-# kel adopt  — start managing a window kel does not know about
-# --------------------------------------------------------------------------
-# These were one command until v0.9.  `kel move` on a window with no metadata
-# silently fell through to meta_write and printed "adopted 'x' into kel" — a
-# second, unrelated job hiding behind a verb nobody would type to reach it, and
-# documented nowhere.  Since v0.9a the board lists unmanaged panes, so "take
-# this one under management" is a gesture you now arrive at on purpose.
-#
-# The split is by *managed or not*, which is the thing you actually know when
-# you reach for one:
-#   move   an agent kel already tracks -> a different group
-#   adopt  a window kel does not track -> tracked, here or in a named group
-# Both may relocate the window; only adopt writes a new record.
-
-# Shared preamble.  Sets KW_* rather than printing tab-separated fields the way
-# resolve_agent does, because both callers need `die` to end the command — and
-# `die` inside $( ) only ends the subshell, which would let a bad group through.
-_kel_window_target() {   # [group]
-  local cur_sess tp
-  # Ask about THIS pane, not "the current one".  A bare `display-message -p`
-  # resolves against the session's ACTIVE window, so running this from a window
-  # that is not the active one — a script, a popup, a send-keys — silently
-  # reported a different window and would have moved the wrong agent.  Same
-  # ${var:+-t "$var"} shape cmd_board_actions uses for its client.
-  tp="${TMUX_PANE:-}"
-  KW_WID="$(tmux display-message -p ${tp:+-t "$tp"} '#{window_id}')"
-  cur_sess="$(tmux display-message -p ${tp:+-t "$tp"} '#{session_name}')"
-  KW_NAME="$(tmux display-message -p ${tp:+-t "$tp"} '#{window_name}')"
-  KW_PCWD="$(tmux display-message -p ${tp:+-t "$tp"} '#{pane_current_path}')"
-  # The group comes from THIS WINDOW's session, not from current_group, which
-  # reads #{client_session} — the group the attached client is looking at.
-  # Those differ whenever you act on a window other than the one on screen, and
-  # with no client attached current_group is empty, which silently sent the
-  # "already tracked" check looking in the wrong place.
-  case "$cur_sess" in
-    "$KEL_PREFIX")   KW_GROUP="$KEL_PREFIX" ;;
-    "$KEL_PREFIX"/*) KW_GROUP="${cur_sess#"$KEL_PREFIX"/}" ;;
-    *)               die "this window isn't in a kel group" ;;
-  esac
-
-  KW_TARGET="${1:-}"
-  if [ -z "$KW_TARGET" ]; then
-    if [ -n "${KEL_GROUP:-}" ]; then KW_TARGET="$KEL_GROUP"
-    else
-      # NB: the pane's cwd, not yours — an agent may have cd'd elsewhere since
-      # it started, so say which directory the guess came from.
-      local gr; gr="$(cd "$KW_PCWD" 2>/dev/null && git rev-parse --show-toplevel 2>/dev/null || true)"
-      if [ -n "$gr" ]; then KW_TARGET="$(basename "$gr")"
-      else KW_TARGET="misc"; warn "no git repo in $KW_PCWD → group 'misc'  (name a group to override)"; fi
-    fi
-  fi
-  slug_ok "$KW_TARGET" || die "group '$KW_TARGET' isn't a slug"
-}
-
-# Relocate a window into a group's session, creating that session if needed.
-_kel_relocate() {   # wid target
-  local dst ph; dst="$(sess "$2")"
-  if ! tmux has-session -t "=$dst" 2>/dev/null; then
-    tmux new-session -d -s "$dst" -c "$HOME" -x 220 -y 50
-    group_session_status "$2" "$dst"
-    ph="$(tmux list-windows -t "=$dst" -F '#{window_id}' | head -1)"
-    tmux move-window -s "$1" -t "$dst:"
-    tmux kill-window -t "$ph" 2>/dev/null || true
-  else
-    tmux move-window -s "$1" -t "$dst:"
-  fi
-  tmux switch-client -t "=$dst" \; select-window -t "$1" 2>/dev/null || true
-}
-
-# tidy: drop a group session that the move just emptied
-_kel_drop_empty_group() {   # group
-  [ -n "${1:-}" ] || return 0
-  tmux list-windows -t "=$(sess "$1")" -F x 2>/dev/null | grep -q x \
-    || tmux kill-session -t "=$(sess "$1")" 2>/dev/null || true
-}
-
-cmd_move() {
-  need tmux; need jq
-  [ -n "${TMUX:-}" ] || die "kel move: run this from inside kel"
-  _kel_window_target "${1:-}"
-
-  local meta; meta="$(meta_path "$KW_GROUP" "$KW_NAME")"
-  [ -f "$meta" ] || die "kel move: '$KW_NAME' isn't a kel agent — 'kel adopt' to start tracking it"
-  [ "$KW_TARGET" = "$KW_GROUP" ] && { say "already in group '$KW_GROUP'"; return 0; }
-  [ -f "$(meta_path "$KW_TARGET" "$KW_NAME")" ] && \
-    die "[$KW_TARGET] already has an agent called '$KW_NAME' — kel rename it first"
-
-  # warn if we're moving a worktree agent away from its repo's group
-  if [ "$(jq -r '.isolation' "$meta")" = worktree ]; then
-    local mr; mr="$(basename "$(jq -r '.repo // ""' "$meta")")"
-    [ -n "$mr" ] && [ "$mr" != "$KW_TARGET" ] && \
-      warn "'$KW_NAME' works in $mr's worktree — moving it to [$KW_TARGET] is cosmetic only"
-  fi
-
-  _kel_relocate "$KW_WID" "$KW_TARGET"
-  mkdir -p "$SESSIONS_DIR/$KW_TARGET"
-  # `jq … > target && rm source` truncates the target before jq runs. A failed
-  # jq leaves a corrupt record in the target. The && then skips the rm, so the
-  # source record survives. The agent ends up filed in two groups.
-  local tmp; tmp="$(mktemp "$SESSIONS_DIR/$KW_TARGET/.mv.XXXXXX")" \
-    || die "kel move: cannot stage a record in [$KW_TARGET]"
-  if jq --arg g "$KW_TARGET" '.group=$g' "$meta" > "$tmp" \
-     && mv -f "$tmp" "$(meta_path "$KW_TARGET" "$KW_NAME")"; then
-    rm -f "$meta"
-  else
-    rm -f "$tmp"
-    # the window already moved, so say that rather than implying nothing did
-    die "kel move: '$KW_NAME''s window moved to [$KW_TARGET] but its record could not be rewritten — 'kel adopt $KW_TARGET' from that window to re-file it"
-  fi
-  set_last_group "$KW_TARGET"
-  _kel_drop_empty_group "$KW_GROUP"
-
-  say "moved '$KW_NAME'  ->  [$KW_TARGET]"
-  snapshot
-}
-
-cmd_adopt() {
-  need tmux; need jq
-  [ -n "${TMUX:-}" ] || die "kel adopt: run this from inside kel"
-  _kel_window_target "${1:-}"
-
-  [ -f "$(meta_path "$KW_GROUP" "$KW_NAME")" ] && \
-    die "kel adopt: '$KW_NAME' is already a kel agent in [$KW_GROUP] — 'kel move' changes its group"
-  [ -f "$(meta_path "$KW_TARGET" "$KW_NAME")" ] && \
-    die "[$KW_TARGET] already has an agent called '$KW_NAME' — kel rename it first"
-
-  local repo; repo="$(cd "$KW_PCWD" 2>/dev/null && git rev-parse --show-toplevel 2>/dev/null || true)"
-  [ "$KW_TARGET" != "$KW_GROUP" ] && _kel_relocate "$KW_WID" "$KW_TARGET"
-
-  # isolation is "inplace": an adopted window edits the checkout it is standing
-  # in, and kel did not create a worktree for it.
-  #
-  # `agent` records what is ACTUALLY running in the pane, not $KEL_AGENT.  The
-  # field is what `kel relaunch` re-runs, so claiming "claude" for an adopted
-  # nvim window would have relaunch type `claude --resume` into your editor.
-  # Same rule as invariant 3: a plausible default is worse than the truth.
-  # $KEL_AGENT only fills in when tmux cannot say.
-  local pcmd
-  pcmd="$(tmux display-message -p -t "$KW_WID" '#{pane_current_command}' 2>/dev/null || true)"
-  [ -n "$pcmd" ] || pcmd="$KEL_AGENT"
-  meta_write "$KW_NAME" "$KW_WID" "$repo" "$KW_PCWD" "inplace" "" "$pcmd" "$KW_TARGET"
-  set_last_group "$KW_TARGET"
-  [ "$KW_TARGET" != "$KW_GROUP" ] && _kel_drop_empty_group "$KW_GROUP"
-
-  say "adopted '$KW_NAME'  ->  [$KW_TARGET]"
-  snapshot
-}
-
-# --------------------------------------------------------------------------
-# kel board   (prefix b)  — fzf-driven fleet browser
-# --------------------------------------------------------------------------
-# rows for fzf:  group <T> name <T> state <T> dirty <T> path <T> wid
-cmd_board_rows() {
-  # Agents first, then every OTHER pane — your editor, lazygit, a shell. The
-  # board used to know only agents, which is the literal "can't get from Claude
-  # Code to anything else" problem. Field 6 is the jump target: a window id for
-  # an agent, a pane id (%N) for a pane; _board_jump handles both.
-  local doc; doc="$(fleet_json --dirty)"
-  {
-  printf '%s' "$doc" | jq -r '
-    def colour:
-      if   . == "waiting"   then "\u001b[1;33m"
-      elif . == "working"   then "\u001b[1;36m"
-      elif . == "done"      then "\u001b[1;32m"
-      elif . == "throttled" then "\u001b[1;35m"
-      elif . == "dead"      then "\u001b[1;31m"
-      elif . == "idle"      then "\u001b[2m"
-      else "\u001b[0m" end;
-    # Field 7 is a SEPARATE, pre-formatted display column, padded for visual
-    # alignment -- fields 1-6 stay exactly as they were (raw group/name/etc),
-    # because {1}/{2} feed EXACT-MATCH lookups downstream (_board_preview,
-    # _board_jump, cmd_go, _board_kill, _board_actions all compare against
-    # the real .group/.name) and padding those directly would break every
-    # one of them with trailing whitespace. --with-nth shows only field 7.
-    def pad($n): (. // "") | tostring | . + (" " * ($n - length)) | .[0:$n];
-    .agents[]
-    | select(.window_id != null)          # orphan-metadata rows have no window
-    | (.state // "idle") as $st
-    | [ .group, .name, ($st | colour) + $st + "\u001b[0m",
-        (if (.dirty // 0) > 0 then "\(.dirty) dirty" else "" end),
-        (.cwd // ""), .window_id,
-        (.group | pad(12)) + (.name | pad(20)) + ($st | colour) + ($st | pad(9)) + "\u001b[0m"
-          + (if (.dirty // 0) > 0 then " \(.dirty) dirty" else "" end) ]
-    | @tsv'
-
-  # Every pane EXCEPT the one already represented by its window's own row.
-  # Every window has a row above (agents and unmanaged alike), so the rule is
-  # "skip each window's lowest pane index".
-  #
-  # Two passes rather than relying on sorted input: the first cut piped through
-  # `sort -t<tab> -k5,5n` and took the first row seen per window, which held on
-  # GNU sort and not on BSD — an agent got listed twice on macOS. Computing the
-  # minimum explicitly cannot care what order the rows arrive in.
-  tmux list-panes -a -F '#{session_name}	#{window_id}	#{window_name}	#{pane_id}	#{pane_index}	#{pane_current_command}	#{pane_current_path}' 2>/dev/null \
-  | awk -F'	' -v pfx="$KEL_PREFIX" '
-      { rows[NR] = $0
-        wid = $2; idx = $5 + 0
-        if (!(wid in lo) || idx < lo[wid]) lo[wid] = idx }
-      END {
-        for (i = 1; i <= NR; i++) {
-          split(rows[i], f, "	")
-          sn=f[1]; wid=f[2]; wname=f[3]; pid=f[4]; pidx=f[5]+0; cmd=f[6]; path=f[7]
-          if (sn == pfx)                    g = pfx
-          else if (index(sn, pfx "/") == 1) g = substr(sn, length(pfx)+2)
-          else continue
-          if (pidx == lo[wid]) continue        # the window own row covers it
-          nm = wname "/" cmd
-          # field 7: the same padded display column the jq side builds, so
-          # --with-nth 7 has something to show for pane rows too
-          disp = sprintf("%-12.12s%-20.20s\033[2m%-9s\033[0m", g, nm, "pane")
-          printf "%s\t%s\t\033[2mpane\033[0m\t\t%s\t%s\t%s\n", g, nm, path, pid, disp
-        }
-      }'
-  } | sort
-}
-
-cmd_board_preview() {   # name group [docfile]
-  # Under `set -u`, `local name="$1"` blew up with "$1: unbound variable" the
-  # moment fzf's own {2} expanded empty — this is the argument guard
-  # cmd_board_kill already got right; ${1:-} keeps a missing/empty argument
-  # from ever reaching a bare parameter expansion.
-  local name="${1:-}" group="${2:-}" docfile="${3:-}"
-  [ -n "$name" ] || return 0
-
-  local _filter='
-    def money: (. * 100 | round) as $c | "\($c / 100 | floor).\((($c % 100) | tostring) | if length == 1 then "0" + . else . end)";
-    (.agents[] | select(.group == $g and .name == $n)) // empty
-    | if .managed then
-        "group      \(.group)",
-        "agent      \(.agent // "-")",
-        "isolation  \(.isolation)\(if .branch then "  (branch \(.branch))" else "" end)",
-        "directory  \(.cwd // "-")"
-      else
-        "group      \(.group)", "(unmanaged window — no metadata)"
-      end,
-      (if .note        then "says       \(.note)" else empty end),
-      (if .land        then "land       \(.land.code)\(if (.land.n // 0) > 0 then " (\(.land.n))" else "" end)" else empty end),
-      (if .context     then "context    \(.context.pct)% of \((.context.size / 1000 | floor))k  (\(.context.in_tokens) tokens used)",
-                            "cost       $\(.context.cost_usd | money)\(if .context.model then "   ·  \(.context.model)" else "" end)"
-                       else empty end),
-      (if (.compactions // 0) > 0 then "compacted  \(.compactions) time(s)" else empty end)'
-
-  # docfile is the ONE fleet_json --land snapshot cmd_board computed before
-  # fzf started (see there) — never re-derived here on every cursor move, and
-  # never fleet_json --dirty inline, which would fork `git status` per
-  # distinct cwd in the fleet. A caller with no snapshot to hand (a direct
-  # `kel _board_preview name group` — the test suite is one) still gets a
-  # correct answer, just not the cheap one; the board's own fzf binding
-  # always passes a docfile, so this fallback is off the hot path.
-  if [ -n "$docfile" ] && [ -r "$docfile" ]; then
-    jq -r --arg n "$name" --arg g "$group" "$_filter" "$docfile"
-  else
-    fleet_json --land | jq -r --arg n "$name" --arg g "$group" "$_filter"
-  fi
-
-  local wid; wid="$(kel_windows | awk -F'\t' -v n="$name" -v g="$group" '$2==g && $5==n{print $4; exit}')"
-  if [ -n "$wid" ]; then
-    printf '\n\033[2m── recent ──\033[0m\n'
-    tmux capture-pane -t "$wid" -p 2>/dev/null | grep -v '^[[:space:]]*$' | tail -8
-  fi
-  local cwd; cwd="$(jq -r '.cwd // ""' "$(meta_path "$group" "$name")" 2>/dev/null)"
-  if [ -n "$cwd" ] && git -C "$cwd" rev-parse --git-dir >/dev/null 2>&1; then
-    local d; d="$(git -C "$cwd" status --short 2>/dev/null | head -10)"
-    [ -n "$d" ] && printf '\n\033[2m── uncommitted ──\033[0m\n%s\n' "$d"
-  fi
-}
-
-cmd_board_jump() {   # target group     (target is @window or %pane)
-  [ -n "${1:-}" ] || return 0
-  tmux switch-client -t "=$(sess "$2")" 2>/dev/null || true
-  case "$1" in
-    %*) tmux select-window -t "$1" 2>/dev/null || true
-        tmux select-pane   -t "$1" 2>/dev/null || true ;;
-    *)  tmux select-window -t "$1" 2>/dev/null || true ;;
-  esac
-  set_last_group "$2"
-}
-
-# ctrl-k wrapper: confirm before killing (in-place agents get no other friction)
-cmd_board_kill() {   # group name
-  [ -n "${2:-}" ] || return 0
-  printf 'kill %s/%s? [y/N] ' "$1" "$2" > /dev/tty
-  local a=''; read -r a < /dev/tty || a=n
-  case "$a" in y|Y|yes) "$SELF" kill "$1/$2" ;; *) : ;; esac
-}
-
-# A tmux display-menu (or command-prompt) CANNOT RENDER while this popup is
-# already open. Confirmed by driving a real attached client through a pty,
-# not assumed: it silently fails to draw — no error, exit 0 — whether the
-# nested call goes through become(), execute() or execute-silent(). tmux
-# allows one client-side overlay at a time, and the board's own popup already
-# owns that slot. Every "tab menu just closes the board" / "ctrl-f does
-# nothing" report traces to this.
-#
-# The fix: never open a SECOND overlay type. become() into a SECOND fzf list
-# instead — same overlay the board already has open, just new rows — which
-# is confirmed to work. Free-text input (new agent name, rename, a group to
-# move to) goes through _kel_ask below instead of command-prompt, for the
-# same reason.
-_kel_ask() {   # header -> the typed line on stdout, empty if cancelled
-  # < /dev/null, not `: | fzf`: a PIPE closes its write end the instant `:`
-  # exits, and fzf reads that as EOF on its item list — it does not wait for
-  # you to type, it just exits immediately with no query typed at all.
-  # /dev/null is the documented way to give fzf zero items without closing
-  # the interaction — confirmed live, not assumed, after the pipe form
-  # silently ate every keystroke.
-  # --layout reverse, matching every other menu here: fzf's DEFAULT layout
-  # puts the prompt at the BOTTOM of the available space, and with zero
-  # rows to list there is nothing else to fill it — the header and input
-  # line rendered ~35 blank lines down, looking broken. Confirmed visually.
-  fzf --print-query --header "$1" --prompt '> ' --height '100%' --layout reverse \
-      --border rounded --border-label ' kel ' < /dev/null 2>/dev/null | head -1
-}
-
-cmd_ask_new() {   # cwd
-  need fzf
-  local name; name="$(_kel_ask 'new agent — name, enter to create:')"
-  [ -n "$name" ] || return 0
-  cd "$1" 2>/dev/null || true
-  exec "$SELF" new "$name"
-}
-
-cmd_ask_new_wt() {   # cwd
-  need fzf
-  local name; name="$(_kel_ask 'new WORKTREE agent — branch/name:')"
-  [ -n "$name" ] || return 0
-  cd "$1" 2>/dev/null || true
-  exec "$SELF" new "$name" -w
-}
-
-cmd_ask_rename() {   # wid
-  need fzf
-  local name; name="$(_kel_ask 'rename — new name:')"
-  [ -n "$name" ] || return 0
-  exec "$SELF" _board_rename "$1" "$name"
-}
-
-cmd_ask_move() {
-  need fzf
-  local grp; grp="$(_kel_ask 'move to which group:')"
-  [ -n "$grp" ] || return 0
-  exec "$SELF" move "$grp"
-}
-
-# tab in the board: the action list for the highlighted agent.
-# (the board closes behind it, same as pressing enter to jump)
-cmd_board_actions() {   # wid name group cwd [here]
-  local wid="$1" name="$2" group="$3" cwd="$4" here="${5:-}"
-  local -a items=(
-    "jump to it"                j  "$SELF _board_jump '$wid' '$group'"
-    "new agent in its folder"   n  "$SELF _ask_new '$cwd'"
-    "new WORKTREE agent there"  w  "$SELF _ask_new_wt '$cwd'"
-    "rename it"                  r  "$SELF _ask_rename '$wid'"
-  )
-  # move / adopt / relaunch all act on "whichever pane I was invoked from" —
-  # none takes an explicit wid — which is correct when $here says this window
-  # IS where you are standing (prefix m, via cmd_here_actions, always is
-  # that), and would be WRONG for an arbitrary highlighted board row that
-  # might be a different window entirely. The board's tab key never passes
-  # $here, so these three stay off the board's own menu.
-  if [ "$here" = here ]; then
-    items+=(
-      "move it to another group"    m  "$SELF _ask_move"
-      "adopt this window into kel"  a  "$SELF adopt"
-      "relaunch it (after a crash)" l  "$SELF relaunch '$group/$name'"
-    )
-  fi
-  items+=(
-    "go to its group"           g  "$SELF go '$group'"
-    ""
-    "kill it"                   k  "$SELF _board_kill '$group' '$name'"
-  )
-  _kel_actions_or_dump " $name " "${items[@]}"
-}
-
-# Shared by every action list this file builds from a bash array: dumps
-# "key<TAB>label" instead of opening it when KEL_DUMP_ITEMS is set, for the
-# regression suite's duplicate-key check — exercising the REAL array a
-# function built (including any conditional branch above the call), not a
-# static guess at its shape parsed out of the source text. Otherwise, rows go
-# to fzf as "label<TAB>command"; the command column is hidden and is what
-# enter become()s into — a plain shell command, since become() execs it
-# directly rather than passing through tmux's own command language.
-_kel_actions_or_dump() {   # title item...
-  local title="$1"; shift
-  local -a items=( "$@" )
-  # fzf is only needed past this point — the dump branch below is pure data
-  # shuffling, no fzf involved, and the regression suite's macOS runner does
-  # not have fzf installed. `need fzf` here (unconditionally) failed those
-  # tests for a dependency the dump path never actually uses.
-  if [ -n "${KEL_DUMP_ITEMS:-}" ]; then
-    local i=0 lbl
-    while [ "$i" -lt "${#items[@]}" ]; do
-      lbl="${items[$i]}"
-      if [ -z "$lbl" ]; then
-        i=$((i + 1))
-      else
-        printf '%s\t%s\n' "${items[$((i+1))]}" "$lbl"
-        i=$((i + 3))
-      fi
-    done
-    return 0
-  fi
-  need fzf
-  # Each item's own letter key is bound DIRECTLY and hard-coded into the bind
-  # string — not read back out of the row via {2}. Confirmed by testing, not
-  # assumed: fzf's {2} field substitution works fine when the become() target
-  # is a plain command (jump/kill/go-to-group all use it via the enter bind
-  # below), but breaks silently — no error, no render — the moment the
-  # substituted value is itself something that opens ANOTHER fzf (the ask
-  # prompts). A hard-coded bind string with the same command does not have
-  # that problem. This also restores the letter-key-driven feel the old
-  # tmux display-menu had, rather than only arrow+enter.
-  local i=0 lbl key cmd rows=""
-  local -a binds=()
-  while [ "$i" -lt "${#items[@]}" ]; do
-    lbl="${items[$i]}"
-    if [ -z "$lbl" ]; then
-      # a real fzf row, not skipped: the OLD tmux display-menu had a genuine
-      # blank, unselectable separator between groups (new/worktree/rename |
-      # move/adopt/relaunch | go/kill), which just vanished when this moved
-      # to fzf — there is no such thing as an unselectable row here, so this
-      # is a dim divider line whose command is a harmless no-op if selected,
-      # and it gets no letter-key bind so it can never be reached on purpose.
-      rows="${rows}"$'\033[2m  ───\033[0m'$'\t'"true"$'\n'
-      i=$((i + 1))
-    else
-      key="${items[$((i+1))]}"
-      cmd="${items[$((i+2))]}"
-      rows="${rows}${lbl} (${key})"$'\t'"${cmd}"$'\n'
-      binds+=( --bind "${key}:become(${cmd})" )
-      i=$((i + 3))
-    fi
-  done
-  printf '%s' "$rows" | fzf --ansi --delimiter '\t' --with-nth 1 --nth 1 \
-    --layout reverse --height '100%' --border rounded --border-label "$title" \
-    --bind 'enter:become({2})' "${binds[@]}" \
-    --header 'press the (letter) shown, or arrow + enter — esc: close'
-}
-
-# ctrl-f in the board: everything that is NOT about one agent — the
-# dashboard, config, and the fleet commands. Until v0.9's board-hub pass these
-# lived only in the prefix-k menu, with no relation to which row was
-# highlighted; that menu is now `kel cheat` instead (see tmux/kel.conf), so
-# this is their one home rather than two.
-cmd_board_fleet_actions() {
-  local -a items=(
-    "the fleet dashboard (kel top)"                 t  "$SELF top"
-    "edit config.toml"                              c  "$SELF config"
-    ""
-    "sweep — close agents whose work merged"        s  "$SELF _run sweep"
-    "restore — rebuild the WHOLE workspace"         R  "$SELF _run restore"
-    "prune — forget dead records (closes nothing)"  p  "$SELF _run prune"
-    "check the machine (doctor)"                    D  "$SELF _run doctor"
-    ""
-    "kel keys (cheat sheet)"                        "?" "$SELF cheat | less -R"
-  )
-  _kel_actions_or_dump ' kel ' "${items[@]}"
-}
-
-cmd_board_rename() {   # wid new
-  need tmux; need jq
-  slug_ok "${2:-}" || { warn "name must be a slug (A-Z a-z 0-9 . _ -)"; return 1; }
-  rename_agent "$1" "$2"
-}
-
-# prefix m — the per-agent menu for the window you're standing in RIGHT NOW,
-# without opening the board first. This is not a second copy of that menu:
-# it gathers this window's own wid/name/group/cwd and calls the exact same
-# cmd_board_actions the board's tab key calls, so there is one action list,
-# reachable two ways, rather than two lists that drift.
-#
-# Same ${TMUX_PANE:+-t "$TMUX_PANE"} shape as _kel_window_target (kel move /
-# kel adopt): a bare `display-message -p` resolves against the CLIENT's
-# active window, not necessarily the pane the key was pressed in.
-cmd_here_actions() {   # [wid name group cwd] — only set when re-entered from its own popup
-  need tmux
-  local wid name group cwd
-  if [ -n "${KEL_IN_POPUP:-}" ] && [ "$#" -ge 4 ]; then
-    wid="$1" name="$2" group="$3" cwd="$4"
-  else
-    local tp="${TMUX_PANE:-}"
-    wid="$(tmux display-message -p ${tp:+-t "$tp"} '#{window_id}')"
-    name="$(tmux display-message -p ${tp:+-t "$tp"} '#{window_name}')"
-    cwd="$(tmux display-message -p ${tp:+-t "$tp"} '#{pane_current_path}')"
-    local sess; sess="$(tmux display-message -p ${tp:+-t "$tp"} '#{session_name}')"
-    case "$sess" in
-      "$KEL_PREFIX")   group="$KEL_PREFIX" ;;
-      "$KEL_PREFIX"/*) group="${sess#"$KEL_PREFIX"/}" ;;
-      *) die "this window isn't in a kel group" ;;
-    esac
-  fi
-  # Same tty requirement cmd_board's fzf has, and the same fix — self-wrap in
-  # a popup rather than assume one is already open. prefix m binds straight
-  # to run-shell -b (kel.conf), which has no tty of its own: confirmed live,
-  # not assumed, after prefix m silently did nothing but flash "returned 2"
-  # in the message line, the exact "fzf --popup needs a tty" trap this file
-  # already documents elsewhere — cmd_board_actions only had a tty when
-  # become()'d from the board's own already-open popup (tab), never when
-  # reached this way. wid/name/group/cwd must be read BEFORE opening the
-  # popup: once inside one, "current pane" means the popup's own throwaway
-  # pane, not the window prefix m was pressed from — so they're threaded
-  # through as arguments on re-entry instead of re-derived.
-  if [ -z "${KEL_IN_POPUP:-}" ]; then
-    local -a penv=( -e KEL_IN_POPUP=1 ) v
-    for v in KEL_SESSION KEL_AGENT KEL_GROUP KEL_WORKTREES KEL_CTX_WARN XDG_STATE_HOME; do
-      [ -n "${!v:-}" ] && penv+=( -e "$v=${!v}" )
-    done
-    exec tmux display-popup -B "${penv[@]}" \
-      -w "${KEL_BOARD_W:-90%}" -h "${KEL_BOARD_H:-85%}" \
-      -EE "'$SELF' _here '$wid' '$name' '$group' '$cwd'"
-  fi
-  cmd_board_actions "$wid" "$name" "$group" "$cwd" here
-}
-
-# ---------------------------------------------------------------------------
-# The keymap file  —  docs/interface.md §6 / §5b-c, interface-build.md Phase 1
-# ---------------------------------------------------------------------------
-# One file, both implementations read it — not generated from Go (this has to
-# work with no Go toolchain installed at all, which is install.sh's whole
-# point) and not hand-duplicated (that was `kel cheat`, and it was wrong about
-# five keys). It lives under cmd/kel-top/ because `go:embed` cannot reach
-# outside its own package's directory — `//go:embed ../keymap.tsv` fails to
-# compile, confirmed against a scratch module, not assumed — so bash reaches
-# the SAME physical file the other way: by walking up from its own resolved
-# path, same shape as cmd_update's $root.
-keymap_file() {
-  local root; root="$(dirname "$(dirname "$(_real_self)")")"
-  printf '%s/cmd/kel-top/keymap.tsv' "$root"
-}
-
-# scope\taction\tgo_key\tbash_key\thelp, comment and blank lines dropped.
-# Never `IFS=$'\t' read` on this — CLAUDE.md's first trap: tab is IFS
-# *whitespace*, so a run of it folds to one delimiter and an empty field
-# shifts everything after it. awk -F'\t' splits on the literal byte instead,
-# which does not fold or drop. This is not a hot path (read at board-open,
-# a handful of times, never per keystroke), so the extra awk fork per lookup
-# is not the cost invariant 5 is about.
-keymap_rows() {
-  local f; f="$(keymap_file)"
-  [ -f "$f" ] || { warn "kel: keymap file missing — expected $f"; return 1; }
-  awk -F'\t' '!/^#/ && NF==5' "$f"
-}
-
-# There is deliberately no per-action lookup helper here. One existed and was
-# called five times from cmd_board, which re-resolved the path and re-scanned
-# the file each time — 48ms onto board open. cmd_board reads all five keys in
-# a single awk pass instead (see there). A helper whose only honest use is
-# "call me once" is not a helper; if a second caller ever needs one key, give
-# it the same one-pass shape rather than reviving this.
-
-# scope\taction\tKEY, the board's OWN idiom's key (bash_key) — not go_key,
-# which kel-top's --dump-keys prints from the same file. The two idioms
-# deliberately do not share keys (interface.md §2: "Idioms deliberately
-# differ" — the board's fzf is a live type-to-filter picker, so a bare letter
-# goes into the query, not to a binding). test/kel-test.sh diffs the
-# (scope,action) columns of both dumps; that agreement, not the key column,
-# is what §2 actually promises.
-cmd_dumpkeys() {
-  keymap_rows | awk -F'\t' '{print $1"\t"$2"\t"$4}'
-}
-
-cmd_board() {
-  need tmux; need fzf; need jq
-  [ -n "${TMUX:-}" ] || die "kel board runs inside tmux"
-  [ -n "$(cmd_board_rows)" ] || { tmux display-message "kel: no agents"; return 0; }
-
-  # The board always runs in a popup, and kel decides that here rather than in
-  # kel.conf — so `kel board` typed at a shell looks exactly like Ctrl+Space
-  # (it used to fill the pane inline), and the geometry lives in one place.
-  #
-  # It has to be tmux's display-popup, not fzf's own --popup: fzf --popup needs
-  # a tty and a tmux key binding has none, so run-shell + fzf --popup dies with
-  # "inappropriate ioctl for device" and the key silently does nothing.
-  # A popup runs a fresh shell off the tmux *server's* environment, so any
-  # KEL_* the calling shell had would vanish — carry them across with -e.
-  if [ -z "${KEL_IN_POPUP:-}" ]; then
-    local -a penv=( -e KEL_IN_POPUP=1 ) v
-    for v in KEL_SESSION KEL_AGENT KEL_GROUP KEL_WORKTREES KEL_CTX_WARN XDG_STATE_HOME; do
-      [ -n "${!v:-}" ] && penv+=( -e "$v=${!v}" )
-    done
-    # -B: no popup border/title. fzf draws its own rounded border and label
-    # right inside it, so without -B this was two nested boxes both saying
-    # " kel " — confirmed visually, not assumed: a real capture showed the
-    # doubled frame. -B applies to every fzf this popup ever become()s into
-    # (tab's action list, ctrl-f's fleet list, the ask prompts), since they
-    # all render inside this SAME popup, each drawing its own border.
-    exec tmux display-popup -B "${penv[@]}" \
-      -w "${KEL_BOARD_W:-90%}" -h "${KEL_BOARD_H:-85%}" -EE "'$SELF' board"
-  fi
-
-  # The preview used to call fleet_json (or, worse, the proposed fix of
-  # fleet_json --dirty) itself on EVERY cursor move: roughly five tmux forks,
-  # two jq and two git calls each time the highlight moved a row, and --dirty
-  # specifically shells `git status --porcelain` for every distinct cwd in
-  # the fleet (see fleet_json above), turning one git fork per keystroke into
-  # N. The fix is to compute the document ONCE, here, before fzf starts, and
-  # have cmd_board_preview read the snapshot instead of re-deriving it. This
-  # necessarily means the preview's land/context/etc are a snapshot from when
-  # the board opened, not live — capture-pane and the uncommitted-files git
-  # call inside cmd_board_preview stay per-agent and live, since those are
-  # the one thing that must reflect the screen right now, and are cheap.
-  # --land also gets us the land column data the preview renders.
-  local preview_doc=''
-  preview_doc="$(mktemp "$STATE_DIR/.board-preview.XXXXXX" 2>/dev/null)" || preview_doc=''
-  if [ -n "$preview_doc" ]; then
-    fleet_json --land > "$preview_doc" 2>/dev/null || true
-    trap 'rm -f "$preview_doc"' EXIT
-  fi
-
-  # ctrl-r is the one place the snapshot above is allowed to cost again. The
-  # rows reload from live data; without regenerating the doc the preview would
-  # keep rendering context/cost/land from board-open time NEXT TO fresh rows,
-  # which is invariant 3's failure mode — a stale number that looks measured.
-  # Two fleet_json passes on an explicit refresh is the honest price; the
-  # whole point of the snapshot is that nothing pays it per keystroke.
-  local rbind="reload($SELF _board_rows)"
-  [ -n "$preview_doc" ] &&
-    rbind="execute-silent($SELF _fleet --land > '$preview_doc')+$rbind+refresh-preview"
-
-  # interface-build.md Phase 1: these five keys come from the keymap file
-  # instead of being hard-coded a second time here — one file, not a mirror
-  # that can drift out from under it. The VALUES are unchanged (enter,
-  # ctrl-k, ctrl-n, ctrl-g, and ctrl-f as the fleet-wide gateway); only where
-  # they come from moved. ctrl-r stays literal below: it reloads, which is a
-  # navigation key like j/k/g/G, not a row in the keymap file.
-  # ONE awk pass, not five separate lookups. Doing it per key
-  # re-resolved _real_self, re-derived the path and re-scanned the whole file:
-  # measured 48ms added to board open, against the ~90ms fleet_json snapshot
-  # this same function computes once precisely so the preview does not pay it
-  # per keystroke. Spending half that back on five reads of a 17-line file is
-  # the shape invariant 5 exists to catch, and it was cheap to not do.
-  # Read one field per LINE, never `IFS=$'\t' read` — CLAUDE.md's first trap.
-  local kmv; kmv="$(keymap_rows | awk -F'\t' '
-    $1=="agent" && $2=="jump"  { j=$4 }
-    $1=="agent" && $2=="kill"  { k=$4 }
-    $1=="agent" && $2=="new"   { n=$4 }
-    $1=="fleet" && $2=="go"    { g=$4 }
-    $1=="fleet" && $2=="sweep" { f=$4 }
-    END { print j; print k; print n; print g; print f }')" || kmv=''
-  local k_jump k_kill k_new k_go k_fleet
-  { read -r k_jump; read -r k_kill; read -r k_new; read -r k_go; read -r k_fleet; } <<KEYMAP
-$kmv
-KEYMAP
-  # An empty fzf --bind key binds nothing to nothing, silently — invariant 3:
-  # an unknown must not render as a plausible-looking default.
-  for _kmk in "$k_jump" "$k_kill" "$k_new" "$k_go" "$k_fleet"; do
-    case "$_kmk" in
-      ''|'-') die "kel: $(keymap_file) is missing a board key the board needs — reinstall, or run kel doctor" ;;
-    esac
-  done
-
-  # A `#` comment placed between two `\`-continued lines of the fzf
-  # invocation below silently truncates the WHOLE command at that point —
-  # confirmed live and the hard way: an earlier explanatory comment sat
-  # between the ctrl-k and ctrl-f binds, which ate --bind ctrl-f, --color
-  # and the trailing redirect entirely (they became stray, separately-run
-  # "command not found" fragments), leaving ctrl-f silently unbound with no
-  # error anywhere. A `\`-continued shell command is one logical line only
-  # once every line in it is code; a comment line breaks that, continuation
-  # or not, so every note about this invocation lives up here, before it
-  # starts, and the block below stays comment-free.
-  cmd_board_rows | SHELL=/bin/bash fzf \
-    --ansi --delimiter '\t' --with-nth '7' --nth '1,2' \
-    --layout reverse --info inline --height '100%' \
-    --border rounded --border-label ' kel ' \
-    --footer 'enter jump · tab actions · ctrl-f dashboard/config/sweep…' \
-    --preview "$SELF _board_preview {2} {1} '$preview_doc'" \
-    --preview-window 'right,45%,wrap,border-left' \
-    --bind "${k_jump}:become($SELF _board_jump {6} {1})" \
-    --bind "tab:execute($SELF _board_actions {6} {2} {1} {5})+reload($SELF _board_rows)" \
-    --bind "${k_go}:become($SELF go {1})" \
-    --bind "ctrl-r:$rbind" \
-    --bind "${k_kill}:execute($SELF _board_kill {1} {2})+reload($SELF _board_rows)" \
-    --bind "${k_new}:execute($SELF _ask_new {5})+reload($SELF _board_rows)" \
-    --bind "${k_fleet}:execute($SELF _board_fleet)+reload($SELF _board_rows)" \
-    --color 'footer:italic,border:8' \
-    || true
-}
-
-# kel menu  —  deprecated alias for the board (kept one release for muscle memory)
-cmd_menu() { cmd_board; }
 
 # --------------------------------------------------------------------------
 # kel restore
@@ -2093,7 +1024,7 @@ cmd_top() {
       die "install Go (install/20-user-tools.sh), then re-run ./install.sh"
     fi
   fi
-  # in tmux, open in a popup the way the board does; outside, run inline
+  # in tmux, open in a popup the way kel config does; outside, run inline
   if [ -n "${TMUX:-}" ] && [ -z "${KEL_IN_POPUP:-}" ]; then
     local -a penv=( -e KEL_IN_POPUP=1 ) v
     for v in KEL_SESSION KEL_CTX_WARN KEL_TOP_BIN XDG_STATE_HOME; do
@@ -2129,7 +1060,7 @@ cmd_sweep() {
     shift
   done
 
-  local doc; doc="$(fleet_json --land --pr)"
+  local doc; doc="$(fleet_json --land --pr)" || exit 1
   local swept=0 kept=0 g nm code st
 
   # eligible: finished, and its branch is merged (or -f, which still refuses
@@ -2185,54 +1116,6 @@ cmd_sweep() {
 }
 
 # --------------------------------------------------------------------------
-# _run  —  a fleet command in a popup, so it is reachable from inside tmux
-# --------------------------------------------------------------------------
-# sweep / restore / prune / doctor were shell-only, which in practice meant
-# unavailable: kel is entered once and then lived in from inside tmux. These
-# are rare enough not to deserve keybindings of their own, so they hang off the
-# prefix-k menu and print into a popup you dismiss.
-cmd_run_popup() {   # subcommand [args...]
-  local sub="${1:-}"; shift || true
-  case "$sub" in
-    sweep|restore|prune|doctor) ;;
-    *) die "kel _run: not a popup command: $sub" ;;
-  esac
-  if [ -n "${TMUX:-}" ] && [ -z "${KEL_IN_POPUP:-}" ]; then
-    local -a penv=( -e KEL_IN_POPUP=1 ) v
-    for v in KEL_SESSION KEL_GROUP XDG_STATE_HOME KEL_FLEET_BIN; do
-      [ -n "${!v:-}" ] && penv+=( -e "$v=${!v}" )
-    done
-    exec tmux display-popup "${penv[@]}" -w 80% -h 60% -T " kel $sub " -E \
-      "'$SELF' _run $sub $* ; printf '\n  [any key]'; read -rsn1"
-  fi
-  # Reached here two ways: from the OLD tmux display-menu (now gone — see
-  # cmd_board_fleet_actions), and from the board's ctrl-f, become()'d in from
-  # a fzf that is ALREADY inside a popup. Both need the same pause: this
-  # branch prints and returns immediately, and the become() chain then exits,
-  # closing the whole popup before the output could be read — confirmed live,
-  # not assumed, the same way the {2} nesting bug was.
-  local rc
-  if [ "$sub" = sweep ]; then "$SELF" _sweepui; rc=$?; else "$SELF" "$sub" "$@"; rc=$?; fi
-  # same [ -t 0 ] guard cmd_attach's snapshot prompt uses: only wait for a
-  # keypress when there is a real terminal to press it on. A plain
-  # `[ -t 0 ] && { ... }` as the function's last statement would make ITS
-  # OWN false result (no tty) become the function's return status, silently
-  # turning a successful doctor/sweep/etc into a reported failure — caught by
-  # the suite, not by reading the code.
-  if [ -t 0 ]; then printf '\n  [any key]'; read -rsn1; fi
-  return "$rc"
-}
-
-# sweep is the one that removes things, so from a menu it always shows the
-# dry run first and asks. The -f path stays shell-only on purpose.
-cmd_sweep_ui() {
-  "$SELF" sweep -n
-  printf '\n  run it for real? [y/N] '
-  local a=''; read -r a || a=n   # in a popup stdin IS the pty; no /dev/tty needed
-  case "$a" in y|Y|yes) echo; "$SELF" sweep ;; *) echo "  nothing swept" ;; esac
-}
-
-# --------------------------------------------------------------------------
 # kel doctor
 # --------------------------------------------------------------------------
 cmd_doctor() {
@@ -2240,7 +1123,7 @@ cmd_doctor() {
   # A failed probe used to name the problem and stop there, which on a fresh
   # machine is the least useful moment to withhold the fix.  Each probe now
   # carries a remediation, printed only when it fails.  The package manager is
-  # resolved once: kel runs on Linux, WSL2 and macOS, and `apt install fzf` is
+  # resolved once: kel runs on Linux, WSL2 and macOS, and `apt install jq` is
   # actively wrong advice on the Mac.
   # node and gh get their own hints rather than "$pm <name>": the Debian
   # package for node is `nodejs`, and stock Ubuntu has no `gh` at all until you
@@ -2267,43 +1150,20 @@ cmd_doctor() {
     fi
   }
   echo "kel doctor" >&2
-  local r_tmux r_ver r_popup r_wt r_jq r_node r_claude r_hooks r_sl r_pass r_go r_gh
+  local r_tmux r_ver r_popup r_wt r_jq r_node r_claude r_hooks r_sl r_pass r_go r_top r_gh
   r_tmux=$(probe   "tmux present"                     "$pm tmux" command -v tmux)
   r_ver=$(probe    "tmux >= 3.0"                      "$pm tmux   (kel needs display-popup)" bash -c 'v=$(tmux -V | grep -oE "[0-9]+\.[0-9]+" | head -1); [ -n "$v" ] || exit 1; [ "${v%%.*}" -gt 3 ] || { [ "${v%%.*}" -eq 3 ] && [ "${v#*.}" -ge 0 ]; }')
   r_popup=$(probe  "display-popup available"          "needs tmux 3.0+ — $pm tmux" bash -c 'tmux list-commands 2>/dev/null | grep -q display-popup')
   r_wt=$(probe     "git worktree available"           "$pm git" bash -c 'git worktree -h 2>&1 | grep -q "add"')
   r_jq=$(probe     "jq present"                       "$pm jq" command -v jq)
-  r_fzf=$(probe    "fzf present (kel board)"          "$pm fzf" command -v fzf)
   r_node=$(probe   "node on PATH"                     "$h_node" command -v node)
   r_claude=$(probe "claude on PATH"                   "install Claude Code — docs/setup.md" command -v claude)
   r_gh=$(probe     "gh authenticated (PR state for kel sweep / top)" "$h_gh" gh auth status)
   r_hooks=$(probe  "kel hooks wired in settings.json" "./install.sh   (from the kelsier repo)" bash -c 'jq -e "[.hooks[]?[]?.hooks[]?.command // empty] | any(test(\"kel hook|kel-hook\"))" "$HOME/.claude/settings.json" >/dev/null')
   r_sl=$(probe     "kel statusLine wired (context %)" "./install.sh   (from the kelsier repo)" bash -c 'jq -e ".statusLine.command // \"\" | test(\"kel statusline\")" "$HOME/.claude/settings.json" >/dev/null')
-  if [ -x "$KEL_TOP_BIN" ]; then
-    printf '  \033[1;32m✓\033[0m %s\n' "kel top available (Go dashboard)" >&2
-  else
-    printf '  \033[2m·\033[0m %s\n' "kel top not built (optional)" >&2
-  fi
-  if [ -x "$KEL_FLEET_BIN" ]; then
-    printf '  \033[1;32m✓\033[0m %s\n' "fleet reader: kel-fleet (Go)" >&2; r_go=true
-  else
-    printf '  \033[2m·\033[0m %s\n' "fleet reader: bash (build kel-fleet for a faster one)" >&2; r_go=false
-  fi
+  r_go=$(probe     "kel-fleet built (required)"       "./install.sh   (needs Go — install/20-user-tools.sh)" test -x "$KEL_FLEET_BIN")
+  r_top=$(probe    "kel-top built (required)"         "./install.sh   (needs Go — install/20-user-tools.sh)" test -x "$KEL_TOP_BIN")
   r_pass=$(probe   "tmux allow-passthrough on"        "tmux/kel.conf sets it — tmux source-file ~/.tmux.conf" bash -c 'tmux start-server \; show -gv allow-passthrough 2>/dev/null | grep -qx on')
-
-  # The keymap file became load-bearing in Phase 1: the board reads its own
-  # bind keys from it, so a missing file is a dead board rather than a
-  # degraded one. That is the right call — an fzf --bind with an empty key
-  # binds nothing to nothing, silently — but a hard dependency with no probe
-  # is how an install goes quiet, which is the thing v0.9's three new probes
-  # were added to stop.
-  # Data rows start at column 0 with a lowercase scope (agent/fleet); every
-  # other line is a `#` comment or blank. Deliberately NOT an awk one-liner
-  # here: this runs through `probe`'s `bash -c`, and the nested quoting needed
-  # to get -F"\t" and && through two levels of shell silently produced a probe
-  # that failed with the file present — caught only by running it.
-  r_keymap=$(probe "the keymap file is readable"      "reinstall, or check cmd/kel-top/keymap.tsv in the clone" \
-    bash -c '[ -r "$1" ] && grep -q "^[a-z]" "$1"' _ "$(keymap_file)")
 
   # install.sh writes the absolute path of the clone it ran from into
   # settings.json. Move or rename that clone and every hook plus the statusLine
@@ -2341,18 +1201,18 @@ cmd_doctor() {
 
   jq -n --arg d "$(date -u +%FT%TZ)" \
     --argjson tmux "$r_tmux" --argjson ver "$r_ver" --argjson popup "$r_popup" \
-    --argjson wt "$r_wt" --argjson jq "$r_jq" --argjson fzf "$r_fzf" --argjson node "$r_node" \
+    --argjson wt "$r_wt" --argjson jq "$r_jq" --argjson node "$r_node" \
     --argjson claude "$r_claude" --argjson hooks "$r_hooks" --argjson sl "$r_sl" \
-    --argjson go "$r_go" --argjson gh "$r_gh" --argjson pass "$r_pass" \
+    --argjson go "$r_go" --argjson top "$r_top" --argjson gh "$r_gh" --argjson pass "$r_pass" \
     --argjson path "$r_path" --argjson managed "$r_managed" --argjson behind "$r_behind" \
     '{checked_at:$d, tmux:$tmux, "tmux>=3.0":$ver, display_popup:$popup,
-      git_worktree:$wt, jq:$jq, fzf:$fzf, node:$node, claude:$claude,
-      hooks_wired:$hooks, statusline_wired:$sl, go_fleet:$go, gh_auth:$gh,
+      git_worktree:$wt, jq:$jq, node:$node, claude:$claude,
+      hooks_wired:$hooks, statusline_wired:$sl, go_fleet:$go, go_top:$top, gh_auth:$gh,
       allow_passthrough:$pass, kel_path:$path, hooks_permitted:$managed,
       up_to_date:$behind}' \
     > "$DOCTOR_CACHE"
   printf '  cached -> %s\n' "${DOCTOR_CACHE/#$HOME/~}" >&2
-  case "$r_tmux$r_ver$r_jq" in *false*) exit 1 ;; esac
+  case "$r_tmux$r_ver$r_jq$r_go" in *false*) exit 1 ;; esac
 }
 
 # --------------------------------------------------------------------------
@@ -2449,9 +1309,7 @@ cmd_config() {
   fi
   [ -n "$ed" ] || die "no editor found — set \$EDITOR, or open $cfg yourself"
 
-  # in tmux, open in a popup the way the board and kel top do; outside, run
-  # inline. Same pattern as cmd_top and cmd_run_popup — not duplicated logic,
-  # the same idiom applied a third time.
+  # in tmux, open in a popup the way kel top does; outside, run inline.
   if [ -n "${TMUX:-}" ] && [ -z "${KEL_IN_POPUP:-}" ]; then
     exec tmux display-popup -e KEL_IN_POPUP=1 \
       -w "${KEL_CONFIG_W:-90%}" -h "${KEL_CONFIG_H:-85%}" -T ' kel config ' \
@@ -2465,6 +1323,9 @@ cmd_config() {
 # --------------------------------------------------------------------------
 cmd_status_line() {
   [ -n "${TMUX:-}" ] || exit 0
+  # The bar is the one surface where a missing kel-fleet would otherwise just
+  # go blank — and a blank bar reads as "no agents".  Say so instead.
+  [ -x "$KEL_FLEET_BIN" ] || { printf '#[fg=colour196]kel-fleet missing — run install.sh#[default]'; exit 0; }
   # One fleet_json, one jq.  This used to walk every window calling
   # effective_state (a tmux fork each) and then walk them all again to count
   # waiting agents elsewhere.  --dirty is deliberately NOT passed: the bar
@@ -2571,100 +1432,6 @@ cmd_jump() {
 }
 
 # --------------------------------------------------------------------------
-# kel cheat
-# --------------------------------------------------------------------------
-cmd_cheat() {
-cat <<'EOF'
-
-  kel keys              prefix = Ctrl+b   (press, release, then the key)
-  ─────────────────────────────────────────────────────────────────────────
-
-  THE MODEL
-    window  = a tab, ONE per agent — shows on the bar as  1:name
-    pane    = a split INSIDE one window (agent | editor) — not on the bar
-    group   = one tmux session per repo — kel/<repo>
-    copy text: hold SHIFT while you drag (mouse mode owns a plain drag)
-
-  MOVE AROUND
-    Ctrl+Space    the board — find any agent OR pane; enter jumps, TAB = act
-                  ctrl-f in the board = dashboard, config, sweep/restore/etc.
-    (prefix b)    the same board
-    prefix `      jump to the next agent WAITING on you — any group
-    prefix 1-9    window (agent) N in this group
-    prefix n / p  next / previous window        prefix w   pick a window
-    prefix g      pick a group                  prefix ( ) prev / next group
-
-  ACT ON AN AGENT
-    prefix t      the fleet dashboard — every agent, sorted by who needs you
-                  (j/k scroll · s sort: triage/ctx/cost · / filter · q quit)
-                  same place ctrl-f → "the fleet dashboard" in the board goes
-    prefix m      manage THIS agent — rename / move / adopt / relaunch / kill
-                  (the SAME menu as the board's TAB, for wherever you're standing)
-    (in the board) TAB on any row — the shared per-agent menu, for that row
-
-  SCROLL an agent's conversation
-    mouse wheel                (kel turns this into PageUp/PageDown for you)
-    PgUp / PgDn                Claude Code's own scrollback
-    prefix [                   tmux scroll mode for a plain shell pane
-                               (↑↓ PgUp PgDn, / search, q leave)
-
-  WINDOWS (agents)                 PANES (splits)
-    prefix c   blank window          prefix | / -   split right / down
-    prefix ,   rename (kel rename)   prefix ↑↓←→    focus a pane (or click it)
-    prefix &   close (confirms)      prefix z       zoom a pane (toggle)
-                                     prefix x       close a pane
-    prefix k   this page — kel cheat. New agent / worktree / rename / adopt /
-               relaunch: ctrl-f→board or prefix m. Fleet: ctrl-f→board.
-
-  GROUP
-    prefix d   detach — "exit kel". Agents keep running; snapshot is saved;
-               `kel` brings you back to your last group.
-    (killing a group, not detaching, ENDS its agents — but after a reboot
-     `kel` offers to rebuild everything from the snapshot)
-
-  ONE flat workspace instead of a group per repo?
-    export KEL_GROUP=work   in ~/.bashrc  —  every `kel new` lands in kel/work,
-    so `prefix 1-9` reaches every agent.  `kel new x --group foo` still splits.
-
-  FROM A SHELL
-    kel                in a repo: go to (or start) that repo's agent, like
-                       `claude` for a dir. Elsewhere: your last group.
-    kel new <name>     new window + agent   (-w = worktree, --group G)
-    kel ls             list every agent, grouped
-    kel board          fzf browser: filter, preview; enter jumps, tab acts
-    kel go [group]     switch group
-    kel move [group]   change THIS agent's group
-    kel adopt [group]  make THIS window a kel agent (a plain `prefix c` window,
-                       your editor, lazygit — anything kel shows as unmanaged)
-    kel rename <new>   rename this window, keep metadata in sync
-    kel kill <name>    close one window
-    kel sweep          close every finished agent whose work has merged
-    kel prune          forget dead records — closes nothing
-    kel top            the fleet dashboard — every agent, sorted by who needs
-                       you  (prefix t; j/k scroll, s sort, / filter, q quit)
-    kel relaunch [name]  relaunch THIS agent after a crash — same window,
-                       same worktree, same conversation
-    kel restore [-c]   rebuild after a kill / reboot  (-c resumes conversations)
-    kel config         edit config.toml (seeds it from the example, once)
-
-  STATUS BAR
-    1:name*  working   1:name?  waiting-on-you   1:name!  done   1:name  idle
-    1:name~  throttled — waiting on quota, not on you (it resumes itself)
-    1:namex  the agent process died (no clean exit) — kel kill or relaunch it
-
-  PANE BORDERS carry the same state, so a full-screen agent still signals
-    orange waiting on you   ·   purple throttled   ·   red died   ·   green done
-    [1:name] current window   1:name·3 = 3 panes
-    ⟨api·2 docs·1⟩  other groups with agents waiting on you (top 3, then +N)
-    1:name·84%  context window used — only shown from KEL_CTX_WARN (70%) up.
-                Claude Code's own row has the full picture: model, bar, cost.
-
-  prefix ?   tmux's full key list      prefix k   this page (kel cheat)
-
-EOF
-}
-
-# --------------------------------------------------------------------------
 # paint_state  —  put the state where you can see it without looking (v0.9a)
 # --------------------------------------------------------------------------
 # The status bar is one line at the bottom. With a full-screen agent that is a
@@ -2754,7 +1521,7 @@ resolve_pane() { # session-id cwd
 # --------------------------------------------------------------------------
 # context / cost, per agent      $STATE_DIR/<wid>.ctx
 #   pct <T> cost_usd <T> in_tokens <T> ctx_size <T> rate5h <T> epoch <T> model
-# Written by `kel statusline`; read by the bar, ls, --json and the board.
+# Written by `kel statusline`; read by the bar, ls, --json and kel top.
 # --------------------------------------------------------------------------
 ctx_field() { # wid n  -> field n of the .ctx line, or empty
   [ -f "$STATE_DIR/$1.ctx" ] || return 0
@@ -2864,7 +1631,7 @@ cmd_statusline() {
     [ -n "$pane" ] && wid="$(tmux display-message -p -t "$pane" '#{window_id}' 2>/dev/null || true)"
   fi
   # An unknown pct writes nothing. Overwriting a real 25% with a placeholder 0
-  # would make every other surface — the bar, `kel ls`, the board, `kel top` —
+  # would make every other surface — the bar, `kel ls`, `kel top` —
   # report an empty context window for an agent that has a full one. The stale
   # record keeps its own epoch in field 6, so a reader can see its age.
   if [ -n "$wid" ] && [ "$ctxsz" -gt 0 ] && [ -n "$pct" ]; then
@@ -3061,10 +1828,7 @@ quickstart() {
 
   kel new <name>     start an agent in the current repo
   prefix `           jump to whichever agent is waiting on you
-  Ctrl+Space         the board — find any agent; tab acts, ctrl-f is
-                     everything else (dashboard, config, sweep, restore…)
-  prefix m           the same actions as tab, for wherever you're standing
-  prefix k           kel cheat — the full keybinding + command reference
+  prefix t           kel top — every agent, its state, context and cost
 
 EOF
 }
@@ -3153,77 +1917,18 @@ cmd_attach() {
 
 usage() { awk 'NR>1 && /^#/ {sub(/^# ?/,""); print; next} NR>1 {exit}' "$0"; }
 
-# --------------------------------------------------------------------------
-# --------------------------------------------------------------------------
-# usage counter  —  scaffolding for the prune pass, meant to be removed with it
-# --------------------------------------------------------------------------
-# rollout.md gates the prune pass on "did I reach for it?", and nothing in kel
-# recorded an answer, so the gate could never be met from a chair.  One append
-# per user gesture turns the whole docket into a `sort | uniq -c`.
-#
-# NAME ONLY, never arguments: those carry agent names, branch names and repo
-# paths.  The log sits in the 0700 state dir with everything else.
-#
-# Excluded: everything that fires without you asking — the two hot paths, the
-# fleet read, the board's per-keystroke preview, snapshot (tmux hooks call it
-# in the background), and the test-only shims.  Counting those would drown the
-# signal and put a write on every status-bar redraw.
-#
-# `usage = off` disables it; deleting usage.log resets it.
-_usage_log() {   # cmd
-  case "${KEL_USAGE:-on}" in 0|off|no|false) return 0 ;; esac
-  case "$1" in
-    hook|statusline|status-line|snapshot|_fleet|_board_rows|_board_preview|_land|_prstate|_slug|_cfgdump|_usage)
-      return 0 ;;
-  esac
-  [ -d "$STATE_DIR" ] || return 0
-  printf '%s %s\n' "$(date +%s)" "$1" >> "$STATE_DIR/usage.log" 2>/dev/null || true
-}
-
-cmd_usage() {
-  local f="$STATE_DIR/usage.log"
-  [ -f "$f" ] || { say "nothing recorded yet — usage.log appears on the next command"; return 0; }
-  local first rest total
-  read -r first rest < "$f"
-  case "$first" in ''|*[!0-9]*) first="$(date +%s)" ;; esac
-  # grep -c, not wc -l: BSD wc pads its count with spaces
-  total="$(grep -c . "$f")"
-  printf '%s invocations over %s\n\n' "$total" "$(humanize_secs $(( $(date +%s) - first )))"
-  awk '{print $2}' "$f" | sort | uniq -c | sort -rn
-}
-
 main() {
   local cmd="${1:-}"; [ $# -gt 0 ] && shift
-  _usage_log "${cmd:-attach}"
   case "$cmd" in
     hook)         cmd_hook "$@" ;;                 # hot path — skip migrate
     new)          migrate_meta; cmd_new "$@" ;;
     kill)         migrate_meta; cmd_kill "$@" ;;
     ls|list)      migrate_meta; cmd_ls "$@" ;;
-    go)           migrate_meta; cmd_go "$@" ;;
-    move)         migrate_meta; cmd_move "$@" ;;
-    adopt)        migrate_meta; cmd_adopt "$@" ;;
     rename)       migrate_meta; cmd_rename "$@" ;;
-    board|menu)   migrate_meta; cmd_board ;;   # menu = deprecated alias
-    _board_rows)     cmd_board_rows ;;
-    _board_preview)  cmd_board_preview "$@" ;;
-    _board_jump)     cmd_board_jump "$@" ;;
-    _board_kill)     cmd_board_kill "$@" ;;
-    _board_actions)  cmd_board_actions "$@" ;;
-    _board_fleet)    cmd_board_fleet_actions ;;
-    _dumpkeys)       cmd_dumpkeys ;;                    # for tests — interface-build.md Phase 1
-    _board_rename)   migrate_meta; cmd_board_rename "$@" ;;
-    _ask_new)        migrate_meta; cmd_ask_new "$@" ;;
-    _ask_new_wt)     migrate_meta; cmd_ask_new_wt "$@" ;;
-    _ask_rename)     migrate_meta; cmd_ask_rename "$@" ;;
-    _ask_move)       migrate_meta; cmd_ask_move "$@" ;;
-    _here)           cmd_here_actions "$@" ;;              # prefix m
     restore)      migrate_meta; cmd_restore "$@" ;;
     relaunch)     migrate_meta; cmd_relaunch "$@" ;;
     top)          cmd_top "$@" ;;
     sweep)        migrate_meta; cmd_sweep "$@" ;;
-    _run)         cmd_run_popup "$@" ;;
-    _sweepui)     migrate_meta; cmd_sweep_ui ;;
     prune)        migrate_meta; cmd_prune "$@" ;;
     snapshot)     cmd_snapshot ;;
     doctor)       cmd_doctor "$@" ;;
@@ -3231,14 +1936,9 @@ main() {
     update)       cmd_update "$@" ;;
     status-line)  cmd_status_line "$@" ;;
     _fleet)       fleet_json "$@" ;;
-    _land)        land_of "$@"; echo ;;                # for tests
-    _prstate)     pr_state_of "$@"; echo ;;            # for tests
-    _slug)        repo_slug "$@"; echo ;;              # for tests
     _cfgdump)     printf 'ctx_warn=%s notify=%s group=%s\n' "${KEL_CTX_WARN:-}" "${KEL_NOTIFY:-}" "${KEL_GROUP:-}" ;;
-    _usage)       cmd_usage ;;                     # the prune pass's instrument
     statusline)   cmd_statusline ;;                # hot path — skip migrate
     jump)         cmd_jump ;;
-    cheat)        cmd_cheat ;;
     ''|attach)    migrate_meta; cmd_attach ;;
     -h|--help|help) usage ;;
     *) die "unknown command: $cmd  (try: kel --help)" ;;

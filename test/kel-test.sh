@@ -13,7 +13,7 @@
 # no tokens spent.  Everything is torn down on the way out, including on
 # failure.
 #
-# Requires: tmux, jq, git.  ~2 min on an M-series Mac (2026-09-01). The suite
+# Requires: tmux, jq, git, go.  ~2 min on an M-series Mac (2026-09-01). The suite
 # prints its pass/fail count at the end.
 set -uo pipefail
 
@@ -44,6 +44,14 @@ export TMUX_TMPDIR
 unset TMUX TMUX_PANE      # don't inherit an outer tmux; we are not "inside" ours
 STATE="$XDG_STATE_HOME/kel"
 SESSIONS="$STATE/sessions"
+
+# Build the Go binaries from THIS checkout, not whatever an earlier install.sh
+# left in ~/.local/bin: bin/kel has no fallback reader any more (v0.10), so a
+# stale installed kel-fleet would be what the suite actually tested.
+command -v go >/dev/null 2>&1 || { echo "the suite needs Go (kel-fleet, kel-top)" >&2; exit 1; }
+export KEL_FLEET_BIN="$WORK/kel-fleet" KEL_TOP_BIN="$WORK/kel-top"
+( cd "$HERE/.." && go build -o "$KEL_FLEET_BIN" ./cmd/kel-fleet && go build -o "$KEL_TOP_BIN" ./cmd/kel-top ) \
+  || { echo "go build failed" >&2; exit 1; }
 
 cleanup() { tmux kill-server 2>/dev/null; rm -rf "$WORK" "$TMUX_TMPDIR"; }
 trap cleanup EXIT INT TERM
@@ -139,22 +147,30 @@ ok "group/name kills exactly one"       '[ "$(wins)" = 1 ]'
 ok "  ...and it is the right one"       '[ -f "$SESSIONS/api-gw/docs.json" ] && [ ! -f "$SESSIONS/coppermind/docs.json" ]'
 ok "a now-unique bare name works"       '"$KEL" kill docs >/dev/null 2>&1; [ ! -f "$SESSIONS/api-gw/docs.json" ]'
 
-section "rename and move stay inside their group"
+section "rename stays inside its group"
 reset
 NEW api-gw alpha
 NEW coppermind alpha
 w="$(tmux list-windows -a -F '#{session_name} #{window_id}' | awk '$1=="keltest/api-gw"{print $2}')"
-"$KEL" _board_rename "$w" beta >/dev/null 2>&1
+# kel rename acts on the window it is run from; TMUX + TMUX_PANE is how tmux
+# itself tells a command where it is standing
+TMUX="$TMUX_TMPDIR/tmux-$(id -u)/default,$(tmux display-message -p '#{pid}'),0" \
+  TMUX_PANE="$(tmux list-panes -t "$w" -F '#{pane_id}' | head -1)" "$KEL" rename beta >/dev/null 2>&1
 ok "rename moves the record"            '[ -f "$SESSIONS/api-gw/beta.json" ] && [ ! -f "$SESSIONS/api-gw/alpha.json" ]'
 ok "  ...and leaves the other group"    '[ -f "$SESSIONS/coppermind/alpha.json" ]'
 ok "  ...and rewrites .name"            '[ "$(jq -r .name "$SESSIONS/api-gw/beta.json")" = beta ]'
 
-section "state is private, the network is optional, usage is counted"
+section "state is private, and the network is optional"
 ok "the state dir is 0700"              '[ "$(ls -ld "$XDG_STATE_HOME/kel" | cut -c1-10)" = "drwx------" ]'
-# pr = off must stop the only call that leaves the machine.  Driven through
-# _land rather than through `sweep`: pr_refresh is only reachable for a repo
-# whose origin is on github.com, and none of the suite fixtures are — a sweep
-# here never calls gh either way, so asserting on it proves nothing.
+# pr = off must stop the only call that leaves the machine.  Until v0.10 this
+# was asserted against bash's own PR helper only -- and kel-fleet, which
+# answers whenever it is installed, ignored the setting entirely.  Driven
+# through the fleet now, so the assertion is on the code that actually runs.
+#
+# The fixture has to get PAST every local answer to reach the gh half: a
+# github.com origin (or there is no slug to ask about), a feature branch (on
+# the base branch the PR state is moot), and a remote-tracking ref at HEAD (or
+# it short-circuits as unpushed).  update-ref fakes "pushed" with no network.
 # %s, not a literal $WORK: single quotes would write the variable NAME into
 # the script, which then has no $WORK set and logs to /gh.calls
 mkdir -p "$WORK/nogh2"
@@ -162,119 +178,34 @@ printf '#!/bin/sh\necho CALLED >> "%s/gh.calls"\nexit 1\n' "$WORK" > "$WORK/nogh
 chmod +x "$WORK/nogh2/gh"
 GHR="$WORK/repos/ghrepo"; mkdir -p "$GHR"
 # -b main and an explicit identity, like every other fixture here: a CI runner
-# has no git user configured, so a bare `git commit` fails and leaves no HEAD —
-# which then reads as "clean" rather than "unpushed" and fails two assertions
-# for a reason that looks nothing like the cause.
+# has no git user configured, so a bare `git commit` fails and leaves no HEAD.
 git -C "$GHR" init -q -b main
 git -C "$GHR" -c user.email=t@t -c user.name=t commit -q --allow-empty -m init
 git -C "$GHR" remote add origin https://github.com/example/ghrepo.git
-ok "a github remote yields a slug"      '[ "$("$KEL" _slug "$GHR")" = example/ghrepo ]'
-rm -f "$WORK/gh.calls"
-PATH="$WORK/nogh2:$PATH" "$KEL" _prstate "$GHR" main --pr >/dev/null 2>&1
+git -C "$GHR" update-ref refs/remotes/origin/main HEAD
+git -C "$GHR" checkout -q -b feat
+git -C "$GHR" -c user.email=t@t -c user.name=t commit -q --allow-empty -m feat
+git -C "$GHR" update-ref refs/remotes/origin/feat HEAD
+NEW ghrepo gh1
+GHLAND() { PATH="$WORK/nogh2:$PATH" "$@" "$KEL" _fleet --land --pr | jq -r '.agents[]|select(.name=="gh1")|.land.code'; }
+rm -f "$WORK/gh.calls" "$STATE/pr-cache/"* 2>/dev/null
+code="$(GHLAND env)"
 ok "pr on reaches gh"                   '[ -f "$WORK/gh.calls" ]'
-rm -f "$WORK/gh.calls" "$XDG_STATE_HOME/kel/pr-cache/"* 2>/dev/null
-PATH="$WORK/nogh2:$PATH" KEL_PR=off "$KEL" _prstate "$GHR" main --pr >/dev/null 2>&1
+# Invariant 3 in its own wording: "an expired gh token must not render as no
+# PR".  A gh that exits nonzero against a real github remote reads `unknown`,
+# never a state that looks like a settled answer.
+ok "  ...and a failing gh reads unknown" '[ "$code" = unknown ]'
+rm -f "$WORK/gh.calls" "$STATE/pr-cache/"* 2>/dev/null
+GHLAND env KEL_PR=off >/dev/null
 ok "  ...and pr = off does not"         '[ ! -f "$WORK/gh.calls" ]'
-# Invariant 3 names this case in its own wording — "an expired gh token must not
-# render as no PR" — and nothing asserted it until 2026-09-01. A gh that exits
-# nonzero against a real github remote must read `unknown`, never a state that
-# looks like a settled answer. Cache cleared first, or a prior call answers.
-rm -f "$XDG_STATE_HOME/kel/pr-cache/"* 2>/dev/null
-ok "  ...and a failing gh reads unknown" '[ "$(PATH="$WORK/nogh2:$PATH" "$KEL" _prstate "$GHR" main --pr)" = unknown ]'
-# local git answers first and short-circuits: a repo with unpushed work never
-# reaches the gh half at all, whatever pr is set to
-rm -f "$WORK/gh.calls"
-PATH="$WORK/nogh2:$PATH" "$KEL" _land "$GHR" main --pr >/dev/null 2>&1
-ok "  ...and land short-circuits local" '[ ! -f "$WORK/gh.calls" ]'
-ok "  ...still answering unpushed"      '[[ "$("$KEL" _land "$GHR" main)" == unpushed* ]]'
-# the usage counter: user gestures only, names only, never arguments
-rm -f "$XDG_STATE_HOME/kel/usage.log"
-"$KEL" ls >/dev/null 2>&1; "$KEL" go >/dev/null 2>&1
-ok "a command is counted"               '[ -n "$(awk "{print \$2}" "$XDG_STATE_HOME/kel/usage.log" | grep -x ls)" ]'
-ok "  ...with no arguments recorded"    '! grep -q "api-gw\|/" "$XDG_STATE_HOME/kel/usage.log"'
-U="$(grep -c . "$XDG_STATE_HOME/kel/usage.log")"
-"$KEL" status-line >/dev/null 2>&1; "$KEL" _fleet >/dev/null 2>&1; "$KEL" snapshot >/dev/null 2>&1
-printf '{}' | "$KEL" statusline >/dev/null 2>&1
-ok "  ...but hot paths are not counted" '[ "$(grep -c . "$XDG_STATE_HOME/kel/usage.log")" = "$U" ]'
-KEL_USAGE=off "$KEL" ls >/dev/null 2>&1
-ok "  ...and usage = off records none"  '[ "$(grep -c . "$XDG_STATE_HOME/kel/usage.log")" = "$U" ]'
-ok "_usage reads it back"               '[[ "$("$KEL" _usage)" == *invocations* ]]'
-
-section "adopt is its own verb, and move refuses to do its job"
-# move and adopt read the CURRENT window, so they only work from inside a pane
-# -- drive them with send-keys the way a user does, and assert on the record
-# rather than on stdout.
-#
-# Take the window id at creation and derive everything from it.  Looking the
-# window up by NAME races tmux's automatic-rename, which relabels it "bash" as
-# soon as the shell starts; the lookup then returns empty, `send-keys -t ""`
-# quietly targets the ACTIVE pane, and the test drives the wrong window.
-reset
-NEW api-gw a
-plain_win() {   # name -> echoes the window id, rename pinned
-  local wid
-  # -P -F prints the id of the window just created.  Picking it out of
-  # list-windows afterwards guesses, and guessed wrong: sorting by activity
-  # selected the running agent instead.
-  wid="$(tmux new-window -d -P -F '#{window_id}' -t '=keltest/api-gw' -c "$WORK/repos/api-gw")"
-  tmux set-option -w -t "$wid" automatic-rename off
-  tmux rename-window -t "$wid" "$1"
-  echo "$wid"
-}
-in_win() {   # wid  command...  -> runs it in that window pane 0
-  local pane; pane="$(tmux list-panes -t "$1" -F '#{pane_id}' | head -1)"
-  [ -n "$pane" ] || return 1
-  shift; tmux send-keys -t "$pane" "$*" Enter
-}
-# send, then wait for the effect, and RESEND if it never came.  A shell that
-# has not yet drawn its prompt discards the keys silently, so a single
-# send + wait_until is a coin flip that reddens CI at random — this suite has
-# been bitten by exactly that before (see the wait_until comment above).
-in_win_until() {   # wid  'condition'  command...
-  local wid="$1" cond="$2"; shift 2
-  local try
-  for try in 1 2 3; do
-    in_win "$wid" "$@" || return 1
-    wait_until "$cond" 20 && return 0
-  done
-  return 1
-}
-
-PW="$(plain_win plainwin)"
-ok "the plain window keeps its name"     '[ "$(tmux display-message -p -t "$PW" "#{window_name}")" = plainwin ]'
-# WHERE is pad(11) because "(unmanaged)" is 11 chars; at 10 it rendered as
-# "(unmanaged" and the new column header made that obvious
-ok "  ...and reads (unmanaged), unclipped" '[ -n "$("$KEL" ls 2>/dev/null | grep -F "(unmanaged)")" ]'
-in_win_until "$PW" '[ -f "$SESSIONS/api-gw/plainwin.json" ]' "'$KEL' adopt > '$WORK/adopt.out' 2>&1"
-ok "adopt writes a record"              '[ -f "$SESSIONS/api-gw/plainwin.json" ]'
-ok "  ...in the pane repo group"        '[ "$(jq -r .group "$SESSIONS/api-gw/plainwin.json")" = api-gw ]'
-ok "  ...marked inplace"                '[ "$(jq -r .isolation "$SESSIONS/api-gw/plainwin.json")" = inplace ]'
-# agent = what is really in the pane, not $KEL_AGENT: relaunch re-runs this
-# field, and "claude" for an adopted editor would type into your editor
-ok "  ...and records the real command"  '[ "$(jq -r .agent "$SESSIONS/api-gw/plainwin.json")" != claude ]'
-ok "  ...which is the pane shell"       '[ -n "$(jq -r .agent "$SESSIONS/api-gw/plainwin.json" | grep -E "^(bash|sh|zsh|fish|dash)$")" ]'
-ok "  ...and ls stops saying unmanaged" '[ -z "$("$KEL" ls 2>/dev/null | awk "\$2==\"plainwin\"" | grep unmanaged)" ]'
-in_win_until "$PW" 'grep -q . "$WORK/a2.out" 2>/dev/null' "'$KEL' adopt > '$WORK/a2.out' 2>&1"
-ok "adopting twice is refused"          'grep -q "already a kel agent" "$WORK/a2.out"'
-
-# move on an unmanaged window must refuse and point at adopt, not adopt silently
-OW="$(plain_win orphan)"
-in_win_until "$OW" 'grep -q . "$WORK/move.out" 2>/dev/null' "'$KEL' move coppermind > '$WORK/move.out' 2>&1"
-ok "move refuses an unmanaged window"   'grep -q "kel adopt" "$WORK/move.out"'
-ok "  ...and writes no record for it"   '[ ! -f "$SESSIONS/coppermind/orphan.json" ] && [ ! -f "$SESSIONS/api-gw/orphan.json" ]'
-ok "  ...and leaves it where it was"    '[ "$(tmux display-message -p -t "$OW" "#{session_name}")" = keltest/api-gw ]'
-
-# move still does its own job on an agent kel manages.  Driven from the window
-# adopted above rather than from agent `a`: `a` runs the fake agent (sleep
-# 9999), so send-keys there types into sleep, not into a shell.
-#
-# `>` creates the target file when the shell sets up the redirect. That happens
-# before jq writes and before the source record is removed. A predicate that
-# waits only on the target therefore returns mid-move.
-in_win_until "$PW" '[ -f "$SESSIONS/coppermind/plainwin.json" ] && [ ! -f "$SESSIONS/api-gw/plainwin.json" ]' "'$KEL' move coppermind > '$WORK/mv2.out' 2>&1"
-ok "move relocates a managed agent"     '[ -f "$SESSIONS/coppermind/plainwin.json" ] && [ ! -f "$SESSIONS/api-gw/plainwin.json" ]'
-ok "  ...and rewrites .group"           '[ "$(jq -r .group "$SESSIONS/coppermind/plainwin.json")" = coppermind ]'
-ok "  ...and the window followed it"    '[ "$(tmux display-message -p -t "$PW" "#{session_name}")" = keltest/coppermind ]'
+# local git answers first: uncommitted work outranks every PR state, so it
+# must not be the reason kel talks to github.com
+echo wip > "$GHR/wip.txt"
+rm -f "$WORK/gh.calls" "$STATE/pr-cache/"* 2>/dev/null
+code="$(GHLAND env)"
+ok "  ...and dirty work never reaches gh" '[ ! -f "$WORK/gh.calls" ]'
+ok "  ...still answering dirty"         '[ "$code" = dirty ]'
+rm -f "$GHR/wip.txt"
 
 section "legacy flat records migrate"
 reset
@@ -298,7 +229,6 @@ ok "  ...and the note with it"           '[[ "$("$KEL" _fleet | jq -r ".agents[]
 ok "dirty is null unless asked for"      '[ "$("$KEL" _fleet | jq -r ".agents[0].dirty")" = null ]'
 ok "  ...and computed when it is"        '[ "$("$KEL" _fleet --dirty | jq -r ".agents[0].dirty")" != null ]'
 ok "ls agrees with _fleet on state"      '[ "$(state_of a)" = "$("$KEL" _fleet | jq -r ".agents[]|select(.name==\"a\")|.state")" ]'
-ok "the board agrees too"                '[[ "$("$KEL" _board_rows | sed "s/\x1b\[[0-9;]*m//g")" == *"api-gw	a	waiting"* ]]'
 # a record whose window is gone must still appear, flagged, not vanish
 "$KEL" kill coppermind/b >/dev/null 2>&1
 NEW api-gw c
@@ -310,21 +240,17 @@ ok "  ...with a null window_id"          '[ "$("$KEL" _fleet | jq -r ".agents[]|
 # -- not vanish, and (the worse bug this actually was) not take the rest of
 # the document with it. Before the fix, --slurpfile aborted on the first bad
 # value it hit in the concatenated stream, so this single corrupt file used
-# to zero out every OTHER agent's entry too, not just its own.
-# Forced onto the bash reader, like the empty-fleet checks above: a dev
-# machine that has ever run install.sh has a real kel-fleet sitting at
-# $KEL_FLEET_BIN's default, and this fix needs to be proven against the
-# bash THIS WORKTREE just changed, not whatever Go binary happens to be
-# lying around from a previous install.
-BEFORE_N="$(KEL_FLEET_BIN=/nonexistent "$KEL" _fleet | jq '.agents | length')"
+# to zero out every OTHER agent's entry too, not just its own.  That was the
+# bash reader; Go's json.Unmarshal fails per record, and this keeps it so.
+BEFORE_N="$("$KEL" _fleet | jq '.agents | length')"
 printf 'not json {{{' > "$SESSIONS/api-gw/garbage.json"
 ok "a corrupt record keeps the other agents" \
-  '[ "$(KEL_FLEET_BIN=/nonexistent "$KEL" _fleet | jq ".agents | length")" = "$((BEFORE_N + 1))" ]'
+  '[ "$("$KEL" _fleet | jq ".agents | length")" = "$((BEFORE_N + 1))" ]'
 ok "  ...and renders itself as unreadable" \
-  '[ "$(KEL_FLEET_BIN=/nonexistent "$KEL" _fleet | jq -r ".agents[]|select(.name==\"garbage\")|.state")" = unreadable ]'
+  '[ "$("$KEL" _fleet | jq -r ".agents[]|select(.name==\"garbage\")|.state")" = unreadable ]'
 ok "  ...named from its path, group included" \
-  '[ "$(KEL_FLEET_BIN=/nonexistent "$KEL" _fleet | jq -r ".agents[]|select(.name==\"garbage\")|.group")" = api-gw ]'
-ok "  ...and _fleet still exits 0"       'KEL_FLEET_BIN=/nonexistent "$KEL" _fleet >/dev/null 2>&1'
+  '[ "$("$KEL" _fleet | jq -r ".agents[]|select(.name==\"garbage\")|.group")" = api-gw ]'
+ok "  ...and _fleet still exits 0"       '"$KEL" _fleet >/dev/null 2>&1'
 rm -f "$SESSIONS/api-gw/garbage.json"
 # An agent that crashes right after SessionStart (idle) used to stay reading
 # "idle" forever: the dead-check only looked at working/waiting/throttled,
@@ -332,6 +258,7 @@ rm -f "$SESSIONS/api-gw/garbage.json"
 # already fired. Found by walking through the tool as a fresh user, not by
 # inspection, and it was wrong in THREE independent places: this jq pipeline,
 # the standalone effective_state() bash function, and internal/fleet/fleet.go.
+# (The jq pipeline went with the bash reader in v0.10.)
 reset
 NEW api-gw idler
 P="$(pane_of api-gw idler)"
@@ -347,77 +274,21 @@ ok "  ...and _fleet agrees"              '[ "$("$KEL" _fleet | jq -r ".agents[]|
 reset
 ok "an empty fleet is {agents:[]}"       '[ "$("$KEL" _fleet | jq -c ".agents")" = "[]" ]'
 ok "  ...and still exits 0"              '"$KEL" _fleet >/dev/null 2>&1'
-# Forced onto the bash reader: with kel-fleet built, the Go path answers and
-# never exercises the record slurp. Zero records used to leave the array empty,
-# which bash 3.2 reports as unbound and 4.4+ turns into a `cat` with no
-# arguments that reads stdin. Stderr is the half a non-tty suite can observe.
-ok "  ...with nothing on stderr"         '[ -z "$(KEL_FLEET_BIN=/nonexistent "$KEL" _fleet 2>&1 >/dev/null)" ]'
-ok "  ...and the bash reader agrees"     '[ "$(KEL_FLEET_BIN=/nonexistent "$KEL" _fleet 2>/dev/null | jq -c ".agents")" = "[]" ]'
+ok "  ...with nothing on stderr"         '[ -z "$("$KEL" _fleet 2>&1 >/dev/null)" ]'
 
-section "the Go kel-fleet agrees with the bash one (v0.6 seam)"
-GOBIN_FLEET="$WORK/kel-fleet"
-if command -v go >/dev/null 2>&1 && (cd "$HERE/.." && go build -o "$GOBIN_FLEET" ./cmd/kel-fleet) 2>/dev/null; then
-  reset
-  NEW api-gw auth-fix
-  NEW api-gw wt
-  NEW coppermind sazed
-  NEW api-gw idler2
-  P="$(pane_of api-gw auth-fix)"
-  hook "$P" Notification permission_prompt "needs Bash now"
-  hook "$P" PreCompact
-  # idle, then crashed: this is the case that was WRONG in both bash and Go
-  # the same way, so a diff between them alone would never have caught it.
-  # Keeping it in the differential guards the fix from regressing in only one.
-  IP="$(pane_of api-gw idler2)"
-  hook "$IP" SessionStart
-  IPPID="$(tmux list-panes -t "$(window_of api-gw idler2)" -F "#{pane_pid}")"
-  kill -9 "$IPPID" 2>/dev/null
-  wait_until '[ "$(tmux list-panes -t "$(window_of api-gw idler2)" -F "#{pane_current_command}")" = bash ]'
-  printf '%s' '{"model":{"display_name":"Opus 5"},"cost":{"total_cost_usd":18.7},"context_window":{"total_input_tokens":178000,"context_window_size":200000,"used_percentage":91},"rate_limits":{"five_hour":{"used_percentage":74}}}' \
-    | TMUX_PANE="$P" "$KEL" statusline >/dev/null
-  echo wip > "$WORK/repos/api-gw/dirt.txt"
-  tmux new-window -d -t '=keltest/api-gw' -n stray 2>/dev/null      # unmanaged
-  cp "$SESSIONS/coppermind/sazed.json" "$SESSIONS/coppermind/ghost.json"
-  jq '.name="ghost"' "$SESSIONS/coppermind/ghost.json" > "$WORK/g" && mv "$WORK/g" "$SESSIONS/coppermind/ghost.json"
-  # #25, kept in the differential too (item 6: "both sides, or neither" --
-  # bash's --slurpfile and Go's json.Unmarshal fail in unrelated ways, so
-  # only running this through both implementations proves they now agree on
-  # the fix, not just that each one independently stopped crashing).
-  printf 'not json {{{' > "$SESSIONS/api-gw/garbage.json"
-  # Warm every index first. The first `git status` in a fresh worktree
-  # refreshes .git/index, so whichever implementation runs first can legitimately
-  # see a different count from the second — a real source of nondeterminism that
-  # is not a kel bug and would otherwise show up as a flaky differential.
-  for d in $("$KEL" _fleet | jq -r '.agents[].cwd // empty' | sort -u); do
-    git -C "$d" status --porcelain >/dev/null 2>&1 || true
-  done
-  # generated_at and activity are both clock readings, and the two
-  # implementations are sampled a moment apart. `activity` is tmux's
-  # #{window_activity}: on 2026-09-01 the bare-flag comparison failed on Linux
-  # CI with bash reading 1788274440 and Go reading 1788274441, one second later.
-  # Comparing it by value asserts a property neither side can hold. Reduced to
-  # presence, so a side that stops reporting it at all is still caught.
-  norm() { jq -S 'del(.generated_at) | .agents |= map(.activity |= (. != null))'; }
-  for flag in "" "--dirty" "--land"; do
-    "$KEL" _fleet $flag | norm > "$WORK/bash.json"
-    KEL_FLEET_BIN=/nonexistent "$KEL" _fleet $flag | norm > "$WORK/bash2.json"
-    "$GOBIN_FLEET" $flag       | norm > "$WORK/go.json"
-    ok "bash and Go agree${flag:+ ($flag)}"  '[ -z "$(diff "$WORK/bash2.json" "$WORK/go.json")" ]'
-    [ -n "$(diff "$WORK/bash2.json" "$WORK/go.json")" ] && diff "$WORK/bash2.json" "$WORK/go.json" | head -14 | sed "s/^/       /"
-  done
-  # regenerate without flags: the loop above left go.json holding --dirty output
-  "$GOBIN_FLEET" | norm > "$WORK/go-plain.json"
-  KEL_FLEET_BIN=/nonexistent "$KEL" _fleet | norm > "$WORK/bash-plain.json"
-  ok "the seam prefers the Go binary"  'KEL_FLEET_BIN="$GOBIN_FLEET" "$KEL" _fleet | norm | diff -q - "$WORK/go-plain.json" >/dev/null'
-  ok "  ...and falls back without it"  'KEL_FLEET_BIN=/nonexistent "$KEL" _fleet | jq -e ".agents|length > 0" >/dev/null'
-  ok "  ...identically either way"     '[ -z "$(diff "$WORK/bash-plain.json" "$WORK/go-plain.json")" ]'
-else
-  echo "  skip  (no Go toolchain — bash implementation is the only one here)"
-fi
+# No fallback reader since v0.10, so a missing or broken kel-fleet has to fail
+# where you can see it.  An empty document would read as "no agents" -- a
+# guess reported as a fact (invariant 3).
+printf '#!/bin/sh\nexit 2\n' > "$WORK/stale"; chmod +x "$WORK/stale"
+ok "a missing kel-fleet fails loudly"    '! KEL_FLEET_BIN=/nonexistent "$KEL" _fleet >/dev/null 2>&1'
+ok "  ...and says how to fix it"         '[[ "$(KEL_FLEET_BIN=/nonexistent "$KEL" ls 2>&1)" == *install.sh* ]]'
+ok "  ...as does a broken one"           '! KEL_FLEET_BIN="$WORK/stale" "$KEL" ls >/dev/null 2>&1'
+ok "  ...and ls prints no empty table"   '[[ "$(KEL_FLEET_BIN=/nonexistent "$KEL" ls 2>/dev/null)" != *NAME* ]]'
+ok "the bar names the problem too"       '[[ "$(TMUX=x KEL_FLEET_BIN=/nonexistent "$KEL" status-line)" == *"kel-fleet missing"* ]]'
 
 section "kel top renders and sorts (#2)"
-GOBIN_TOP="$WORK/kel-top"
-if command -v go >/dev/null 2>&1 && (cd "$HERE/.." && go build -o "$GOBIN_TOP" ./cmd/kel-top) 2>/dev/null; then
+GOBIN_TOP="$KEL_TOP_BIN"
+{
   reset
   NEW api-gw idler
   NEW api-gw blocked
@@ -532,13 +403,17 @@ EOF
   # OFF that first row instead -- a positive, unambiguous signal that "j" has
   # actually been applied -- before capturing the position enter must not
   # then change.
-  CUR0="$(tmux capture-pane -p -t "$TWIN" 2>/dev/null | grep -n '›')"
+  # Line NUMBER only: the cursor row also carries the FOR column, which ticks
+  # every second -- comparing the whole line made this fail whenever a second
+  # boundary fell between the two captures.
+  curline() { tmux capture-pane -p -t "$TWIN" 2>/dev/null | grep -n '›' | cut -d: -f1; }
+  CUR0="$(curline)"
   tmux send-keys -t "$TWIN" j
-  wait_until "[ \"\$(tmux capture-pane -p -t '$TWIN' 2>/dev/null | grep -n '›')\" != '$CUR0' ]"
-  CUR1="$(tmux capture-pane -p -t "$TWIN" 2>/dev/null | grep -n '›')"
+  wait_until '[ "$(curline)" != "$CUR0" ]'
+  CUR1="$(curline)"
   tmux send-keys -t "$TWIN" Enter
   sleep 0.3   # nothing to wait FOR: asserting silence, same idiom as #1's notify test
-  CUR2="$(tmux capture-pane -p -t "$TWIN" 2>/dev/null | grep -n '›')"
+  CUR2="$(curline)"
   ok "enter is a genuine no-op in normal mode (#3)" '[ "$CUR1" = "$CUR2" ]'
   ok "  ...and the program is still running, not crashed" \
     '[ "$(tmux list-panes -t "$TWIN" -F "#{pane_current_command}" 2>/dev/null)" != bash ]'
@@ -550,27 +425,27 @@ EOF
   ok "backspace, previously undocumented, in filter mode's hints" \
     '[[ "$(tmux capture-pane -p -t "$TWIN" 2>/dev/null)" == *backspace* ]]'
   tmux kill-window -t "$TWIN" 2>/dev/null
-else
-  echo "  skip  (no Go toolchain)"
-fi
+}
 
 section "land: one verb per row, degrading without gh (#6)"
 reset
 NEW api-gw solo
-L() { "$KEL" _land "$1" "${2:-}" | tr '\t' '/'; }
-ok "a repo with no remote is clean"      '[ "$(L "$WORK/repos/api-gw")" = "clean/" ]'
+NEW coppermind solo2
+# code/n for one agent, read the way kel sweep reads it.  The non-git and
+# missing-directory cases live in internal/fleet/land_test.go: a kel agent
+# cannot be started in a directory that does not exist.
+L() { "$KEL" _fleet --land | jq -r --arg n "$1" '.agents[]|select(.name==$n)|.land|"\(.code)/\(.n // "")"'; }
+ok "a repo with no remote is clean"      '[ "$(L solo)" = "clean/" ]'
 echo wip > "$WORK/repos/api-gw/wip.txt"
-ok "uncommitted work -> dirty N"         '[ "$(L "$WORK/repos/api-gw")" = "dirty/1" ]'
+ok "uncommitted work -> dirty N"         '[ "$(L solo)" = "dirty/1" ]'
 ( cd "$WORK/repos/api-gw" && git add -A && git -c user.email=t@t -c user.name=t commit -qm w ) >/dev/null 2>&1
-ok "committed, no remote -> clean"       '[ "$(L "$WORK/repos/api-gw")" = "clean/" ]'
-ok "a non-git directory is clean"        '[ "$(L /tmp)" = "clean/" ]'
-ok "a missing directory is clean"        '[ "$(L "$WORK/nope")" = "clean/" ]'
+ok "committed, no remote -> clean"       '[ "$(L solo)" = "clean/" ]'
 # a remote makes unpushed meaningful
 git -C "$WORK/repos/coppermind" remote add origin "$WORK/repos/api-gw" 2>/dev/null
 echo z > "$WORK/repos/coppermind/z.txt"
 ( cd "$WORK/repos/coppermind" && git add -A && git -c user.email=t@t -c user.name=t commit -qm z ) >/dev/null 2>&1
-ok "commits no remote has -> unpushed N" '[[ "$(L "$WORK/repos/coppermind")" == unpushed/* ]]'
-ok "a non-GitHub remote is never unknown" '[[ "$(L "$WORK/repos/coppermind")" != unknown/* ]]'
+ok "commits no remote has -> unpushed N" '[[ "$(L solo2)" == unpushed/* ]]'
+ok "a non-GitHub remote is never unknown" '[[ "$(L solo2)" != unknown/* ]]'
 ok "--land fills the document"           '[ "$("$KEL" _fleet --land | jq -r ".agents[0].land.code")" != null ]'
 ok "  ...and plain _fleet leaves it null" '[ "$("$KEL" _fleet | jq -r ".agents[0].land")" = null ]'
 # Prove it needs no network by taking gh away, rather than by timing it:
@@ -578,10 +453,6 @@ ok "  ...and plain _fleet leaves it null" '[ "$("$KEL" _fleet | jq -r ".agents[0
 # whole reason the macOS runner exists.
 mkdir -p "$WORK/nogh"; printf '#!/bin/sh\nexit 127\n' > "$WORK/nogh/gh"; chmod +x "$WORK/nogh/gh"
 ok "  ...and needs no gh at all"         '[ "$(PATH="$WORK/nogh:$PATH" "$KEL" _fleet --land | jq -Sc ".agents[].land")" = "$("$KEL" _fleet --land | jq -Sc ".agents[].land")" ]'
-# bin/kel updates on pull; kel-fleet only on install.sh, so a stale binary that
-# rejects a new flag is a normal transient state and must not break the command
-printf '#!/bin/sh\nexit 2\n' > "$WORK/stale"; chmod +x "$WORK/stale"
-ok "a broken kel-fleet falls back to bash" 'KEL_FLEET_BIN="$WORK/stale" "$KEL" _fleet --land | jq -e ".agents" >/dev/null'
 
 section ".kel/group pins a directory to a group (#12)"
 reset
@@ -694,43 +565,14 @@ ok "  ...a different colour when throttled" '[ "$(border)" != "" ]'
 hook "$P1" SessionEnd
 ok "session end clears it"               '[ -z "$(border)" ]'
 
-# B — the board lists panes, not only agents
-tmux split-window -d -t "$W1" -c "$WORK" 'sleep 9999'
-tmux new-window  -d -t '=keltest/api-gw' -n plainwin -c "$WORK"
-wait_until '[ "$(tmux list-panes -a -F x | grep -c x)" -ge 3 ]'
-rows() { "$KEL" _board_rows | sed 's/\x1b\[[0-9;]*m//g'; }
-ok "the board still lists the agent"     '[ -n "$(rows | awk -F"\t" "\$2==\"agent1\"")" ]'
-ok "  ...and now its other pane too"     '[ -n "$(rows | awk -F"\t" "\$3==\"pane\"")" ]'
-ok "  ...targeted by pane id"            '[[ "$(rows | awk -F"\t" "\$3==\"pane\"{print \$6; exit}")" == %* ]]'
-ok "an agent is never listed twice"      '[ "$(rows | awk -F"\t" "\$2==\"agent1\"" | grep -c .)" = 1 ]'
-[ "$(rows | awk -F"\t" '$2=="agent1"' | grep -c .)" = 1 ] || rows | sed "s/^/       /"
-ok "a plain window appears as well"      '[ -n "$(rows | grep plainwin)" ]'
-# field 7: a separate, padded DISPLAY column (v0.9). Fields 1-6 must stay raw
-# -- _board_preview / _board_jump / cmd_go / _board_kill / _board_actions all
-# do exact-match lookups against them, and the tests above (awk $2=="agent1")
-# already prove that by passing; this locks in field 7 specifically, so a
-# future change that folds padding back into the real fields would be caught
-# here rather than only breaking the board in a way nothing types out.
-ok "field 7 exists and is padded"       '[ "$(rows | awk -F"\t" "\$2==\"agent1\"{print length(\$7)}")" -ge 32 ]'
-ok "  ...and field 2 (name) is not"     '[[ "$(rows | awk -F"\t" "\$2==\"agent1\"{print \$2}")" != *" "* ]]'
-ok "  ...pane rows have field 7 too"    '[ -n "$(rows | awk -F"\t" "\$3==\"pane\"{print \$7}")" ]'
-
-# B' — worktree reachable from a menu, and the stranded commands guarded
 ok "kel new -w still makes a worktree"   'NEW_W() { ( cd "$WORK/repos/api-gw" && "$KEL" new wt1 -w --agent "sleep 9999" ) >/dev/null 2>&1; }; NEW_W; [ "$(jq -r .isolation "$SESSIONS/api-gw/wt1.json")" = worktree ]'
-ok "_run refuses anything not allowed"   '! "$KEL" _run kill >/dev/null 2>&1'
-# < /dev/null: a real popup's stdin is a real tty, so the "press any key"
-# pause after the output is correct there and must NOT fire in this suite,
-# which does have a real tty on stdin (this session's own).
-ok "_run doctor runs"                    'KEL_IN_POPUP=1 "$KEL" _run doctor >/dev/null 2>&1 < /dev/null'
 # doctor hints go to stderr only — the cached JSON schema must not gain a field
 "$KEL" doctor >/dev/null 2>&1
-ok "doctor caches the same schema"       '[ "$(jq -Sr "keys | join(\",\")" "$XDG_STATE_HOME/kel/doctor.json")" = "allow_passthrough,checked_at,claude,display_popup,fzf,gh_auth,git_worktree,go_fleet,hooks_permitted,hooks_wired,jq,kel_path,node,statusline_wired,tmux,tmux>=3.0,up_to_date" ]'
+ok "doctor caches the same schema"       '[ "$(jq -Sr "keys | join(\",\")" "$XDG_STATE_HOME/kel/doctor.json")" = "allow_passthrough,checked_at,claude,display_popup,gh_auth,git_worktree,go_fleet,go_top,hooks_permitted,hooks_wired,jq,kel_path,node,statusline_wired,tmux,tmux>=3.0,up_to_date" ]'
 # capture, do not pipe: doctor exits non-zero when a required probe fails, and
 # `set -o pipefail` would then fail this test even though the hint was printed
 dout="$(PATH="$WORK/nogh:$PATH" "$KEL" doctor 2>&1 || true)"
 ok "  ...and a failed probe prints a fix" '[[ "$dout" == *"gh auth login"* ]]'
-
-ok "_sweepui needs an explicit yes"      'printf "n\n" | KEL_IN_POPUP=1 "$KEL" _sweepui 2>&1 | grep -q "nothing swept"'
 
 # the completion scripts' own jq filters, run against a real document.
 # These broke silently in v0.6 (bare array -> {generated_at,current,agents})
@@ -756,7 +598,7 @@ ok "both completion files use it"        'for f in bash zsh; do grep -q "agents\
 BLIST="$(sed -n 's/.*subcmds="\([^"]*\)".*/\1/p' "$HERE/../completions/kel.bash" | tr ' ' '\n' | sort -u)"
 ZLIST="$(awk '/subcmds=\(/,/^  \)/' "$HERE/../completions/kel.zsh" | grep -oE "'[a-z-]+:" | tr -d "':" | sort -u)"
 ok "bash and zsh complete the same set"  '[ "$BLIST" = "$ZLIST" ]'
-ok "  ...and it is not empty"            '[ "$(printf "%s\n" "$BLIST" | grep -c .)" -ge 15 ]'
+ok "  ...and it is not empty"            '[ "$(printf "%s\n" "$BLIST" | grep -c .)" -ge 12 ]'
 ok "  ...and includes config"            '[ -n "$(printf "%s\n" "$BLIST" | grep -x config)" ]'
 ok "  ...and includes update"            '[ -n "$(printf "%s\n" "$BLIST" | grep -x update)" ]'
 # an empty fleet must still answer --json with JSON, not an English sentence
@@ -865,7 +707,7 @@ hook "$P" UserPromptSubmit
 ok "UserPromptSubmit -> working"                    '[ "$(state_of a)" = working ]'
 hook "$P" Notification permission_prompt "needs Bash"
 ok "permission_prompt -> waiting"                   '[ "$(state_of a)" = waiting ]'
-ok "  ...and the reason is kept"                    '[[ "$("$KEL" _board_preview a api-gw)" == *"needs Bash"* ]]'
+ok "  ...and the reason is kept"                    '[[ "$("$KEL" _fleet | jq -r ".agents[0].note")" == *"needs Bash"* ]]'
 hook "$P" UserPromptSubmit
 hook "$P" Notification idle_prompt "still there?"
 ok "idle_prompt does NOT claim your attention"      '[ "$(state_of a)" = working ]'
@@ -901,32 +743,6 @@ hook "$P" PreCompact; hook "$P" PreCompact
 ok "  ...and accumulates"                   '[ "$(jq -r .compactions "$M")" = 3 ]'
 ok "PostCompact does not double-count"      'hook "$P" PostCompact; [ "$(jq -r .compactions "$M")" = 3 ]'
 ok "--json exposes it"                      '[ "$("$KEL" ls --json | jq -r ".agents[0].compactions")" = 3 ]'
-ok "the board preview shows it"             '[[ "$("$KEL" _board_preview a api-gw)" == *"compacted  3"* ]]'
-
-section "no display-menu binds a key twice"
-# prefix k used to bind `w` to both "new WORKTREE agent" and "switch to a
-# window"; display-menu takes the first match, so the second item could never
-# fire and nothing said so. A duplicate key is silent by nature -- hence a
-# test. v0.9's board-hub pass moved both menus (per-agent, fleet) out of
-# tmux.conf and into bin/kel as bash arrays with a conditional branch
-# (cmd_board_actions' $here extra), which a text-parsing extractor over
-# tmux.conf can no longer see at all. KEL_DUMP_ITEMS makes the REAL functions
-# print "key<TAB>label" instead of opening the menu, so this exercises the
-# actual conditional logic rather than a static guess at its shape.
-DUMP() { KEL_DUMP_ITEMS=1 "$KEL" "$@"; }
-keys_unique() { local f; f="$(cat)"; [ "$(printf '%s' "$f" | cut -f1 | grep -c .)" = "$(printf '%s' "$f" | cut -f1 | sort -u | grep -c .)" ]; }
-
-ok "board tab menu: keys are unique"        'DUMP _board_actions w1 n1 g1 /tmp | keys_unique'
-ok "  ...6 items (no move/adopt/relaunch)"  '[ "$(DUMP _board_actions w1 n1 g1 /tmp | grep -c .)" = 6 ]'
-ok "prefix m menu ("here"): keys unique"    'DUMP _board_actions w1 n1 g1 /tmp here | keys_unique'
-ok "  ...9 items (+ move/adopt/relaunch)"   '[ "$(DUMP _board_actions w1 n1 g1 /tmp here | grep -c .)" = 9 ]'
-ok "ctrl-f fleet menu: keys are unique"     'DUMP _board_fleet | keys_unique'
-ok "  ...and dashboard/config/sweep/etc are all there" \
-  '[[ "$(DUMP _board_fleet | cut -f1 | tr -d "\n")" == *t*c*s*R*p*D* ]]'
-# prove keys_unique actually bites, on a hand-built duplicate -- not a
-# tautology that would pass on anything
-ok "  ...and the check itself catches a duplicate" \
-  '! printf "a\tone\nb\ttwo\na\tthree\n" | keys_unique'
 
 section "relaunch-in-place (#13)"
 reset
@@ -1036,17 +852,17 @@ ok "refuses when it is not a git clone"  '[[ "$("$WORK/nogit/bin/kel" update 2>&
 
 section "the docs keep up with the code"
 # Two hand-written lists of things bin/kel already knows. That is the shape that
-# rots here: spec.md §11 was missing `gh authenticated` and `statusLine wired`
+# rots here: the spec's probe table was missing `gh authenticated` and `statusLine wired`
 # until 2026-09-01, and `kel config` was in neither completion file from v0.9
 # until the same day. Both are counted rather than string-matched — the wording
 # differs on purpose ("the wired kel path still resolves" vs "…resolves"), and a
 # mapping table to reconcile that would be the burden these guards remove.
 
-# §11's table folds "tmux present" and "tmux >= 3.0" into one row, and its
+# The spec's table folds "tmux present" and "tmux >= 3.0" into one row, and its
 # "clone level with its upstream" row is rendered directly rather than through
 # probe(). Both adjustments are named here so a future reader can re-derive them.
 DPROBES=$(awk '/^cmd_doctor\(\)/,/^}/' "$HERE/../bin/kel" | grep -cE '\$\(probe ')
-DROWS=$(awk '/^## 11\. Capability probe/,/^### 11a/' "$HERE/../docs/spec.md" \
+DROWS=$(awk '/^## .*Capability probe/,/^### /' "$HERE/../docs/spec.md" \
         | grep '^| ' | grep -v '^| Probe' | grep -vc 'clone level')
 ok "every doctor probe has a spec row"   '[ "$DPROBES" = "$(( DROWS + 1 ))" ]'
 ok "  ...and there are some to check"    '[ "$DPROBES" -ge 12 ]'
@@ -1067,53 +883,40 @@ CZSH=$(awk '/subcmds=\(/,/^  \)/' "$HERE/../completions/kel.zsh" \
 ok "the dispatcher and kel help agree"   '[ "$DISP" = "$HELP" ]'
 ok "  ...and the bash completion too"    '[ "$DISP" = "$CBASH" ]'
 ok "  ...and the zsh completion too"     '[ "$DISP" = "$CZSH" ]'
-ok "  ...over a real number of commands" '[ "$(printf "%s\n" "$DISP" | grep -c .)" -ge 15 ]'
+ok "  ...over a real number of commands" '[ "$(printf "%s\n" "$DISP" | grep -c .)" -ge 12 ]'
 
-section "errors cannot be swallowed (Phase 0 — interface.md §7)"
+section "errors cannot be swallowed"
 # display-popup: a single -E closes the popup the instant shell-command exits
 # — including a `die`, so the message a human needed never rendered. Two -E
-# closes only on success, leaving a failure on screen. cmd_run_popup is the
-# one deliberate exception: its shell-command ends in its OWN "[any key]"
-# pause, so the message is always read before the popup's shell exits at all
-# — independent of -E vs -EE — and it must keep a single -E. Counted, not
-# string-matched to a line number, because every edit here shifts what
-# interface.md cited as bin/kel:1592 / 1624 / 1935 / 2275.
+# closes only on success, leaving a failure on screen. Counted, not matched
+# to line numbers.
 POPUP_EE=$(grep -c -- '-EE' "$HERE/../bin/kel")
-ok "the four board/top/config popups use -EE, not a single -E" '[ "$POPUP_EE" = 4 ]'
+ok "the top/config popups use -EE"       '[ "$POPUP_EE" = 2 ]'
 POPUP_SINGLE_E=$(grep -cE '(^|[^E-])-E([^E]|$)' "$HERE/../bin/kel")
-ok "  ...and only cmd_run_popup's is still a single -E"        '[ "$POPUP_SINGLE_E" = 1 ]'
-ok "  ...and that one IS cmd_run_popup's"                      \
-  'awk "/^cmd_run_popup\(\)/,/^}/" "$HERE/../bin/kel" | grep -qE "(^|[^E-])-E([^E]|\$)"'
-# prove the guard bites: turn one -EE back into a single -E in a scratch
-# copy, the same edit this phase would be undone by, and confirm the count
-# guard would now fail.
-sed 's/-EE "'"'"'\$SELF'"'"' board"/-E "'"'"'\$SELF'"'"' board"/' \
-    "$HERE/../bin/kel" > "$WORK/kel-popup-revert"
-ok "  ...and reverting one -EE is caught"  '[ "$(grep -c -- "-EE" "$WORK/kel-popup-revert")" != 4 ]'
+ok "  ...and none uses a single -E"      '[ "$POPUP_SINGLE_E" = 0 ]'
 
 # run-shell in kel.conf: tmux only added a -E flag to run-shell (redirect
 # stderr into the stdout run-shell already shows on failure) in 3.6 — this
 # machine's tmux is 3.4, and `tmux source-file` on a -E'd run-shell dies with
 # "unknown flag -E", confirmed live below. That would have broken every key
-# this phase touches on kel's own documented tmux >= 3.0 floor, so the fix
-# actually shipped is the portable equivalent: a literal `2>&1` inside the
-# invoked command, which every tmux back to 3.0 already displays on failure
-# via run-shell's built-in view-mode behaviour — NOT the `-E` flag
-# interface.md's corollary literally names. The snapshot hooks
+# this touches on kel's own documented tmux >= 3.0 floor, so the fix is the
+# portable equivalent: a literal `2>&1` inside the invoked command, which
+# every tmux back to 3.0 already displays on failure via run-shell's
+# built-in view-mode behaviour. The snapshot hooks
 # (client-detached, after-split-window, pane-exited) stay fire-and-forget on
 # purpose either way — do not add this to them.
 CONF="$HERE/../tmux/kel.conf"
 KELBINDS=$(grep -n 'run-shell -b .*local/bin/kel ' "$CONF" | grep -v 'kel snapshot')
-ok "kel.conf's 4 foreground key binds exist"           '[ "$(printf "%s\n" "$KELBINDS" | grep -c .)" = 4 ]'
-ok "  ...and all 4 surface run-shell's stderr"          '[ "$(printf "%s\n" "$KELBINDS" | grep -c "2>&1")" = 4 ]'
+ok "kel.conf's foreground kel bind exists"             '[ "$(printf "%s\n" "$KELBINDS" | grep -c .)" = 1 ]'
+ok "  ...and surfaces run-shell's stderr"               '[ "$(printf "%s\n" "$KELBINDS" | grep -c "2>&1")" = 1 ]'
 ok "  ...but the snapshot hooks stay fire-and-forget"   '! grep -q "kel snapshot.*2>&1" "$CONF"'
 ok "  ...and this config actually sources under tmux"  \
   'tmux -S "$TMUX_TMPDIR/guard.sock" new-session -d -s guardtest 2>/dev/null
    rc=0; tmux -S "$TMUX_TMPDIR/guard.sock" source-file "$CONF" 2>/dev/null || rc=$?
    tmux -S "$TMUX_TMPDIR/guard.sock" kill-server 2>/dev/null
    [ "$rc" = 0 ]'
-# prove it would NOT source with the literal -E flag interface.md names —
-# this is the "spec turned out wrong" case, kept as a regression guard.
+# prove it would NOT source with a literal -E flag — kept as a regression
+# guard, because an earlier spec prescribed exactly that.
 sed 's/run-shell -b "\(\$HOME[^"]*\)"/run-shell -b -E "\1"/' "$CONF" > "$WORK/kel-conf-dash-E"
 ok "  ...confirmed: a literal -E flag does NOT source on this tmux" \
   'tmux -S "$TMUX_TMPDIR/guard2.sock" new-session -d -s guardtest2 2>/dev/null
@@ -1121,182 +924,9 @@ ok "  ...confirmed: a literal -E flag does NOT source on this tmux" \
    tmux -S "$TMUX_TMPDIR/guard2.sock" kill-server 2>/dev/null
    [ "$rc" != 0 ]'
 # prove the stderr-redirect guard bites: drop one 2>&1 in a scratch copy.
-sed 's/kel board 2>&1"/kel board"/' "$CONF" > "$WORK/kel-conf-revert"
+sed 's/kel top 2>&1"/kel top"/' "$CONF" > "$WORK/kel-conf-revert"
 REVERTED=$(grep -n 'run-shell -b .*local/bin/kel ' "$WORK/kel-conf-revert" | grep -v 'kel snapshot')
-ok "  ...and dropping one 2>&1 is caught"  '[ "$(printf "%s\n" "$REVERTED" | grep -c "2>&1")" != 4 ]'
-
-# `"$SELF" …` invocations: bin/kel has 175 legitimate /dev/null probes, so the
-# rule is narrower than "no /dev/null" — no kel surface hides ANOTHER kel
-# subcommand's own output behind one. The board's own fzf used to (the
-# trailing `|| true` already absorbed fzf's exit status, so the redirect was
-# only ever hiding fzf's OWN stderr, plus everything any `become()`'d or
-# `execute()`'d "$SELF" call underneath it printed).
-ok "the board's fzf no longer redirects its own output to /dev/null" \
-  '! awk "/^cmd_board\(\)/,/^}/" "$HERE/../bin/kel" | grep -q ">/dev/null 2>&1"'
-# prove it: put the redirect back in a scratch copy, the same place it lived.
-sed "s/    --color 'footer:italic,border:8' \\\\/    --color 'footer:italic,border:8' \\\\\\n    >\/dev\/null 2>\&1/" \
-    "$HERE/../bin/kel" > "$WORK/kel-redirect-revert"
-ok "  ...and re-adding it is caught" \
-  'awk "/^cmd_board\(\)/,/^}/" "$WORK/kel-redirect-revert" | grep -q ">/dev/null 2>&1"'
-
-section "the preview argument guard (#21) and the once-computed doc (§4b)"
-# cmd_board_kill already got this right; cmd_board_preview did not — under
-# set -u, `local name="$1"` threw "$1: unbound variable" the moment fzf's
-# own {2} expanded empty (a genuinely reachable state, not hypothetical).
-ok "zero arguments: exits 0, no diagnostic"  '_e=$("$KEL" _board_preview 2>&1); [ $? = 0 ] && [ -z "$_e" ]'
-ok "one argument: exits 0, no diagnostic"    '_e=$("$KEL" _board_preview somename 2>&1); [ $? = 0 ]'
-# the two existing checks further down ("the reason is kept" / "the board
-# preview shows it") call `_board_preview name group` with NO docfile — that
-# is cmd_board_preview's fallback path (see there), proving it still works
-# standalone. The board's own fzf binding is the only caller that passes the
-# mktemp'd snapshot as a third argument.
-
-# Navigation verbs leave the board; action verbs come back to it. become() is
-# execve(2) and one-way, which is CORRECT for enter (jump) and ctrl-g (kel go
-# switches the client to another group — returning to a board drawn over a
-# client that just moved is the bug, not the fix). tab/ctrl-n/ctrl-f/ctrl-k
-# act on the fleet and must return with fresh rows. Phase 0 converted ctrl-g
-# by mistake; this guard is why that does not come back.
-#
-# interface-build.md Phase 1 moved the KEY half of five of these binds into
-# the keymap file (one awk pass in cmd_board), so the literal strings "enter"
-# and "ctrl-g" no longer appear in this block — ${k_jump} and ${k_go} do. The
-# become()-vs-execute() shape this guard actually cares about is unchanged;
-# only where the key comes from moved. The values are checked separately,
-# against the keymap file itself, in the Phase 1 section below.
-BOARD_FZF="$(sed -n '/cmd_board_rows | SHELL/,/--color/p' "$KEL")"
-ok "navigation binds exec away (enter, ctrl-g)" \
-  '[ "$(printf "%s\n" "$BOARD_FZF" | grep -c "k_jump}:become\|k_go}:become")" = 2 ]'
-ok "  ...and action binds return to the board"  \
-  '[ "$(printf "%s\n" "$BOARD_FZF" | grep -c "tab:execute\|k_new}:execute\|k_fleet}:execute\|k_kill}:execute")" = 4 ]'
-# prove the guard still bites after the indirection: become() a key that
-# should execute() (the same mistake Phase 0's own note above records).
-ok "  ...and become()-ing an action key is still caught" \
-  '[ "$(printf "%s" "$BOARD_FZF" | sed "s/k_kill}:execute/k_kill}:become/" | grep -c "k_new}:execute\|k_fleet}:execute\|k_kill}:execute")" != 4 ]'
-# ctrl-r reloads the ROWS from live data. Without regenerating the snapshot
-# too, the preview would keep rendering context/cost/land from board-open
-# time beside those fresh rows — invariant 3's failure mode, a stale figure
-# that looks measured.
-ok "ctrl-r regenerates the snapshot, not just the rows" \
-  'grep -q "execute-silent(.*_fleet --land > " "$KEL" && grep -q "refresh-preview" "$KEL"'
-
-# The trap covers every ordinary exit; a popup killed outright skips it and
-# leaks one file per board open. Same shape as the .stash leak prune_state
-# already reaps — and prune_state ignoring a new state file is a bug this repo
-# has shipped once already.
-# NOTE: prune_state is NOT `kel prune` (cmd_prune reaps dead *agents* and never
-# calls it). Its callers are cmd_ls and cmd_attach, so `kel ls` is what drives
-# it here — a naming collision worth knowing before you debug this test.
-touch "$STATE/.board-preview.stale" && touch -t 202501010000 "$STATE/.board-preview.stale"
-touch "$STATE/.board-preview.fresh"
-"$KEL" ls >/dev/null 2>&1 || true
-ok "prune reaps a stale board-preview snapshot"  '[ ! -e "$STATE/.board-preview.stale" ]'
-ok "  ...and leaves a live one alone"            '[ -e "$STATE/.board-preview.fresh" ]'
-rm -f "$STATE/.board-preview.fresh"
-
-section "the keymap becomes a file (Phase 1 — interface-build.md)"
-KEYMAP="$HERE/../cmd/kel-top/keymap.tsv"
-ok "the keymap file exists"                      '[ -f "$KEYMAP" ]'
-BAD_ROWS="$(awk -F'\t' '!/^#/ && $0!="" && NF!=5' "$KEYMAP")"
-ok "  ...and every row has exactly 5 columns"    '[ -z "$BAD_ROWS" ]'
-
-# scope action -> its 3rd dump column (the KEY that dump's own idiom chose).
-dumpkeys_lookup() {   # dump-output  scope  action
-  printf '%s\n' "$1" | awk -F'\t' -v s="$2" -v a="$3" '$1==s && $2==a {print $3}'
-}
-DUMP_BASH="$("$KEL" _dumpkeys)"
-
-# bash reads the same file bin/kel:1626 onward defines — resolved values, not
-# just "a file exists somewhere". These are the exact literals Phase 0's
-# guard above used to hard-code; this is where they actually live now.
-ok "bash resolves jump to enter"                 '[ "$(dumpkeys_lookup "$DUMP_BASH" agent jump)" = enter ]'
-ok "  ...kill to ctrl-k"                         '[ "$(dumpkeys_lookup "$DUMP_BASH" agent kill)" = ctrl-k ]'
-ok "  ...new to ctrl-n"                          '[ "$(dumpkeys_lookup "$DUMP_BASH" agent new)" = ctrl-n ]'
-ok "  ...go to ctrl-g"                           '[ "$(dumpkeys_lookup "$DUMP_BASH" fleet go)" = ctrl-g ]'
-ok "  ...sweep (the ctrl-f gateway) to ctrl-f"   '[ "$(dumpkeys_lookup "$DUMP_BASH" fleet sweep)" = ctrl-f ]'
-# an unknown action fails rather than resolving to something plausible —
-# invariant 3, applied to a lookup instead of a rendered field.
-ok "an unknown action has no bash_key"           '[ -z "$(dumpkeys_lookup "$DUMP_BASH" agent nope)" ]'
-
-# The collision test, written before any UI work touches the keymap — the
-# guard interface-build.md Phase 1 item 5 exists for. It runs directly
-# against the DATA FILE, independent of whether either implementation has
-# wired an action up yet (kel-top's Update() has not, on purpose — Phase 1
-# "does not wire them up"). Nav keys are the ones with a real case in
-# kel-top's Update(): j/k/g/G/s///r/q/esc/?. `enter` is deliberately excluded
-# from that set and NOT a bug in this guard: interface.md §5b assigns it to
-# `jump` by design ("Go-to-group is not a per-agent key ... enter covers
-# it"). Any OTHER action claiming a nav key, or claiming enter instead of
-# jump, must still fail — both are checked.
-MAINGO="$HERE/../cmd/kel-top/main.go"
-# Phase 1 recorded the opposite of this on purpose ("enter really is
-# unhandled... today") as a dated fact, not a permanent one: Phase 2 item 3
-# was exactly to stop that being true (#27, "a keypress with no effect and no
-# case to find it"). Matched on m.keys.Jump rather than a literal
-# `case "enter"` string because Update() no longer switches on raw strings
-# at all (key.Matches against keys.go's bindings, in both modes) — a plain
-# grep for the old literal would now silently pass for the wrong reason
-# (there is no `case "enter"` ANYWHERE any more, handled or not) instead of
-# actually proving the case exists in NORMAL mode specifically. That switch
-# starts right after `n := len(m.visible())`, the same anchor used to build
-# `n` inside it.
-ok "enter now matches a case in kel-top's normal mode (#3, #27)" \
-  'awk "/n := len\\(m\\.visible\\(\\)\\)/,0" "$MAINGO" | grep -q "m.keys.Jump"'
-collide() {   # keymap-file-path -> one line per collision found, empty if none
-  awk -F'\t' '
-    !/^#/ && NF==5 {
-      scope=$1; action=$2; key=$3
-      if (scope=="agent") {
-        if (key=="j"||key=="k"||key=="g"||key=="G"||key=="s"||key=="/"||key=="r"||key=="q"||key=="esc"||key=="?") {
-          if (!(action=="jump" && key=="enter")) print "nav-collision: " scope "/" action " -> " key
-        }
-        if (key=="enter" && action!="jump") print "nav-collision: " scope "/" action " -> " key
-      }
-      if (seen[scope,key]++) print "dup-key: " scope "/" key " (" action " and " first[scope,key] ")"
-      else first[scope,key]=action
-    }
-  ' "$1"
-}
-ok "no go_key collides with a navigation key, and no scope reuses one" \
-  '[ -z "$(collide "$KEYMAP")" ]'
-# prove it: interface-build.md names the exact regression — kill on k, in a
-# table where k is cursor-up. A real tab, not a sed \t escape: BSD sed does
-# not interpret \t in the pattern (CLAUDE.md's portability table), so this
-# builds the search/replace strings with the actual byte instead. Written to
-# a scratch copy; the real file is never touched.
-TAB="$(printf '\t')"
-KEYMAP_BAD="$WORK/keymap-kill-k.tsv"
-sed "s/^agent${TAB}kill${TAB}x${TAB}/agent${TAB}kill${TAB}k${TAB}/" "$KEYMAP" > "$KEYMAP_BAD"
-ok "  ...and setting kill to k is caught"        '[[ "$(collide "$KEYMAP_BAD")" == *"agent/kill -> k"* ]]'
-
-# Both implementations expose the same action set (scope+action), read from
-# the same file — the guarantee interface.md §2 actually makes ("both
-# implementations expose the same action set"), not that they share keys
-# (they deliberately do not: §2, "Idioms deliberately differ").
-ACTIONS_FILE="$(awk -F'\t' '!/^#/ && NF==5 {print $1"/"$2}' "$KEYMAP" | sort)"
-ACTIONS_BASH="$(printf '%s\n' "$DUMP_BASH" | awk -F'\t' '{print $1"/"$2}' | sort)"
-ok "bash's dump matches the file (nothing dropped or mangled)" '[ "$ACTIONS_FILE" = "$ACTIONS_BASH" ]'
-# GOBIN_TOP was already built (and its own action-content checked) in the
-# "kel top renders and sorts" section above; reused here rather than built a
-# second time.
-if [ -x "$GOBIN_TOP" ]; then
-  DUMP_GO="$("$GOBIN_TOP" --dump-keys)"
-  ACTIONS_GO="$(printf '%s\n' "$DUMP_GO" | awk -F'\t' '{print $1"/"$2}' | sort)"
-  ok "bash and Go dumps agree on the action set" '[ "$ACTIONS_BASH" = "$ACTIONS_GO" ]'
-  # the go:embed guard the build asked for: kel-top was built from THIS
-  # keymap.tsv (go:embed reads it at compile time), so its embedded copy and
-  # the on-disk file agreeing here is exactly what proves a later edit to
-  # the file WITHOUT a rebuild — install.sh rebuilds every run, but a stray
-  # `go build` skipped, or a dev edit before reinstalling, would not — is
-  # what turns into drift, not silence.
-  ok "  ...Go's embedded copy matches the on-disk file" '[ "$ACTIONS_FILE" = "$ACTIONS_GO" ]'
-  # prove that guard can fail: simulate a file edited after the binary was
-  # built (a row added, in this case) without a rebuild.
-  ACTIONS_FILE_EDITED="$(printf '%s\nfleet/bogus\n' "$ACTIONS_FILE" | sort)"
-  ok "  ...and a file edited after the build is caught" '[ "$ACTIONS_FILE_EDITED" != "$ACTIONS_GO" ]'
-else
-  echo "  skip  (no Go toolchain)"
-fi
+ok "  ...and dropping it is caught"       '[ "$(printf "%s\n" "$REVERTED" | grep -c "2>&1")" != 1 ]'
 
 section "statusline records context without a live agent"
 reset

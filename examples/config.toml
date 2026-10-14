@@ -17,8 +17,6 @@
 
 [ui]
 # ctx_warn     = 70             # context % at which the status bar starts showing it
-# board_w      = "90%"          # the board popup
-# board_h      = "85%"
 # top_w        = "90%"          # the kel top popup
 # top_h        = "80%"
 
@@ -37,13 +35,6 @@
 # restore_cmds = "nvim vim hx nano lazygit lazydocker htop btop k9s"
                                 # pane commands `kel restore` will re-run
 
-[privacy]
-# usage        = "on"           # kel appends "<epoch> <subcommand>" to
-                                # usage.log on each command you run — the
-                                # input for the prune pass. Names only, never
-                                # arguments. `kel _usage` reads it back;
-                                # "off" records nothing.
-
 [go]
 # fleet_bin    = ""             # override the kel-fleet binary (default ~/.local/bin/kel-fleet)
-# top_bin      = ""             # override the kel-top binary
+# top_bin      = ""             # override the kel-top binary (default ~/.local/bin/kel-top)

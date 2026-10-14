@@ -42,8 +42,7 @@ jobs:
 
       # tmux/kel.conf was never parsed by CI, which is how a menu that bound
       # `w` to two different items shipped: tmux takes the first match and the
-      # shadowed item silently never fires.  The suite now checks menu keys for
-      # uniqueness, but nothing checked that the file PARSES at all.
+      # shadowed item silently never fires.  Nothing checked the file PARSES.
       # Isolated socket, because kill-server on the default one is how this
       # repo once killed a live workspace.
       - name: tmux/kel.conf parses
@@ -68,10 +67,8 @@ jobs:
         if: runner.os == 'macOS'
         run: /bin/bash --version | head -1 && /bin/bash -n bin/kel
 
-      # Go is optional for kel — bin/kel falls back to its bash implementation
-      # when kel-fleet is absent — but CI always has it, so CI always checks
-      # that the two agree. That differential is the whole safety net for the
-      # port: a disagreement is a failure, not a curiosity.
+      # Go is required since v0.10: kel-fleet is the only fleet reader, and
+      # the suite builds both binaries from this checkout before it runs.
       - uses: actions/setup-go@v5
         with:
           go-version: stable
@@ -82,6 +79,7 @@ jobs:
           go version
           go vet ./...
           go build ./...
+          go test ./...
 
       - name: regression suite
         run: ./test/kel-test.sh

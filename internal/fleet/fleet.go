@@ -1,9 +1,10 @@
 // Package fleet computes the kelsier fleet document: one answer to "what is
 // the fleet doing", assembled from tmux and the on-disk state directory.
 //
-// This is a port of _fleet_bash in bin/kel, and the bash version is the
-// oracle: the two must emit the same document for the same state, and the
-// regression suite fails on a difference. See docs/rollout.md § v0.6.
+// It began as a port of bin/kel's bash reader, checked against it by a
+// differential test.  v0.10 deleted the bash reader: this is now the only
+// implementation, and the document it emits is the contract every surface
+// (kel ls, the bar, kel top, the sidebar) reads.
 package fleet
 
 import (
