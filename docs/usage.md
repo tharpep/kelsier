@@ -132,7 +132,8 @@ and keeps that workspace safe in `snapshots/` (the newest five are kept), so
 starting fresh cannot overwrite it. **`kel restore`** brings it back — every
 window, split and directory, with conversations resumed. **`kel restore
 --list`** shows the saved workspaces and **`kel restore 2`** picks an older
-one. Restoring into a running workspace only adds what is missing.
+one. Restoring into a running workspace only adds what is missing, and closes
+the empty shell a fresh `kel` opened if you never used it.
 
 ## Isolation
 

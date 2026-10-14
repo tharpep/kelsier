@@ -668,7 +668,20 @@ ok "  ...splits included"                '[ "$(tmux list-panes -t "$(window_of a
 ok "  ...into the one session"           '[ "$(grps)" = 1 ]'
 ok "  ...conversations resumed by default" 'agent_up "$(window_of coppermind sazed)"'
 ok "  ...and the archive entry is used up" '[ -z "$(ls "$STATE/snapshots" 2>/dev/null)" ]'
+ok "  ...and the untouched fresh-start shell is closed" '[ "$(wins)" = 2 ]'
 ok "  ...and no stale lock is left"      '[ ! -e "$STATE/.restoring" ]'
+
+# a fresh-start shell you actually used is yours — restore must leave it
+"$KEL" snapshot >/dev/null 2>&1
+tmux kill-server 2>/dev/null; sleep 0.6
+(cd "$WORK" && "$KEL" < /dev/null) >/dev/null 2>&1
+WW="$(tmux list-windows -t '=keltest' -F '#{window_id}' | head -1)"
+sleep 6   # past the 5s "no output since its prompt" window, so typing is unambiguous
+tmux send-keys -t "$WW" 'echo used' Enter
+wait_until "tmux capture-pane -p -t '$WW' | grep -qx used"
+"$KEL" restore >/dev/null 2>&1
+wait_until '[ -n "$(window_of coppermind sazed)" ]'
+ok "a fresh-start shell you used is kept" '[ -n "$(tmux list-windows -a -F "#{window_id}" | grep -x "$WW")" ]'
 
 # the archive keeps five, newest first; `kel restore <n>` picks one
 mkdir -p "$STATE/snapshots"

@@ -910,6 +910,27 @@ restore_list() {
   echo "  kel restore [<n>]   bring one back (newest is 1)"
 }
 
+# Close the shell a fresh `kel` opened, if it was never used — otherwise every
+# "start fresh, then kel restore" leaves an empty window beside the restored
+# agents.  Conservative on purpose: only a window kel marked (@kel-welcome),
+# with one pane, still at a bare shell, and with no output since its prompt
+# appeared (window_activity within 5s of when kel made it).  Anything typed
+# there produces output, which keeps it.  A slow-starting shell also keeps it,
+# which is the safe direction to be wrong in.
+close_untouched_welcome() {
+  local wid born act np cmd
+  tmux list-windows -t "=$KEL_PREFIX" \
+       -F '#{window_id}|#{@kel-welcome}|#{window_activity}|#{window_panes}|#{pane_current_command}' 2>/dev/null \
+  | while IFS='|' read -r wid born act np cmd; do
+      case "$born" in ''|*[!0-9]*) continue ;; esac
+      case "$act"  in ''|*[!0-9]*) continue ;; esac
+      [ "$np" = 1 ] || continue
+      case "$cmd" in bash|zsh|fish|sh|dash) ;; *) continue ;; esac
+      [ $((act - born)) -le 5 ] || continue
+      tmux kill-window -t "$wid" 2>/dev/null || true
+    done
+}
+
 # rebuild a workspace from a v1 or v2 snapshot (windows, splits, layout, agents)
 restore_from_snapshot() {   # file resume(1|0)
   need tmux; need jq
@@ -992,6 +1013,8 @@ restore_from_snapshot() {   # file resume(1|0)
   _restore_window
   unset -f _restore_window
 
+  # only once something was actually rebuilt — never leave the session empty
+  [ -n "$first_wid" ] && close_untouched_welcome
   local dest="${dest_wid:-$first_wid}"
   [ -n "$dest" ] && goto_window "$dest"
 
@@ -2000,8 +2023,13 @@ cmd_attach() {
   fi
   say "welcome to kel."
   quickstart
-  if [ -t 0 ] && [ -t 1 ]; then exec tmux new-session -s "$KEL_PREFIX" -c "$HOME"; fi
-  tmux new-session -d -s "$KEL_PREFIX" -c "$HOME"
+  # @kel-welcome marks the shell kel opened for you, with when, so that a
+  # `kel restore` straight after can close it if you never used it
+  local born; born="$(date +%s)"
+  if [ -t 0 ] && [ -t 1 ]; then
+    exec tmux new-session -s "$KEL_PREFIX" -c "$HOME" \; set-option -w @kel-welcome "$born"
+  fi
+  tmux new-session -d -s "$KEL_PREFIX" -c "$HOME" \; set-option -w @kel-welcome "$born"
   say "workspace started — tmux attach -t $KEL_PREFIX"
 }
 
