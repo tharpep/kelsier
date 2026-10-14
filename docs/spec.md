@@ -231,26 +231,79 @@ are not designed yet.
 
 ---
 
-## 7. Status line
+## 7. The two bottom rows
 
-`tmux`'s own window list has no knowledge of agent state, so kel replaces it:
+There are two, with different jobs, and the sidebar (§5) takes the
+per-window list both used to carry.
+
+| where | drawn by | scope |
+|---|---|---|
+| Claude Code's own row, inside each agent pane | `kel statusline` | **this session** — what you need while typing to it |
+| tmux's bottom bar | `kel status-line` | **the account and the workspace** — what belongs to no single pane (Orca's footer) |
+
+### 7a. Claude's row  ·  *designed (decided 2026-10-14)*
 
 ```
-set -g status-left "#($HOME/.local/bin/kel status-line)"
-set -g window-status-format ""
-set -g window-status-current-format ""
+kelsier@fix-auth · fix-auth ↑2 ● · Opus 5.5 · ████░░ 36% ctx · $10.65 · quota 58% · wk 41%
 ```
 
+- **where it is** — repo@worktree, branch, `↑N` unpushed, `●` dirty: the same
+  land code the sidebar shows (this needs the land state cached somewhere the
+  row can read without running git — the row runs on every update)
+- **the session** — model, context bar, cost; `fast` / `xhigh` only when not
+  default; `ctx ?` when unmeasured
+- **quota** — always, whenever Claude Code reports one (API-key sessions have
+  none, and show nothing — never a fake `0%`). Labelled `quota`, because the
+  bar-and-percentage shape already means context in this row
+
+### 7b. tmux's bottom bar  ·  *designed (decided 2026-10-14)*
+
 ```
-[api-gw] 1:auth-fix? [2:rate-limit·91%*] 3:docs   ⟨infra·1 web·2⟩
+claude ▓▓▓░░ 58% (1h20m) · wk 41%  │  4 agents · 1 waiting 6m · 2 done · $24.10  │  7 panes · :3000 :8000  │  kelsier · fix-auth ↑2 ●
 ```
 
-`?` waiting on you, `*` working, `!` done, `~` throttled, `x` dead, bare =
-idle; `[ ]` marks the current window; `⟨…⟩` names other groups with agents
-blocked on you. Every state hook calls `tmux refresh-client -S` after writing,
-so the bar changes the moment an agent does — but only when the rendered value
-actually changed (invariant 5). In the workspace design this becomes the
-bottom bar of §5.
+With no agents running, quota and location still show:
+
+```
+claude ▓▓▓░░ 58% (1h20m) · wk 41%  │  no agents  │  3 panes · :5173  │  api-gw · main ✓
+```
+
+1. **quota** — the 5-hour window as a bar and percentage with its reset time,
+   and the weekly window. No `5h` label: the window is always five hours, and
+   the weekly is the only other one Claude Code reports. Always shown when
+   known.
+2. **fleet** — counts by state, the age of the oldest waiting agent, and the
+   total cost of live sessions (cumulative per session, so "spent by open
+   sessions", never "today").
+3. **machine** — pane count (sidebars excluded) and the TCP ports listening
+   in kel's panes' process trees. Memory was considered and dropped: it has
+   never been the problem.
+4. **location** — the *focused* pane's repo, branch and land state, for any
+   pane, plain shells and servers included.
+
+The per-window list (`1:auth-fix? 2:docs`) goes — the sidebar replaces it,
+and it was what overflowed the bar past about six windows.
+
+**Stale quota reads as unknown.** Quota is per account, so it moves out of the
+per-window `.ctx` into its own small file (5h %, its reset, weekly %, its
+reset, the epoch it was observed) — an on-disk addition, recorded in
+`CLAUDE.md`'s contract table when built. If the 5h reset has passed since the
+last observation, the bar shows `░░░░░ ?`, never the old figure (invariant 3).
+Same for the weekly.
+
+**Ports are too slow for the hot path.** On macOS they need `lsof`, which costs
+~100 ms and up; the bar redraws constantly (invariant 5). `kel-fleet` computes
+them on a short cache (~10 s) and the bar only reads the cached value.
+
+**Narrow terminals** are deliberately not designed yet. Whether the bar
+overflows is something daily use will show; if it does, groups drop from the
+right, quota and waiting last.
+
+### 7c. How it updates
+
+`tmux`'s `#()` only re-runs on the status interval, so every state hook calls
+`tmux refresh-client -S` after writing — but only when the rendered value
+actually changed (invariant 5).
 
 ---
 

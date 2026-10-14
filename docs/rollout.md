@@ -106,9 +106,12 @@ it had to answer first are decided in `spec.md` §5c. A draft order:
    / `r`ename by calling the existing `bin/kel` commands.
 4. **The panel** — files (`yazi`), git (`lazygit`), opened at the selected
    pane's directory.
-5. **Plan and tasks** — the plan from `~/.claude/plans/*.md`; the task list
+5. **The two bottom rows** — `spec.md` §7: Claude's row gains git position
+   and always-on quota; the tmux bar becomes the workspace footer (quota,
+   fleet, panes and ports, location). Quota moves to its own state file.
+6. **Plan and tasks** — the plan from `~/.claude/plans/*.md`; the task list
    from the session transcript the hooks already point at.
-6. **Automations** — last, and only once the rest is daily-driven.
+7. **Automations** — last, and only once the rest is daily-driven.
 
 `v0.10.0` is tagged when 1–3 are usable.
 
