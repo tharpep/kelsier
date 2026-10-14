@@ -87,7 +87,7 @@ TUI pass over the old board, which no longer exists.
 fix: `kel-fleet` ignored `pr = off`, and it called `gh` for repos that local git
 had already answered.
 
-### Step 4 — the build plan  ·  *M0–M1 done, M2 next*
+### Step 4 — the build plan  ·  *M0–M2 done, M3 next*
 
 Agreed 2026-10-14. Each milestone ends with something to try, and the suite
 stays green throughout. The decisions behind it are `spec.md` §5c and §7.
@@ -127,7 +127,7 @@ stays green throughout. The decisions behind it are `spec.md` §5c and §7.
 - *tests:* Go unit tests for classification; suite assertions over real panes
   (a `sleep` agent, a `python3 -m http.server` for a port, a plain shell)
 
-**M2 — sidebar plumbing**  ·  *next* — *the author tries it here, rough*
+**M2 — sidebar plumbing**  ·  **done** — *the author tries it here, rough*
 - `kel-top --sidebar`, a minimal list
 - `kel new` and an `after-new-window` hook add a 32-column sidebar pane to
   every window, marked `@kel-sidebar`, without stealing focus
@@ -140,8 +140,16 @@ stays green throughout. The decisions behind it are `spec.md` §5c and §7.
 - *tests:* a sidebar in new and hand-made windows; three restore cycles keep
   the snapshot intact (invariant 2) with no duplicate sidebars; hidden
   sidebars do not poll
+- *found on the way, each now tested:* the sidebar would have kept a dead
+  agent reading alive, made relaunch refuse forever and type into kel-top,
+  and made `resolve_pane`'s directory match ambiguous; the first `reap`
+  closed every window; the first `ensure` (an `if-shell` with an empty
+  branch) and — since long before v0.10 — the `after-split-window` snapshot
+  hook both left the active pane in view-mode, swallowing keys; the sidebar
+  panicked when a resize squeezed it to one column; and the suite was loading
+  the developer's own `~/.tmux.conf` whenever kel restarted its server
 
-**M3 — the sidebar itself**  →  **tag `v0.10.0`**
+**M3 — the sidebar itself**  →  **tag `v0.10.0`**  ·  *next*
 - repo → worktree → pane tree, rows per `spec.md` §5
 - keys `j`/`k` `enter` `/` `n` `w` `x` `r` `?`; `prefix Space` focuses it,
   `esc` returns

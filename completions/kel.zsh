@@ -19,6 +19,7 @@ _kel() {
     'ls:list agents, grouped by repo'
     'rename:rename the current window (keeps metadata in sync)'
     'top:fleet dashboard — sorted by who needs you'
+    'sidebar:the sidebar pane in every window (on|off)'
     'restore:bring back a previous workspace (--list to choose)'
     'relaunch:relaunch ONE crashed agent in its existing window'
     'sweep:close finished agents whose work has merged'
@@ -49,6 +50,7 @@ _kel() {
       esac
       ;;
     restore) compadd -- --list --no-resume ;;
+    sidebar) compadd -- on off ;;
     relaunch)
       _alternative 'flags:flag:(-f)' \
         "agents:agent:($(_kel_names '.agents[] | .name, "\(.group)/\(.name)"'))"

@@ -47,6 +47,8 @@ kel kill <name> -f     ...even with uncommitted / unpushed work
 kel ls [--json]        every agent, grouped by repo (state, context %, cost);
                        --json is the fleet document {generated_at, current, agents}
 kel rename <newname>   rename THIS window and keep its record in sync
+kel sidebar on|off     the sidebar pane in every window (on by default; off is
+                       remembered until you turn it back on)
 kel top                every agent, sorted so the one needing you is first —
                        state, time in state, LAND, context, cost, last output.
                        j/k scroll, s sort, / filter, q quit   (prefix t)
@@ -85,6 +87,21 @@ Internal (wired into tmux / Claude Code): `kel status-line`, `kel jump`,
 
 `kel.conf` also turns on the mouse (to select text, hold Shift while you drag),
 counts windows from 1, and labels each pane.
+
+## The sidebar
+
+Every kel window has a 32-column pane on its left listing every pane in the
+workspace — grouped by repo, agents with their state (`?` waiting, `*`
+working…), servers with their ports, shells and programs — with `›` on the
+pane you are in. Click into it (the mouse is on) and `j`/`k` move, `enter`
+jumps to that pane. It is the same list in every window.
+
+This is the rough M2 version: M3 adds a focus key, actions (new, kill,
+rename) and a filter. Hidden sidebars do no work; the one you can see refreshes
+every two seconds and at once when an agent changes state. `kel sidebar off`
+removes it everywhere (and new windows get none) until `kel sidebar on`;
+`sidebar = "off"` in config disables it outright; `sidebar_width` sets the
+width.
 
 ## Groups
 

@@ -3,6 +3,7 @@
 //
 //	kel top                 interactive  (j/k scroll, s sort, / filter, ? help, q quit)
 //	kel top --once          render one frame to stdout and exit
+//	kel-top --sidebar       the pane on the left of every kel window (sidebar.go)
 //	kel top --dump-help-keys  print the navigation keymap's key set — see keys.go
 //
 // Read-only for now: it never acts on an agent. v0.10 deleted the fzf board
@@ -221,6 +222,9 @@ func tidy(s string) string {
 }
 
 func pad(s string, n int) string {
+	if n <= 0 {
+		return "" // a squeezed pane asks for negative widths; slicing them panics
+	}
 	r := []rune(s)
 	if len(r) >= n {
 		return string(r[:n])
@@ -553,23 +557,30 @@ func (m model) View() tea.View {
 }
 
 func main() {
-	once := false
+	once, sidebar := false, false
 	for _, a := range os.Args[1:] {
 		switch a {
 		case "--once":
 			once = true
+		case "--sidebar":
+			sidebar = true
 		case "--dump-help-keys":
 			// the guard's data half: test/kel-test.sh diffs this against a
 			// hand-kept expected set, so a key cannot go undocumented
 			fmt.Print(dumpHelpKeys(newKeys()))
 			return
 		case "-h", "--help":
-			fmt.Fprintln(os.Stderr, "usage: kel-top [--once] [--dump-help-keys]")
+			fmt.Fprintln(os.Stderr, "usage: kel-top [--once] [--sidebar] [--dump-help-keys]")
 			return
 		default:
 			fmt.Fprintf(os.Stderr, "kel-top: unknown flag %s\n", a)
 			os.Exit(2)
 		}
+	}
+
+	if sidebar {
+		runSidebar(once)
+		return
 	}
 
 	m := model{

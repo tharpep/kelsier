@@ -15,6 +15,7 @@
 #   kel relaunch [name] [-f]   relaunch a crashed agent in its existing window
 #                              (one agent — `kel restore` rebuilds the workspace)
 #   kel top                    the fleet dashboard (prefix t)
+#   kel sidebar on|off         the sidebar pane in every window (default on)
 #   kel sweep [-n] [-f]        close every finished agent whose work has merged
 #                              (closes windows; -n shows the plan first)
 #   kel prune [-f]             forget dead agent records (closes nothing)
@@ -108,6 +109,8 @@ SELF="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)/$(basename "${BA
 [ -x "$SELF" ] || SELF="$(command -v kel 2>/dev/null || printf '%s' "$HOME/.local/bin/kel")"
 # commands worth re-running per pane on restore (agents handled separately)
 KEL_RESTORE_CMDS="${KEL_RESTORE_CMDS:-nvim vim hx nano lazygit lazydocker htop btop k9s}"
+KEL_SIDEBAR_WIDTH="${KEL_SIDEBAR_WIDTH:-32}"      # identical in every window (spec.md §5c)
+SIDEBAR_OFF="$STATE_DIR/sidebar-off"              # `kel sidebar off`, persisted
 
 # guarded: an unconditional mkdir -p of three existing dirs measured ~10ms,
 # and every kel invocation — including each status-bar redraw — paid it
@@ -257,16 +260,21 @@ effective_state() { # wid
     # walking through the tool as a fresh user: an agent that crashes between
     # SessionStart and its first prompt used to sit reading "idle" forever,
     # with no glyph, no colour, nothing to tell you it was gone.
+    # the sidebar pane (v0.10) runs kel-top, a non-shell — counting it would
+    # read a crashed agent as alive forever (invariant 3), so it is skipped
     idle|working|waiting|throttled)
-      tmux list-panes -t "$1" -F '#{pane_current_command}' 2>/dev/null \
+      tmux list-panes -t "$1" -F '#{@kel-sidebar}|#{pane_current_command}' 2>/dev/null \
+        | awk -F'|' '$1 == ""' | cut -d'|' -f2- \
         | grep -qvxE 'bash|zsh|fish|sh|dash|tmux' || { printf 'dead'; return; } ;;
   esac
   printf '%s' "$s"
 }
 
-# create the window in the one session (making it if needed); prints wid
-open_window() { # name cwd group
-  local name="$1" cwd="$2" group="$3" wid
+# create the window in the one session (making it if needed); prints wid.
+# "bare" skips the sidebar — restore adds it itself, ordered against the saved
+# layout (see restore_from_snapshot)
+open_window() { # name cwd group [bare]
+  local name="$1" cwd="$2" group="$3" bare="${4:-}" wid
   if tmux has-session -t "=$KEL_PREFIX" 2>/dev/null; then
     wid="$(tmux new-window -t "=$KEL_PREFIX:" -n "$name" -c "$cwd" -P -F '#{window_id}')"
   else
@@ -274,7 +282,104 @@ open_window() { # name cwd group
   fi
   [ -n "$wid" ] || return 1
   tmux set-option -w -t "$wid" @kel-group "$group" 2>/dev/null || true
+  [ -n "$bare" ] || sidebar_ensure "$wid"
   printf '%s' "$wid"
+}
+
+# ---- the sidebar pane (v0.10 M2) -----------------------------------------
+# Every kel window carries a fixed-width pane on its left running
+# `kel-top --sidebar`, so the sidebar reads as one persistent thing
+# (spec.md §5).  The pane is marked @kel-sidebar; anything looking for "the
+# user's pane" must skip it — see agent_pane.
+
+sidebar_enabled() {
+  case "${KEL_SIDEBAR:-on}" in 0|off|no|false) return 1 ;; esac
+  [ ! -e "$SIDEBAR_OFF" ] && [ -x "$KEL_TOP_BIN" ]
+}
+
+# the first pane of a window that is not the sidebar — where an agent runs,
+# where send-keys must go, what a restore replays into
+agent_pane() { # wid
+  tmux list-panes -t "$1" -F '#{@kel-sidebar}|#{pane_id}' 2>/dev/null \
+    | awk -F'|' '$1 == "" {print $2; exit}'
+}
+
+# Add the sidebar to a window that has none.  Idempotent INSIDE one tmux
+# command list: the check (@kel-has-sidebar), the mark and the split run with
+# no other client's commands in between, so kel new and the after-new-window
+# hook cannot both add one — proven by racing ten of these at one window.
+# -b left, -d focus stays where it was, -f the window's full height, which also
+# makes it the {top-left} pane whatever pane-base-index is.
+sidebar_ensure() { # wid
+  local wid="$1" sn
+  sidebar_enabled || return 0
+  sn="$(tmux display-message -p -t "$wid" '#{session_name}' 2>/dev/null)" || return 0
+  case "$sn" in "$KEL_PREFIX"|"$KEL_PREFIX"/*) ;; *) return 0 ;; esac   # not kel's window
+  # No else-branch, and the condition inverted, ON PURPOSE: the first version
+  # was `if-shell -F '#{@kel-has-sidebar}' '' '<add it>'`, and tmux reports
+  # that empty command as an error — which, with no client to print it to, it
+  # shows in view-mode on the window's active pane: the agent's.  The pane
+  # then swallowed every key, C-c included.  Found because the suite's
+  # dead-agent check could not kill its agent.
+  tmux if-shell -F -t "$wid" '#{?@kel-has-sidebar,,1}' \
+    "set-option -w -t '$wid' @kel-has-sidebar 1 ; split-window -hbdf -l $KEL_SIDEBAR_WIDTH -t '$wid' -c '#{pane_current_path}' \"exec '$KEL_TOP_BIN' --sidebar\" ; set-option -p -t '$wid.{top-left}' @kel-sidebar 1" \
+    2>/dev/null || true
+}
+
+# nudge every sidebar to look again (SIGUSR1); each decides for itself, with
+# one cheap tmux call, whether it is the visible one
+sidebar_wake() {
+  local flag pid
+  tmux list-panes -a -F '#{@kel-sidebar} #{pane_pid}' 2>/dev/null \
+  | while read -r flag pid; do
+      [ "$flag" = 1 ] && kill -USR1 "$pid" 2>/dev/null
+    done
+  return 0
+}
+
+# re-pin every sidebar's width after tmux's proportional resize
+sidebar_fit() {
+  local flag id w
+  tmux list-panes -a -F '#{@kel-sidebar} #{pane_id} #{pane_width}' 2>/dev/null \
+  | while read -r flag id w; do
+      [ "$flag" = 1 ] && [ "$w" != "$KEL_SIDEBAR_WIDTH" ] \
+        && tmux resize-pane -t "$id" -x "$KEL_SIDEBAR_WIDTH" 2>/dev/null
+    done
+  return 0
+}
+
+# a kel window left holding only its sidebar — the user's last pane exited —
+# is closed, not left as an orphan column
+sidebar_reap() {
+  # COUNT the user's panes.  The first version tested `[ -n "$(… | grep -vx 1)" ]`
+  # — but a user pane's flag is an empty line, which grep matches and prints
+  # as nothing, so every window looked sidebar-only and reap closed them all.
+  local wid n
+  for wid in $(kel_windows | cut -f3); do
+    n="$(tmux list-panes -t "$wid" -F '#{@kel-sidebar}' 2>/dev/null | grep -cvx 1)"
+    [ "${n:-1}" = 0 ] || continue
+    tmux kill-window -t "$wid" 2>/dev/null
+  done
+  return 0
+}
+
+cmd_sidebar() { # on | off
+  need tmux
+  local wid id flag
+  case "${1:-}" in
+    off)
+      : > "$SIDEBAR_OFF"
+      tmux list-panes -a -F '#{@kel-sidebar} #{pane_id}' 2>/dev/null \
+        | while read -r flag id; do [ "$flag" = 1 ] && tmux kill-pane -t "$id" 2>/dev/null; done
+      for wid in $(kel_windows | cut -f3); do tmux set-option -wu -t "$wid" @kel-has-sidebar 2>/dev/null; done
+      say "sidebar off — kel sidebar on brings it back" ;;
+    on)
+      rm -f "$SIDEBAR_OFF"
+      sidebar_enabled || die "the sidebar is disabled by sidebar = off in config.toml (or KEL_SIDEBAR)"
+      for wid in $(kel_windows | cut -f3); do sidebar_ensure "$wid"; done
+      say "sidebar on" ;;
+    *) die "usage: kel sidebar on|off" ;;
+  esac
 }
 
 # move the caller to a window, in whichever kel session holds it
@@ -514,7 +619,7 @@ cmd_new() {
   [ -n "$wid" ] || die "failed to create tmux window"
 
   meta_write "$name" "$wid" "$repo" "$cwd" "$isolation" "$branch" "$agent" "$group"
-  [ "$start_agent" = 1 ] && tmux send-keys -t "$wid" "$agent" Enter
+  [ "$start_agent" = 1 ] && tmux send-keys -t "$(agent_pane "$wid")" "$agent" Enter
 
   say "new agent  $name  [$group]  ($isolation${branch:+, branch $branch})"
   goto_window "$wid"
@@ -809,10 +914,10 @@ snapshot() {   # silent; called by hooks and state-changing commands
   local US=$'\037' TAB=$'\t' cur lines
   cur="$(tmux display-message -p '#{window_id}' 2>/dev/null || true)"
   lines="$(awk -F'\t' -v US="$US" -v cur="$cur" '
-      NR == FNR { n[$1]++; pc[$1, n[$1]] = $3; pm[$1, n[$1]] = $4; next }
+      NR == FNR { n[$1]++; pc[$1, n[$1]] = $3; pm[$1, n[$1]] = $4; ps[$1, n[$1]] = $5; next }
       { print "W" US $5 US $6 US $7 US ($4 == cur ? "1" : "")
-        for (i = 1; i <= n[$4]; i++) print "P" US pc[$4, i] US pm[$4, i] }' \
-    <(tmux list-panes -a -F '#{window_id}	#{pane_index}	#{pane_current_path}	#{pane_current_command}' 2>/dev/null) \
+        for (i = 1; i <= n[$4]; i++) print "P" US pc[$4, i] US pm[$4, i] US ps[$4, i] }' \
+    <(tmux list-panes -a -F '#{window_id}	#{pane_index}	#{pane_current_path}	#{pane_current_command}	#{@kel-sidebar}' 2>/dev/null) \
     <(tmux list-windows -a -F '#{session_name}	#{window_index}	#{window_id}	#{window_name}	#{window_layout}	#{@kel-group}' 2>/dev/null \
       | awk -F'\t' -v p="$KEL_PREFIX" '
           $1 == p || index($1, p"/") == 1 {
@@ -830,7 +935,8 @@ snapshot() {   # silent; called by hooks and state-changing commands
           if $r[0] == "W" then
             (if $r[4] == "1" then .last = (.windows | length) else . end)
             | .windows += [{name: $r[1], layout: $r[2], group: $r[3], panes: []}]
-          else .windows[-1].panes += [{cwd: $r[1], cmd: $r[2]}] end)
+          else .windows[-1].panes += [{cwd: $r[1], cmd: $r[2]}
+                                     + (if $r[3] == "1" then {sidebar: true} else {} end)] end)
         | {version: 2, saved_at: $t, saved_epoch: $e, last: .last, windows: .windows}')" || return 0
   [ "$(printf '%s' "$snap" | jq '.windows | length' 2>/dev/null)" -gt 0 ] 2>/dev/null || return 0
 
@@ -913,20 +1019,29 @@ restore_list() {
 # Close the shell a fresh `kel` opened, if it was never used — otherwise every
 # "start fresh, then kel restore" leaves an empty window beside the restored
 # agents.  Conservative on purpose: only a window kel marked (@kel-welcome),
-# with one pane, still at a bare shell, and with no output since its prompt
-# appeared (window_activity within 5s of when kel made it).  Anything typed
-# there produces output, which keeps it.  A slow-starting shell also keeps it,
-# which is the safe direction to be wrong in.
+# with one pane of the user's, still at a bare shell, whose prompt appears
+# exactly once in its whole history: after any command, an earlier line starts
+# with the same prompt ("me@host:~$ ls").  Not a line count — a login banner
+# (Ubuntu's sudo hint, a MOTD) makes a fresh shell three lines or thirty.  Not
+# "no scrollback" either: adding the sidebar narrows the pane, and a wrapped
+# banner line spills into history.  -J joins wrapped lines, -S - reads it all.
+#
+# Not window_activity, which the first version used: a visible sidebar
+# redraws every two seconds, so with the sidebar (M2) every window looks used.
 close_untouched_welcome() {
-  local wid born act np cmd
-  tmux list-windows -t "=$KEL_PREFIX" \
-       -F '#{window_id}|#{@kel-welcome}|#{window_activity}|#{window_panes}|#{pane_current_command}' 2>/dev/null \
-  | while IFS='|' read -r wid born act np cmd; do
+  local wid born cmd p np lines prompt
+  tmux list-windows -t "=$KEL_PREFIX" -F '#{window_id}|#{@kel-welcome}|#{pane_current_command}' 2>/dev/null \
+  | while IFS='|' read -r wid born cmd; do
       case "$born" in ''|*[!0-9]*) continue ;; esac
-      case "$act"  in ''|*[!0-9]*) continue ;; esac
+      np="$(tmux list-panes -t "$wid" -F '#{@kel-sidebar}' 2>/dev/null | grep -vxc 1)"
       [ "$np" = 1 ] || continue
-      case "$cmd" in bash|zsh|fish|sh|dash) ;; *) continue ;; esac
-      [ $((act - born)) -le 5 ] || continue
+      p="$(agent_pane "$wid")"
+      case "$(tmux display-message -p -t "$p" '#{pane_current_command}' 2>/dev/null)" in
+        bash|zsh|fish|sh|dash) ;; *) continue ;; esac
+      lines="$(tmux capture-pane -p -J -S - -t "$p" 2>/dev/null)"
+      prompt="$(printf '%s\n' "$lines" | grep . | tail -1)"
+      [ -n "$prompt" ] || continue
+      [ "$(printf '%s\n' "$lines" | awk -v p="$prompt" 'index($0, p) == 1' | grep -c .)" = 1 ] || continue
       tmux kill-window -t "$wid" 2>/dev/null || true
     done
 }
@@ -964,9 +1079,9 @@ restore_from_snapshot() {   # file resume(1|0)
                      last: ($g == ($s.last_group // "") and .name == ($s.last_window // ""))} ]
           end )[]
       | (["W", .name, (.group // ""), (.layout // ""), (if .last then "1" else "" end)] | join($us)),
-        (.panes[] | ["P", (.cwd // ""), (.cmd // "")] | join($us))' "$snap" 2>/dev/null)"
+        (.panes[] | ["P", (.cwd // ""), (.cmd // ""), (if .sidebar then "1" else "" end)] | join($us))' "$snap" 2>/dev/null)"
 
-  local first_wid='' dest_wid='' wid='' wname='' wg='' wlayout='' wlast='' meta=''
+  local first_wid='' dest_wid='' wid='' wname='' wg='' wlayout='' wlast='' meta='' wsb=''
   local -a cwds=() cmds=()
   # build one window from what has been collected for it
   _restore_window() {
@@ -977,16 +1092,24 @@ restore_from_snapshot() {   # file resume(1|0)
       return 0
     fi
     local p0="${cwds[0]:-$HOME}"; [ -d "$p0" ] || p0="$HOME"
-    wid="$(open_window "$wname" "$p0" "$wg")" || return 0
+    # bare: the sidebar goes in at a point chosen against the saved layout,
+    # whose pane count has to match.  Saved WITH a sidebar: add it first, as
+    # the top-left pane it was.  Saved WITHOUT one (a v0.9 / M0 / M1 snapshot):
+    # rebuild that layout exactly, then add the sidebar beside it.
+    wid="$(open_window "$wname" "$p0" "$wg" bare)" || return 0
     [ -n "$first_wid" ] || first_wid="$wid"
     [ "$wlast" = 1 ] && dest_wid="$wid"
-    local -a pids; pids=( "$(tmux list-panes -t "$wid" -F '#{pane_id}' | head -1)" )
+    [ "$wsb" = 1 ] && sidebar_ensure "$wid"
+    local -a pids; pids=( "$(agent_pane "$wid")" )
     local j pc
     for ((j = 1; j < ${#cwds[@]}; j++)); do
       pc="${cwds[$j]}"; [ -d "$pc" ] || pc="$HOME"
-      pids+=( "$(tmux split-window -t "$wid" -c "$pc" -P -F '#{pane_id}')" )
+      pids+=( "$(tmux split-window -t "${pids[$((j - 1))]}" -c "$pc" -P -F '#{pane_id}')" )
     done
+    # (saved with a sidebar but sidebars now off: one cell too many, so tmux
+    # refuses the layout — the panes are all there, only the geometry is lost)
     [ -n "$wlayout" ] && tmux select-layout -t "$wid" "$wlayout" 2>/dev/null || true
+    [ "$wsb" = 1 ] || sidebar_ensure "$wid"
 
     meta=''; [ -n "$wg" ] && [ -f "$(meta_path "$wg" "$wname")" ] && meta="$(meta_path "$wg" "$wname")"
     if [ -n "$meta" ]; then
@@ -1006,8 +1129,9 @@ restore_from_snapshot() {   # file resume(1|0)
   while IFS="$US" read -r kind a b c d; do
     case "$kind" in
       W) _restore_window
-         wname="$a"; wg="$b"; wlayout="$c"; wlast="$d"; cwds=(); cmds=() ;;
-      P) cwds+=( "$a" ); cmds+=( "$b" ) ;;
+         wname="$a"; wg="$b"; wlayout="$c"; wlast="$d"; wsb=''; cwds=(); cmds=() ;;
+      P) if [ "$c" = 1 ]; then wsb=1        # the sidebar: relaunched, never replayed
+         else cwds+=( "$a" ); cmds+=( "$b" ); fi ;;
     esac
   done <<< "$plan"
   _restore_window
@@ -1064,7 +1188,7 @@ cmd_restore() {
     [ -d "$cwd" ] || { warn "skip $n — its directory is gone ($cwd)"; continue; }
     wid="$(open_window "$n" "$cwd" "$grp")" || { warn "skip $n — couldn't open a window"; continue; }
     jq --arg w "$wid" '.window_id=$w' "$meta" > "$meta.tmp" && mv "$meta.tmp" "$meta"
-    [ "$resume" = 1 ] && tmux send-keys -t "$wid" "$(agent_resume_cmd "$agent" "$cid")" Enter
+    [ "$resume" = 1 ] && tmux send-keys -t "$(agent_pane "$wid")" "$(agent_resume_cmd "$agent" "$cid")" Enter
     restored=$((restored+1))
   done <<< "$names"
 
@@ -1122,8 +1246,9 @@ cmd_relaunch() {
   # effective_state's dead check.
   local st alive=0
   st="$(effective_state "$wid")"
-  tmux list-panes -t "$wid" -F '#{pane_current_command}' 2>/dev/null \
-    | grep -qvxE 'bash|zsh|fish|sh|dash|tmux' && alive=1
+  tmux list-panes -t "$wid" -F '#{@kel-sidebar}|#{pane_current_command}' 2>/dev/null \
+    | awk -F'|' '$1 == ""' | cut -d'|' -f2- \
+    | grep -qvxE 'bash|zsh|fish|sh|dash|tmux' && alive=1      # never the sidebar
   if [ "$alive" = 1 ] && [ "$force" != 1 ]; then
     die "'$group/$name' still has a live process (state: ${st:-unknown}) — kel relaunch $name -f to force it"
   fi
@@ -1131,7 +1256,7 @@ cmd_relaunch() {
   local agent cid pane
   agent="$(jq -r '.agent // "claude"' "$meta")"
   cid="$(jq -r '.claude_session // ""' "$meta")"
-  pane="$(tmux list-panes -t "$wid" -F '#{pane_id}' 2>/dev/null | head -1)"
+  pane="$(agent_pane "$wid")"     # not head -1: that is the sidebar since v0.10
   [ -n "$pane" ] || die "'$group/$name' has no pane to relaunch in"
 
   # drop the stale reading; the relaunched agent's SessionStart sets it again
@@ -1636,7 +1761,10 @@ resolve_pane() { # session-id cwd
     pane="$(cat "$STASH_DIR/$sid" 2>/dev/null || true)"
   fi
   if [ -z "$pane" ] && [ -n "$cwd" ]; then
-    match="$(tmux list-panes -a -F '#{pane_id} #{pane_current_path}' 2>/dev/null | awk -v c="$cwd" '$2==c{print $1}')"
+    # the sidebar shares its window's directory: counting it would make every
+    # match ambiguous and the lookup give up
+    match="$(tmux list-panes -a -F '#{@kel-sidebar}|#{pane_id}|#{pane_current_path}' 2>/dev/null \
+      | awk -F'|' -v c="$cwd" '$1 == "" && $3 == c {print $2}')"
     [ "$(printf '%s\n' "$match" | grep -c .)" = 1 ] && pane="$match"
   fi
   printf '%s' "$pane"
@@ -1937,6 +2065,7 @@ cmd_hook() {
   mv -f "$tmp" "$STATE_DIR/$wid.state"
   paint_state "$wid" "$(effective_state "$wid")"
   tmux refresh-client -S 2>/dev/null || true
+  sidebar_wake                 # the visible sidebar shows the change now, not in 2s
 
   # Only on a transition *into* a notifying state, and only when you are not
   # already looking at it.  Without the transition test every repeat hook of
@@ -2027,9 +2156,11 @@ cmd_attach() {
   # `kel restore` straight after can close it if you never used it
   local born; born="$(date +%s)"
   if [ -t 0 ] && [ -t 1 ]; then
-    exec tmux new-session -s "$KEL_PREFIX" -c "$HOME" \; set-option -w @kel-welcome "$born"
+    exec tmux new-session -s "$KEL_PREFIX" -c "$HOME" \; set-option -w @kel-welcome "$born" \
+      \; run-shell -b "'$SELF' _sidebar ensure '#{window_id}'"
   fi
   tmux new-session -d -s "$KEL_PREFIX" -c "$HOME" \; set-option -w @kel-welcome "$born"
+  sidebar_ensure "$(tmux display-message -p -t "=$KEL_PREFIX:" '#{window_id}' 2>/dev/null)"
   say "workspace started — tmux attach -t $KEL_PREFIX"
 }
 
@@ -2049,6 +2180,14 @@ main() {
     sweep)        migrate_meta; cmd_sweep "$@" ;;
     prune)        migrate_meta; cmd_prune "$@" ;;
     snapshot)     cmd_snapshot ;;
+    sidebar)      cmd_sidebar "$@" ;;
+    _sidebar)     case "${1:-}" in
+                    ensure) sidebar_ensure "${2:-}" ;;
+                    wake)   sidebar_wake ;;
+                    fit)    sidebar_fit ;;
+                    reap)   sidebar_reap ;;
+                    *)      die "kel _sidebar ensure|wake|fit|reap" ;;
+                  esac ;;
     doctor)       cmd_doctor "$@" ;;
     config)       cmd_config ;;
     update)       cmd_update "$@" ;;

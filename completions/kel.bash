@@ -18,7 +18,7 @@ _kel() {
     cword=$COMP_CWORD
   }
 
-  local subcmds="new kill ls rename top restore relaunch sweep prune doctor config update help"
+  local subcmds="new kill ls rename top sidebar restore relaunch sweep prune doctor config update help"
 
   if [ "$cword" -eq 1 ]; then
     COMPREPLY=( $(compgen -W "$subcmds" -- "$cur") )
@@ -58,6 +58,9 @@ _kel() {
       ;;
     ls)
       COMPREPLY=( $(compgen -W "--json" -- "$cur") )
+      ;;
+    sidebar)
+      COMPREPLY=( $(compgen -W "on off" -- "$cur") )
       ;;
   esac
 }

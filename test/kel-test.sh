@@ -26,6 +26,10 @@ VERBOSE=0; [ "${1:-}" = "-v" ] && VERBOSE=1
 WORK="$(mktemp -d "${TMPDIR:-/tmp}/kel-test.XXXXXX")"
 export XDG_STATE_HOME="$WORK/state"
 export KEL_SESSION=keltest
+# Sidebars off unless a section turns them on: the sections written before
+# v0.10 count panes, and a sidebar is one more.  The sidebar's own section
+# turns it on and re-checks what matters with it present.
+export KEL_SIDEBAR=off
 
 # tmux resolves its socket under $TMUX_TMPDIR, and bin/kel inherits it — so the
 # suite and the tool under test share one throwaway server and `kill-server`
@@ -42,6 +46,16 @@ export TMUX_TMPDIR
   exit 1
 }
 unset TMUX TMUX_PANE      # don't inherit an outer tmux; we are not "inside" ours
+# ...nor its config.  reset() starts the server with -f /dev/null, but once a
+# test kills it, the next one is started by KEL (`new-session` in a restore),
+# and that loads the developer's real ~/.tmux.conf — kel's own hooks included,
+# running the installed kel against this suite's state.  CI has no such file,
+# so this only ever bit a dev box: it put a test's agent pane into view-mode.
+# Every tmux call — the suite's, kel's, kel-top's — goes through this shim.
+mkdir -p "$WORK/shim"
+printf '#!/bin/sh\nexec %s -f /dev/null "$@"\n' "$(command -v tmux)" > "$WORK/shim/tmux"
+chmod +x "$WORK/shim/tmux"
+export PATH="$WORK/shim:$PATH"
 STATE="$XDG_STATE_HOME/kel"
 SESSIONS="$STATE/sessions"
 
@@ -111,7 +125,9 @@ state_of() { "$KEL" ls 2>/dev/null | awk -v n="$1" '$2==n {print $3}'; }
 # a bare shell and effective_state correctly calls that `dead`.  Wait for the
 # process before asserting on state.  v0.6 made the fleet read 3x faster, which
 # is what first lost this race.
-agent_up() { wait_until "tmux list-panes -t '$1' -F '#{pane_current_command}' 2>/dev/null | grep -qvxE 'bash|zsh|fish|sh|dash|tmux'"; }
+# the sidebar runs kel-top, a non-shell, so it is excluded — else this would
+# report the agent up before it has started
+agent_up() { wait_until "tmux list-panes -t '$1' -F '#{@kel-sidebar}|#{pane_current_command}' 2>/dev/null | awk -F'|' '\$1==\"\"{print \$2}' | grep -qvxE 'bash|zsh|fish|sh|dash|tmux'"; }
 NEW() { K "$1" new "$2" --agent 'sleep 9999' >/dev/null 2>&1; agent_up "$(window_of "$1" "$2")"; }
 # By group AND name: since v0.10 every window shares one session, so two
 # repos' `docs` agents are two windows in it, told apart by @kel-group.
@@ -676,7 +692,6 @@ ok "  ...and no stale lock is left"      '[ ! -e "$STATE/.restoring" ]'
 tmux kill-server 2>/dev/null; sleep 0.6
 (cd "$WORK" && "$KEL" < /dev/null) >/dev/null 2>&1
 WW="$(tmux list-windows -t '=keltest' -F '#{window_id}' | head -1)"
-sleep 6   # past the 5s "no output since its prompt" window, so typing is unambiguous
 tmux send-keys -t "$WW" 'echo used' Enter
 wait_until "tmux capture-pane -p -t '$WW' | grep -qx used"
 "$KEL" restore >/dev/null 2>&1
@@ -754,6 +769,110 @@ ok "with a client, exactly the pane it is looking at is current" \
   '[ "$(P "[.panes[] | select(.current) | .pane_id]")" = "[\"$SHP\"]" ]'
 wait "$CC" 2>/dev/null
 ok "the ports scan is cached"            '[ -f "$STATE/ports.json" ]'
+
+# ---------------------------------------------------------------- v0.10 M2
+section "the sidebar: one pane on the left of every kel window (v0.10 M2)"
+export KEL_SIDEBAR=on KEL_SIDEBAR_TRACE="$WORK/sidebar.trace"
+: > "$KEL_SIDEBAR_TRACE"
+reset                                    # the server inherits both from here
+sbcount() { tmux list-panes -t "$1" -F '#{@kel-sidebar}' 2>/dev/null | grep -cx 1; }
+userpane() { tmux list-panes -t "$1" -F '#{@kel-sidebar}|#{pane_id}' | awk -F'|' '$1=="" {print $2; exit}'; }
+NEW api-gw agent
+SBW="$(window_of api-gw agent)"
+wait_until '[ "$(sbcount "$SBW")" = 1 ]'
+ok "kel new gives the window exactly one sidebar" '[ "$(sbcount "$SBW")" = 1 ]'
+ok "  ...on the left, at the configured width"    '[ "$(tmux list-panes -t "$SBW" -F "#{@kel-sidebar} #{pane_left} #{pane_width}" | awk "\$1==1 {print \$2, \$3}")" = "0 32" ]'
+ok "  ...running kel-top"                         'wait_until "tmux list-panes -t $SBW -F \"#{@kel-sidebar} #{pane_current_command}\" | grep -qx \"1 kel-top\""'
+ok "  ...focus stayed on the user's pane"         '[ -z "$(tmux list-panes -t "$SBW" -F "#{pane_active}#{@kel-sidebar}" | grep -x 11)" ]'
+ok "  ...and the agent started there, not in it"  '[ "$(tmux display -p -t "$(userpane "$SBW")" "#{pane_current_command}")" = sleep ]'
+
+HW="$(tmux new-window -d -P -F '#{window_id}' -t '=keltest:' -c "$WORK/repos/api-gw")"
+"$KEL" _sidebar ensure "$HW"
+ok "a hand-made window gets one (the hook's command)" '[ "$(sbcount "$HW")" = 1 ]'
+for i in 1 2 3 4 5 6 7 8 9 10; do "$KEL" _sidebar ensure "$HW" & done; wait
+ok "  ...and ten racing ensures still leave one"  '[ "$(sbcount "$HW")" = 1 ]'
+OW="$(tmux new-session -d -P -F '#{window_id}' -s notkel)"
+"$KEL" _sidebar ensure "$OW"
+ok "a window outside kel is left alone"           '[ "$(sbcount "$OW")" = 0 ]'
+tmux kill-session -t '=notkel'
+
+ok "_fleet --panes never lists a sidebar"         '[ "$("$KEL" _fleet --panes | jq "[.panes[] | select(.cmd == \"kel-top\")] | length")" = 0 ]'
+ok "  ...nor counts it among a window's panes"    '[ "$("$KEL" _fleet | jq -r ".agents[] | select(.name == \"agent\") | .panes | length")" = 1 ]'
+
+# invariant 3: kel-top is a live non-shell; it must not keep a dead agent alive
+P="$(userpane "$SBW")"
+hook "$P" UserPromptSubmit
+tmux send-keys -t "$P" C-c
+wait_until '[ "$(state_of agent)" = dead ]'
+ok "a crashed agent beside a live sidebar reads dead" '[ "$(state_of agent)" = dead ]'
+"$KEL" relaunch api-gw/agent >/dev/null 2>&1
+ok "relaunch types into the agent's pane, not the sidebar" \
+  'wait_until "[ \"\$(tmux display -p -t $P \"#{pane_current_command}\")\" = sleep ]" && [ "$(sbcount "$SBW")" = 1 ]'
+
+tmux kill-pane -t "$(userpane "$HW")"
+"$KEL" _sidebar reap
+ok "a window left holding only its sidebar is closed" '! tmux list-windows -a -F "#{window_id}" | grep -qx "$HW"'
+ok "  ...and every other window is left alone"    '[ -n "$(window_of api-gw agent)" ] && [ "$(sbcount "$SBW")" = 1 ]'
+
+# sleep/wake: no client attached, so nothing is visible — every sidebar drew
+# once at startup and must not reload again
+NEW coppermind other
+OTW="$(window_of coppermind other)"
+wait_until '[ "$(sbcount "$OTW")" = 1 ]'
+SB1="$(tmux list-panes -t "$SBW" -F '#{@kel-sidebar} #{pane_id}' | awk '$1==1 {print $2}')"
+SB2="$(tmux list-panes -t "$OTW" -F '#{@kel-sidebar} #{pane_id}' | awk '$1==1 {print $2}')"
+reloads() { grep -c " $1 " "$KEL_SIDEBAR_TRACE"; }
+sleep 4
+ok "with no one looking, sidebars do not reload"  '[ "$(reloads "$SB1")" = 1 ] && [ "$(reloads "$SB2")" = 1 ]'
+( sleep 7 ) | tmux -C attach -t '=keltest' >/dev/null 2>&1 &
+CC=$!
+wait_until 'tmux list-clients 2>/dev/null | grep -q .' 30
+tmux select-window -t "$SBW"; "$KEL" _sidebar wake
+sleep 5
+ok "the shown sidebar reloads; the hidden one does not" '[ "$(reloads "$SB1")" -ge 3 ] && [ "$(reloads "$SB2")" -le 2 ]'
+wait "$CC" 2>/dev/null
+
+"$KEL" sidebar off >/dev/null 2>&1
+ok "kel sidebar off removes every sidebar"        '[ "$(sbcount "$SBW")" = 0 ] && [ "$(sbcount "$OTW")" = 0 ]'
+NEW api-gw later
+ok "  ...and new windows get none"                '[ "$(sbcount "$(window_of api-gw later)")" = 0 ]'
+"$KEL" sidebar on >/dev/null 2>&1
+ok "kel sidebar on puts them back, everywhere"    '[ "$(sbcount "$SBW")" = 1 ] && [ "$(sbcount "$(window_of api-gw later)")" = 1 ]'
+
+# restore keeps one sidebar per window and the user's splits (invariant 2)
+reset
+NEW api-gw auth-fix
+NEW coppermind sazed
+AFW="$(window_of api-gw auth-fix)"
+wait_until '[ "$(sbcount "$AFW")" = 1 ]'
+tmux split-window -d -t "$(userpane "$AFW")" -c "$WORK/repos/api-gw" 'sleep 9999'
+"$KEL" snapshot >/dev/null 2>&1
+shape() { jq -c '[.windows[] | [.group, .name, ([.panes[] | select(.sidebar)] | length), ([.panes[] | select(.sidebar | not)] | length)]]' "$1"; }
+want="$(shape "$STATE/snapshot.json")"
+ok "the snapshot records each sidebar"           '[ "$want" = "[[\"api-gw\",\"auth-fix\",1,2],[\"coppermind\",\"sazed\",1,1]]" ]'
+for i in 1 2 3; do
+  tmux kill-server 2>/dev/null; sleep 0.6
+  "$KEL" restore >/dev/null 2>&1
+  wait_until '[ "$(wins)" = 2 ]'
+  ok "restore $i: one sidebar per window, splits intact" "[ '$(shape "$STATE/snapshot.json")' = '$want' ]"
+done
+# a snapshot from before the sidebar existed: its layout first, then a sidebar
+reset
+printf '{"version":2,"saved_epoch":1,"last":0,"windows":[{"name":"old","group":"api-gw","layout":"","panes":[{"cwd":"%s","cmd":"bash"},{"cwd":"%s","cmd":"bash"}]}]}' \
+  "$WORK/repos/api-gw" "$WORK/repos/api-gw" > "$STATE/snapshot.json"
+"$KEL" restore --no-resume >/dev/null 2>&1
+ok "a pre-sidebar snapshot restores, and gains one" '[ "$(sbcount "$(window_of api-gw old)")" = 1 ] && [ "$(tmux list-panes -t "$(window_of api-gw old)" -F x | grep -c x)" = 3 ]'
+
+# the fresh-start shell has a sidebar now; restore must still close it unused
+NEW api-gw keep
+"$KEL" snapshot >/dev/null 2>&1
+tmux kill-server 2>/dev/null; sleep 0.6
+(cd "$WORK" && "$KEL" < /dev/null) >/dev/null 2>&1
+"$KEL" restore >/dev/null 2>&1
+wait_until '[ -n "$(window_of api-gw keep)" ]'
+ok "restore still closes an unused fresh-start shell beside its sidebar" '[ "$(wins)" = 2 ]'
+export KEL_SIDEBAR=off
+unset KEL_SIDEBAR_TRACE
 
 # ---------------------------------------------------------------- restore
 section "restore rebuilds the workspace and keeps the snapshot"
@@ -1037,10 +1156,10 @@ ok "  ...and none uses a single -E"      '[ "$POPUP_SINGLE_E" = 0 ]'
 # (client-detached, after-split-window, pane-exited) stay fire-and-forget on
 # purpose either way — do not add this to them.
 CONF="$HERE/../tmux/kel.conf"
-KELBINDS=$(grep -n 'run-shell -b .*local/bin/kel ' "$CONF" | grep -v 'kel snapshot')
+KELBINDS=$(grep -n '^bind.*run-shell -b .*local/bin/kel ' "$CONF")
 ok "kel.conf's foreground kel bind exists"             '[ "$(printf "%s\n" "$KELBINDS" | grep -c .)" = 1 ]'
 ok "  ...and surfaces run-shell's stderr"               '[ "$(printf "%s\n" "$KELBINDS" | grep -c "2>&1")" = 1 ]'
-ok "  ...but the snapshot hooks stay fire-and-forget"   '! grep -q "kel snapshot.*2>&1" "$CONF"'
+ok "  ...while every hook discards its output"          '[ -z "$(grep "^set-hook" "$CONF" | grep "run-shell" | grep -v ">/dev/null 2>&1")" ]'
 ok "  ...and this config actually sources under tmux"  \
   'tmux -S "$TMUX_TMPDIR/guard.sock" new-session -d -s guardtest 2>/dev/null
    rc=0; tmux -S "$TMUX_TMPDIR/guard.sock" source-file "$CONF" 2>/dev/null || rc=$?
@@ -1063,7 +1182,7 @@ else
 fi
 # prove the stderr-redirect guard bites: drop one 2>&1 in a scratch copy.
 sed 's/kel top 2>&1"/kel top"/' "$CONF" > "$WORK/kel-conf-revert"
-REVERTED=$(grep -n 'run-shell -b .*local/bin/kel ' "$WORK/kel-conf-revert" | grep -v 'kel snapshot')
+REVERTED=$(grep -n '^bind.*run-shell -b .*local/bin/kel ' "$WORK/kel-conf-revert")
 ok "  ...and dropping it is caught"       '[ "$(printf "%s\n" "$REVERTED" | grep -c "2>&1")" != 1 ]'
 
 section "statusline records context without a live agent"
