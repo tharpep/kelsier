@@ -87,33 +87,76 @@ TUI pass over the old board, which no longer exists.
 fix: `kel-fleet` ignored `pr = off`, and it called `gh` for repos that local git
 had already answered.
 
-### Step 4 — the sidebar  ·  *next, being planned*
+### Step 4 — the build plan  ·  *M0 next*
 
-Not started. To be planned in conversation before any code; the questions it
-it had to answer first are decided in `spec.md` §5c. A draft order:
+Agreed 2026-10-14. Each milestone ends with something to try, and the suite
+stays green throughout. The decisions behind it are `spec.md` §5c and §7.
 
-1. **The fleet document learns every pane** — kind (agent / server / shell,
-   from the process), cwd, and git position per worktree (branch,
-   ahead/behind, dirty). Data first, in `kel-fleet`, so the sidebar and any
-   later GUI read the same thing.
-2. **The sidebar's plumbing** — a sidebar pane in every window (created by
-   `kel new` and an `after-new-window` hook), marked so snapshot, restore and
-   the dead-agent check skip it; inactive instances idle and wake when their
-   window is shown; view state shared through the state directory. Prove it by
-   hand on a real tmux server before building UI on it.
-3. **The sidebar** — `kel top` grown into it: repo → worktree → pane, about
-   eight keys, all in its footer. Navigation and jump first; `n`ew / `x` kill
-   / `r`ename by calling the existing `bin/kel` commands.
-4. **The panel** — files (`yazi`), git (`lazygit`), opened at the selected
-   pane's directory.
-5. **The two bottom rows** — `spec.md` §7: Claude's row gains git position
-   and always-on quota; the tmux bar becomes the workspace footer (quota,
-   fleet, panes and ports, location). Quota moves to its own state file.
-6. **Plan and tasks** — the plan from `~/.claude/plans/*.md`; the task list
-   from the session transcript the hooks already point at.
-7. **Automations** — last, and only once the rest is daily-driven.
+**M0 — one session** *(bash, small)*  ·  *next*
+- `kel new` puts every window in a single `kel` session; `group` stays in the
+  records as the repo label (no on-disk format change)
+- the bar, `kel` (attach) and `prefix g` simplify — `prefix g` goes
+- restore merges a v0.9 per-repo snapshot into the one session
+- *try:* everything works as today, in one session; `prefix 1..9` reaches
+  every agent
+- *tests:* the suite's session counts adapted; a v0.9 multi-session snapshot
+  restores into one session
 
-`v0.10.0` is tagged when 1–3 are usable.
+**M1 — the fleet learns every pane** *(Go, `kel-fleet`)*
+- a `panes[]` list in the fleet document: window, kind (agent / server /
+  shell, from the process tree), command, cwd, repo, worktree or main
+  checkout, branch, ahead/behind, dirty, listening ports
+- git position computed once per directory; ports cached ~10 s; a cached
+  git-position file for Claude's row to read later
+- *try:* `kel _fleet | jq .panes` shows everything open
+- *tests:* Go unit tests for classification; suite assertions over real panes
+  (a `sleep` agent, a `python3 -m http.server` for a port, a plain shell)
+
+**M2 — sidebar plumbing**  ·  *the author tries it here, rough*
+- `kel-top --sidebar`, a minimal list
+- `kel new` and an `after-new-window` hook add a 32-column sidebar pane to
+  every window, marked `@kel-sidebar`, without stealing focus
+- hidden sidebars sleep; a hook wakes the shown one; view state shared through
+  the state directory
+- snapshot records the sidebar as a marked pane and restore relaunches it
+  (its geometry is part of the window's layout string, so skipping it would
+  break `select-layout`); `kel ls` and the dead-agent check ignore it
+- *try:* every window has the column; switching shows the same thing
+- *tests:* a sidebar in new and hand-made windows; three restore cycles keep
+  the snapshot intact (invariant 2) with no duplicate sidebars; hidden
+  sidebars do not poll
+
+**M3 — the sidebar itself**  →  **tag `v0.10.0`**
+- repo → worktree → pane tree, rows per `spec.md` §5
+- keys `j`/`k` `enter` `/` `n` `w` `x` `r` `?`; `prefix Space` focuses it,
+  `esc` returns
+- `n` / `x` / `r` call the existing `kel new` / `kill` / `rename`, so
+  kill-safety is unchanged
+- *try:* daily-drive it — this is where we learn whether it is right
+- *tests:* rendered frames (as `kel top`'s are), keys driven through a real
+  tmux pane, `x` on a dirty worktree still refusing
+
+**M4 — the two bottom rows**  →  `v0.11`
+- a quota state file; Claude's row gains git position and always-on quota;
+  the tmux bar becomes the workspace footer (`spec.md` §7)
+- *tests:* stale quota renders `?`; no `0%` without a quota; the bar stays one
+  `jq` pass and refreshes only on change
+
+**M5 — panel popups**  →  `v0.11`
+- `f` yazi, `g` lazygit, `p` plan/tasks — popups at the selected pane's
+  directory
+
+**M6 — plan and tasks, then automations**  →  `v0.12+`
+- plan files in `~/.claude/plans/` have generated names; tying one to a
+  session probably means the transcript. Investigated when we get there —
+  it blocks nothing earlier.
+
+**Why this order:** M0–M1 are data and plumbing you can mostly ignore; M2 is
+where the tmux-hook risk lives, so it is proven before any UI depends on it;
+M3 is the first thing that feels different.
+
+**Open:** what made the old restore hard to work with. M0 and M2 both rebuild
+restore, which is the chance to fix it rather than extend it.
 
 ---
 
