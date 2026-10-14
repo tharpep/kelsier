@@ -677,6 +677,8 @@ ok "  ...having moved the old snapshot to the archive" '[ "$(ls "$STATE/snapshot
 ok "  ...where the fresh start's own snapshot cannot overwrite it" \
   '[ "$(jq -c "[.windows[] | [.group, .name, (.panes | length)]]" "$STATE/snapshots/"*.json)" = "$want" ]'
 ok "--list shows it"                     '[[ "$("$KEL" restore --list 2>&1)" == *auth-fix*sazed* ]]'
+# the fresh shell must have drawn its prompt (see the sidebar section)
+wait_until '[ -n "$(tmux capture-pane -p -t "$(tmux list-windows -t =keltest -F "#{window_id}" | head -1)" | grep .)" ]' 50
 "$KEL" restore >/dev/null 2>&1
 wait_until '[ -n "$(window_of api-gw auth-fix)" ] && [ -n "$(window_of coppermind sazed)" ]'
 ok "kel restore brings it back"          '[ -n "$(window_of api-gw auth-fix)" ] && [ -n "$(window_of coppermind sazed)" ]'
@@ -869,6 +871,11 @@ NEW api-gw keep
 "$KEL" snapshot >/dev/null 2>&1
 tmux kill-server 2>/dev/null; sleep 0.6
 (cd "$WORK" && "$KEL" < /dev/null) >/dev/null 2>&1
+# wait for the fresh shell to draw its prompt: until it has, there is nothing
+# to judge "untouched" by and kel rightly keeps the window. A person cannot
+# type `kel restore` faster than a prompt appears; CI's runner can.
+WW="$(tmux list-windows -t '=keltest' -F '#{window_id}' | head -1)"
+wait_until '[ -n "$(tmux capture-pane -p -t "$(userpane "$WW")" | grep .)" ]' 50
 "$KEL" restore >/dev/null 2>&1
 wait_until '[ -n "$(window_of api-gw keep)" ]'
 ok "restore still closes an unused fresh-start shell beside its sidebar" '[ "$(wins)" = 2 ]'
