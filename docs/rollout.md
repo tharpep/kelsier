@@ -87,12 +87,12 @@ TUI pass over the old board, which no longer exists.
 fix: `kel-fleet` ignored `pr = off`, and it called `gh` for repos that local git
 had already answered.
 
-### Step 4 — the build plan  ·  *M0 next*
+### Step 4 — the build plan  ·  *M0 done, M1 next*
 
 Agreed 2026-10-14. Each milestone ends with something to try, and the suite
 stays green throughout. The decisions behind it are `spec.md` §5c and §7.
 
-**M0 — one session, and restore by choice** *(bash)*  ·  *next*
+**M0 — one session, and restore by choice**  ·  **done**
 - `kel new` puts every window in a single `kel` session; `group` stays in the
   records as the repo label (no on-disk format change)
 - the bar, `kel` (attach) and `prefix g` simplify — `prefix g` goes
@@ -109,8 +109,15 @@ stays green throughout. The decisions behind it are `spec.md` §5c and §7.
   prompting; the old workspace survives a fresh start and `kel restore`
   brings it back; `--list` shows the archive; the archive caps at five; a v0.9
   multi-session snapshot restores into one session
+- *found on the way:* `kel rename` and `kel relaunch` asked tmux for "the
+  current window" rather than the window of the pane they ran in — correct by
+  luck while each repo had its own session, wrong as soon as two shared one.
+  Both now target `$TMUX_PANE`. And outside tmux, `#{@kel-group}` resolves
+  against tmux's default window, which made `kel kill <name>` guess a group
+  instead of reporting the ambiguity; `current_group` now answers only from
+  inside tmux.
 
-**M1 — the fleet learns every pane** *(Go, `kel-fleet`)*
+**M1 — the fleet learns every pane** *(Go, `kel-fleet`)*  ·  *next*
 - a `panes[]` list in the fleet document: window, kind (agent / server /
   shell, from the process tree), command, cwd, repo, worktree or main
   checkout, branch, ahead/behind, dirty, listening ports

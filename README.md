@@ -81,7 +81,7 @@ kel top              every agent, the one needing you first   (prefix t)
 kel relaunch [name]  relaunch one crashed agent in place
 kel sweep [-n]       close out every finished agent that landed
 kel kill <name>      close one       ·  kel prune    discard dead records
-kel restore [-c]     rebuild after a reboot
+kel restore [--list] bring back a previous workspace (kel never asks)
 kel doctor           check the machine
 kel config / update  edit settings / pull and re-wire
 ```

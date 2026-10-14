@@ -205,7 +205,7 @@ where it already is** — which is exactly what a sidebar per window does.
 
 | question | decision |
 |---|---|
-| groups | **one `kel` tmux session for everything.** The sidebar groups by repo → worktree from each pane's directory; sessions-per-repo would only duplicate that and make navigation two-level. `group` stays in the records as the repo label (no format change); `.kel/group` keeps working as a display grouping; restore merges old per-repo sessions into the one |
+| groups | *built (M0).* **One `kel` tmux session for everything.** The sidebar groups by repo → worktree from each pane's directory; sessions-per-repo would only duplicate that and make navigation two-level. `group` stays in the records as the repo label (no format change); `.kel/group` keeps working as a display grouping; restore merges old per-repo sessions into the one |
 | the panel | **a `display-popup` first** (~90%) for `yazi`, `lazygit`, plan and tasks — no layout cost, nothing resizes. A pinned right-hand pane only if the popup gets reopened constantly |
 | sidebar width | **fixed, 32 columns by default**, `sidebar_width` in config, identical in every window. Hide/show applies to every window at once and resizes the user's panes, so it is a rare gesture |
 | idle and wake | **hook-driven.** Hidden sidebars sleep; `session-window-changed` wakes the shown one; it refreshes when kel's state hooks fire, plus a slow fallback poll. Control mode only if this proves insufficient |
@@ -470,8 +470,7 @@ state-changing commands) writes the full shape to `snapshot.json`, keeping one
 `.prev`. A restore holds a `.restoring` lockfile so the hooks it trips cannot
 overwrite the file it is reading (invariant 2).
 
-**Restore is by choice, like `claude --resume`** *(designed 2026-10-14, built
-in M0).* Until v0.10, `kel` put a rebuild prompt in front of you whenever a
+**Restore is by choice, like `claude --resume`** *(built in M0).* Until v0.10, `kel` put a rebuild prompt in front of you whenever a
 snapshot existed and the server was down — every first `kel` after a reboot,
 whatever you came to do. The author's account: they never quite understood
 what it was asking and were just trying to move on. So:

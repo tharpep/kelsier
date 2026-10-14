@@ -96,7 +96,7 @@ reset() {
 # run kel from inside repo $1
 K() { local r="$1"; shift; ( cd "$WORK/repos/$r" && "$KEL" "$@" ); }
 wins() { tmux list-windows -a -F x 2>/dev/null | grep -c x; }
-grps() { tmux list-sessions -F '#{session_name}' 2>/dev/null | grep -c keltest; }
+grps() { tmux list-sessions -F '#{session_name}' 2>/dev/null | grep -c '^keltest'; }   # kel's sessions
 # feed a Claude Code hook payload for pane $1, event $2, notification_type $3, text $4
 hook() {
   printf '%s' "{\"session_id\":\"s\",\"cwd\":\"$WORK\",\"hook_event_name\":\"$2\"\
@@ -113,8 +113,11 @@ state_of() { "$KEL" ls 2>/dev/null | awk -v n="$1" '$2==n {print $3}'; }
 # is what first lost this race.
 agent_up() { wait_until "tmux list-panes -t '$1' -F '#{pane_current_command}' 2>/dev/null | grep -qvxE 'bash|zsh|fish|sh|dash|tmux'"; }
 NEW() { K "$1" new "$2" --agent 'sleep 9999' >/dev/null 2>&1; agent_up "$(window_of "$1" "$2")"; }
-pane_of()   { tmux list-panes -s -t "=keltest/$1" -F '#{pane_id} #{window_name}'  | awk -v n="$2" '$2==n {print $1; exit}'; }
-window_of() { tmux list-windows  -t "=keltest/$1" -F '#{window_id} #{window_name}' | awk -v n="$2" '$2==n {print $1; exit}'; }
+# By group AND name: since v0.10 every window shares one session, so two
+# repos' `docs` agents are two windows in it, told apart by @kel-group.
+window_of() { tmux list-windows -a -F '#{session_name} #{@kel-group} #{window_id} #{window_name}' 2>/dev/null \
+                | awk -v g="$1" -v n="$2" '$1 ~ /^keltest/ && $2==g && $4==n {print $3; exit}'; }
+pane_of()   { local w; w="$(window_of "$1" "$2")"; [ -n "$w" ] && tmux list-panes -t "$w" -F '#{pane_id}' | head -1; }
 
 # ---------------------------------------------------------------- isolation
 section "the suite cannot reach your real tmux server"
@@ -151,7 +154,7 @@ section "rename stays inside its group"
 reset
 NEW api-gw alpha
 NEW coppermind alpha
-w="$(tmux list-windows -a -F '#{session_name} #{window_id}' | awk '$1=="keltest/api-gw"{print $2}')"
+w="$(window_of api-gw alpha)"
 # kel rename acts on the window it is run from; TMUX + TMUX_PANE is how tmux
 # itself tells a command where it is standing
 TMUX="$TMUX_TMPDIR/tmux-$(id -u)/default,$(tmux display-message -p '#{pid}'),0" \
@@ -399,7 +402,7 @@ EOF
   # keypress with no effect and no case to find it in (Phase 2's "must not:
   # no actions yet" is the reason it stays a no-op). Driven through a real
   # tmux pane rather than reasoned about, per CLAUDE.md's testing guidance.
-  TWIN="$(tmux new-window -d -P -F '#{window_id}' -t '=keltest/api-gw' -n kt "COLUMNS=100 LINES=24 $GOBIN_TOP")"
+  TWIN="$(tmux new-window -d -P -F '#{window_id}' -t '=keltest:' -n kt "COLUMNS=100 LINES=24 $GOBIN_TOP")"
   wait_until "tmux capture-pane -p -t '$TWIN' 2>/dev/null | grep -q GROUP"
   # The cursor marker exists from the very first frame (on row 0), so waiting
   # for it to merely be PRESENT races the keypress: it can be satisfied by
@@ -614,6 +617,81 @@ ok "claude is launched with --name"      '[ "$(jq -r .agent "$SESSIONS/coppermin
 ( cd "$WORK/repos/coppermind" && "$KEL" new other --agent 'sleep 9999' ) >/dev/null 2>&1
 ok "  ...and other agents are untouched" '[ "$(jq -r .agent "$SESSIONS/coppermind/other.json")" = "sleep 9999" ]'
 
+# ---------------------------------------------------------------- v0.10 M0
+section "every window lives in one session (v0.10)"
+reset
+NEW api-gw docs
+NEW coppermind docs
+ok "two repos, one session"              '[ "$(grps)" = 1 ] && [ "$(tmux list-sessions -F "#{session_name}" | grep -cx keltest)" = 1 ]'
+ok "  ...two windows in it"              '[ "$(wins)" = 2 ]'
+ok "  ...each stamped with its group"    '[ -n "$(window_of api-gw docs)" ] && [ -n "$(window_of coppermind docs)" ]'
+ok "  ...records still filed by group"   '[ -f "$SESSIONS/api-gw/docs.json" ] && [ -f "$SESSIONS/coppermind/docs.json" ]'
+ok "_fleet reports both groups"          '[ "$("$KEL" _fleet | jq -r "[.agents[].group] | sort | join(\",\")")" = "api-gw,coppermind" ]'
+# a hand-made window has no record and no @kel-group: kel-fleet finds its
+# repo from the pane's directory, with no git fork (the bar's hot path)
+tmux new-window -d -t '=keltest:' -n handmade -c "$WORK/repos/coppermind"
+wait_until '[ "$(wins)" = 3 ]'
+ok "a hand-made window gets its repo's group" '[ "$("$KEL" _fleet | jq -r ".agents[] | select(.name==\"handmade\") | .group")" = coppermind ]'
+# the upgrade path: a v0.9 server still holds a per-repo session
+tmux new-session -d -s 'keltest/legacy' -n old -c "$WORK"
+ok "a v0.9 per-repo session still reads, with its group" '[ "$("$KEL" _fleet | jq -r ".agents[] | select(.name==\"old\") | .group")" = legacy ]'
+tmux kill-session -t '=keltest/legacy'
+export TMUX="$TMUX_TMPDIR/tmux-$(id -u)/default,$(tmux display-message -p '#{pid}'),0"
+bar="$("$KEL" status-line)"
+unset TMUX
+# grep -c ., not wc -l: BSD pads the count (CLAUDE.md, portability)
+ok "the bar lists every agent in the session" '[ "$(printf "%s" "$bar" | grep -o ":docs" | grep -c .)" = 2 ] && [[ "$bar" == *handmade* ]]'
+
+section "kel never prompts; restore is by choice (v0.10)"
+reset
+NEW api-gw auth-fix
+NEW coppermind sazed
+tmux split-window -d -t "$(window_of api-gw auth-fix)" -c "$WORK/repos/api-gw" 'sleep 9999'
+wait_until '[ "$(tmux list-panes -t "$(window_of api-gw auth-fix)" -F x 2>/dev/null | grep -c x)" = 2 ]'
+"$KEL" snapshot >/dev/null 2>&1
+want="$(jq -c '[.windows[] | [.group, .name, (.panes | length)]]' "$STATE/snapshot.json")"
+tmux kill-server 2>/dev/null; sleep 0.6
+# stdin closed: a prompt would read EOF and take its default — which is how
+# the old one could not be caught by a test that only checked the exit code
+out="$( (cd "$WORK" && "$KEL" < /dev/null) 2>&1 )"; rc=$?
+ok "kel opens without prompting"         '[ "$rc" = 0 ] && [[ "$out" != *"[Y/n"* ]] && [ "$(grps)" = 1 ]'
+ok "  ...and says how to get it back"    '[[ "$out" == *"previous workspace: 2 window"*"kel restore"* ]]'
+ok "  ...having moved the old snapshot to the archive" '[ "$(ls "$STATE/snapshots" | grep -c .)" = 1 ] && [ ! -e "$STATE/snapshot.json" ]'
+"$KEL" snapshot >/dev/null 2>&1          # what the tmux hooks do the moment anything changes
+ok "  ...where the fresh start's own snapshot cannot overwrite it" \
+  '[ "$(jq -c "[.windows[] | [.group, .name, (.panes | length)]]" "$STATE/snapshots/"*.json)" = "$want" ]'
+ok "--list shows it"                     '[[ "$("$KEL" restore --list 2>&1)" == *auth-fix*sazed* ]]'
+"$KEL" restore >/dev/null 2>&1
+wait_until '[ -n "$(window_of api-gw auth-fix)" ] && [ -n "$(window_of coppermind sazed)" ]'
+ok "kel restore brings it back"          '[ -n "$(window_of api-gw auth-fix)" ] && [ -n "$(window_of coppermind sazed)" ]'
+ok "  ...splits included"                '[ "$(tmux list-panes -t "$(window_of api-gw auth-fix)" -F x | grep -c x)" = 2 ]'
+ok "  ...into the one session"           '[ "$(grps)" = 1 ]'
+ok "  ...conversations resumed by default" 'agent_up "$(window_of coppermind sazed)"'
+ok "  ...and the archive entry is used up" '[ -z "$(ls "$STATE/snapshots" 2>/dev/null)" ]'
+ok "  ...and no stale lock is left"      '[ ! -e "$STATE/.restoring" ]'
+
+# the archive keeps five, newest first; `kel restore <n>` picks one
+mkdir -p "$STATE/snapshots"
+for t in 101 102 103 104 105 106; do
+  printf '{"version":2,"saved_epoch":%s,"last":-1,"windows":[{"name":"w%s","group":"old","layout":"","panes":[{"cwd":"%s","cmd":"bash"}]}]}' \
+    "$t" "$t" "$WORK" > "$STATE/snapshots/$t.json"
+done
+"$KEL" snapshot >/dev/null 2>&1
+tmux kill-server 2>/dev/null; sleep 0.6
+(cd "$WORK" && "$KEL" < /dev/null) >/dev/null 2>&1
+ok "the archive keeps the newest five"   '[ "$(ls "$STATE/snapshots" | grep -c .)" = 5 ] && [ ! -e "$STATE/snapshots/101.json" ] && [ ! -e "$STATE/snapshots/102.json" ]'
+"$KEL" restore 2 >/dev/null 2>&1
+ok "kel restore 2 picks the second newest" '[ -n "$(window_of old w106)" ] && [ -z "$(window_of old w105)" ]'
+ok "a number past the end is refused"    '! "$KEL" restore 9 >/dev/null 2>&1'
+
+# a v0.9 snapshot keyed windows by group, one session each; it must come back
+# into the one session, each window keeping its group
+reset
+printf '{"saved_at":"x","last_group":"api-gw","last_window":"a","groups":{"api-gw":[{"name":"a","layout":"","panes":[{"cwd":"%s","cmd":"bash"}]}],"coppermind":[{"name":"b","layout":"","panes":[{"cwd":"%s","cmd":"bash"}]}]}}' \
+  "$WORK/repos/api-gw" "$WORK/repos/coppermind" > "$STATE/snapshot.json"
+"$KEL" restore --no-resume >/dev/null 2>&1
+ok "a v0.9 snapshot restores into one session" '[ "$(grps)" = 1 ] && [ -n "$(window_of api-gw a)" ] && [ -n "$(window_of coppermind b)" ]'
+
 # ---------------------------------------------------------------- restore
 section "restore rebuilds the workspace and keeps the snapshot"
 reset
@@ -623,13 +701,13 @@ K coppermind new sazed    --agent 'sleep 9999' >/dev/null 2>&1
 tmux split-window -d -t "$(window_of api-gw auth-fix)" -c "$WORK/repos/api-gw" 'sleep 9999'
 wait_until '[ "$(tmux list-panes -t "$(window_of api-gw auth-fix)" -F x 2>/dev/null | grep -c x)" = 2 ]'
 "$KEL" snapshot >/dev/null 2>&1
-want="$(jq -Sc '.groups|map_values(map(.name))' "$STATE/snapshot.json")"
+want="$(jq -c '[.windows[] | [.group, .name]]' "$STATE/snapshot.json")"
 for i in 1 2 3; do
   tmux kill-server 2>/dev/null; sleep 0.6
-  "$KEL" restore -s >/dev/null 2>&1
-  wait_until '[ "$(wins)" = 3 ] && [ "$(grps)" = 2 ]'
-  got="$(jq -Sc '.groups|map_values(map(.name))' "$STATE/snapshot.json")"
-  ok "restore $i rebuilds 3 windows / 2 groups" "[ '$(wins)' = 3 ] && [ '$(grps)' = 2 ]"
+  "$KEL" restore >/dev/null 2>&1
+  wait_until '[ "$(wins)" = 3 ] && [ "$(grps)" = 1 ]'
+  got="$(jq -c '[.windows[] | [.group, .name]]' "$STATE/snapshot.json")"
+  ok "restore $i rebuilds 3 windows in one session" "[ '$(wins)' = 3 ] && [ '$(grps)' = 1 ]"
   ok "restore $i leaves the snapshot intact"    "[ '$got' = '$want' ]"
   ok "restore $i rebuilds the split pane"       '[ "$(tmux list-panes -t "$(window_of api-gw auth-fix)" -F x 2>/dev/null | grep -c x)" = 2 ]'
 done
@@ -802,20 +880,6 @@ unset KEL_NOTIFY_CMD
 # Suppression *while focused* needs an attached client, and attaching one
 # portably in CI would mean `script`, whose flags differ between GNU and BSD —
 # exactly the class of trap this suite exists to catch. Verified by hand.
-
-section "per-group waiting badge (#4)"
-reset
-NEW api-gw a
-NEW coppermind b
-for g in api-gw coppermind; do
-  hook "$(tmux list-panes -t "=keltest/$g" -F '#{pane_id}' | head -1)" Notification permission_prompt "x"
-done
-export TMUX="$TMUX_TMPDIR/tmux-$(id -u)/default,$(tmux display-message -p '#{pid}'),0"
-bar="$("$KEL" status-line api-gw)"
-ok "the badge names the other group"        '[[ "$bar" == *"coppermind·1"* ]]'
-ok "  ...and not the one you are in"        '[[ "$bar" != *"api-gw·1"* ]]'
-ok "  ...and not the old +N form"           '[[ "$bar" != *"+1 waiting"* ]]'
-unset TMUX
 
 # ---------------------------------------------------------------- statusline
 section "kel update refuses before it touches anything"

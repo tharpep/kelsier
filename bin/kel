@@ -10,8 +10,8 @@
 #                              the uncommitted / unpushed check
 #   kel ls [--json]            list agents, grouped by repo
 #   kel rename <newname>       rename the current window (keeps metadata in sync)
-#   kel restore [-c] [-s]      rebuild the workspace after a kill / reboot
-#                              (-c resume conversations, -s force the snapshot)
+#   kel restore [<n>]          bring back a previous workspace, conversations
+#         [--list] [--no-resume]  resumed (--list: choose among the last five)
 #   kel relaunch [name] [-f]   relaunch a crashed agent in its existing window
 #                              (one agent — `kel restore` rebuilds the workspace)
 #   kel top                    the fleet dashboard (prefix t)
@@ -86,18 +86,17 @@ kel_config_load() {
 }
 kel_config_load
 
-KEL_PREFIX="${KEL_SESSION:-kel}"          # tmux sessions are  <prefix>/<group>
+KEL_PREFIX="${KEL_SESSION:-kel}"          # the one tmux session (v0.9: <prefix>/<group>)
 KEL_AGENT="${KEL_AGENT:-claude}"
 STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/kel"
 SESSIONS_DIR="$STATE_DIR/sessions"
 STASH_DIR="$STATE_DIR/.stash"
 DOCTOR_CACHE="$STATE_DIR/doctor.json"
-LAST_GROUP_FILE="$STATE_DIR/last-group"
 SNAPSHOT="$STATE_DIR/snapshot.json"
 RESTORE_LOCK="$STATE_DIR/.restoring"
 KEL_FLEET_BIN="${KEL_FLEET_BIN:-$HOME/.local/bin/kel-fleet}"   # the Go seam (v0.6)
 KEL_TOP_BIN="${KEL_TOP_BIN:-$HOME/.local/bin/kel-top}"
-SNAPSHOT_DECLINED="$STATE_DIR/snapshot-declined"   # a snapshot you said no to
+SNAPSHOT_ARCHIVE="$STATE_DIR/snapshots"           # workspaces kel started fresh over
 STATUSLINE_PREV="$HOME/.claude/statusline-prev"   # a statusLine kel displaced
 KEL_CTX_WARN="${KEL_CTX_WARN:-70}"                # show context on the bar from here up
 KEL_NOTIFY="${KEL_NOTIFY:-waiting}"               # states worth interrupting you for
@@ -143,7 +142,6 @@ need() { command -v "$1" >/dev/null 2>&1 || die "missing dependency: $1"; }
 # groups & sessions
 # --------------------------------------------------------------------------
 # tmux session name for a group.  The bare prefix is the pre-v0.2 flat session.
-sess() { case "$1" in "$KEL_PREFIX") printf '%s' "$KEL_PREFIX";; *) printf '%s/%s' "$KEL_PREFIX" "$1";; esac; }
 
 slug_ok() { case "$1" in ''|*[!A-Za-z0-9._-]*) return 1;; *) return 0;; esac; }
 git_root() { git rev-parse --show-toplevel 2>/dev/null; }
@@ -184,34 +182,52 @@ dir_group() {   # dir -> group name, or empty
   done
 }
 
-# all kel group names that have a live tmux session
-group_sessions() {
-  tmux list-sessions -F '#{session_name}' 2>/dev/null | awk -v p="$KEL_PREFIX" '
-    $0==p            { print p; next }
-    index($0,p"/")==1 { print substr($0, length(p)+2) }'
+# ---- the one session ----------------------------------------------------
+# Since v0.10 every kel window lives in ONE tmux session, named exactly
+# $KEL_PREFIX.  The sidebar groups by repo itself; a session per repo only made
+# navigation two-level.  A window's group therefore cannot come from its
+# session any more: kel stamps it on the window as the @kel-group option,
+# which the hot paths can read in the same format string they already run.
+#
+# v0.9 put each repo in its own `<prefix>/<group>` session.  A server started
+# before the upgrade still has those, so everything that READS recognises them
+# (their name still carries the group); nothing creates them, and they drain as
+# their windows close — the way v0.2 drained the flat session before them.
+
+# kel's live sessions: the one session, plus any legacy per-repo ones
+kel_sessions() {
+  tmux list-sessions -F '#{session_name}' 2>/dev/null \
+    | awk -v p="$KEL_PREFIX" '$0==p || index($0,p"/")==1'
 }
 
-# every window in every kel session:  session<TAB>group<TAB>index<TAB>wid<TAB>name
+# every window kel owns:  session<TAB>index<TAB>wid<TAB>name<TAB>group
+# group is @kel-group, else the legacy session's name, else empty (a hand-made
+# window in the one session — kel-fleet derives its group from the pane's repo)
 kel_windows() {
-  tmux list-windows -a -F '#{session_name}	#{window_index}	#{window_id}	#{window_name}' 2>/dev/null \
+  tmux list-windows -a -F '#{session_name}	#{window_index}	#{window_id}	#{window_name}	#{@kel-group}' 2>/dev/null \
   | awk -F'\t' -v p="$KEL_PREFIX" '
       $1==p || index($1,p"/")==1 {
-        g = ($1==p) ? p : substr($1, length(p)+2)
-        print $1"\t"g"\t"$2"\t"$3"\t"$4
+        g = $5
+        if (g == "" && index($1,p"/")==1) g = substr($1, length(p)+2)
+        print $1"\t"$2"\t"$3"\t"$4"\t"g
       }'
 }
 
-# the group the attached client is looking at, or empty if not in a kel session
+# the group of the window the client is looking at, or empty outside kel
 current_group() {
-  local s; s="$(tmux display-message -p '#{client_session}' 2>/dev/null || true)"
-  case "$s" in
-    "$KEL_PREFIX")   printf '%s' "$KEL_PREFIX" ;;
-    "$KEL_PREFIX"/*) printf '%s' "${s#"$KEL_PREFIX"/}" ;;
-  esac
+  # '|', not a tab: an empty @kel-group is a leading empty field, which
+  # IFS=$'\t' read silently drops (CLAUDE.md, traps) — and slugs have no '|'
+  # Only from inside tmux, and about THIS pane.  Outside a client, #{@kel-group}
+  # still resolves against tmux's default window — a guess that silently
+  # disarmed `kel kill`'s ambiguity check.  #{client_session} used to be empty
+  # there, which is what kept the old version honest.
+  [ -n "${TMUX:-}" ] || return 0
+  local v g s
+  v="$(tmux display-message -p ${TMUX_PANE:+-t "$TMUX_PANE"} '#{@kel-group}|#{client_session}' 2>/dev/null || true)"
+  g="${v%%|*}"; s="${v#*|}"
+  if [ -n "$g" ]; then printf '%s' "$g"; return; fi
+  case "$s" in "$KEL_PREFIX"/*) printf '%s' "${s#"$KEL_PREFIX"/}" ;; esac
 }
-
-set_last_group() { printf '%s' "$1" > "$LAST_GROUP_FILE" 2>/dev/null || true; }
-get_last_group() { cat "$LAST_GROUP_FILE" 2>/dev/null || true; }
 
 state_note() { # wid -> the notification text the hook recorded, if any
   [ -f "$STATE_DIR/$1.state" ] || return 0
@@ -248,37 +264,28 @@ effective_state() { # wid
   printf '%s' "$s"
 }
 
-# put kel's group-scoped status-left on a group session
-# (set-option does NOT accept the "=" exact-match prefix; the full name is exact)
-group_session_status() { # group session
-  tmux set-option -t "$2" status-left-length 200 2>/dev/null || true
-  tmux set-option -t "$2" status-left \
-    "#[fg=colour245][$1]#[default] #($SELF status-line $1)" 2>/dev/null || true
-}
-
-# create the window in its group's session (making the session if needed); prints wid
+# create the window in the one session (making it if needed); prints wid
 open_window() { # name cwd group
-  local name="$1" cwd="$2" group="$3" s; s="$(sess "$group")"
-  if tmux has-session -t "=$s" 2>/dev/null; then
-    tmux new-window -t "=$s" -n "$name" -c "$cwd" -P -F '#{window_id}'
+  local name="$1" cwd="$2" group="$3" wid
+  if tmux has-session -t "=$KEL_PREFIX" 2>/dev/null; then
+    wid="$(tmux new-window -t "=$KEL_PREFIX:" -n "$name" -c "$cwd" -P -F '#{window_id}')"
   else
-    local wid
-    wid="$(tmux new-session -d -s "$s" -n "$name" -c "$cwd" -x 220 -y 50 -P -F '#{window_id}')"
-    group_session_status "$group" "$s"
-    printf '%s' "$wid"
+    wid="$(tmux new-session -d -s "$KEL_PREFIX" -n "$name" -c "$cwd" -x 220 -y 50 -P -F '#{window_id}')"
   fi
+  [ -n "$wid" ] || return 1
+  tmux set-option -w -t "$wid" @kel-group "$group" 2>/dev/null || true
+  printf '%s' "$wid"
 }
 
-# move the caller to a window, switching to its group session
-goto_window() { # wid [group]
-  local wid="$1" group="${2:-}" s=''
-  [ -n "$group" ] && s="$(sess "$group")"
+# move the caller to a window, in whichever kel session holds it
+goto_window() { # wid
+  local wid="$1" s
+  s="$(tmux display-message -p -t "$wid" '#{session_name}' 2>/dev/null || true)"
   if in_tmux; then
     [ -n "$s" ] && tmux switch-client -t "=$s" 2>/dev/null || true
     tmux select-window -t "$wid" 2>/dev/null || true
   elif [ -t 1 ]; then
-    if [ -n "$s" ]; then tmux attach -t "=$s" \; select-window -t "$wid"
-    else tmux attach \; select-window -t "$wid"; fi
+    tmux attach -t "=${s:-$KEL_PREFIX}" \; select-window -t "$wid"
   fi
   return 0
 }
@@ -358,6 +365,9 @@ migrate_meta() {
   # non-hot-path command; a chmod on an already-correct dir is one cheap
   # syscall, and doing it here keeps the hot paths free of it.
   chmod 700 "$STATE_DIR" 2>/dev/null
+  # v0.10: one session has no "last group" to return to, and kel no longer
+  # asks about snapshots, so there is no refusal to remember
+  rm -f "$STATE_DIR/last-group" "$STATE_DIR/snapshot-declined"
   for f in "$SESSIONS_DIR"/*.json; do
     [ -e "$f" ] || continue
     nm="$(basename "$f" .json)"
@@ -383,7 +393,7 @@ migrate_meta() {
 meta_is_live() { # path name
   local wid; [ -f "$1" ] || return 1
   wid="$(jq -r '.window_id' "$1")"
-  kel_windows | awk -F'\t' -v w="$wid" -v n="$2" '$4==w && $5==n {found=1} END{exit !found}'
+  kel_windows | awk -F'\t' -v w="$wid" -v n="$2" '$3==w && $4==n {found=1} END{exit !found}'
 }
 
 # records with no live window, as  group<TAB>name<TAB>path
@@ -504,11 +514,10 @@ cmd_new() {
   [ -n "$wid" ] || die "failed to create tmux window"
 
   meta_write "$name" "$wid" "$repo" "$cwd" "$isolation" "$branch" "$agent" "$group"
-  set_last_group "$group"
   [ "$start_agent" = 1 ] && tmux send-keys -t "$wid" "$agent" Enter
 
   say "new agent  $name  [$group]  ($isolation${branch:+, branch $branch})"
-  goto_window "$wid" "$group"
+  goto_window "$wid"
   snapshot
 }
 
@@ -538,7 +547,7 @@ cmd_kill() {
   else
     # no record under that name — the window may have been renamed since
     # `kel new`.  Find the record owning the window currently named $bare.
-    local bw; bw="$(kel_windows | awk -F'\t' -v n="$bare" '$5==n {print $4; exit}')"
+    local bw; bw="$(kel_windows | awk -F'\t' -v n="$bare" '$4==n {print $3; exit}')"
     if [ -n "$bw" ]; then
       rr="$(meta_by_wid "$bw" || true)"
       [ -n "$rr" ] && IFS=$'\t' read -r group name meta <<< "$rr"
@@ -552,7 +561,7 @@ cmd_kill() {
     repo="$(jq -r '.repo // ""' "$meta")"
     name="$(jq -r '.name // empty' "$meta")"; name="${name:-$orig_name}"
   else
-    wid="$(kel_windows | awk -F'\t' -v n="$bare" '$5==n {print $4; exit}')"
+    wid="$(kel_windows | awk -F'\t' -v n="$bare" '$4==n {print $3; exit}')"
     [ -n "$wid" ] || die "no agent '$orig_name'"
     name="$bare"
     warn "'$name' is an unmanaged window — closing it, no metadata to clean up"
@@ -603,15 +612,15 @@ cmd_kill() {
 # --------------------------------------------------------------------------
 # rename a specific window by id + move its metadata record along with it
 rename_agent() { # wid new
-  local wid="$1" new="$2" old grp='' sn
+  local wid="$1" new="$2" old grp='' sn v
   old="$(tmux display-message -p -t "$wid" '#{window_name}' 2>/dev/null)"
   [ -n "$old" ] || { warn "kel rename: window $wid is gone"; return 1; }
   [ "$old" = "$new" ] && return 0
-  sn="$(tmux display-message -p -t "$wid" '#{session_name}' 2>/dev/null || true)"
-  case "$sn" in
-    "$KEL_PREFIX")   grp="$KEL_PREFIX" ;;
-    "$KEL_PREFIX"/*) grp="${sn#"$KEL_PREFIX"/}" ;;
-  esac
+  # the group is the window's @kel-group since v0.10 (one session names none);
+  # a legacy v0.9 kel/<group> session still names it
+  v="$(tmux display-message -p -t "$wid" '#{@kel-group}|#{session_name}' 2>/dev/null || true)"
+  grp="${v%%|*}"; sn="${v#*|}"
+  [ -z "$grp" ] && case "$sn" in "$KEL_PREFIX"/*) grp="${sn#"$KEL_PREFIX"/}" ;; esac
   [ -n "$grp" ] && [ -f "$(meta_path "$grp" "$new")" ] && \
     { warn "an agent named '$new' already exists in [$grp]"; return 1; }
 
@@ -638,7 +647,10 @@ cmd_rename() {
   local new="${1:-}"
   [ -n "$new" ] || die "usage: kel rename <newname>"
   slug_ok "$new" || die "name must be a slug (A-Z a-z 0-9 . _ -)"
-  rename_agent "$(tmux display-message -p '#{window_id}')" "$new"
+  # the window this pane is in, not "the current window": with one session
+  # (v0.10) tmux's notion of current is whichever window was selected last,
+  # which renamed the wrong agent the moment two shared a session
+  rename_agent "$(tmux display-message -p ${TMUX_PANE:+-t "$TMUX_PANE"} '#{window_id}')" "$new"
 }
 
 # --------------------------------------------------------------------------
@@ -749,7 +761,7 @@ cmd_ls() {
       "" )' | sed '$d'
 
   if [ -n "$(printf '%s' "$doc" | jq -r '.agents[] | select(.window_id == null) | .name')" ]; then
-    echo "  dead = window gone.  kel restore [-c] rebuilds  ·  kel prune discards"
+    echo "  dead = window gone.  kel restore rebuilds  ·  kel prune discards"
   fi
   return 0
 }
@@ -763,8 +775,15 @@ agent_resume_cmd() { # agent cid  -> the shell string to resume/start an agent
 }
 
 # --------------------------------------------------------------------------
-# kel snapshot  — save the whole workspace shape (groups/windows/panes)
+# kel snapshot  — save the whole workspace shape (windows/panes/layouts)
 # --------------------------------------------------------------------------
+# Format v2 (v0.10):  {version:2, saved_at, saved_epoch, last,
+#                      windows:[{name, group, layout, panes:[{cwd,cmd}]}]}
+# in window order.  v1 keyed windows by group — one tmux session per repo —
+# which lost the order across groups; restore still reads v1 (see below).
+# saved_epoch is written here rather than derived later: parsing saved_at
+# back needs GNU `date -d` or BSD `date -j`, which disagree (CLAUDE.md,
+# portability).  `last` is the index of the window you were looking at.
 snapshot() {   # silent; called by hooks and state-changing commands
   # A restore owns snapshot.json while it runs (see restore_from_snapshot).
   # This has to be a lockfile, not an env var: the tmux hooks that call us
@@ -779,54 +798,123 @@ snapshot() {   # silent; called by hooks and state-changing commands
     rm -f "$RESTORE_LOCK"
   fi
   command -v tmux >/dev/null 2>&1 && command -v jq >/dev/null 2>&1 || return 0
-  group_sessions | grep -q . || return 0
-  local snap g s
-  snap="$(jq -n --arg t "$(date -u +%FT%TZ)" --arg lg "$(current_group)" \
-               --arg lw "$(tmux display-message -p '#{window_name}' 2>/dev/null || true)" \
-               '{saved_at:$t, last_group:$lg, last_window:$lw, groups:{}}')"
-  while read -r g; do
-    [ -z "$g" ] && continue
-    s="$(sess "$g")"
-    local wins='[]' widx wname wlayout
-    while IFS=$'\t' read -r widx wname wlayout; do
-      [ -z "$widx" ] && continue
-      local panes='[]' pcwd pcmd
-      while IFS=$'\t' read -r pcwd pcmd; do
-        panes="$(printf '%s' "$panes" | jq --arg c "$pcwd" --arg m "$pcmd" '.+[{cwd:$c,cmd:$m}]')"
-      done < <(tmux list-panes -t "$s:$widx" -F '#{pane_current_path}	#{pane_current_command}' 2>/dev/null)
-      wins="$(printf '%s' "$wins" | jq --arg n "$wname" --arg l "$wlayout" --argjson p "$panes" \
-              '.+[{name:$n,layout:$l,panes:$p}]')"
-    done < <(tmux list-windows -t "$s" -F '#{window_index}	#{window_name}	#{window_layout}' 2>/dev/null)
-    snap="$(printf '%s' "$snap" | jq --arg g "$g" --argjson w "$wins" '.groups[$g]=$w')"
-  done < <(group_sessions)
+
+  # Two tmux calls (every window, every pane), one awk to join them, ONE jq
+  # to assemble — the v1 writer forked a jq per pane.  tmux emits tabs (it
+  # escapes control characters in format output, so it cannot emit \037
+  # itself); awk splits on tabs, which keeps empty fields, and re-joins on
+  # \037 for jq.  An empty group is why: it is exactly the field
+  # IFS=$'\t' read would silently drop (CLAUDE.md, traps).  The one session
+  # sorts before any legacy kel/<group> session.
+  local US=$'\037' TAB=$'\t' cur lines
+  cur="$(tmux display-message -p '#{window_id}' 2>/dev/null || true)"
+  lines="$(awk -F'\t' -v US="$US" -v cur="$cur" '
+      NR == FNR { n[$1]++; pc[$1, n[$1]] = $3; pm[$1, n[$1]] = $4; next }
+      { print "W" US $5 US $6 US $7 US ($4 == cur ? "1" : "")
+        for (i = 1; i <= n[$4]; i++) print "P" US pc[$4, i] US pm[$4, i] }' \
+    <(tmux list-panes -a -F '#{window_id}	#{pane_index}	#{pane_current_path}	#{pane_current_command}' 2>/dev/null) \
+    <(tmux list-windows -a -F '#{session_name}	#{window_index}	#{window_id}	#{window_name}	#{window_layout}	#{@kel-group}' 2>/dev/null \
+      | awk -F'\t' -v p="$KEL_PREFIX" '
+          $1 == p || index($1, p"/") == 1 {
+            g = $6
+            if (g == "" && index($1, p"/") == 1) g = substr($1, length(p) + 2)
+            print ($1 == p ? "0" : "1") "\t" $1 "\t" $2 "\t" $3 "\t" $4 "\t" $5 "\t" g
+          }' \
+      | sort -t"$TAB" -k1,1 -k2,2 -k3,3n))"
+  [ -n "$lines" ] || return 0
+
+  local snap
+  snap="$(printf '%s\n' "$lines" \
+    | jq -Rn --arg t "$(date -u +%FT%TZ)" --argjson e "$(date +%s)" --arg us "$US" '
+        reduce (inputs | split($us)) as $r ({windows: [], last: -1};
+          if $r[0] == "W" then
+            (if $r[4] == "1" then .last = (.windows | length) else . end)
+            | .windows += [{name: $r[1], layout: $r[2], group: $r[3], panes: []}]
+          else .windows[-1].panes += [{cwd: $r[1], cmd: $r[2]}] end)
+        | {version: 2, saved_at: $t, saved_epoch: $e, last: .last, windows: .windows}')" || return 0
+  [ "$(printf '%s' "$snap" | jq '.windows | length' 2>/dev/null)" -gt 0 ] 2>/dev/null || return 0
+
   local tmp; tmp="$(mktemp "$STATE_DIR/.snap.XXXXXX" 2>/dev/null)" || return 0
   [ -f "$SNAPSHOT" ] && cp -f "$SNAPSHOT" "$SNAPSHOT.prev" 2>/dev/null
   printf '%s' "$snap" > "$tmp" && mv -f "$tmp" "$SNAPSHOT"
-  rm -f "$SNAPSHOT_DECLINED"          # a new snapshot is a new question
 }
 
 cmd_snapshot() { need tmux; need jq; snapshot; say "snapshot -> ${SNAPSHOT/#$HOME/\~}"; }
 
-# Saying "no" to the rebuild prompt used to last exactly one invocation, so a
-# workspace you had finished with asked again every single time you ran `kel`.
-# Remember the refusal against that snapshot's timestamp: a NEW snapshot is a
-# new question and will ask again, the same one will not.
-decline_snapshot() {
-  jq -r '.saved_at // ""' "$SNAPSHOT" 2>/dev/null > "$SNAPSHOT_DECLINED" || true
-}
-snapshot_declined() {
-  [ -f "$SNAPSHOT_DECLINED" ] || return 1
-  local d s
-  read -r d < "$SNAPSHOT_DECLINED" 2>/dev/null || return 1
-  s="$(jq -r '.saved_at // ""' "$SNAPSHOT" 2>/dev/null)"
-  [ -n "$d" ] && [ "$d" = "$s" ]
+# --------------------------------------------------------------------------
+# the archive  —  restore by choice (v0.10)
+# --------------------------------------------------------------------------
+# Until v0.10, `kel` stopped on a rebuild prompt whenever a snapshot existed
+# and the server was down — every first `kel` after a reboot, whatever you
+# came to do.  The author never understood what it was asking and just wanted
+# to move on.  Now `kel` always just opens, and `kel restore` brings a previous
+# workspace back, the way `claude --resume` does.
+#
+# The catch that makes this more than deleting a prompt: the snapshot hooks
+# rewrite snapshot.json within seconds of anything changing, so starting fresh
+# would silently destroy the old workspace.  So before a fresh start, kel moves
+# it here.  Newest five kept.  File names are the archive epoch, so a numeric
+# sort on the name is a sort by age — no stat(1), no sort -V.
+archive_snapshot() {
+  [ -f "$SNAPSHOT" ] || return 1
+  mkdir -p "$SNAPSHOT_ARCHIVE" || return 1
+  local t; t="$(date +%s)"
+  while [ -e "$SNAPSHOT_ARCHIVE/$t.json" ]; do t=$((t + 1)); done
+  mv -f "$SNAPSHOT" "$SNAPSHOT_ARCHIVE/$t.json" || return 1
+  local f
+  archived_snapshots | tail -n +6 | while read -r f; do rm -f "$f"; done
+  return 0
 }
 
-# rebuild the workspace from snapshot.json (windows, splits, layout, agents)
-restore_from_snapshot() {   # [-c]
+# archived snapshots, newest first, one path per line
+archived_snapshots() {
+  [ -d "$SNAPSHOT_ARCHIVE" ] || return 0
+  local f n
+  for f in "$SNAPSHOT_ARCHIVE"/*.json; do
+    [ -e "$f" ] || continue
+    n="${f##*/}"; n="${n%.json}"
+    case "$n" in ''|*[!0-9]*) continue ;; esac
+    printf '%s\n' "$f"
+  done | awk -F/ '{n=$NF; sub(/\.json$/,"",n); print n"\t"$0}' | sort -t"$(printf '\t')" -k1,1nr | cut -f2-
+}
+
+# what `kel restore` can bring back, newest first: the last workspace's own
+# snapshot.json while no kel session is running (nothing has replaced it
+# yet), then the archive
+restore_candidates() {
+  [ -f "$SNAPSHOT" ] && [ -z "$(kel_sessions)" ] && printf '%s\n' "$SNAPSHOT"
+  archived_snapshots
+}
+
+# window count and names of a v1 or v2 snapshot, tab-separated
+snapshot_summary() { # file
+  jq -r '(if .version == 2 then [.windows[].name]
+          else [.groups[][].name] end) as $n
+         | "\($n | length)\t\($n | join(" "))"' "$1" 2>/dev/null
+}
+
+restore_list() {
+  local i=0 f n names ep age now; now="$(date +%s)"
+  while read -r f; do
+    [ -n "$f" ] || continue
+    i=$((i + 1))
+    IFS=$'\t' read -r n names < <(snapshot_summary "$f")
+    ep="$(jq -r '.saved_epoch // empty' "$f" 2>/dev/null)"
+    case "$ep" in
+      ''|*[!0-9]*) age="$(jq -r '.saved_at // "?"' "$f" 2>/dev/null)" ;;
+      *)           age="$(humanize_secs $((now - ep))) ago" ;;
+    esac
+    printf '  %d  %-10s %2s window(s)  %s\n' "$i" "$age" "${n:-?}" "${names:-}"
+  done < <(restore_candidates)
+  [ "$i" -gt 0 ] || { say "no saved workspace to restore"; return 0; }
+  echo "  kel restore [<n>]   bring one back (newest is 1)"
+}
+
+# rebuild a workspace from a v1 or v2 snapshot (windows, splits, layout, agents)
+restore_from_snapshot() {   # file resume(1|0)
   need tmux; need jq
-  [ -f "$SNAPSHOT" ] || { warn "no snapshot to restore"; return 1; }
-  local cont=0; [ "${1:-}" = "-c" ] && cont=1
+  local src="$1" resume="${2:-1}"
+  [ -f "$src" ] || { warn "no snapshot to restore"; return 1; }
 
   # Rebuilding the workspace fires tmux's own after-split-window / pane-exited
   # hooks, which run `kel snapshot` in the background — that would write the
@@ -834,111 +922,132 @@ restore_from_snapshot() {   # [-c]
   # truncating the restore and destroying the record of everything not yet
   # rebuilt.  Hold the lock so those writes stand down, and read from a private
   # copy so nothing can move underneath us either way.
-  local src="$SNAPSHOT"
   date +%s > "$RESTORE_LOCK"
-  local SNAPSHOT
-  SNAPSHOT="$(mktemp "$STATE_DIR/.snapin.XXXXXX" 2>/dev/null)" \
+  local snap
+  snap="$(mktemp "$STATE_DIR/.snapin.XXXXXX" 2>/dev/null)" \
     || { rm -f "$RESTORE_LOCK"; warn "no scratch space to restore from"; return 1; }
-  cp -f "$src" "$SNAPSHOT"
-  local lg lw first_wid='' dest_wid=''
-  lg="$(jq -r '.last_group // ""' "$SNAPSHOT")"
-  lw="$(jq -r '.last_window // ""' "$SNAPSHOT")"
+  cp -f "$src" "$snap"
 
-  local g wi nw
-  while read -r g; do
-    [ -z "$g" ] && continue
-    nw="$(jq -r --arg g "$g" '.groups[$g] | length' "$SNAPSHOT")"
-    for ((wi=0; wi<nw; wi++)); do
-      local wname wlayout np
-      wname="$(jq -r   --arg g "$g" --argjson i "$wi" '.groups[$g][$i].name'          "$SNAPSHOT")"
-      wlayout="$(jq -r --arg g "$g" --argjson i "$wi" '.groups[$g][$i].layout // ""'  "$SNAPSHOT")"
-      np="$(jq -r      --arg g "$g" --argjson i "$wi" '.groups[$g][$i].panes | length' "$SNAPSHOT")"
+  # One jq pass flattens v1 or v2 into lines:  W name group layout last
+  # followed by  P cwd cmd  per pane.  \037-separated for the same reason as
+  # the writer: group may be empty.  A v1 snapshot is a v0.9 one, a session
+  # per group; flattening it is what restores it into the one session.
+  local US=$'\037' plan
+  plan="$(jq -r --arg us "$US" '
+      . as $s
+      | ( if (.version // 1) == 2 then
+            [ .windows | to_entries[] | .value + {last: (.key == ($s.last // -1))} ]
+          else
+            [ .groups | to_entries[] | .key as $g | .value[]
+              | . + {group: $g,
+                     last: ($g == ($s.last_group // "") and .name == ($s.last_window // ""))} ]
+          end )[]
+      | (["W", .name, (.group // ""), (.layout // ""), (if .last then "1" else "" end)] | join($us)),
+        (.panes[] | ["P", (.cwd // ""), (.cmd // "")] | join($us))' "$snap" 2>/dev/null)"
 
-      # already live? leave it
-      kel_windows | awk -F'\t' -v s="$(sess "$g")" -v n="$wname" '$1==s&&$5==n{f=1}END{exit !f}' && continue
-
-      local p0; p0="$(jq -r --arg g "$g" --argjson i "$wi" '.groups[$g][$i].panes[0].cwd // ""' "$SNAPSHOT")"
-      [ -d "$p0" ] || p0="$HOME"
-      local wid; wid="$(open_window "$wname" "$p0" "$g")"
-      [ -n "$wid" ] || continue
-      [ -z "$first_wid" ] && first_wid="$wid"
-
-      local -a pids; pids=( "$(tmux list-panes -t "$wid" -F '#{pane_id}' | head -1)" )
-      local pj pc
-      for ((pj=1; pj<np; pj++)); do
-        pc="$(jq -r --arg g "$g" --argjson i "$wi" --argjson j "$pj" '.groups[$g][$i].panes[$j].cwd // ""' "$SNAPSHOT")"
-        [ -d "$pc" ] || pc="$HOME"
-        pids+=( "$(tmux split-window -t "$wid" -c "$pc" -P -F '#{pane_id}')" )
-      done
-      [ -n "$wlayout" ] && tmux select-layout -t "$wid" "$wlayout" 2>/dev/null || true
-
-      local meta; meta="$(meta_path "$g" "$wname")"
-      if [ -f "$meta" ]; then
-        jq --arg w "$wid" '.window_id=$w' "$meta" > "$meta.t" && mv "$meta.t" "$meta"
-        if [ "$cont" = 1 ]; then
-          tmux send-keys -t "${pids[0]}" \
-            "$(agent_resume_cmd "$(jq -r '.agent // "claude"' "$meta")" "$(jq -r '.claude_session // ""' "$meta")")" Enter
-        fi
-      fi
-      for ((pj=1; pj<np; pj++)); do
-        pc="$(jq -r --arg g "$g" --argjson i "$wi" --argjson j "$pj" '.groups[$g][$i].panes[$j].cmd // ""' "$SNAPSHOT")"
-        case " $KEL_RESTORE_CMDS " in *" $pc "*) tmux send-keys -t "${pids[$pj]}" "$pc" Enter ;; esac
-      done
-
-      [ "$g" = "$lg" ] && [ "$wname" = "$lw" ] && dest_wid="$wid"
+  local first_wid='' dest_wid='' wid='' wname='' wg='' wlayout='' wlast='' meta=''
+  local -a cwds=() cmds=()
+  # build one window from what has been collected for it
+  _restore_window() {
+    [ -n "$wname" ] || return 0
+    # already live in kel? leave it — a restore into a running workspace only
+    # adds what is missing
+    if kel_windows | awk -F'\t' -v n="$wname" -v g="$wg" '$4==n && $5==g {f=1} END{exit !f}'; then
+      return 0
+    fi
+    local p0="${cwds[0]:-$HOME}"; [ -d "$p0" ] || p0="$HOME"
+    wid="$(open_window "$wname" "$p0" "$wg")" || return 0
+    [ -n "$first_wid" ] || first_wid="$wid"
+    [ "$wlast" = 1 ] && dest_wid="$wid"
+    local -a pids; pids=( "$(tmux list-panes -t "$wid" -F '#{pane_id}' | head -1)" )
+    local j pc
+    for ((j = 1; j < ${#cwds[@]}; j++)); do
+      pc="${cwds[$j]}"; [ -d "$pc" ] || pc="$HOME"
+      pids+=( "$(tmux split-window -t "$wid" -c "$pc" -P -F '#{pane_id}')" )
     done
-  done < <(jq -r '.groups | keys[]' "$SNAPSHOT")
+    [ -n "$wlayout" ] && tmux select-layout -t "$wid" "$wlayout" 2>/dev/null || true
 
-  [ -n "$lg" ] && set_last_group "$lg"
+    meta=''; [ -n "$wg" ] && [ -f "$(meta_path "$wg" "$wname")" ] && meta="$(meta_path "$wg" "$wname")"
+    if [ -n "$meta" ]; then
+      jq --arg w "$wid" '.window_id=$w' "$meta" > "$meta.t" && mv "$meta.t" "$meta"
+      # resuming is why you restore, so it is the default (v0.10); invariant 4's
+      # one sanctioned send-keys besides launch
+      [ "$resume" = 1 ] && tmux send-keys -t "${pids[0]}" \
+        "$(agent_resume_cmd "$(jq -r '.agent // "claude"' "$meta")" "$(jq -r '.claude_session // ""' "$meta")")" Enter
+    fi
+    for ((j = 0; j < ${#cmds[@]}; j++)); do
+      [ "$j" = 0 ] && [ -n "$meta" ] && continue
+      case " $KEL_RESTORE_CMDS " in *" ${cmds[$j]} "*) tmux send-keys -t "${pids[$j]}" "${cmds[$j]}" Enter ;; esac
+    done
+  }
+
+  local kind a b c d
+  while IFS="$US" read -r kind a b c d; do
+    case "$kind" in
+      W) _restore_window
+         wname="$a"; wg="$b"; wlayout="$c"; wlast="$d"; cwds=(); cmds=() ;;
+      P) cwds+=( "$a" ); cmds+=( "$b" ) ;;
+    esac
+  done <<< "$plan"
+  _restore_window
+  unset -f _restore_window
+
   local dest="${dest_wid:-$first_wid}"
-  [ -n "$dest" ] && goto_window "$dest" "$lg"
+  [ -n "$dest" ] && goto_window "$dest"
 
-  rm -f "$SNAPSHOT" "$RESTORE_LOCK"
+  rm -f "$snap" "$RESTORE_LOCK"
   snapshot                     # release the lock, then record what we rebuilt
-  say "workspace restored from snapshot"
+  say "workspace restored"
 }
 
 # --------------------------------------------------------------------------
-# kel restore
+# kel restore [--list] [<n>] [--no-resume]
 # --------------------------------------------------------------------------
 cmd_restore() {
   need tmux; need jq
-  local continue_agent=0 use_snap=auto
+  local resume=1 list=0 pick=''
   while [ $# -gt 0 ]; do
     case "$1" in
-      --continue|-c)  continue_agent=1 ;;
-      --snapshot|-s)  use_snap=yes ;;
-      --no-snapshot)  use_snap=no ;;
-      *) die "kel restore: unknown arg $1" ;;
+      --no-resume)  resume=0 ;;
+      --list|-l)    list=1 ;;
+      ''|*[!0-9]*)  die "kel restore: unknown arg $1   (kel restore [--list] [<n>] [--no-resume])" ;;
+      *)            pick="$1" ;;
     esac
     shift
   done
+  [ "$list" = 1 ] && { restore_list; return; }
 
-  if [ "$use_snap" = yes ] || { [ "$use_snap" = auto ] && [ -f "$SNAPSHOT" ] && [ -z "$(group_sessions)" ]; }; then
-    restore_from_snapshot "$([ "$continue_agent" = 1 ] && printf -- -c)"
-    return
+  local src
+  src="$(restore_candidates | sed -n "${pick:-1}p")"
+  if [ -n "$src" ]; then
+    restore_from_snapshot "$src" "$resume" || return 1
+    # an archived workspace that is live again is not "previous" any more;
+    # the running one is snapshotted to snapshot.json as usual
+    case "$src" in "$SNAPSHOT_ARCHIVE"/*) rm -f "$src" ;; esac
+    return 0
   fi
+  [ -n "$pick" ] && die "no saved workspace #$pick — see kel restore --list"
 
+  # no snapshot anywhere: rebuild the dead records, one window each
   local names; names="$(dead_sessions)"
   [ -n "$names" ] || { say "nothing to restore"; return 0; }
 
-  local n meta cwd agent cid grp wid restored=0 lastgrp=''
+  local n meta cwd agent cid grp wid='' restored=0
   while IFS=$'\t' read -r grp n meta; do
     [ -z "$n" ] && continue
     cwd="$(jq -r '.cwd // ""' "$meta")"
     agent="$(jq -r '.agent // "claude"' "$meta")"
     cid="$(jq -r '.claude_session // ""' "$meta")"
     [ -d "$cwd" ] || { warn "skip $n — its directory is gone ($cwd)"; continue; }
-    wid="$(open_window "$n" "$cwd" "$grp")"
-    [ -n "$wid" ] || { warn "skip $n — couldn't open a window"; continue; }
+    wid="$(open_window "$n" "$cwd" "$grp")" || { warn "skip $n — couldn't open a window"; continue; }
     jq --arg w "$wid" '.window_id=$w' "$meta" > "$meta.tmp" && mv "$meta.tmp" "$meta"
-    [ "$continue_agent" = 1 ] && tmux send-keys -t "$wid" "$(agent_resume_cmd "$agent" "$cid")" Enter
-    lastgrp="$grp"; restored=$((restored+1))
+    [ "$resume" = 1 ] && tmux send-keys -t "$wid" "$(agent_resume_cmd "$agent" "$cid")" Enter
+    restored=$((restored+1))
   done <<< "$names"
 
-  [ "$continue_agent" = 1 ] && say "restored $restored agent(s) — resuming" \
-                            || say "restored $restored agent(s) — not started"
-  [ -n "$lastgrp" ] && { set_last_group "$lastgrp"; goto_window "$wid" "$lastgrp"; }
+  [ "$resume" = 1 ] && say "restored $restored agent(s) — resuming" \
+                    || say "restored $restored agent(s) — not started"
+  [ -n "$wid" ] && goto_window "$wid"
   snapshot
 }
 
@@ -969,7 +1078,7 @@ cmd_relaunch() {
   local group meta wid rr rc=0
   if [ -z "$name" ]; then
     [ -n "${TMUX:-}" ] || die "usage: kel relaunch <name>   (or run it from inside the agent's window)"
-    wid="$(tmux display-message -p '#{window_id}' 2>/dev/null)"
+    wid="$(tmux display-message -p ${TMUX_PANE:+-t "$TMUX_PANE"} '#{window_id}' 2>/dev/null)"   # this pane's window — see cmd_rename
     rr="$(meta_by_wid "$wid" || true)"
     [ -n "$rr" ] || die "this window isn't a managed agent"
     IFS=$'\t' read -r group name meta <<< "$rr"
@@ -1330,7 +1439,12 @@ cmd_status_line() {
   # effective_state (a tmux fork each) and then walk them all again to count
   # waiting agents elsewhere.  --dirty is deliberately NOT passed: the bar
   # never shows it and `git status` per worktree is the expensive part.
-  fleet_json | jq -r --arg want "${1:-}" --argjson warn "${KEL_CTX_WARN:-70}" '
+  #
+  # One session since v0.10, so the bar is every live window in index order —
+  # no per-group row and no ⟨other groups⟩ badge.  This is the interim bar:
+  # spec.md §7b replaces it with the workspace footer in M4.  A v0.9 session
+  # may still pass a group argument from its own status-left; it is ignored.
+  fleet_json | jq -r --argjson warn "${KEL_CTX_WARN:-70}" '
     def glyph:
       if   . == "waiting"   then {s:"?", c:"#[fg=colour214,bold]"}
       elif . == "working"   then {s:"*", c:"#[fg=colour111]"}
@@ -1339,40 +1453,23 @@ cmd_status_line() {
       elif . == "dead"      then {s:"x", c:"#[fg=colour167,bold]"}
       else {s:"", c:""} end;
 
-    (if $want == "" then (.current.group // "") else $want end) as $g
-    | [.agents[] | select(.window_id != null)] as $live
-    | if $g == "" then
-        ($live | length) as $n
-        | ([$live[] | select(.state == "waiting")] | length) as $w
-        | if   $n == 0 then ""
-          elif $w > 0  then "#[fg=colour245][kel]#[default] #[fg=colour214,bold]\($n) agent\(if $n == 1 then "" else "s" end) · \($w) waiting#[default] "
-          else              "#[fg=colour245][kel] \($n) agents#[default] " end
+    [ .agents[] | select(.window_id != null) ] | sort_by(.index)
+    | if length == 0 then ""
       else
-        ( [ $live[] | select(.group == $g) ] | sort_by(.index)
-            | map(
-                . as $a | ($a.state // "" | glyph) as $gl
-                | ($a.panes | length) as $np
-                | ($a.context.pct // null) as $pct
-                | ( $a.name
-                    + (if $np > 1 then "#[fg=colour240]·\($np)#[default]" + $gl.c else "" end)
-                    + (if ($pct != null and $pct >= $warn)
-                       then (if $pct >= 90 then "#[fg=colour167,bold]" else "#[fg=colour179]" end)
-                            + "·\($pct)%#[default]" + $gl.c
-                       else "" end) ) as $nm
-                | $gl.c
-                  + (if $a.current then "[\($a.index):\($nm)\($gl.s)]" else "\($a.index):\($nm)\($gl.s)" end)
-                  + "#[default]" )
-            | " " + join(" ") ) as $row
-        | ( [ $live[] | select(.group != $g and .state == "waiting") | .group ]
-            | group_by(.) | map({g:.[0], n:length}) | sort_by(-.n, .g) ) as $others
-        | $row
-          + ( if ($others | length) == 0 then ""
-              else "  #[fg=colour214]⟨"
-                   + ( ( $others[0:3] | map("\(.g)·\(.n)") | join(" ") )
-                       + ( ($others[3:] | map(.n) | add) as $x
-                           | if $x == null then "" else " +\($x)" end ) )
-                   + "⟩#[default]" end )
-          + " "
+        map(
+          . as $a | ($a.state // "" | glyph) as $gl
+          | ($a.panes | length) as $np
+          | ($a.context.pct // null) as $pct
+          | ( $a.name
+              + (if $np > 1 then "#[fg=colour240]·\($np)#[default]" + $gl.c else "" end)
+              + (if ($pct != null and $pct >= $warn)
+                 then (if $pct >= 90 then "#[fg=colour167,bold]" else "#[fg=colour179]" end)
+                      + "·\($pct)%#[default]" + $gl.c
+                 else "" end) ) as $nm
+          | $gl.c
+            + (if $a.current then "[\($a.index):\($nm)\($gl.s)]" else "\($a.index):\($nm)\($gl.s)" end)
+            + "#[default]" )
+        | "#[fg=colour245][kel]#[default] " + join(" ") + " "
       end'
 }
 
@@ -1385,12 +1482,14 @@ cmd_jump() {
   cs="$(tmux display-message -p '#{client_session}' 2>/dev/null || true)"
   cw="$(tmux display-message -p '#{window_index}' 2>/dev/null || echo '')"
 
+  # session, then index: one session since v0.10, but a legacy v0.9 server
+  # can still hold kel/<group> sessions, and the cycle must cross them too
   local -a w=()
-  while IFS=$'\t' read -r sname _ idx wid _; do
+  while IFS=$'\t' read -r sname idx wid _; do
     [ -z "${wid:-}" ] && continue
     [ "$(effective_state "$wid")" = waiting ] || continue
     w+=( "$sname"$'\t'"$idx"$'\t'"$wid" )
-  done < <(kel_windows | sort -t$'\t' -k2,2 -k3,3n)
+  done < <(kel_windows | sort -t$'\t' -k1,1 -k2,2n)
 
   local n="${#w[@]}"
   [ "$n" -eq 0 ] && { tmux display-message "kel: nothing waiting"; exit 0; }
@@ -1415,13 +1514,15 @@ cmd_jump() {
   fi
   local ts ti tw
   IFS=$'\t' read -r ts ti tw <<< "$tgt"
-  tmux switch-client -t "=$ts" \; select-window -t "$ti"
+  tmux switch-client -t "=$ts" \; select-window -t "$tw"
 
   # say where you landed and how long it has been sitting — the jump is
   # otherwise silent, and "which one was that?" is the next question
-  local grp="$ts" nm ep
-  case "$ts" in "$KEL_PREFIX") ;; "$KEL_PREFIX"/*) grp="${ts#"$KEL_PREFIX"/}" ;; esac
-  nm="$(tmux display-message -p -t "$tw" '#{window_name}' 2>/dev/null || echo "$ti")"
+  local grp nm ep v
+  v="$(tmux display-message -p -t "$tw" '#{@kel-group}|#{window_name}' 2>/dev/null || true)"
+  grp="${v%%|*}"; nm="${v#*|}"; [ -n "$nm" ] || nm="$ti"
+  [ -z "$grp" ] && case "$ts" in "$KEL_PREFIX"/*) grp="${ts#"$KEL_PREFIX"/}" ;; esac
+  grp="${grp:-$KEL_PREFIX}"
   ep=''; [ -f "$STATE_DIR/$tw.state" ] && read -r _ ep _ < "$STATE_DIR/$tw.state" 2>/dev/null
   case "${ep:-}" in ''|*[!0-9]*) ep='' ;; esac
   if [ -n "$ep" ]; then
@@ -1650,12 +1751,18 @@ cmd_statusline() {
   # ---- render Claude Code's row ----
   local label=''
   if [ -n "$wid" ]; then
-    local sn wn; sn="$(tmux display-message -p -t "$wid" '#{session_name}' 2>/dev/null || true)"
-    wn="$(tmux display-message -p -t "$wid" '#{window_name}' 2>/dev/null || true)"
-    case "$sn" in
-      "$KEL_PREFIX")   label="$wn" ;;
-      "$KEL_PREFIX"/*) label="${sn#"$KEL_PREFIX"/}/$wn" ;;
-    esac
+    # one display-message, not two: this is a hot path. '|' separates because
+    # an empty @kel-group would be a leading empty field to IFS-tab read
+    local v kg sn wn
+    v="$(tmux display-message -p -t "$wid" '#{@kel-group}|#{session_name}|#{window_name}' 2>/dev/null || true)"
+    kg="${v%%|*}"; v="${v#*|}"; sn="${v%%|*}"; wn="${v#*|}"
+    if [ -n "$kg" ]; then label="$kg/$wn"
+    else
+      case "$sn" in
+        "$KEL_PREFIX")   label="$wn" ;;
+        "$KEL_PREFIX"/*) label="${sn#"$KEL_PREFIX"/}/$wn" ;;
+      esac
+    fi
   fi
 
   # Outside a kel window there is no label, so the payload's own repo and
@@ -1827,10 +1934,23 @@ quickstart() {
   cat <<'EOF'
 
   kel new <name>     start an agent in the current repo
+  kel restore        bring back a previous workspace (--list to choose)
   prefix `           jump to whichever agent is waiting on you
   prefix t           kel top — every agent, its state, context and cost
 
 EOF
+}
+
+# attach to the workspace — or, with no terminal (scripts, the test suite),
+# say how to and return, rather than fail on "open terminal failed"
+attach_workspace() { # [wid]
+  local s="$KEL_PREFIX"
+  kel_sessions | grep -qxF "$KEL_PREFIX" || s="$(kel_sessions | head -1)"
+  if [ -t 0 ] && [ -t 1 ]; then
+    if [ -n "${1:-}" ]; then exec tmux attach -t "=$s" \; select-window -t "$1"
+    else exec tmux attach -t "=$s"; fi
+  fi
+  say "workspace running — tmux attach -t $s"
 }
 
 cmd_attach() {
@@ -1841,78 +1961,48 @@ cmd_attach() {
     cmd_ls; return
   fi
 
-  local groups; groups="$(group_sessions)"
-
   # dir target, the way `claude` keys off the current directory:
-  # KEL_GROUP, else the repo we're standing in.
+  # KEL_GROUP, else .kel/group or the repo we're standing in.
   local want=''
   if [ -n "${KEL_GROUP:-}" ]; then want="$KEL_GROUP"
-  elif git_root >/dev/null 2>&1; then want="$(basename "$(git_root)")"
+  elif git_root >/dev/null 2>&1; then want="$(group_for_cwd)"
   fi
   slug_ok "$want" || want=''
 
-  # 1. dir-aware attach — this repo's group is already live
-  if [ -n "$want" ] && printf '%s\n' "$groups" | grep -qxF "$want"; then
-    set_last_group "$want"
-    exec tmux attach -t "=$(sess "$want")"
-  fi
-
-  # 2. live workspace, not in a repo — attach the last group you used
-  if [ -n "$groups" ] && [ -z "$want" ]; then
-    local last target; last="$(get_last_group)"
-    if [ -n "$last" ] && printf '%s\n' "$groups" | grep -qxF "$last"; then
-      target="$last"
-    else
-      target="$(printf '%s\n' "$groups" | head -1)"
+  # 1. a live workspace: go to it — at this repo's agent if it has one, or
+  #    start one for this repo if it does not
+  if [ -n "$(kel_sessions)" ]; then
+    local wid=''
+    [ -n "$want" ] && wid="$(kel_windows | awk -F'\t' -v g="$want" '$5==g {print $3; exit}')"
+    if [ -n "$want" ] && [ -z "$wid" ]; then
+      say "no agent for '$want' yet — starting one"
+      exec "$SELF" new "$want"
     fi
-    exec tmux attach -t "=$(sess "$target")"
-  fi
-
-  # 3. live workspace, in a repo with no group of its own yet — start its agent
-  if [ -n "$groups" ] && [ -n "$want" ]; then
-    say "no agent for '$want' yet — starting one"
-    exec "$SELF" new "$want"
-  fi
-
-  # --- no live groups below this point ---
-
-  # 4. server down but the workspace was snapshotted — offer to rebuild it
-  if [ -f "$SNAPSHOT" ] && ! snapshot_declined; then
-    local ng na
-    ng="$(jq -r '.groups | length' "$SNAPSHOT" 2>/dev/null || echo '?')"
-    na="$(jq -r '[.groups[][].name] | length' "$SNAPSHOT" 2>/dev/null || echo '?')"
-    if [ -t 0 ] && [ -t 1 ]; then
-      printf '\033[1;33mkel\033[0m rebuild your workspace? %s group(s), %s window(s)  [Y/n/d=discard] ' "$ng" "$na"
-      local ans=''; read -r ans || ans=n
-      case "$ans" in
-        d|D|discard)
-          rm -f "$SNAPSHOT" "$SNAPSHOT.prev" "$SNAPSHOT_DECLINED"
-          say "discarded the saved workspace" ;;
-        n|N|no)
-          decline_snapshot
-          say "ok — starting fresh; 'kel restore' still rebuilds it, and this won't ask again" ;;
-        *) restore_from_snapshot -c; return ;;
-      esac
-      # declined — fall through to a fresh start instead of dead-ending
-    else
-      say "workspace snapshot found ($ng groups, $na windows) — 'kel restore' to rebuild"
-      return
-    fi
-  elif [ -n "$(dead_sessions)" ]; then
-    warn "no live workspace, but these agents can be rebuilt:"
-    cmd_ls
-    echo "  kel restore [-c]  rebuild them   ·   kel prune  discard them"
+    attach_workspace "$wid"
     return
   fi
 
-  # 5. fresh start — dir-aware if we're in a repo
+  # 2. no live workspace.  Never ask (v0.10): until then this stopped on a
+  #    rebuild prompt, every first `kel` after a reboot, whatever you came to
+  #    do.  Put the old workspace somewhere a fresh start cannot overwrite it,
+  #    say so in one line, and carry on.  `kel restore` brings it back.
+  if [ -f "$SNAPSHOT" ]; then
+    local n; n="$(snapshot_summary "$SNAPSHOT" | cut -f1)"
+    archive_snapshot && say "previous workspace: ${n:-?} window(s) · kel restore"
+  elif [ -n "$(dead_sessions)" ]; then
+    say "agents from before can be brought back: kel restore   (kel prune discards them)"
+  fi
+
+  # 3. fresh start — dir-aware if we're in a repo
   if [ -n "$want" ]; then
     say "starting an agent for '$want'"
     exec "$SELF" new "$want"
   fi
   say "welcome to kel."
   quickstart
-  exec tmux new-session -s "$(sess misc)" -c "$HOME"
+  if [ -t 0 ] && [ -t 1 ]; then exec tmux new-session -s "$KEL_PREFIX" -c "$HOME"; fi
+  tmux new-session -d -s "$KEL_PREFIX" -c "$HOME"
+  say "workspace started — tmux attach -t $KEL_PREFIX"
 }
 
 usage() { awk 'NR>1 && /^#/ {sub(/^# ?/,""); print; next} NR>1 {exit}' "$0"; }

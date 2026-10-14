@@ -42,7 +42,7 @@ _kel() {
       esac
       ;;
     restore)
-      COMPREPLY=( $(compgen -W "-c -s" -- "$cur") )
+      COMPREPLY=( $(compgen -W "--list --no-resume" -- "$cur") )
       ;;
     relaunch)
       case "$cur" in

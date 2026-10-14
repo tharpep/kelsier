@@ -26,13 +26,17 @@ able to lose work. `--uninstall --purge` removes that too, after asking.
 **Upgrading from v0.9:** a running tmux server keeps the old bindings
 (`Ctrl+Space`, `prefix b`, `prefix m`, `prefix k`) until it restarts —
 `source-file` adds bindings, it does not remove them. `tmux kill-server` (after
-`kel snapshot`) or unbind them by hand.
+`kel snapshot`) or unbind them by hand. Per-repo sessions from v0.9
+(`kel/<group>`) keep working until their windows close; new windows go into
+the one `kel` session, and `kel restore` brings a v0.9 snapshot back into it.
 
 ## Commands
 
 ```
 kel                    in a repo: go to (or start) that repo's agent, the way
-                       `claude` keys off the directory. Elsewhere: your last group.
+                       `claude` keys off the directory. Never asks anything:
+                       with no workspace running it starts fresh and, if there
+                       was one before, says `kel restore` brings it back
 kel new <name>         new window + agent in the current repo   (inplace)
 kel new <name> -w      ...in a fresh git worktree on a new branch <name>
 kel new <name> --group G       put it in group G instead of the repo's
@@ -50,8 +54,9 @@ kel sweep [-n] [-f]    close out every finished agent whose branch has landed;
                        anything dirty, unpushed or unmerged is reported, never
                        touched. -n shows the plan first
 kel relaunch [name]    relaunch ONE crashed agent in its existing window
-kel restore [-c] [-s]  rebuild the workspace after a kill / reboot
-                       (-c resume conversations; -s force the snapshot)
+kel restore [<n>]      bring back a previous workspace — windows, splits,
+                       directories, conversations resumed (--no-resume: don't)
+kel restore --list     the last five saved workspaces, newest first
 kel prune [-f]         discard dead agent records (and their worktrees)
 kel doctor             check the machine; every failure prints its fix
 kel config             edit config.toml (seeded from the example, once)
@@ -71,8 +76,7 @@ Internal (wired into tmux / Claude Code): `kel status-line`, `kel jump`,
 |---|---|
 | `` prefix ` `` | jump to the next agent **waiting** on you — any group |
 | `prefix t` | `kel top` |
-| `prefix g` | pick a group (tmux session tree) |
-| `prefix 1..9` / `n` / `p` / `w` | move between agents in the group (native tmux) |
+| `prefix 1..9` / `n` / `p` / `w` | move between windows — every agent is in one session (native tmux) |
 | `prefix ,` | rename this window (routes through `kel rename`) |
 | `prefix \|` / `-` | split, keeping the current directory |
 | `prefix [` | scroll mode for a shell pane (`q` to leave) |
@@ -82,15 +86,17 @@ Internal (wired into tmux / Claude Code): `kel status-line`, `kel jump`,
 `kel.conf` also turns on the mouse (to select text, hold Shift while you drag),
 counts windows from 1, and labels each pane.
 
-## Groups — for now
+## Groups
 
-**A group is a tmux session**, `kel/<group>`, and by default a group is a repo:
-`kel new` reads `$PWD` at that moment and uses the git root's basename. `--group
-G` or `$KEL_GROUP` override it; a `.kel/group` file pins a directory and
-everything under it (`$KEL_GROUP` still wins). Non-repo agents go to `misc`.
+**Every window lives in one tmux session, `kel`**; a group is a label, not a
+session. By default it is the repo: `kel new` reads `$PWD` at that moment and
+uses the git root's basename. `--group G` or `$KEL_GROUP` override it; a
+`.kel/group` file pins a directory and everything under it (`$KEL_GROUP` still
+wins). Non-repo agents go to `misc`. A window you make yourself (`prefix c`)
+gets the group of the repo its pane is standing in.
 
-The sidebar groups by repo on its own, so sessions-per-group may not survive
-the pivot (`spec.md` §5c).
+The group is what `kel ls` sorts by, what `kel kill <group>/<name>` names, and
+— from M3 — what the sidebar groups rows under.
 
 **window vs pane:** `kel new` makes a **window** — one agent. `prefix | / -`
 makes a **pane** inside it, for your own editor, shell or tests. kel tracks
@@ -99,29 +105,34 @@ state per window, so a second agent belongs in its own window.
 ## The status bar
 
 ```
-[api-gw] 1:auth-fix? [2:rate-limit·91%*] 3:docs   ⟨infra·1 web·2⟩
+[kel] 1:auth-fix? [2:rate-limit·91%*] 3:docs 4:sazed
 ```
 
 `?` waiting on you · `*` working · `!` done · `~` throttled (waiting on quota,
 resumes itself) · `x` dead (the process exited without a clean stop — `kel
 relaunch` or `kel kill` it) · bare = idle · `[ ]` current window · `·91%`
-context, shown from `KEL_CTX_WARN` (default 70) up · `⟨…⟩` other groups with
-agents blocked on you. If `kel-fleet` is missing the bar says so in red rather
-than going blank.
+context, shown from `KEL_CTX_WARN` (default 70) up. If `kel-fleet` is missing
+the bar says so in red rather than going blank. This is an interim bar: M4
+turns it into the workspace footer (`spec.md` §7b).
 
 ## Detach, kill, reboot
 
 **`prefix d` detaches** and snapshots; every agent keeps running and `kel`
-brings you back. **Killing** a session ends its agents; `kel ls` then shows
-them `dead`. **After a reboot**, `kel` offers to rebuild the whole workspace —
-every group, window, split and directory, agents resumed by session id:
+brings you back. **Killing** the session ends its agents; `kel ls` then shows
+them `dead`.
+
+**After a reboot, `kel` just opens** — it never asks. If a workspace was
+running before, it says so in one line:
 
 ```
-kel rebuild your workspace? 3 group(s), 9 window(s)  [Y/n]
+kel previous workspace: 9 window(s) · kel restore
 ```
 
-**n** starts fresh and will not ask again for that snapshot; **d** discards
-it. `kel restore` does the same non-interactively.
+and keeps that workspace safe in `snapshots/` (the newest five are kept), so
+starting fresh cannot overwrite it. **`kel restore`** brings it back — every
+window, split and directory, with conversations resumed. **`kel restore
+--list`** shows the saved workspaces and **`kel restore 2`** picks an older
+one. Restoring into a running workspace only adds what is missing.
 
 ## Isolation
 
@@ -151,7 +162,8 @@ Everything lives in `${XDG_STATE_HOME:-~/.local/state}/kel/`, mode `0700`:
 - `<window-id>.state` — state from the hooks, including Claude Code's
   notification text (the agent quoting a command back at you)
 - `<window-id>.ctx` — context, cost and model from `kel statusline`
-- `snapshot.json` (+ `.prev`), `doctor.json`, `last-group`, `pr-cache/`,
+- `snapshot.json` (+ `.prev`), `snapshots/` (previous workspaces),
+  `doctor.json`, `pr-cache/`,
   `.stash/`
 
 Field layouts are in `CLAUDE.md` under *The on-disk contract*.

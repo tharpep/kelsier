@@ -76,10 +76,11 @@ change; migrate old records in `migrate_meta`.
 | `sessions/<group>/<name>.json` | one record per managed agent. Keyed by group **and** name — two repos can each have a `docs`. |
 | `<window-id>.state` | `<state> <epoch> <note>` — one line, atomic write |
 | `<window-id>.ctx` | `<pct> <cost> <in_tokens> <ctx_size> <rate_5h> <epoch> <model>`, tab-separated |
-| `snapshot.json` | full workspace shape; `.prev` keeps one generation |
+| `snapshot.json` | full workspace shape, format v2 since v0.10: `{version:2, saved_at, saved_epoch, last, windows:[{name, group, layout, panes:[{cwd,cmd}]}]}`. `.prev` keeps one generation. Restore still reads v1 (`groups` keyed by group) |
+| `snapshots/<epoch>.json` | previous workspaces, archived by `kel` before a fresh start so the hooks cannot overwrite them; newest five kept |
 | `.restoring` | lockfile held during a restore (see Invariants) |
 | `.stash/<claude-session-id>` | pane id from `SessionStart`, for hooks with no `$TMUX_PANE` |
-| `doctor.json`, `last-group` | cached probe results, last-used group |
+| `doctor.json` | cached probe results |
 | `pr-cache/<owner>__<repo>.json` | PR list from `gh`, plus `.at` with the fetch epoch |
 
 **The directory is `0700`.** The records carry repo paths, branch names and
@@ -91,6 +92,14 @@ text — the agent quoting a command back at you, greps and file paths included.
 
 State is keyed by **window id**, metadata by **group + name**. tmux auto-names
 every `claude` window `claude`, so name-keyed state would collide.
+
+**One session, so the group lives on the window.** Since v0.10 every kel window
+is in the single `$KEL_PREFIX` session, and kel stamps its group on the window
+as the tmux option `@kel-group`. Where a window's group comes from, in order:
+its record (matched by window id + name), `@kel-group`, a legacy v0.9
+`kel/<group>` session name, the repo its first pane stands in. Any lookup of
+"the window I am in" must target `$TMUX_PANE` — with one session, tmux's
+"current window" is whichever was selected last.
 
 **Read it through `fleet_json`, never by re-deriving.** `kel _fleet [--dirty]
 [--land] [--pr]` — that is, `kel-fleet` — turns all of the above into one JSON
@@ -291,11 +300,12 @@ the marker for the old design; the docs rewritten to the new one; the old
 surfaces deleted (board, menus, `kel cheat`, `go` / `move` / `adopt`, the bash
 fleet reader). Go is now required.
 
-**Next is step 4, the sidebar — and it is planned in conversation before any
-code.** The layout is decided — a sidebar pane in every window, measured
-against the `swap-pane` alternative in `spec.md` §5b. `rollout.md` § v0.10 has
-a draft order and `spec.md` §5c the decisions made so far. Do not start building
-on the strength of the draft.
+**Step 4, the sidebar, is being built milestone by milestone** — the plan is
+`rollout.md` § v0.10 (M0–M6), each milestone planned with the author before
+code. **M0 is done**: one session, and `kel` never prompts (`kel restore` by
+choice). **M1 is next**: the fleet document learns every pane. The layout is
+decided — a sidebar pane in every window, measured against `swap-pane` in
+`spec.md` §5b; the remaining decisions are §5c.
 
 Bubble Tea is **v2** (`charm.land/bubbletea/v2`, `View() tea.View`,
 `tea.KeyPressMsg`); almost every tutorial online is v1 and will not compile.

@@ -135,7 +135,10 @@ func prefix() string {
 	return "kel"
 }
 
-// groupOf maps a tmux session name to a kel group, or "" if it isn't ours.
+// groupOf says whether a tmux session is kel's, and for a legacy v0.9
+// per-repo session (`kel/<group>`) which group it named.  Since v0.10 every
+// kel window lives in the one session named exactly pfx, which carries no
+// group — that comes from the window (see windowGroup).
 func groupOf(session, pfx string) (string, bool) {
 	switch {
 	case session == pfx:
@@ -169,11 +172,11 @@ func Load(o Options) Doc {
 	go func() {
 		defer wg.Done()
 		winsRaw = tmuxOut("list-windows", "-a", "-F",
-			"#{session_name}\t#{window_index}\t#{window_id}\t#{window_name}\t#{window_activity}")
+			"#{session_name}\t#{window_index}\t#{window_id}\t#{window_name}\t#{window_activity}\t#{@kel-group}")
 	}()
 	go func() {
 		defer wg.Done()
-		panesRaw = tmuxOut("list-panes", "-a", "-F", "#{window_id}\t#{pane_current_command}")
+		panesRaw = tmuxOut("list-panes", "-a", "-F", "#{window_id}\t#{pane_current_command}\t#{pane_current_path}")
 	}()
 	go func() {
 		defer wg.Done()
@@ -187,9 +190,13 @@ func Load(o Options) Doc {
 	}
 
 	paneMap := map[string][]string{}
+	firstPath := map[string]string{} // window id -> its first pane's cwd
 	for _, l := range lines(panesRaw) {
-		if p := strings.SplitN(l, "\t", 2); len(p) == 2 {
+		if p := strings.SplitN(l, "\t", 3); len(p) >= 2 {
 			paneMap[p[0]] = append(paneMap[p[0]], p[1])
+			if _, seen := firstPath[p[0]]; !seen && len(p) == 3 {
+				firstPath[p[0]] = p[2]
+			}
 		}
 	}
 
@@ -267,9 +274,14 @@ func Load(o Options) Doc {
 		}
 		return "misc"
 	}
-	recMap := map[string]record{}
+	// Keyed by window id: since v0.10 the session no longer names the group,
+	// so a record is matched to its window the way liveness always was — the
+	// same id AND the same name (see the dead-record loop below).
+	recByWid := map[string]record{}
 	for _, r := range records {
-		recMap[recGroup(r)+" "+r.Name] = r
+		if r.WindowID != "" {
+			recByWid[r.WindowID] = r
+		}
 	}
 
 	lands := map[string]*Land{}
@@ -292,20 +304,42 @@ func Load(o Options) Doc {
 		}
 	}
 
-	type win struct{ sess, idx, wid, name, activity string }
+	type win struct{ sess, idx, wid, name, activity, kelGroup string }
 	var wins []win
 	for _, l := range lines(winsRaw) {
 		p := strings.Split(l, "\t")
-		if len(p) == 5 {
-			wins = append(wins, win{p[0], p[1], p[2], p[3], p[4]})
+		if len(p) == 6 {
+			wins = append(wins, win{p[0], p[1], p[2], p[3], p[4], p[5]})
 		}
 	}
 
 	agents := []Agent{}
+	curGroup := ""
 	for _, w := range wins {
-		g, ok := groupOf(w.sess, pfx)
+		legacy, ok := groupOf(w.sess, pfx)
 		if !ok {
 			continue
+		}
+		rec, managed := recByWid[w.wid]
+		if managed && rec.Name != w.name {
+			managed = false
+		}
+		// where a window's group comes from, most authoritative first: its
+		// record; the @kel-group window option kel new sets; a legacy v0.9
+		// kel/<group> session; the repo its first pane stands in
+		g := ""
+		switch {
+		case managed:
+			g = recGroup(rec)
+		case w.kelGroup != "":
+			g = w.kelGroup
+		case w.sess != pfx:
+			g = legacy
+		default:
+			g = repoGroup(firstPath[w.wid])
+		}
+		if w.wid == curWid {
+			curGroup = g
 		}
 		panes := paneMap[w.wid]
 		if panes == nil {
@@ -338,7 +372,6 @@ func Load(o Options) Doc {
 			}
 		}
 
-		rec, managed := recMap[g+" "+w.name]
 		a := Agent{
 			Group: g, Name: w.name, WindowID: sp(w.wid), Index: numPtr(w.idx),
 			Current: w.sess == curSess && w.wid == curWid, Managed: managed,
@@ -400,10 +433,8 @@ func Load(o Options) Doc {
 	}
 
 	cur := Current{}
-	if curSess != "" {
-		if g, ok := groupOf(curSess, pfx); ok {
-			cur.Group = sp(g)
-		}
+	if curGroup != "" {
+		cur.Group = sp(curGroup)
 	}
 	if curWid != "" {
 		cur.WindowID = sp(curWid)
@@ -414,6 +445,45 @@ func Load(o Options) Doc {
 		Current:     cur,
 		Agents:      agents,
 	}
+}
+
+// repoGroup names the group for a directory kel did not create a window in:
+// a .kel/group file at or above it (stopping at the repo root, as bin/kel's
+// dir_group does), else the repo root's basename, else "misc".  Stat calls
+// only — this runs on the bar's redraw path, where a `git` fork per window
+// would break invariant 5.
+func repoGroup(dir string) string {
+	if dir == "" {
+		return "misc"
+	}
+	for d := filepath.Clean(dir); ; d = filepath.Dir(d) {
+		if b, err := os.ReadFile(filepath.Join(d, ".kel", "group")); err == nil {
+			if g := strings.TrimSpace(string(b)); slugOK(g) {
+				return g
+			}
+		}
+		if _, err := os.Stat(filepath.Join(d, ".git")); err == nil {
+			return filepath.Base(d)
+		}
+		if d == filepath.Dir(d) {
+			return "misc"
+		}
+	}
+}
+
+// slugOK matches bin/kel's slug_ok: A-Z a-z 0-9 . _ -, and not empty.
+func slugOK(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, c := range s {
+		ok := c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' ||
+			c == '.' || c == '_' || c == '-'
+		if !ok {
+			return false
+		}
+	}
+	return true
 }
 
 func globSorted(pattern string) []string {
