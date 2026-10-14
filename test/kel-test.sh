@@ -298,6 +298,10 @@ GOBIN_TOP="$KEL_TOP_BIN"
   printf '%s' '{"context_window":{"used_percentage":93,"context_window_size":200000,"total_input_tokens":9},"cost":{"total_cost_usd":18.7}}' \
     | TMUX_PANE="$(pane_of coppermind busy)" "$KEL" statusline >/dev/null
   frame() { COLUMNS="${1:-120}" "$GOBIN_TOP" --once 2>/dev/null | sed 's/\x1b\[[0-9;]*m//g'; }
+  # Widest line in CHARACTERS. Not `wc -L`: GNU counts display columns, macOS
+  # counts bytes, so the multibyte › and … made every frame look too wide on
+  # the Mac runner. perl -CS decodes UTF-8 and is on both.
+  maxw() { perl -CS -ne 'chomp; $m = length if length > $m; END { print $m + 0 }'; }
   ok "renders a header"                    '[[ "$(frame)" == *"GROUP"*"AGENT"*"STATE"* ]]'
   ok "lists every agent"                   '[ "$(frame | grep -cE "^.? *(api-gw|coppermind) ")" = 3 ]'
   ok "triage puts waiting first"           '[[ "$(frame | sed -n 2p)" == *blocked*waiting* ]]'
@@ -314,9 +318,9 @@ GOBIN_TOP="$KEL_TOP_BIN"
   # backspace only has meaning in filter mode, which --once cannot reach (it
   # renders one frame with no keys processed) -- checked below instead, in
   # the interactive tmux pane already needed for the enter no-op test.
-  ok "80 cols still fits the table"        '[ "$(frame 80 | head -1 | wc -L)" -le 80 ]'
+  ok "80 cols still fits the table"        '[ "$(frame 80 | head -1 | maxw)" -le 80 ]'
   ok "50 cols drops columns, not rows"     '[ "$(frame 50 | grep -cE "^.? *(api-gw|coppermind) ")" = 3 ]'
-  ok "  ...and stays within 50"            '[ "$(frame 50 | wc -L)" -le 50 ]'
+  ok "  ...and stays within 50"            '[ "$(frame 50 | maxw)" -le 50 ]'
   ok "no trailing whitespace on any row"   '! frame | grep -q " $"'
 
   # #4/§4a: LAND outranks CTX and $, and the show/hide gates are derived from
@@ -326,7 +330,7 @@ GOBIN_TOP="$KEL_TOP_BIN"
   widths_ok() {
     local w got
     for w in 50 55 58 59 60 64 65 66 67 68 74 75 76 77 80 85 90; do
-      got="$(frame "$w" | wc -L)"
+      got="$(frame "$w" | maxw)"
       if [ "$got" -gt "$w" ]; then
         echo "    overflow: w=$w rendered $got" >&2
         return 1
@@ -915,14 +919,21 @@ ok "  ...and this config actually sources under tmux"  \
    rc=0; tmux -S "$TMUX_TMPDIR/guard.sock" source-file "$CONF" 2>/dev/null || rc=$?
    tmux -S "$TMUX_TMPDIR/guard.sock" kill-server 2>/dev/null
    [ "$rc" = 0 ]'
-# prove it would NOT source with a literal -E flag — kept as a regression
-# guard, because an earlier spec prescribed exactly that.
+# prove it would NOT source with a literal -E flag below tmux 3.6 — kept as a
+# regression guard, because an earlier spec prescribed exactly that. From 3.6
+# the flag exists (Homebrew ships 3.7), so there the check has nothing to
+# prove; kel's floor is 3.0, which is why kel.conf still cannot use it.
+TV="$(tmux -V | grep -oE '[0-9]+\.[0-9]+' | head -1)"
+if [ "${TV%%.*}" -lt 3 ] || { [ "${TV%%.*}" -eq 3 ] && [ "${TV#*.}" -lt 6 ]; }; then
 sed 's/run-shell -b "\(\$HOME[^"]*\)"/run-shell -b -E "\1"/' "$CONF" > "$WORK/kel-conf-dash-E"
-ok "  ...confirmed: a literal -E flag does NOT source on this tmux" \
+ok "  ...confirmed: a literal -E flag does NOT source on tmux $TV" \
   'tmux -S "$TMUX_TMPDIR/guard2.sock" new-session -d -s guardtest2 2>/dev/null
    rc=0; tmux -S "$TMUX_TMPDIR/guard2.sock" source-file "$WORK/kel-conf-dash-E" 2>/dev/null || rc=$?
    tmux -S "$TMUX_TMPDIR/guard2.sock" kill-server 2>/dev/null
    [ "$rc" != 0 ]'
+else
+  echo "  skip  (tmux $TV has run-shell -E; the guard only means something below 3.6)"
+fi
 # prove the stderr-redirect guard bites: drop one 2>&1 in a scratch copy.
 sed 's/kel top 2>&1"/kel top"/' "$CONF" > "$WORK/kel-conf-revert"
 REVERTED=$(grep -n 'run-shell -b .*local/bin/kel ' "$WORK/kel-conf-revert" | grep -v 'kel snapshot')

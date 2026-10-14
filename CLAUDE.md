@@ -243,6 +243,8 @@ a GNU flag for a BSD one:
 | `setsid` (absent on macOS) | `( cmd & )` |
 | `script -qfc CMD file` (BSD wants `script -q file CMD`) | avoid; don't put it in tests |
 | `wc -l` (BSD pads the count with spaces: `       1`) | `grep -c .`, or trim before comparing |
+| `wc -L` (GNU: display columns; macOS: bytes, so `›` counts 3) | `perl -CS` and `length`, which counts characters |
+| assuming a tmux flag is absent (Homebrew ships 3.7; Ubuntu 3.4) | gate the assertion on `tmux -V`, and keep kel itself at its 3.0 floor |
 | `timeout` (GNU coreutils; absent on macOS) | prove the property directly instead of by elapsed time |
 | relying on `sort` ordering across implementations | compute what you need explicitly (two-pass awk) |
 

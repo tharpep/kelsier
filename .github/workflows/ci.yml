@@ -65,7 +65,7 @@ jobs:
       # frozen at GPLv2) would choke on.  Check against the old one explicitly.
       - name: syntax under macOS stock bash 3.2
         if: runner.os == 'macOS'
-        run: /bin/bash --version | head -1 && /bin/bash -n bin/kel
+        run: /bin/bash --version | head -1 && /bin/bash -n bin/kel && /bin/bash -n install.sh
 
       # Go is required since v0.10: kel-fleet is the only fleet reader, and
       # the suite builds both binaries from this checkout before it runs.
