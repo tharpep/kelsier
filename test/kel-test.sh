@@ -781,7 +781,8 @@ NEW api-gw agent
 SBW="$(window_of api-gw agent)"
 wait_until '[ "$(sbcount "$SBW")" = 1 ]'
 ok "kel new gives the window exactly one sidebar" '[ "$(sbcount "$SBW")" = 1 ]'
-ok "  ...on the left, at the configured width"    '[ "$(tmux list-panes -t "$SBW" -F "#{@kel-sidebar} #{pane_left} #{pane_width}" | awk "\$1==1 {print \$2, \$3}")" = "0 32" ]'
+# no awk here: macOS's awk rejected the escaped program GNU awk accepted
+ok "  ...on the left, at the configured width"    'tmux list-panes -t "$SBW" -F "#{@kel-sidebar}:#{pane_left}:#{pane_width}" | grep -qx "1:0:32"'
 ok "  ...running kel-top"                         'wait_until "tmux list-panes -t $SBW -F \"#{@kel-sidebar} #{pane_current_command}\" | grep -qx \"1 kel-top\""'
 ok "  ...focus stayed on the user's pane"         '[ -z "$(tmux list-panes -t "$SBW" -F "#{pane_active}#{@kel-sidebar}" | grep -x 11)" ]'
 ok "  ...and the agent started there, not in it"  '[ "$(tmux display -p -t "$(userpane "$SBW")" "#{pane_current_command}")" = sleep ]'
