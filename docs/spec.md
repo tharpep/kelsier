@@ -429,8 +429,15 @@ Since v0.10 it is produced **only** by the Go `kel-fleet`; the bash reader it
 was ported from, and the differential test that held them together, are gone.
 A missing `kel-fleet` fails loudly — an empty document would read as "no
 agents", which is a guess reported as a fact. The sidebar will need fields the
-document lacks today (every pane, its process, git position for every
-worktree); they go here, not into the sidebar.
+document lacked; they went here, not into the sidebar: **`--panes`** *(M1)*
+adds a `panes` array — every pane in every kel window, with `kind` (`agent`
+from the window's record or a `claude` process; `server` if anything in its
+process tree listens on TCP; `shell`; else `program`), `ports`, and `git`
+(root, linked worktree or main checkout, branch, upstream, ahead/behind,
+dirty — one `git status --porcelain=v2 --branch` per repo root). Ports come
+from `/proc` on Linux and WSL2 with no fork, and from one `lsof` + `ps` on
+macOS, cached 10 s. Unknowns stay null: no ports scan means `ports: null`, not
+`[]`; no client attached means no pane is `current`.
 
 `--dirty` is opt-in because `git status` per worktree is the expensive part
 and the bar never shows it.

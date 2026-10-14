@@ -87,7 +87,7 @@ TUI pass over the old board, which no longer exists.
 fix: `kel-fleet` ignored `pr = off`, and it called `gh` for repos that local git
 had already answered.
 
-### Step 4 — the build plan  ·  *M0 done, M1 next*
+### Step 4 — the build plan  ·  *M0–M1 done, M2 next*
 
 Agreed 2026-10-14. Each milestone ends with something to try, and the suite
 stays green throughout. The decisions behind it are `spec.md` §5c and §7.
@@ -117,17 +117,17 @@ stays green throughout. The decisions behind it are `spec.md` §5c and §7.
   instead of reporting the ambiguity; `current_group` now answers only from
   inside tmux.
 
-**M1 — the fleet learns every pane** *(Go, `kel-fleet`)*  ·  *next*
+**M1 — the fleet learns every pane**  ·  **done**
 - a `panes[]` list in the fleet document: window, kind (agent / server /
   shell, from the process tree), command, cwd, repo, worktree or main
   checkout, branch, ahead/behind, dirty, listening ports
-- git position computed once per directory; ports cached ~10 s; a cached
-  git-position file for Claude's row to read later
+- git position computed once per repo root; ports cached ~10 s. The
+  git-position cache for Claude's row moved to M4, where its consumer is
 - *try:* `kel _fleet | jq .panes` shows everything open
 - *tests:* Go unit tests for classification; suite assertions over real panes
   (a `sleep` agent, a `python3 -m http.server` for a port, a plain shell)
 
-**M2 — sidebar plumbing**  ·  *the author tries it here, rough*
+**M2 — sidebar plumbing**  ·  *next* — *the author tries it here, rough*
 - `kel-top --sidebar`, a minimal list
 - `kel new` and an `after-new-window` hook add a 32-column sidebar pane to
   every window, marked `@kel-sidebar`, without stealing focus

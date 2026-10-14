@@ -64,6 +64,10 @@ type Doc struct {
 	GeneratedAt string  `json:"generated_at"`
 	Current     Current `json:"current"`
 	Agents      []Agent `json:"agents"`
+	// Panes is present only when asked for (Options.Panes): every pane in
+	// every kel window, for the sidebar. A pointer so that "asked, and there
+	// are none" is [] while "not asked" omits the key.
+	Panes *[]Pane `json:"panes,omitempty"`
 }
 
 // record is the on-disk agent record, sessions/<group>/<name>.json.
@@ -155,6 +159,7 @@ type Options struct {
 	Dirty bool
 	Land  bool
 	PR    bool // may refresh the PR cache — never on a refresh path
+	Panes bool // every pane, with kind, git position and ports (panes.go)
 }
 
 // Load assembles the fleet document.
@@ -176,28 +181,35 @@ func Load(o Options) Doc {
 	}()
 	go func() {
 		defer wg.Done()
-		panesRaw = tmuxOut("list-panes", "-a", "-F", "#{window_id}\t#{pane_current_command}\t#{pane_current_path}")
+		// path last: it is the one field that could hold anything
+		panesRaw = tmuxOut("list-panes", "-a", "-F",
+			"#{window_id}\t#{pane_current_command}\t#{pane_id}\t#{pane_index}\t#{pane_active}\t#{pane_pid}\t#{pane_current_path}")
 	}()
 	go func() {
 		defer wg.Done()
-		curRaw = tmuxOut("display-message", "-p", "#{client_session} #{window_id}")
+		curRaw = tmuxOut("display-message", "-p", "#{client_session} #{window_id} #{pane_id}")
 	}()
 	wg.Wait()
 
-	curSess, curWid := "", ""
-	if f := strings.Fields(strings.TrimSpace(curRaw)); len(f) == 2 {
-		curSess, curWid = f[0], f[1]
+	curSess, curWid, curPane := "", "", ""
+	if f := strings.Fields(strings.TrimSpace(curRaw)); len(f) == 3 {
+		curSess, curWid, curPane = f[0], f[1], f[2]
 	}
 
 	paneMap := map[string][]string{}
 	firstPath := map[string]string{} // window id -> its first pane's cwd
+	paneRows := map[string][]paneRow{}
 	for _, l := range lines(panesRaw) {
-		if p := strings.SplitN(l, "\t", 3); len(p) >= 2 {
-			paneMap[p[0]] = append(paneMap[p[0]], p[1])
-			if _, seen := firstPath[p[0]]; !seen && len(p) == 3 {
-				firstPath[p[0]] = p[2]
-			}
+		p := strings.SplitN(l, "\t", 7)
+		if len(p) != 7 {
+			continue
 		}
+		paneMap[p[0]] = append(paneMap[p[0]], p[1])
+		if _, seen := firstPath[p[0]]; !seen {
+			firstPath[p[0]] = p[6]
+		}
+		paneRows[p[0]] = append(paneRows[p[0]], paneRow{
+			wid: p[0], cmd: p[1], id: p[2], idx: p[3], active: p[4], pid: p[5], path: p[6]})
 	}
 
 	type stateEntry struct {
@@ -314,6 +326,7 @@ func Load(o Options) Doc {
 	}
 
 	agents := []Agent{}
+	var paneWins []winInfo
 	curGroup := ""
 	for _, w := range wins {
 		legacy, ok := groupOf(w.sess, pfx)
@@ -341,6 +354,13 @@ func Load(o Options) Doc {
 		if w.wid == curWid {
 			curGroup = g
 		}
+		agentCmd := ""
+		if managed && rec.Agent != nil {
+			if f := strings.Fields(*rec.Agent); len(f) > 0 {
+				agentCmd = f[0]
+			}
+		}
+		paneWins = append(paneWins, winInfo{w.wid, w.idx, w.name, g, agentCmd})
 		panes := paneMap[w.wid]
 		if panes == nil {
 			panes = []string{}
@@ -440,11 +460,16 @@ func Load(o Options) Doc {
 		cur.WindowID = sp(curWid)
 	}
 
-	return Doc{
+	doc := Doc{
 		GeneratedAt: time.Now().UTC().Format(time.RFC3339),
 		Current:     cur,
 		Agents:      agents,
 	}
+	if o.Panes {
+		ps := buildPanes(paneRows, paneWins, curPane)
+		doc.Panes = &ps
+	}
+	return doc
 }
 
 // repoGroup names the group for a directory kel did not create a window in:

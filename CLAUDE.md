@@ -82,6 +82,7 @@ change; migrate old records in `migrate_meta`.
 | `.stash/<claude-session-id>` | pane id from `SessionStart`, for hooks with no `$TMUX_PANE` |
 | `doctor.json` | cached probe results |
 | `pr-cache/<owner>__<repo>.json` | PR list from `gh`, plus `.at` with the fetch epoch |
+| `ports.json` | `{at, panes:{<pane pid>: [ports]}}` — the listening-port scan behind `_fleet --panes`, reused for 10 s |
 
 **The directory is `0700`.** The records carry repo paths, branch names and
 Claude session ids, and `<window-id>.state` carries Claude Code's notification
@@ -104,9 +105,10 @@ its record (matched by window id + name), `@kel-group`, a legacy v0.9
 **Read it through `fleet_json`, never by re-deriving.** `kel _fleet [--dirty]
 [--land] [--pr]` — that is, `kel-fleet` — turns all of the above into one JSON
 document, and `ls` / `--json` / `status-line` / the completions / `kel top` all
-read it. Adding a field means adding it there once, in Go. The sidebar will need
-more (every pane, its process, git position per worktree); it goes into the
-document, not into the sidebar.
+read it. Adding a field means adding it there once, in Go. `--panes` (v0.10 M1)
+adds every pane in every kel window — kind (agent / server / shell / program),
+cwd, listening ports and git position — for the sidebar; it is opt-in because
+its git and port lookups do not fit the bar's redraw budget.
 
 ### Agent states
 
@@ -159,6 +161,11 @@ workspace**: its own `TMUX_TMPDIR` (so its `tmux kill-server` cannot reach the
 default socket — it once killed a live workspace), its own `XDG_STATE_HOME`,
 and `KEL_SESSION=keltest`. Agents are faked with `sleep 9999`, so nothing
 reaches an API. Any test you add must keep all three.
+
+**An attached client is testable after all:** `( sleep N ) | tmux -C attach`
+is a control-mode client with no terminal, holding the attach open as long as
+its stdin. The suite uses it for "current pane"; the notifications section
+still says focus suppression is untestable — it no longer has to be.
 
 Run it before every commit. It covers: cross-group name collisions, ambiguous
 `kill` resolution, rename scoping, legacy record migration, three consecutive
@@ -302,8 +309,8 @@ fleet reader). Go is now required.
 
 **Step 4, the sidebar, is being built milestone by milestone** — the plan is
 `rollout.md` § v0.10 (M0–M6), each milestone planned with the author before
-code. **M0 is done**: one session, and `kel` never prompts (`kel restore` by
-choice). **M1 is next**: the fleet document learns every pane. The layout is
+code. **M0–M1 are done**: one session, `kel` never prompts (`kel restore` by choice),
+and `_fleet --panes` knows every pane. **M2 is next**: the sidebar's plumbing. The layout is
 decided — a sidebar pane in every window, measured against `swap-pane` in
 `spec.md` §5b; the remaining decisions are §5c.
 

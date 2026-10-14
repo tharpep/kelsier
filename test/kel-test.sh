@@ -705,6 +705,56 @@ printf '{"saved_at":"x","last_group":"api-gw","last_window":"a","groups":{"api-g
 "$KEL" restore --no-resume >/dev/null 2>&1
 ok "a v0.9 snapshot restores into one session" '[ "$(grps)" = 1 ] && [ -n "$(window_of api-gw a)" ] && [ -n "$(window_of coppermind b)" ]'
 
+section "the fleet learns every pane (v0.10 M1)"
+reset
+R="$WORK/repos/api-gw"
+# a real upstream position without a network: a remote-tracking ref at the
+# first commit, the branch tracking it, one commit past it, one dirty file
+git -C "$R" remote add origin "$WORK/nowhere.git"
+git -C "$R" update-ref refs/remotes/origin/main HEAD
+git -C "$R" config branch.main.remote origin
+git -C "$R" config branch.main.merge refs/heads/main
+git -C "$R" -c user.email=t@t -c user.name=t commit -q --allow-empty -m ahead
+echo wip > "$R/dirt.txt"
+NEW api-gw agent
+AW="$(window_of api-gw agent)"
+# a listener that binds port 0 and says which port it got — python3 is on
+# both CI runners; a fixed port could collide
+tmux split-window -d -t "$AW" -c "$R" \
+  "python3 -c 'import socket,time; s=socket.socket(); s.bind((\"127.0.0.1\",0)); s.listen(); open(\"$WORK/port\",\"w\").write(str(s.getsockname()[1])); time.sleep(9999)'"
+tmux split-window -d -t "$AW" -c "$R"
+tmux new-window -d -t '=keltest:' -n odd -c "$WORK" 'sleep 9999'   # a non-shell in an unmanaged window
+( cd "$R" && "$KEL" new wtp -w --agent 'sleep 9999' ) >/dev/null 2>&1
+wait_until '[ -s "$WORK/port" ]' 50
+wait_until '[ "$("$KEL" _fleet --panes | jq "[.panes[] | select(.kind==\"server\")] | length")" = 1 ]' 30
+P() { "$KEL" _fleet --panes | jq -c "$1"; }
+ok "--panes lists every pane"            '[ "$(P ".panes | length")" = 5 ]'
+ok "  ...and plain _fleet has no panes key" '[ "$("$KEL" _fleet | jq "has(\"panes\")")" = false ]'
+ok "the agent's pane is an agent"        '[ "$(P "[.panes[] | select(.window_name==\"agent\" and .kind==\"agent\" and .agent)] | length")" = 1 ]'
+ok "a bare shell is a shell"             '[ "$(P "[.panes[] | select(.window_name==\"agent\" and .kind==\"shell\")] | length")" = 1 ]'
+ok "a listener is a server, with its port" '[ "$(P "[.panes[] | select(.kind==\"server\") | .ports[]]")" = "[$(cat "$WORK/port")]" ]'
+ok "a non-shell, non-agent is a program" '[ "$(P ".panes[] | select(.window_name==\"odd\") | .kind")" = "\"program\"" ]'
+ok "git: branch and upstream"            '[ "$(P ".panes[] | select(.window_name==\"agent\" and .agent) | .git | [.branch, .upstream]")" = "[\"main\",\"origin/main\"]" ]'
+ok "  ...ahead / behind / dirty"         '[ "$(P ".panes[] | select(.window_name==\"agent\" and .agent) | .git | [.ahead, .behind, .dirty]")" = "[1,0,1]" ]'
+ok "  ...a main checkout is not a worktree" '[ "$(P ".panes[] | select(.window_name==\"agent\" and .agent) | .git.worktree")" = false ]'
+ok "  ...a kel new -w pane is a worktree" '[ "$(P ".panes[] | select(.window_name==\"wtp\") | .git.worktree")" = true ]'
+ok "  ...and outside a repo, git is null" '[ "$(P ".panes[] | select(.window_name==\"odd\") | .git")" = null ]'
+# "current" is the pane a client is looking at.  With no client attached,
+# nothing is — and kel must say none rather than guess one (invariant 3).
+ok "with no client attached, no pane claims to be current" '[ "$(P "[.panes[] | select(.current)] | length")" = 0 ]'
+# A control-mode client (tmux -C) is a real attached client with no terminal,
+# so the with-a-client case is testable after all: it holds the attach open
+# for as long as its stdin does.
+( sleep 5 ) | tmux -C attach -t '=keltest' >/dev/null 2>&1 &
+CC=$!
+wait_until 'tmux list-clients 2>/dev/null | grep -q .' 30
+SHP="$(tmux list-panes -t "$AW" -F '#{pane_id} #{pane_current_command}' | awk '$2=="bash"||$2=="zsh"||$2=="sh"{print $1; exit}')"
+tmux select-window -t "$AW"; tmux select-pane -t "$SHP"
+ok "with a client, exactly the pane it is looking at is current" \
+  '[ "$(P "[.panes[] | select(.current) | .pane_id]")" = "[\"$SHP\"]" ]'
+wait "$CC" 2>/dev/null
+ok "the ports scan is cached"            '[ -f "$STATE/ports.json" ]'
+
 # ---------------------------------------------------------------- restore
 section "restore rebuilds the workspace and keeps the snapshot"
 reset
