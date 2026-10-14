@@ -1696,8 +1696,7 @@ paint_state() {   # wid state
     waiting)   col=colour214 ;;   # blocked on you — the one that matters
     throttled) col=colour141 ;;
     dead)      col=colour167 ;;
-    done)      col=colour114 ;;
-    *)         col='' ;;          # working / idle: stay quiet
+    *)         col='' ;;          # working / idle / done: stay quiet
   esac
   if [ -n "$col" ]; then
     tmux set-option -w -t "$wid" pane-border-style        "fg=$col" 2>/dev/null || true
