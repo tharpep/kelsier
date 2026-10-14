@@ -216,19 +216,15 @@ where it already is** — which is exactly what a sidebar per window does.
 
 ---
 
-## 6. Keys  ·  *today*
+## 6. Keys
 
-| Key | Action |
-|---|---|
-| `` prefix ` `` | jump to the next `waiting` agent in **any** group — cycles, wraps |
-| `prefix t` | `kel top` — every agent, sorted so the one needing you is first |
-| `prefix g` | pick a group (tmux's own session tree) |
-| `prefix ,` | rename this window (routes through `kel rename`) |
-| `prefix \|` / `prefix -` | split, keeping the current directory |
+The sidebar's keys are decided in §5c. Today's bindings are listed in
+`usage.md` — one list, so the two cannot drift.
 
-v0.10 removed `Ctrl+Space` / `prefix b` (the board), `prefix m` (the per-agent
-menu) and `prefix k` (`kel cheat`). The sidebar's keys replace all of them and
-are not designed yet.
+Two rules hold across both. **Switching is one keystroke** — never
+open-menu, find-row, press-enter. And **`` prefix ` `` is the key the tool
+exists for**: not "go to window 3" but "go to whoever is blocked on me",
+across every repo; it matches `waiting` only, cycles and wraps.
 
 ---
 
@@ -312,8 +308,8 @@ actually changed (invariant 5).
 
 An agent is one `tmux` window and one working directory. kel-managed agents
 get a metadata record; a hand-made `prefix c` window is tracked for state but
-has no record and shows as `(unmanaged)`. (v0.10 removed `kel adopt` and
-`kel move`; the sidebar lists every pane, which makes "adopting" one moot.)
+has no record and shows as `(unmanaged)`. The sidebar
+(§5) lists every pane, managed or not.
 
 `~/.local/state/kel/sessions/<group>/<name>.json`:
 
@@ -463,33 +459,11 @@ worktrees are all dirty or unpushed is never refreshed at all.
 
 ---
 
-## 10. Commands  ·  *today*
+## 10. Commands
 
-```
-kel                        dir-aware entry (like `claude`): in a repo, attach
-                           that group or start its agent; else the last group
-kel new <name> [-w]        window + agent, inplace or in a git worktree
-      [--group G] [--agent CMD] [--no-agent]
-kel kill <name> [-f]       close the window; remove the worktree; -f overrides
-                           the uncommitted / unpushed check
-kel ls [--json]            every agent, grouped by repo
-kel rename <newname>       rename the current window, keep the record in sync
-kel top                    every agent, sorted so the one needing you is
-                           first (prefix t) — the seed of the sidebar
-kel sweep [-n] [-f]        close out every finished agent whose work landed;
-                           everything else is reported with its reason
-kel relaunch [name] [-f]   relaunch ONE crashed agent in its existing window
-kel restore [-c] [-s]      rebuild the workspace after a kill / reboot
-kel prune [-f]             discard dead agent records (and their worktrees)
-kel doctor                 capability probe, cached to doctor.json
-kel config                 edit config.toml, seeded from the example once
-kel update                 fast-forward the clone, then re-run install.sh
-```
-
-Internal: `kel status-line`, `kel jump`, `kel snapshot`, `kel hook <EVENT>`,
-`kel statusline`, `kel _fleet`.
-
-v0.10 removed `board`, `menu`, `cheat`, `go`, `move`, `adopt` and `_usage`.
+The command list is `usage.md` (and `kel --help`, which the suite checks
+against the dispatcher and both completions). What belongs here is the design
+two of them carry:
 
 **Workspace snapshot.** `kel snapshot` (fired by tmux hooks and by
 state-changing commands) writes the full shape to `snapshot.json`, keeping one

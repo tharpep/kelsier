@@ -63,10 +63,6 @@ kel update             fast-forward the clone kel runs from, then re-run
 Internal (wired into tmux / Claude Code): `kel status-line`, `kel jump`,
 `kel snapshot`, `kel hook <EVENT>`, `kel statusline`, `kel _fleet`.
 
-**Removed in v0.10:** `kel board` / `kel menu`, `kel cheat`, `kel go`,
-`kel move`, `kel adopt`, `kel _usage`. Use `prefix g` (tmux's session tree) to
-switch groups until the sidebar lands.
-
 ## Keys
 
 `prefix` is `Ctrl+b`.

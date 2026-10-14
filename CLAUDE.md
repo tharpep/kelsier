@@ -6,9 +6,8 @@ you, in the terminal. `tmux` does the multiplexing; `kel` does the bookkeeping.
 Go for everything that reads or renders; bash for the hooks, the installer, and
 the mutating commands until they move.
 
-**kel is mid-pivot (v0.10).** The old interface — an fzf board, two menus and a
-cheat sheet — was deleted; an Orca-shaped sidebar replaces it and is being
-designed. `v0.9.0` is the tag for the old design.
+**kel is mid-pivot (v0.10)** to an Orca-shaped sidebar — see *Where things
+stand* at the bottom. `v0.9.0` is the tag for the old design.
 
 Read `docs/spec.md` for the design and `docs/rollout.md` for the build order and
 current status. **`rollout.md` is the source of truth for what to work on next.**

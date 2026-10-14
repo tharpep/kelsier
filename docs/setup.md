@@ -101,6 +101,7 @@ Notes:
 
 | Tool | Source | Why not apt |
 |---|---|---|
+| `go` | go.dev tarball → `~/.local/go` (no sudo) | **required by kel** — `install.sh` builds `kel-fleet` and `kel-top` and fails without it; Ubuntu's Go is too old for current modules |
 | `neovim` | official `nvim-linux-x86_64.tar.gz` → `/opt` | apt's 0.9.5 is below the 0.10+ floor for modern plugins |
 | `lazygit` | GitHub release binary | not in the 24.04 repos |
 | `yazi` | GitHub release binary (`yazi` + `ya`) | not packaged |
@@ -228,9 +229,11 @@ On a Mac, steps 1–2 are `bash install/macos-tools.sh` (see §3); 3–5 are the
 same. `install.sh` itself is portable and needs no change.
 
 1. `wsl --install -d Ubuntu-24.04`, set user.
-2. Install `fnm` + Node, Claude Code.
+2. Install `fnm` + Node, Go, Claude Code (`install/20-user-tools.sh` installs
+   fnm, Node and Go).
 3. `git clone <kelsier repo> ~/code/kelsier`
-4. `cd ~/code/kelsier && ./install.sh` — symlinks `kel`, sources `tmux/kel.conf`,
+4. `cd ~/code/kelsier && ./install.sh` — builds `kel-fleet` and `kel-top`,
+   symlinks `kel`, sources `tmux/kel.conf`,
    wires the Claude Code hooks, and installs bash + zsh completion
    (`~/.local/share/{bash-completion/completions,zsh/site-functions}`; for zsh it
    also appends an `fpath+=` line to `~/.zshrc` — run `compinit` after).
