@@ -60,7 +60,7 @@ statusline adapter. What did not: every interactive surface.
 ## v0.10 — the pivot  ·  *in progress*
 
 **Theme:** one surface. An Orca-shaped workspace in the terminal: a persistent
-sidebar of every pane, the selected pane in the main slot, IDE views (files,
+sidebar in every window listing every pane, your own splits left untouched, IDE views (files,
 git, plan, tasks) in a panel. Design in `spec.md` §5.
 
 ### Step 1 — tag the old design  ·  **done**
@@ -90,15 +90,17 @@ had already answered.
 ### Step 4 — the sidebar  ·  *next, being planned*
 
 Not started. To be planned in conversation before any code; the questions it
-has to answer first are in `spec.md` §5b. A draft order, for that discussion:
+has to answer first are in `spec.md` §5c. A draft order, for that discussion:
 
 1. **The fleet document learns every pane** — kind (agent / server / shell,
    from the process), cwd, and git position per worktree (branch,
    ahead/behind, dirty). Data first, in `kel-fleet`, so the sidebar and any
    later GUI read the same thing.
-2. **The workspace shell** — the holding session, the workspace window, the
-   `swap-pane` mechanics, and what restore does with them. Prove it by hand
-   on a real tmux server before building UI on it.
+2. **The sidebar's plumbing** — a sidebar pane in every window (created by
+   `kel new` and an `after-new-window` hook), marked so snapshot, restore and
+   the dead-agent check skip it; inactive instances idle and wake when their
+   window is shown; view state shared through the state directory. Prove it by
+   hand on a real tmux server before building UI on it.
 3. **The sidebar** — `kel top` grown into it: repo → worktree → pane, about
    eight keys, all in its footer. Navigation and jump first; `n`ew / `x` kill
    / `r`ename by calling the existing `bin/kel` commands.

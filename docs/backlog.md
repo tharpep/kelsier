@@ -63,7 +63,7 @@ way `kel kill` does** — this is the one command that could destroy several
 agents at once, so the refusal matters more than the convenience.
 
 **Gate:** the sidebar's workspace exists (step 4) — "quit" means something
-different once there is one workspace window and a holding session.
+different once every window carries a sidebar.
 
 ### 16. Precise blocked-state via permission hooks  ·  `[fits]`
 
@@ -120,8 +120,8 @@ intra-session, kel is inter-session — but with `teammateMode: "tmux"` Claude
 Code **splits panes inside the window it runs in**. Under kel that means:
 snapshot records the teammate panes and restore rebuilds them as bare shells;
 a lead that dies beside a live teammate is not flagged `dead`. **The workspace
-design makes this sharper**: a swapped-in agent pane that splits itself would
-split the main slot. Default is `"in-process"`, so it is inert until enabled —
+design makes this sharper**: teammate panes would split a window that also
+holds kel's sidebar pane, and the sidebar must list them as panes, not agents. Default is `"in-process"`, so it is inert until enabled —
 but step 4 should decide what happens rather than discover it.
 
 ---
@@ -158,5 +158,5 @@ branch, never a viewer or a conflict check.
 ### R6. Quick peek — `kel peek`  ·  `[obsoleted]`
 
 Cut 2026-08-30: `kel top`'s LAST OUTPUT column showed every agent at once. In
-the workspace design the main slot *is* the peek — selecting a row shows the
+the sidebar design selecting a row *is* the peek — it shows the
 real pane. Original design at the `v0.9.0` tag.

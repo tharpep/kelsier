@@ -99,68 +99,119 @@ the bash that remains.
 ## 5. Layout — the workspace  ·  *designed, not built*
 
 ```
-┌ kel ──────────────┬──────── focused pane ────────────┬ panel (toggle) ┐
+┌ kel ──────────────┬──────── the window's own panes ──┬ panel (toggle) ┐
 │ kelsier           │                                  │ [files] git    │
-│ ▸ main      ↑2 ●  │  (claude, a server, or a shell — │  plan  tasks   │
-│   ◐ claude  41%   │   whatever you selected; it is   │                │
-│     opus $1.20    │   the real pane, untouched)      │  yazi / lazygit│
-│   ▪ npm dev :3000 │                                  │  / plan.md     │
-│ ▸ wt/fix-auth  ✓  │                                  │                │
-│   ● claude WAIT   │                                  │                │
-│   $ zsh           │                                  │                │
-│ api-server        │                                  │                │
+│ ▸ main      ↑2 ●  │  claude            │ nvim        │  plan  tasks   │
+│   ◐ claude  41%   │                    │             │                │
+│     opus $1.20    │  (your splits, as  │             │  yazi / lazygit│
+│   ▪ npm dev :3000 │   you made them —  │             │  / plan.md     │
+│ ▸ wt/fix-auth  ✓  │   kel never moves  │             │                │
+│   ● claude WAIT   │   or resizes them) │             │                │
+│   $ zsh           │                    │             │                │
+│ api-server        │                    │             │                │
 ├───────────────────┴──────────────────────────────────┴────────────────┤
 │ claude 58% 5h · 41% wk                      4 agents · 1 waiting      │
 └───────────────────────────────────────────────────────────────────────┘
 ```
 
-**One workspace window, panes swapped into the main slot** (chosen 2026-10-14
-over a sidebar-per-window design). Every agent and every other pane lives in a
-hidden holding session; the workspace window holds the sidebar, the main slot
-and, when toggled, the panel. Selecting a row in the sidebar moves that pane
-into the main slot with `swap-pane` — the process is not touched, only where
-it is displayed.
+**A sidebar pane in every window** (decided 2026-10-14, after measuring — §5b).
+Agents and everything else stay ordinary tmux windows, with whatever splits
+you made. Each window carries its own sidebar pane at a fixed width on the
+left, all running the same Go program over the same state, so the sidebar
+reads as one persistent thing that is simply always there. Selecting a row is
+`select-window` (plus `select-pane` for a pane row): **nothing is moved, swapped
+or resized.**
 
 - **Sidebar** — a Go TUI (Bubble Tea v2), grown from `kel top`. Repo →
   worktree → *every* pane. Each row: what is running (agent / server / shell,
   from the pane's process), and for the worktree its git position (branch,
   ahead/behind, dirty). Agent rows add state, context %, cost and model. It is
   **the only kel surface**: no board, no menus, no cheat sheet.
-- **Main slot** — the selected pane. Agents stay byte-identical.
-- **Panel** — one slot that switches between files (`yazi`), git (`lazygit`),
-  the session's plan and its task list. Off by default.
+- **The window's own panes** — untouched. Agents stay byte-identical; an
+  `[agent | nvim]` pair stays a pair.
+- **Panel** — files (`yazi`), git (`lazygit`), the session's plan and its task
+  list, opened at the selected pane's directory. Off by default; whether it is
+  a pane in the window or a `display-popup` is a step-4 decision.
 - **Bottom bar** — quota burn (5h / weekly) and fleet counts.
 - **Keys** live in the sidebar, about eight of them, all shown in its footer.
 
+**What one sidebar per window costs, and how it is paid:**
+
+- **N processes.** One `kel-top` measured ~10–12 MB and ~2.5% CPU while
+  polling. Ten polling instances would be a quarter of a core for nothing, so
+  **a sidebar whose window is not active idles** — no polling, no rendering —
+  and is woken when its window becomes active (a `session-window-changed` /
+  `after-select-window` hook, or control-mode events).
+- **Identical everywhere.** Cursor, expanded rows and filter are *view state*
+  shared through the state directory, so switching windows shows the same
+  sidebar, not a different one. That is also what a later desktop app would
+  read (§12c).
+- **Every window needs one.** `kel new` creates it; a hook on `after-new-window`
+  covers a hand-made `prefix c` window. A sidebar pane must be recognisable
+  (a `@kel-sidebar` pane option) so snapshot, restore, `kel ls` and the dead-agent
+  check all skip it — it is kel's pane, not the user's.
+
 ### 5a. What tmux gives this
 
-- **Control mode** (`tmux -C`) — the sidebar can subscribe to tmux's own
-  events (window added, pane exited, focus changed) instead of polling.
-- **`swap-pane` / `join-pane` / `break-pane`** — move a running pane between
-  windows without touching its process.
+- **Control mode** (`tmux -C`) — subscribe to tmux's own events (window added,
+  pane exited, window changed) instead of polling.
+- **Hooks** (`after-new-window`, `session-window-changed`, `pane-exited`) —
+  create a window's sidebar, wake the visible one.
 - **`display-popup`** — floating overlays (lazygit, yazi, a plan) dismissed
   with `q`.
-- **Per-pane user options** (`@kel-kind`, `@kel-repo`) — metadata tmux keeps
+- **Per-pane user options** (`@kel-sidebar`, `@kel-kind`) — metadata tmux keeps
   for us, readable in one `list-panes -F`.
 - **`#{pane_current_command}` / `#{pane_pid}` / `#{pane_current_path}`** —
   what is running and where, for every pane, in one call.
 
-### 5b. Open questions — answered in the step-4 planning, not here
+### 5b. Why not one workspace window with panes swapped in
 
-The v0.2 spec **rejected this exact architecture** (§5c at the `v0.9.0` tag).
-Its objections were concrete, and each needs an answer rather than being
-forgotten:
+That was chosen first, on 2026-10-14, and reversed the same day after
+measuring. It is recorded so it is not re-proposed — the v0.2 spec had
+rejected it too (§5c at the `v0.9.0` tag), and its objections turned out to be
+half right.
 
-| v0.2 objection | status |
+**Measured** on an isolated tmux server, with a script logging every
+`SIGWINCH`, and a real Claude Code 2.1.299:
+
+| test | result |
 |---|---|
-| `swap-pane` buys less flexibility than native windows: no real side-by-side | **open.** A swapped *pane* cannot carry a user's own `[agent \| nvim]` split with it. Options: swap whole windows (`link-window`), allow splits only inside the main slot, or treat a split as a second sidebar row |
-| geometry desync on every terminal resize; the next swap-in janks | **open, probably fine.** A swapped pane is resized to the slot and gets `SIGWINCH`; Claude Code redraws. Needs measuring, not reasoning |
-| `prefix 1`..`9` collides with native window switching | **answered.** Navigation moves into the sidebar; the workspace is one window |
-| three panel modes over one slot means you cannot see the board while editing | **answered.** The sidebar is persistent; the panel is the swappable part |
+| `swap-pane` into a slot of the **same** size | 0 resizes in 6 swaps |
+| `swap-pane` into a **different** size | 1 resize per swap |
+| terminal resized while a pane is hidden | hidden pane keeps its size; resized once when next shown |
+| switching windows that each carry a fixed sidebar pane | 0 resizes (after a new window's first display) |
+| Claude Code under resize | redraws correctly, but it is **not** an alternate-screen app: each shrink pushed stale lines into tmux scrollback (0 → 3 → 6 lines over four resizes of an idle session) |
 
-Also open: how a restore rebuilds the holding session and the workspace
-window; what happens to a pane that is closed while in the main slot; whether
-groups survive as a concept at all now that the sidebar groups by repo itself.
+**The verdict on v0.2's four objections:**
+
+| objection | verdict |
+|---|---|
+| no real side-by-side: a swapped pane cannot carry the user's own split | **true, and decisive.** `swap-pane` moves one pane. Keeping `[agent \| nvim]` together needs a nested tmux client in the slot or splits flattened into sidebar rows; both cost more than they buy |
+| geometry desync; the next swap-in janks | **solvable** — keep the holding session the slot's size and a swap resizes nothing. Not decisive on its own |
+| `prefix 1`..`9` collides with native window switching | moot either way — navigation moves into the sidebar |
+| cannot see the board while editing | moot either way — the sidebar is persistent |
+
+**Orca agrees with the rule underneath.** Its PTYs live in a daemon (tmux's
+role) and each terminal is an xterm.js view; switching shows a different view
+and never moves the process. Its source holds and coalesces resizes and leaves
+hidden terminals at their size, because spurious resizes "garble" a
+full-screen program's grid (`src/main/ipc/pty/ipc/resize-visibility.ts`,
+`src/renderer/src/lib/pane-manager/pane-pty-resize-hold.ts` in
+`stablyai/orca`). **Never resize a pane you are not showing, and show a layout
+where it already is** — which is exactly what a sidebar per window does.
+
+### 5c. Still open — for the step-4 planning
+
+- **Groups.** Whether sessions-per-repo survive, now that the sidebar groups by
+  repo itself. One session for everything would make `select-window` the only
+  navigation verb.
+- **The panel's form.** A real pane (stays open while you work, costs width in
+  every window) or a `display-popup` (no layout cost, modal).
+- **Sidebar width** — fixed, or remembered per user; it must be the same in
+  every window or switching will look like it jumps.
+- **Idle and wake** — hook vs control mode, measured for the cost of each.
+- **Restore** — rebuilds windows and splits as today, then adds the sidebar
+  pane to each; the `.restoring` lock must cover the hooks that adds.
 
 ---
 

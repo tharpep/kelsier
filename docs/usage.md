@@ -94,7 +94,7 @@ G` or `$KEL_GROUP` override it; a `.kel/group` file pins a directory and
 everything under it (`$KEL_GROUP` still wins). Non-repo agents go to `misc`.
 
 The sidebar groups by repo on its own, so sessions-per-group may not survive
-the pivot (`spec.md` §5b).
+the pivot (`spec.md` §5c).
 
 **window vs pane:** `kel new` makes a **window** — one agent. `prefix | / -`
 makes a **pane** inside it, for your own editor, shell or tests. kel tracks
