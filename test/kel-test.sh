@@ -960,7 +960,10 @@ tmux send-keys -t "$SW" n
 wait_until 'sbtext "$SW" | grep -q "^new: "'
 tmux send-keys -t "$SW" -l fresh
 tmux send-keys -t "$SW" Enter
-wait_until '[ -n "$(window_of api-gw fresh)" ]' 80
+# kel new stamps the window's group before it writes the record, so wait for
+# both — waiting on the window alone raced the record on CI's macOS runner,
+# as the sbdiag dump below showed (the window there, active, the record not)
+wait_until '[ -n "$(window_of api-gw fresh)" ] && [ -f "$SESSIONS/api-gw/fresh.json" ]' 80
 ok "n names and starts an agent, in that space's repo" '[ -n "$(window_of api-gw fresh)" ] && [ -f "$SESSIONS/api-gw/fresh.json" ]'
 sbdiag "$SW" "$f0"
 
