@@ -34,7 +34,7 @@
 #   kel snapshot               save the workspace shape (hooks call this)
 #   kel hook <EVENT>           Claude Code state hook
 #   kel statusline             Claude Code statusLine — context % / cost
-#   kel _panel <what> ...      the sidebar's popups: files, git, diff, edit, browse
+#   kel _panel <what> ...      the sidebar's popups: files, git, diff, edit, plan, browse
 set -uo pipefail
 
 # --------------------------------------------------------------------------
@@ -102,6 +102,7 @@ KEL_FLEET_BIN="${KEL_FLEET_BIN:-$HOME/.local/bin/kel-fleet}"   # the Go seam (v0
 KEL_TOP_BIN="${KEL_TOP_BIN:-$HOME/.local/bin/kel-top}"
 SNAPSHOT_ARCHIVE="$STATE_DIR/snapshots"           # workspaces kel started fresh over
 STATUSLINE_PREV="$HOME/.claude/statusline-prev"   # a statusLine kel displaced
+CLAUDE_HOME="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"   # plans/ and tasks/ live here
 KEL_CTX_WARN="${KEL_CTX_WARN:-70}"                # show context on the bar from here up
 KEL_NOTIFY="${KEL_NOTIFY:-waiting}"               # states worth interrupting you for
 # The running script's own absolute path, preferred over a PATH lookup: kel
@@ -547,9 +548,9 @@ prune_state() {
   local live f wid panes pane
   live="$(tmux list-windows -a -F '#{window_id}' 2>/dev/null || true)"
   [ -n "$live" ] || return 0
-  for f in "$STATE_DIR"/*.state "$STATE_DIR"/*.ctx "$STATE_DIR"/*.seen "$STATE_DIR"/*.edit; do
+  for f in "$STATE_DIR"/*.state "$STATE_DIR"/*.ctx "$STATE_DIR"/*.seen "$STATE_DIR"/*.edit "$STATE_DIR"/*.plan "$STATE_DIR"/*.view; do
     [ -e "$f" ] || continue
-    wid="${f##*/}"; wid="${wid%.state}"; wid="${wid%.ctx}"; wid="${wid%.seen}"; wid="${wid%.edit}"
+    wid="${f##*/}"; wid="${wid%.*}"
     printf '%s\n' "$live" | grep -qxF "$wid" || rm -f "$f"
   done
   # SessionEnd removes a session's own stash entry, including on /clear, which
@@ -1551,6 +1552,7 @@ cmd_url() { # [dir|agent]
 #   _panel git    <dir> <title>          lazygit
 #   _panel diff   <dir> <title> <base>   what changed against the land base
 #   _panel edit   <dir> <title> <wid>    the file the agent last touched
+#   _panel plan   <dir> <title> <wid>    the agent's plan, then its tasks
 #   _panel browse <url>                  the real browser
 cmd_panel() {
   local what="${1:-}"
@@ -1564,6 +1566,7 @@ cmd_panel() {
     git)   need_tool lazygit; popup "$dir" "lazygit · $title" lazygit ;;
     diff)  panel_diff "$dir" "$title" "$arg" ;;
     edit)  panel_edit "$dir" "$title" "$arg" ;;
+    plan)  panel_plan "$dir" "$title" "$arg" ;;
     *)     die "kel _panel: unknown panel '$what'" ;;
   esac
 }
@@ -1639,6 +1642,72 @@ panel_edit() { # dir title wid
   else
     popup "$dir" "nvim · $title" nvim "+$line" "$path"
   fi
+}
+
+# plan: what the agent means to do, then where it is (spec.md §9, "Plan and
+# tasks").  The plan is the file its plan-mode Write named (<wid>.plan).
+# Tasks are Claude Code's own list for the session, ~/.claude/tasks/<session
+# id>/<n>.json, read as they stand rather than rebuilt from hook events.
+# Undocumented, so a file that does not parse makes the list read unreadable —
+# never a shorter list that looks complete (invariant 3).
+panel_plan() { # dir title wid
+  local dir="$1" title="$2" wid="$3" plan='' sid tdir view have=0
+  [ -f "$STATE_DIR/$wid.plan" ] && read -r plan < "$STATE_DIR/$wid.plan"
+  sid="$(session_of "$wid")"
+  tdir="$CLAUDE_HOME/tasks/$sid"
+  [ -n "$plan" ] && have=1
+  [ -n "$sid" ] && [ -d "$tdir" ] && have=1
+  [ "$have" = 1 ] || die "no plan or task list for this agent"
+  view="$STATE_DIR/$wid.view"
+  {
+    if [ -z "$plan" ]; then printf '# plan\n\nnone — this session has not written one\n'
+    elif [ -f "$plan" ]; then cat "$plan"
+    else printf '# plan\n\n%s is gone\n' "$plan"; fi
+    printf '\n---\n\n'
+    plan_tasks "$sid" "$tdir"
+  } > "$view.$$" && mv -f "$view.$$" "$view"
+  if command -v glow >/dev/null 2>&1; then popup "$dir" "plan · $title" glow -p "$view"
+  elif command -v bat >/dev/null 2>&1; then popup "$dir" "plan · $title" bat --paging=always -l md "$view"
+  else popup "$dir" "plan · $title" less -R "$view"; fi
+}
+
+# the task list as markdown: ✓ done, ▸ in progress, · pending, and what blocks
+# what. Deleted tasks are gone. Each file is checked before the one jq over
+# them all: one bad file must not silently drop the rest, nor hide itself.
+plan_tasks() { # sid dir
+  local sid="$1" tdir="$2" f bad=''
+  if [ -z "$sid" ] || [ ! -d "$tdir" ]; then printf '# tasks\n\nno task list — this session keeps none\n'; return; fi
+  for f in "$tdir"/*.json; do
+    [ -e "$f" ] || continue
+    jq -e 'type == "object" and has("status")' "$f" >/dev/null 2>&1 || bad="$bad ${f##*/}"
+  done
+  if [ -n "$bad" ]; then printf '# tasks\n\nunreadable — has Claude Code changed its format? (%s)\n' "${bad# }"; return; fi
+  set -- "$tdir"/*.json
+  [ -e "$1" ] || { printf '# tasks\n\nnone yet\n'; return; }
+  jq -rs '
+    map(select(.status != "deleted")) | sort_by(.id | tonumber? // 0)
+    | ([.[] | select(.status == "completed")] | length) as $done
+    | "# tasks · \($done) of \(length) done\n",
+      ( .[] | (if .status == "completed" then "✓" elif .status == "in_progress" then "▸" else "·" end)
+              + " " + (if .status == "in_progress" and (.activeForm // "") != "" then .activeForm else .subject end)
+              + (if ((.blockedBy // []) | length) > 0 then "  _(blocked by \(.blockedBy | join(", ")))_" else "" end)
+              + "  " )' "$@"
+}
+
+# the Claude session in window WID: its record's, else the one SessionStart
+# stashed for a pane there (an unmanaged window has no record)
+session_of() { # wid
+  local m sid f pane panes
+  if m="$(meta_by_wid "$1")"; then
+    sid="$(jq -r '.claude_session // ""' "${m##*$'\t'}" 2>/dev/null)"
+    [ -n "$sid" ] && { printf '%s' "$sid"; return; }
+  fi
+  panes="$(tmux list-panes -t "$1" -F '#{pane_id}' 2>/dev/null)"
+  for f in "$STASH_DIR"/*; do
+    [ -e "$f" ] || continue
+    pane="$(cat "$f" 2>/dev/null)"
+    printf '%s\n' "$panes" | grep -qxF "$pane" && { printf '%s' "${f##*/}"; return; }
+  done
 }
 
 # the first pane of kel's session running nvim at or under ROOT, as
@@ -2244,9 +2313,12 @@ hook_edit() { # payload sid cwd
   pane="$(resolve_pane "$2" "$3")"; [ -n "$pane" ] || return 0
   wid="$(tmux display-message -p -t "$pane" '#{window_id}' 2>/dev/null)"; [ -n "$wid" ] || return 0
   case "$path" in /*) ;; *) path="$3/$path" ;; esac
-  printf '%s
-%s
-' "$path" "$line" > "$STATE_DIR/$wid.edit.$$" && mv -f "$STATE_DIR/$wid.edit.$$" "$STATE_DIR/$wid.edit"
+  # In plan mode Claude writes its plan with Write, under its plans directory
+  # (measured on 2.1.300): that write is the session's plan, not "the file
+  # the agent last touched" — `p` shows it, and `e` must not open it
+  local kind=edit
+  case "$path" in "$CLAUDE_HOME/plans/"*) kind=plan ;; esac
+  printf '%s\n%s\n' "$path" "$line" > "$STATE_DIR/$wid.$kind.$$" && mv -f "$STATE_DIR/$wid.$kind.$$" "$STATE_DIR/$wid.$kind"
 }
 
 cmd_hook() {

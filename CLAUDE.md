@@ -87,6 +87,8 @@ change; migrate old records in `migrate_meta`.
 | `quota` | `<5h%> <5h reset> <7d%> <7d reset> <spend%> <spend reset> <epoch seen>`, space-separated; `-1` = not reported, `0` reset = not given. Written by `kel statusline` only from a payload carrying rate limits; `kel-fleet` reads it as `quota`, nulling a figure whose window reset or that is older than its window |
 | `<window-id>.seen` | one epoch: when the window was last shown. `kel-fleet` reads it for `unseen` on a `done` agent (no file = unseen); the shown sidebar writes it for its own window |
 | `<window-id>.edit` | two lines: the path the window's agent last edited, then its first changed line. Written by the `PostToolUse` hook (matched to `Edit\|Write\|MultiEdit` in settings.json), read by `kel _panel edit` |
+| `<window-id>.plan` | two lines like `.edit`: the plan file a plan-mode `Write` under `$CLAUDE_CONFIG_DIR/plans/` named. The same hook, sorted by path |
+| `<window-id>.view` | what `p` last composed (plan, then tasks) for its popup; overwritten each time |
 | `sidebar-off` | present after `kel sidebar off`; no new sidebars until `kel sidebar on` |
 | `ports.json` | `{at, panes:{<pane pid>: [ports]}}` — the listening-port scan behind `_fleet --panes`, reused for 10 s |
 
@@ -350,8 +352,11 @@ when the author has daily-driven it. **M4 is done** too: the bar is the
 workspace footer and Claude's row is the session only, inside kel. **M5 is
 done**: `f` `g` `d` `e` `o` open yazi, lazygit, the diff, the agent's last
 file and the browser — kel owns none of them, and `KEL_POPUP_TRACE` lets the
-suite check what a popup would open without a terminal client. **M6 is next**:
-plan and tasks. The
+suite check what a popup would open without a terminal client. **M6 is
+done**: `p` shows the agent's plan and Claude Code's own task list, read from
+`~/.claude/tasks/<session>/` (undocumented — a file that will not parse reads
+unreadable). Automations stay gated (`backlog.md` #38); `v0.10.0` is the
+author's call. The
 sidebar's look is held by golden frames (`cmd/kel-top/testdata/sidebar`);
 change one only after showing the author the frame. The layout
 is decided — a sidebar pane in every window, measured against `swap-pane` in

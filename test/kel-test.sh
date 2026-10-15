@@ -1083,6 +1083,42 @@ python3 -c 'import socket,sys; socket.socket(socket.AF_UNIX).bind(sys.argv[1])' 
 ok "e with nvim open there: the file goes over its socket" 'grep -q -- "--server $XDG_RUNTIME_DIR/nvim\..*--remote-expr .*edit +12 .*README.md" "$WORK/nvim.calls"'
 ok "  ...and its pane is selected"              '[ "$(tmux display -p -t "$W5" "#{pane_id}")" = "$NP" ]'
 
+# ---- v0.10 M6: the plan and the tasks — against a CLAUDE_CONFIG_DIR of the
+# suite's own, never the developer's ~/.claude
+export CLAUDE_CONFIG_DIR="$WORK/claude"; mkdir -p "$CLAUDE_CONFIG_DIR/plans"
+ok "p with no plan and no tasks says so"        '[[ "$("$KEL" _panel plan "$WT5" t "$W5" 2>&1)" == *"no plan or task list"* ]]'
+PLAN="$CLAUDE_CONFIG_DIR/plans/gentle-otter.md"
+printf '# Fix the parser\n\n1. read it\n2. fix it\n' > "$PLAN"
+printf '%s' "{\"session_id\":\"s\",\"cwd\":\"$WT5\",\"hook_event_name\":\"PostToolUse\",\"tool_name\":\"Write\",\"tool_input\":{\"file_path\":\"$PLAN\"}}" \
+  | TMUX_PANE="$(userpane "$W5")" "$KEL" hook PostToolUse
+ok "a Write under the plans dir is the plan"     '[ "$(sed -n 1p "$STATE/$W5.plan")" = "$PLAN" ]'
+ok "  ...and not the last edit"                  '[ "$(sed -n 1p "$STATE/$W5.edit")" = "$WT5/README.md" ]'
+: > "$KEL_POPUP_TRACE"
+"$KEL" _panel plan "$WT5" api-gw/wt5 "$W5" >/dev/null 2>&1
+ok "p opens the plan in a popup"                 'grep -q "^$WT5	plan · api-gw/wt5	" "$KEL_POPUP_TRACE"'
+ok "  ...the plan's own text"                    'grep -q "Fix the parser" "$STATE/$W5.view"'
+ok "  ...and says when the session keeps no tasks" 'grep -q "no task list" "$STATE/$W5.view"'
+# tasks: Claude Code's own list, as it stands on disk for the agent's session
+jq '.claude_session = "sess5"' "$SESSIONS/api-gw/wt5.json" > "$WORK/r" && mv "$WORK/r" "$SESSIONS/api-gw/wt5.json"
+TD="$CLAUDE_CONFIG_DIR/tasks/sess5"; mkdir -p "$TD"
+printf '{"id":"1","subject":"read it","status":"completed","blockedBy":[]}'  > "$TD/1.json"
+printf '{"id":"2","subject":"fix it","activeForm":"Fixing it","status":"in_progress","blockedBy":[]}' > "$TD/2.json"
+printf '{"id":"3","subject":"ship it","status":"pending","blockedBy":["2"]}' > "$TD/3.json"
+printf '{"id":"4","subject":"dropped","status":"deleted","blockedBy":[]}'    > "$TD/4.json"
+"$KEL" _panel plan "$WT5" api-gw/wt5 "$W5" >/dev/null 2>&1
+V="$STATE/$W5.view"
+ok "tasks: done, in progress (as it is phrased), pending" 'grep -q "^✓ read it" "$V" && grep -q "^▸ Fixing it" "$V" && grep -q "^· ship it" "$V"'
+ok "  ...with what blocks what"                  'grep -q "ship it.*blocked by 2" "$V"'
+ok "  ...the count, deleted ones gone"           'grep -q "1 of 3 done" "$V" && ! grep -q dropped "$V"'
+printf '{"id":"5", trunc' > "$TD/5.json"
+"$KEL" _panel plan "$WT5" api-gw/wt5 "$W5" >/dev/null 2>&1
+ok "a file that does not parse: unreadable, not a shorter list" 'grep -q "unreadable.*5.json" "$V" && ! grep -q "✓ read it" "$V"'
+rm -rf "$TD" "$STATE/$W5.plan"
+ok "with neither again, p refuses"              '! "$KEL" _panel plan "$WT5" t "$W5" >/dev/null 2>&1'
+mkdir -p "$TD"; printf '{"id":"1","subject":"solo","status":"pending","blockedBy":[]}' > "$TD/1.json"
+ok "tasks alone are enough for p, the plan said missing" '"$KEL" _panel plan "$WT5" t "$W5" >/dev/null 2>&1 && grep -q "has not written one" "$V" && grep -q "solo" "$V"'
+unset CLAUDE_CONFIG_DIR
+
 ok "a missing tool is said, not a crash"        '[[ "$(PATH="/usr/bin:/bin" KEL_FLEET_BIN="$KEL_FLEET_BIN" "$KEL" _panel files "$WT5" t 2>&1)" == *"yazi is not installed"* ]]'
 kill "$CC" 2>/dev/null; wait "$CC" 2>/dev/null
 unset KEL_AGENT KEL_POPUP_TRACE BROWSER XDG_RUNTIME_DIR

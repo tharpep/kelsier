@@ -413,13 +413,13 @@ func (m sbModel) panel(what string) (sbModel, tea.Cmd) {
 	case "diff":
 		// the base is a few git calls: worked out off the key path
 		return m, func() tea.Msg { return kelDone("", dir, nil, "_panel", "diff", dir, title, fleet.BaseRef(dir)) }
-	case "edit":
+	case "edit", "plan":
 		a, ok := m.agentOf(m.view().sel)
 		if !ok {
 			m.msg, m.msgBad = "select an agent first", true
 			return m, nil
 		}
-		return m, runKel(dir, nil, "_panel", "edit", dir, title, a.wid)
+		return m, runKel(dir, nil, "_panel", what, dir, title, a.wid)
 	}
 	return m, runKel(dir, nil, "_panel", what, dir, title)
 }
@@ -664,6 +664,8 @@ func (m sbModel) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m.panel("edit")
 	case "o":
 		return m.browse()
+	case "p":
+		return m.panel("plan")
 	case "?":
 		m.help = true
 	case "esc":
@@ -701,6 +703,7 @@ var sbHelp = [][2]string{
 	{"d", "diff against base"},
 	{"e", "edit agent's last file"},
 	{"o", "open server in browser"},
+	{"p", "agent's plan and tasks"},
 	{"esc", "back to your pane"},
 	{"prefix space", "focus the sidebar"},
 	{"prefix `", "next waiting agent"},

@@ -275,7 +275,7 @@ where it already is** — which is exactly what a sidebar per window does.
 | restore | *built (M2).* **Rebuild windows and splits as today, sidebars included, under the existing `.restoring` lock.** A snapshot records each sidebar as a `@kel-sidebar` pane (its geometry is part of the window's layout string, so skipping it would break `select-layout`), and restore relaunches it rather than replaying a command — so a restore cannot duplicate one. The author found the old restore hard to work with — the rebuild is a chance to simplify it, not just extend it |
 | scope | **only kel's session.** Panes in other tmux sessions are not part of the workspace |
 | focus | *built (M3).* **One key to focus the sidebar** (`prefix Space`, taking tmux's `next-layout`); `enter` jumps to the selected pane, `esc` returns where you were. `` prefix ` `` is unchanged |
-| keys | *built (M3, M5).* `j`/`k` move · `enter` jump · `/` filter · `n` new agent · `w` new worktree agent · `x` kill (kill-safety intact) · `r` rename · `f` files · `g` git · `d` the worktree's diff · `e` edit what the agent last touched · `o` a server in the browser · `?` help. `p` plan/tasks comes with M6. None deeper than one key |
+| keys | *built (M3, M5).* `j`/`k` move · `enter` jump · `/` filter · `n` new agent · `w` new worktree agent · `x` kill (kill-safety intact) · `r` rename · `f` files · `g` git · `d` the worktree's diff · `e` edit what the agent last touched · `o` a server in the browser · `p` plan and tasks · `?` help. None deeper than one key |
 | sections | *built (M3).* **`spaces` above `agents`** (§5), after herdr, replacing the single repo → worktree → pane tree |
 | mouse | *built (M3).* **First-class.** A click selects and jumps; the wheel scrolls; every gesture a key does on a row, a click can reach. Bubble Tea v2 reports mouse events; tmux passes them to the pane under the pointer with `mouse on`, which kel's config already sets |
 | done, until seen | *built (M3).* **`done` stays loud until you have looked at the agent**, then quietens — herdr's semantics, and what makes the dots worth reading. A **flag on `done`, not a new state**: `kel jump`, the notifications and every reader that matches on state are untouched. When "looked at" happened is recorded from the window-change event the sidebar already receives (§9) |
@@ -568,15 +568,38 @@ with the payload on stdin:
 | `SessionEnd` | state file removed |
 | `PreCompact` | no change — increments `compactions` |
 | `PostCompact` | no change — redraws the bar |
-| `PostToolUse` on `TodoWrite` | *designed.* no change — records the session's task list for the panel's tasks view (M6) |
-| `PostToolUse` on `Edit` / `Write` | *built (M5).* no change — records the last file the agent touched and its first changed line (`tool_response.structuredPatch[0].newStart`), for `e` (§5f) |
+| `PostToolUse` on `Edit` / `Write` | *built (M5).* no change — records the last file the agent touched and its first changed line (`tool_response.structuredPatch[0].newStart`), for `e` (§5f). *Built (M6):* a write under `~/.claude/plans/` is the session's plan, recorded as `<window-id>.plan` instead |
 
-The two `PostToolUse` entries are wired with a **matcher limited to those
-tools**: `PostToolUse` fires after every tool call, so an unmatched hook would
-put a `kel` start on the agent's hottest path (invariant 5). Both read the
-tool's own payload — the task list and the file path are in it — so neither
-scrapes a transcript. Each adds a small per-window file to the on-disk
-contract, recorded in `CLAUDE.md` when built.
+The `PostToolUse` entry is wired with a **matcher limited to those tools**:
+`PostToolUse` fires after every tool call, so an unmatched hook would put a
+`kel` start on the agent's hottest path (invariant 5). It reads the tool's own
+payload — the file path is in it — so it never scrapes a transcript.
+
+**Plan and tasks** *(measured 2026-10-15 on Claude Code 2.1.300; built,
+M6)*. The first design said a `PostToolUse` hook on `TodoWrite` would
+carry the task list. Measured with a headless session and a hook that logged
+every payload, both halves of that were stale:
+
+- **`TodoWrite` is gone.** Since 2.1.142 the task tools are `TaskCreate` /
+  `TaskUpdate` / `TaskGet` / `TaskList`, and since 2.1.268 newer models —
+  Opus 5.5 among them — do not get them by default at all: most of the
+  author's sessions keep no task list. kel never turns them on
+  (`CLAUDE_CODE_ENABLE_TODO_TOOLS` would alter the agent — not a harness).
+  When a session has them they do fire `PostToolUse` (`TaskCreate` returns
+  `{task:{id,subject}}`; `TaskUpdate` takes `{taskId,status}`), and Claude
+  Code keeps the whole list on disk as `~/.claude/tasks/<session id>/<id>.json`
+  — `subject`, `status`, `blockedBy`. kel **reads that directory** for the
+  agent's `claude_session` rather than rebuilding the list from hook events: it
+  is exactly the current list, with no state machine to keep in step. It is
+  undocumented, so a file that does not parse makes the list read
+  `tasks unreadable`, never an empty list (invariant 3). No directory means
+  the session keeps no list, which is the common case and says so.
+- **The plan needs no new hook.** In plan mode Claude writes its plan with the
+  ordinary `Write` tool to `~/.claude/plans/<generated name>.md` — which the
+  M5 hook already sees. So the generated name never has to be tied to a
+  session after the fact: the write itself names the window. Recording it as
+  the plan rather than the last edit also fixes `e`, which would otherwise
+  open the plan as "the file the agent last touched".
 
 **Done, until seen** *(built, M3)*. `done` carries a flag: unseen until the
 agent's window is shown, then seen. The sidebar records the moment from the

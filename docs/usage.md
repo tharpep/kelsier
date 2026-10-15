@@ -3,7 +3,7 @@
 The reference for what exists **today**. kel is mid-pivot (v0.10, see
 `rollout.md`): the old board and menus are gone, replaced by the sidebar; kel
 is the sidebar, the commands below, the status bar, `kel top` and
-jump-to-blocked. The plan / tasks popup is not built yet.
+jump-to-blocked.
 
 ## Install
 
@@ -120,6 +120,7 @@ A blue `▌` marks the selection, `›` where you are.
 | `d` | that worktree's changes — committed and uncommitted — against the branch it lands on (diffview.nvim if installed, else `delta`, else `git diff`) |
 | `e` | the file the selected agent last edited, at the line — in the nvim you have open in that worktree, else a popup |
 | `o` | the selected server in your browser — its lowest port; the footer names the others |
+| `p` | the selected agent's plan (from plan mode), then its task list — `✓` done, `▸` in progress, `·` pending, and what blocks what. Most sessions on newer models keep no task list; it says so |
 | `?` | every key |
 | `esc` | back to the pane you were in |
 | click · wheel | select and jump, fold a space · move |
@@ -224,7 +225,9 @@ Everything lives in `${XDG_STATE_HOME:-~/.local/state}/kel/`, mode `0700`:
 - `quota` — the account's rate limits, from `kel statusline`
 - `<window-id>.seen`, `sidebar.json`, `sidebar-cache.json` — the sidebar's
 - `<window-id>.edit` — the file the agent last edited, and the line, from a
-  `PostToolUse` hook on Edit / Write
+  `PostToolUse` hook on Edit / Write; `<window-id>.plan` — the plan file a
+  plan-mode Write named; `<window-id>.view` — what `p` last showed
+- kel *reads*, never writes, Claude Code's own `~/.claude/tasks/<session>/`
 - `snapshot.json` (+ `.prev`), `snapshots/` (previous workspaces),
   `doctor.json`, `pr-cache/`,
   `.stash/`

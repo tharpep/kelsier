@@ -87,7 +87,7 @@ TUI pass over the old board, which no longer exists.
 fix: `kel-fleet` ignored `pr = off`, and it called `gh` for repos that local git
 had already answered.
 
-### Step 4 — the build plan  ·  *M0–M5 done, M6 next*
+### Step 4 — the build plan  ·  *M0–M6 done*
 
 Agreed 2026-10-14. Each milestone ends with something to try, and the suite
 stays green throughout. The decisions behind it are `spec.md` §5c and §7.
@@ -267,13 +267,31 @@ too: the first background, `colour234`, read as grey and became true black
   real pty client: `display-popup` blocks its caller until the popup closes,
   harmless only because the sidebar runs actions off its key path
 
-**M6 — plan and tasks, then automations**  →  `v0.12+`  ·  *next*
-- `p`, the plan / tasks popup (moved from M5 with its data)
-- tasks come from a `PostToolUse` hook on `TodoWrite` (`spec.md` §9) — the
-  payload carries the list, so no transcript is read
-- plan files in `~/.claude/plans/` have generated names; tying one to a
-  session probably means the transcript. Investigated when we get there —
-  it blocks nothing earlier.
+**M6 — plan and tasks**  →  `v0.12`  ·  **done**
+Planned after measuring the real payloads (`spec.md` §9, "Plan and tasks"):
+the `TodoWrite` design was stale, and the plan turned out to need no new hook.
+- **the plan**: the M5 `PostToolUse` hook sends a write under
+  `~/.claude/plans/` to `<window-id>.plan` (its path) instead of `.edit`, so
+  `e` stops mistaking the plan for the last edit
+- **tasks**: read from `~/.claude/tasks/<claude_session>/*.json` — the
+  record's `claude_session`, or the `.stash` entry for an unmanaged window. No
+  directory: "no task list" (the usual case on Opus 5.5). A file that does not
+  parse: "tasks unreadable", never a shorter list
+- **`p`** opens a popup at the agent: the plan (through `glow` or `bat` if
+  installed, else plain), then its tasks — `✓` done, `▸` in progress, `·`
+  pending, with what blocks what. Neither: the footer says so
+- *try:* a session in plan mode; then one started with
+  `CLAUDE_CODE_ENABLE_TODO_TOOLS=1` by you, for the tasks half
+- *tests:* a Write under the plans dir lands in `.plan` and not `.edit`; tasks
+  from a fixture directory in every status; a missing directory says "no task
+  list"; a corrupt file says "unreadable"; `p` with neither says so; the
+  popup's contents through `KEL_POPUP_TRACE`
+- **automations stay gated** (`backlog.md` #38): the sidebar, panel and plan
+  are not daily-driven yet. After M6, `v0.10.0` is tagged when the author says
+  so
+- *found on the way:* M5's `hook_edit` had real newlines inside its `printf`
+  format — a quoting slip in its writing that happened to print the same
+  thing; rewritten while the plan / edit split went in
 
 **Why this order:** M0–M1 are data and plumbing you can mostly ignore; M2 is
 where the tmux-hook risk lives, so it is proven before any UI depends on it;
