@@ -46,12 +46,19 @@ func TestSidebarGolden(t *testing.T) {
 	}
 	for _, f := range files {
 		name := strings.TrimSuffix(filepath.Base(f), ".json")
-		for _, w := range []int{28, 32, 40} {
-			got, err := fixtureFrame(f, w, 0)
+		for _, c := range []struct {
+			w       int
+			focused bool
+		}{{28, false}, {32, false}, {40, false}, {32, true}} {
+			w := c.w
+			got, err := fixtureFrame(f, w, 0, c.focused)
 			if err != nil {
 				t.Fatal(err)
 			}
 			gold := filepath.Join(fixtures, name+"."+itoa(w)+".golden")
+			if c.focused {
+				gold = filepath.Join(fixtures, name+".focused."+itoa(w)+".golden")
+			}
 			if *update {
 				if err := os.WriteFile(gold, []byte(got+"\n"), 0o644); err != nil {
 					t.Fatal(err)
@@ -154,7 +161,7 @@ func TestSidebarLineRefs(t *testing.T) {
 			t.Errorf("line %d %q maps to %+v", i, l, refs[i])
 		}
 	}
-	if !strings.Contains(lines[len(lines)-1], "j/k") {
+	if !strings.Contains(lines[len(lines)-1], "prefix space") {
 		t.Error("the footer is not pinned to the last line")
 	}
 }
@@ -171,11 +178,44 @@ func TestSidebarNoInverse(t *testing.T) {
 }
 
 func TestParseVisible(t *testing.T) {
-	cases := map[string]bool{"1 1": true, "1 2\n": true, "0 1": false, "1 0": false, "": false, "x": false}
+	cases := map[string][2]bool{
+		"1 1": {true, false}, "1 2 1\n": {true, true}, "1 1 0": {true, false},
+		"0 1 1": {false, false}, "1 0 1": {false, false}, "": {false, false}, "x": {false, false},
+	}
 	for in, want := range cases {
-		if parseVisible(in) != want {
-			t.Errorf("parseVisible(%q) != %v", in, want)
+		if v, a := parseVisible(in); v != want[0] || a != want[1] {
+			t.Errorf("parseVisible(%q) = %v %v, want %v", in, v, a, want)
 		}
+	}
+}
+
+// The footer: how to get in while unfocused; the selection's keys once in.
+func TestSidebarHint(t *testing.T) {
+	doc := loadFixture(t, "fifteen-three-repos")
+	foot := func(ui uiState, w int) string {
+		out, _ := renderView(buildView(doc, ui), w, 30, 0)
+		l := strings.Split(plain(out), "\n")
+		return l[len(l)-1]
+	}
+	if got := foot(uiState{}, 32); got != "prefix space" {
+		t.Errorf("unfocused footer: %q", got)
+	}
+	if got := foot(uiState{focused: true}, 32); !strings.HasPrefix(got, "e edit · p plan · x kill") {
+		t.Errorf("agent footer: %q", got)
+	}
+	if got := foot(uiState{focused: true, sel: spaceID("/home/me/code/api-gw")}, 32); !strings.HasPrefix(got, "f files · g git · d diff") {
+		t.Errorf("space footer: %q", got)
+	}
+	if got := foot(uiState{focused: true, sel: "%7", expanded: map[string]bool{"/home/me/code/api-gw": true}}, 40); !strings.Contains(got, "o open") {
+		t.Errorf("server footer: %q", got)
+	}
+	for w := 1; w <= 40; w++ {
+		if got := foot(uiState{focused: true}, w); len([]rune(got)) > w {
+			t.Errorf("width %d: footer %q overflows", w, got)
+		}
+	}
+	if got := foot(uiState{focused: true}, 40); !strings.HasSuffix(got, "· ?") {
+		t.Errorf("with room, the footer ends in ?: %q", got)
 	}
 }
 

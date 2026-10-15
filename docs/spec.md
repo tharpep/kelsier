@@ -129,7 +129,7 @@ the bash that remains.
 │ ◆ docs                   │                      │                   │
 │   done                   │                      │                   │
 │                          │                      │                   │
-│ j/k · enter · ? keys     │                      │                   │
+│ e edit · p plan · ?      │                      │                   │
 ├──────────────────────────┴──────────────────────────────────────────┤
 │ claude ███░░ 58% (1h20m) · wk 41%  │  1 waiting 6m · $24.10          │
 └─────────────────────────────────────────────────────────────────────┘
@@ -279,6 +279,7 @@ where it already is** — which is exactly what a sidebar per window does.
 | sections | *built (M3).* **`spaces` above `agents`** (§5), after herdr, replacing the single repo → worktree → pane tree |
 | mouse | *built (M3).* **First-class.** A click selects and jumps; the wheel scrolls; every gesture a key does on a row, a click can reach. Bubble Tea v2 reports mouse events; tmux passes them to the pane under the pointer with `mouse on`, which kel's config already sets |
 | done, until seen | *built (M3).* **`done` stays loud until you have looked at the agent**, then quietens — herdr's semantics, and what makes the dots worth reading. A **flag on `done`, not a new state**: `kel jump`, the notifications and every reader that matches on state are untouched. When "looked at" happened is recorded from the window-change event the sidebar already receives (§9) |
+| footer | *built 2026-10-15, after daily use.* **The keys for what is selected, and only while the sidebar has the keyboard.** The author did not want to remember keys and did not want a busier sidebar, so the one footer line teaches them: an agent shows `e edit · p plan · x kill · ?`, a space `f files · g git · d diff · ?`, a server `o open · …`, as many as fit, then `?` for the rest; `enter` is left out as the key everybody tries. Without the keyboard it reads `prefix space` — how to get in. Focus comes from the terminal's focus events (kel sets `focus-events on`), else `#{pane_active}` on each tick, and any key or click proves it |
 | visual language | *built (M3).* §5d. Settled on rendered frames, approved by the author, before M3 was wired to live data; the background is true black (`colour16`), the author's call after `colour234` read as grey |
 
 **Still open** — settled when their milestone is planned, not before:

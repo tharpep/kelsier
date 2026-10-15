@@ -140,14 +140,17 @@ func (m *sbModel) markSeen() {
 // ---------------------------------------------------------------- tmux
 
 // visible: this pane's window is its session's active window, and someone is
-// attached to that session. Format "1 2" = active, two clients.
-func parseVisible(s string) bool {
+// attached to that session. Format "1 2 0" = active, two clients, and — the
+// third field — whether this pane is the window's active one, which is the
+// fallback for focus when the terminal does not report it.
+func parseVisible(s string) (visible, active bool) {
 	f := strings.Fields(s)
-	if len(f) != 2 || f[0] != "1" {
-		return false
+	if len(f) < 2 || f[0] != "1" {
+		return false, false
 	}
 	n, err := strconv.Atoi(f[1])
-	return err == nil && n > 0
+	visible = err == nil && n > 0
+	return visible, visible && len(f) > 2 && f[2] == "1"
 }
 
 func (m *sbModel) checkVisible() {
@@ -156,8 +159,12 @@ func (m *sbModel) checkVisible() {
 		return
 	}
 	out, err := exec.Command("tmux", "display-message", "-p", "-t", m.myPane,
-		"#{window_active} #{session_attached}").Output()
-	m.visible = err == nil && parseVisible(string(out))
+		"#{window_active} #{session_attached} #{pane_active}").Output()
+	if err != nil {
+		m.visible = false
+		return
+	}
+	m.visible, m.ui.focused = parseVisible(string(out))
 }
 
 func jump(wid, pane string) {
@@ -511,7 +518,15 @@ func (m sbModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.msg, m.msgBad = msg.msg, !msg.ok
 		return m, m.loadCmd()
 
+	// focus: the terminal's report when tmux passes it (focus-events on),
+	// else #{pane_active} on each tick; a key or a click proves it as well
+	case tea.FocusMsg:
+		m.ui.focused = true
+	case tea.BlurMsg:
+		m.ui.focused = false
+
 	case tea.MouseClickMsg:
+		m.ui.focused = true
 		if msg.Button != tea.MouseLeft || m.mode != modeNormal {
 			return m, nil
 		}
@@ -551,6 +566,7 @@ func (m sbModel) withShared() uiState {
 func (m sbModel) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	k := msg.String()
 	m.msg = ""
+	m.ui.focused = true
 
 	switch m.mode {
 	case modeKill:
@@ -673,6 +689,7 @@ func (m sbModel) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.ui.filter = ""
 			return m, nil
 		}
+		m.ui.focused = false
 		// back to where you were before prefix Space — in this sidebar's own
 		// window: with no target, which window tmux calls current differs
 		// between versions (macOS CI picked another one)
@@ -727,6 +744,7 @@ func (m sbModel) View() tea.View {
 	v := tea.NewView(m.render())
 	v.AltScreen = true
 	v.MouseMode = tea.MouseModeCellMotion
+	v.ReportFocus = true
 	return v
 }
 
@@ -778,7 +796,7 @@ func runSidebar(once bool) {
 // fixtureFrame renders a saved fleet document — the frames the author
 // approves before the sidebar is wired to anything live (spec.md §5e). "now"
 // is the document's own generated_at, so ages never drift between runs.
-func fixtureFrame(path string, w, h int) (string, error) {
+func fixtureFrame(path string, w, h int, focused bool) (string, error) {
 	b, err := os.ReadFile(path)
 	if err != nil {
 		return "", err
@@ -791,7 +809,7 @@ func fixtureFrame(path string, w, h int) (string, error) {
 	if t, err := time.Parse(time.RFC3339, doc.GeneratedAt); err == nil {
 		now = t.Unix()
 	}
-	out, _ := renderView(buildView(doc, uiState{}), w, h, now)
+	out, _ := renderView(buildView(doc, uiState{focused: focused}), w, h, now)
 	return out, nil
 }
 
@@ -805,15 +823,21 @@ func runFixtures(path string, widths []int, h int) {
 	}
 	for _, f := range files {
 		for _, w := range widths {
-			out, err := fixtureFrame(f, w, h)
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "kel-top: %v\n", err)
-				os.Exit(1)
+			for _, focused := range []bool{false, true} {
+				out, err := fixtureFrame(f, w, h, focused)
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "kel-top: %v\n", err)
+					os.Exit(1)
+				}
+				name := strings.TrimSuffix(filepath.Base(f), ".json")
+				state := "unfocused"
+				if focused {
+					state = "focused"
+				}
+				fmt.Printf("%s── %s · %d cols · %s %s%s\n", dim, name, w, state, strings.Repeat("─", max(0, 12-len(name))), reset)
+				fmt.Println(out)
+				fmt.Println()
 			}
-			name := strings.TrimSuffix(filepath.Base(f), ".json")
-			fmt.Printf("%s── %s · %d cols %s%s\n", dim, name, w, strings.Repeat("─", max(0, 20-len(name))), reset)
-			fmt.Println(out)
-			fmt.Println()
 		}
 	}
 }

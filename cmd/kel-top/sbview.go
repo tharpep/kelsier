@@ -33,6 +33,7 @@ type uiState struct {
 	expanded map[string]bool // explicit toggles by space key; absent = default
 	filter   string
 	myWindow string // the window this sidebar sits in — current, whatever the doc says
+	focused  bool   // the keyboard is in this sidebar
 }
 
 type sbSpace struct {
@@ -63,6 +64,7 @@ type sbView struct {
 	entryIDs []string // selectable ids in screen order, for j/k
 
 	footer, footerColour string // a prompt or a message; "" = the key hint
+	focused              bool
 }
 
 // lineRef says which entry a screen line belongs to — what a click hits.
@@ -88,7 +90,7 @@ func spaceKey(p fleet.Pane) (key, label string) {
 }
 
 func buildView(doc fleet.Doc, ui uiState) sbView {
-	v := sbView{sel: ui.sel, filter: ui.filter}
+	v := sbView{sel: ui.sel, filter: ui.filter, focused: ui.focused}
 	if doc.Panes == nil {
 		v.unknown = true
 		return v
@@ -485,7 +487,10 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 		add("    "+wc+word+reset+dim+rest+reset, r)
 	}
 
-	footer, fc := "j/k · enter · ? keys", dim
+	// The footer teaches the keys by showing the ones that fit what is
+	// selected, so nothing has to be remembered and nothing is added: one
+	// line, as before. Without the keyboard it says only how to get it.
+	footer, fc := hint(v, w), dim
 	if v.filter != "" {
 		footer = "/" + v.filter + "  esc clears"
 	}
@@ -542,4 +547,44 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 		refs[i] = l.ref
 	}
 	return b.String(), refs
+}
+
+// hint is the footer for the selected entry: its keys, most useful first, as
+// many as fit, then `?` for the rest when there is room.
+func hint(v sbView, w int) string {
+	if !v.focused {
+		return "prefix space"
+	}
+	var keys []string
+	switch {
+	case strings.HasPrefix(v.sel, "a:"):
+		// enter is the one key everybody tries; the room goes to the rest
+		keys = []string{"e edit", "p plan", "x kill", "r rename", "enter"}
+	case strings.HasPrefix(v.sel, "s:"):
+		keys = []string{"f files", "g git", "d diff", "n new", "enter fold"}
+	default: // a pane
+		keys = []string{"f files", "g git", "enter"}
+		for _, s := range v.spaces {
+			for _, p := range s.panes {
+				if p.PaneID == v.sel && p.Kind == "server" {
+					keys = []string{"o open", "f files", "g git", "enter"}
+				}
+			}
+		}
+	}
+	out := ""
+	for _, k := range keys {
+		next := k
+		if out != "" {
+			next = out + " · " + k
+		}
+		if len([]rune(next))+len([]rune(" · ?")) > w && out != "" {
+			break
+		}
+		out = next
+	}
+	if len([]rune(out))+len([]rune(" · ?")) <= w {
+		out += " · ?"
+	}
+	return out
 }

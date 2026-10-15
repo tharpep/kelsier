@@ -104,7 +104,9 @@ in two sections:
   seen, magenta throttled, red `✕` dead, dim `?` unknown), then how long, the
   context % and the cost.
 
-A blue `▌` marks the selection, `›` where you are.
+A blue `▌` marks the selection, `›` where you are. The footer reads `prefix
+space` until the sidebar has the keyboard, then shows the keys for whatever is
+selected (`e edit · p plan · x kill · ?` on an agent) — `?` lists them all.
 
 | key | |
 |---|---|
