@@ -1562,7 +1562,7 @@ cmd_panel() {
   local dir="${1:-}" title="${2:-}" arg="${3:-}"
   [ -d "$dir" ] || die "no such directory: $dir"
   case "$what" in
-    files) need_tool yazi;    popup "$dir" "yazi · $title · q closes" yazi ;;
+    files) need_tool yazi;    KEL_POPUP_KEEP=1 popup "$dir" "yazi · $title · prefix q closes" yazi ;;
     git)   need_tool lazygit; panel_lazygit "$dir" "$title" ;;
     diff)  panel_diff "$dir" "$title" "$arg" ;;
     edit)  panel_edit "$dir" "$title" "$arg" ;;
@@ -1582,8 +1582,8 @@ panel_lazygit() { # dir title
   local own over="$STATE_DIR/lazygit-overlay.yml"
   own="$(lazygit --print-config-dir 2>/dev/null)/config.yml"
   [ -f "$over" ] || printf '# written by kel: esc at the top level closes its popup\nquitOnTopLevelReturn: true\n' > "$over"
-  if [ -f "$own" ]; then popup "$1" "lazygit · $2 · q closes" lazygit --use-config-file "$own,$over"
-  else popup "$1" "lazygit · $2 · q closes" lazygit --use-config-file "$over"; fi
+  if [ -f "$own" ]; then KEL_POPUP_KEEP=1 popup "$1" "lazygit · $2 · prefix q closes" lazygit --use-config-file "$own,$over"
+  else KEL_POPUP_KEEP=1 popup "$1" "lazygit · $2 · prefix q closes" lazygit --use-config-file "$over"; fi
 }
 
 # tmux_at_least MAJOR MINOR — compared arithmetically: BSD sort has no -V
@@ -1593,26 +1593,55 @@ tmux_at_least() {
   [ "${v%%.*}" -gt "$1" ] || { [ "${v%%.*}" -eq "$1" ] && [ "${v#*.}" -ge "$2" ]; }
 }
 
-# popup DIR TITLE CMD... — a titled popup at DIR, closed when CMD exits.
+# popup DIR TITLE CMD... — a titled popup at DIR running CMD.
+#
+# The popup hosts a small tmux session of its own, `_kelpop_<n>`, and attaches
+# to it, instead of running CMD directly. A popup takes every key, prefix
+# included, so a tool that hands you to another (yazi opening vim) could trap
+# you — `q` then meant vim's `q`. Inside the hosted session tmux's keys work
+# again, and `prefix q` (kel.conf) detaches, which closes the popup whatever is
+# running. The name starts with `_`, so no kel filter (`kel` or `kel/<group>`)
+# ever counts it: not the sidebar, the fleet, a snapshot or a restore.
+#
+# KEL_POPUP_KEEP=1: reuse the session if the tool is still running, so lazygit
+# and yazi reopen where you left them; the tool's own quit ends it. Views of
+# something that changes (diff, plan, edit) are made fresh each time.
+#
 # KEL_POPUP_TRACE records instead of drawing: a popup needs a client with a
 # terminal, and the suite has only control-mode clients, which cannot show
-# one.  Everything up to the draw — which tool, which directory, the refusals —
-# still runs for real.
+# one. Everything up to the draw still runs for real.
 popup() {
   local dir="$1" title="$2"; shift 2
   if [ -n "${KEL_POPUP_TRACE:-}" ]; then
     printf '%s\t%s\t%s\n' "$dir" "$title" "$*" >> "$KEL_POPUP_TRACE"
     return 0
   fi
-  local cmd='' a
+  local cmd='' a name sock="${TMUX%%,*}"
   for a in "$@"; do cmd="$cmd $(printf '%q' "$a")"; done
-  # Two E flags, not one: a lone one closes the popup the moment the tool
+  cmd="${cmd# }"
+  name="_kelpop_$(printf '%s|%s' "$dir" "$1" | cksum | cut -d' ' -f1)"
+  [ -n "${KEL_POPUP_KEEP:-}" ] || tmux kill-session -t "=$name" 2>/dev/null
+  # `=name:` with the colon where a pane is the target (set-option): without
+  # it tmux reads `=name` as a pane and finds no such session
+  if ! tmux has-session -t "=$name" 2>/dev/null; then
+    tmux new-session -d -s "$name" -c "$dir" "$cmd" \; \
+         set-option -t "=$name:" status off \; \
+         set-option -t "=$name:" @kel-popup 1 >/dev/null 2>&1 \
+      || die "could not start $1"
+  fi
+  # Two E flags, not one: a lone one closes the popup the moment its command
   # exits, a failure included, so its error would never be read ("errors
   # cannot be swallowed" in the suite counts these)
+  # KEL_POPUP_NODRAW: everything but the draw — the suite's seam for the
+  # hosted session, whose clients are control-mode (one cannot show a popup,
+  # and is hung up trying)
+  [ -n "${KEL_POPUP_NODRAW:-}" ] && return 0
   local -a opt=( -EE -w "${KEL_POPUP_W:-90%}" -h "${KEL_POPUP_H:-85%}" -d "$dir" -T " $title " )
   tmux_at_least 3 3 && opt+=( -b rounded )            # border styles are 3.3+
   [ -n "${TMUX_PANE:-}" ] && opt+=( -t "$TMUX_PANE" )
-  tmux display-popup "${opt[@]}" "${cmd# }"
+  # the inner client is this same server's; $TMUX unset, or tmux refuses to
+  # nest. `env -u` is in both GNU and BSD env
+  tmux display-popup "${opt[@]}" "env -u TMUX tmux -S $(printf '%q' "$sock") attach -t $(printf '%q' "=$name")"
 }
 
 # diff: what the agent changed — committed and uncommitted — against the base
@@ -1625,11 +1654,11 @@ panel_diff() { # dir title base
     die "no changes against $base"
   fi
   if command -v nvim >/dev/null 2>&1 && nvim --headless -c 'lua io.write(pcall(require, "diffview") and "y" or "n")' -c 'qa!' 2>/dev/null | grep -q y; then
-    popup "$dir" "diff · $title · $base · :q closes" nvim -c "DiffviewOpen $base"
+    popup "$dir" "diff · $title · $base · prefix q closes" nvim -c "DiffviewOpen $base"
   elif command -v delta >/dev/null 2>&1; then
-    popup "$dir" "diff · $title · $base · q closes" sh -c 'git diff --merge-base "$1" | delta --paging=always' sh "$base"
+    popup "$dir" "diff · $title · $base · prefix q closes" sh -c 'git diff --merge-base "$1" | delta --paging=always' sh "$base"
   else
-    popup "$dir" "diff · $title · $base · q closes" git diff --merge-base "$base"
+    popup "$dir" "diff · $title · $base · prefix q closes" git diff --merge-base "$base"
   fi
 }
 
@@ -1653,7 +1682,7 @@ panel_edit() { # dir title wid
     tmux select-window -t "${pane%% *}" \; select-pane -t "${pane%% *}" 2>/dev/null
     say "opened in your nvim"
   else
-    popup "$dir" "nvim · $title · :q closes" nvim "+$line" "$path"
+    popup "$dir" "nvim · $title · prefix q closes" nvim "+$line" "$path"
   fi
 }
 
@@ -1679,9 +1708,9 @@ panel_plan() { # dir title wid
     printf '\n---\n\n'
     plan_tasks "$sid" "$tdir"
   } > "$view.$$" && mv -f "$view.$$" "$view"
-  if command -v glow >/dev/null 2>&1; then popup "$dir" "plan · $title · q closes" glow -p "$view"
-  elif command -v bat >/dev/null 2>&1; then popup "$dir" "plan · $title · q closes" bat --paging=always -l md "$view"
-  else popup "$dir" "plan · $title · q closes" less -R "$view"; fi
+  if command -v glow >/dev/null 2>&1; then popup "$dir" "plan · $title · prefix q closes" glow -p "$view"
+  elif command -v bat >/dev/null 2>&1; then popup "$dir" "plan · $title · prefix q closes" bat --paging=always -l md "$view"
+  else popup "$dir" "plan · $title · prefix q closes" less -R "$view"; fi
 }
 
 # the task list as markdown: ✓ done, ▸ in progress, · pending, and what blocks

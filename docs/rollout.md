@@ -289,6 +289,11 @@ the `TodoWrite` design was stale, and the plan turned out to need no new hook.
 - **automations stay gated** (`backlog.md` #38): the sidebar, panel and plan
   are not daily-driven yet. After M6, `v0.10.0` is tagged when the author says
   so
+- *after M6, from daily use (screenshots):* trapped in lazygit (`esc` now
+  closes it), the quota bar unreadable (`█` for `▓`), keys to remember (the
+  footer now shows the selection's keys, and `prefix space` when unfocused),
+  and trapped in vim inside yazi — so every popup now hosts a small tmux
+  session where `prefix q` always closes it (`spec.md` §5c, "the panel")
 - *found on the way:* M5's `hook_edit` had real newlines inside its `printf`
   format — a quoting slip in its writing that happened to print the same
   thing; rewritten while the plan / edit split went in

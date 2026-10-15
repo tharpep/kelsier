@@ -269,6 +269,18 @@ with nothing in kel to assert against. Re-breaking an `unguarded` one is silent.
   own helpers for releases, while `kel-fleet` — which answered whenever it was
   installed — broke both. Assert a promise through the path that actually runs
   (`kel _fleet`), never through an internal helper.
+- `[guarded]` **A popup takes every key — prefix included.** No tmux binding
+  fires while one is open, so a tool that launches another (yazi → vim) could
+  trap you. kel's popups attach to a hosted `_kelpop_*` session instead, where
+  tmux's keys work and `prefix q` detaches. Those sessions are kel's but fall
+  outside its `kel` / `kel/<group>` filters on purpose — keep it that way.
+- `[guarded]` **`set-option -t =name` is not a session target.** It takes a
+  pane, and `=name` alone finds "no such session"; write `=name:`. The
+  hosted-popup chain failed on this and the first popup never drew.
+- `[guarded]` **A control-mode client cannot show a popup — and is hung up by
+  one.** The suite's control clients are what stand in for a person, so it
+  stops before the draw (`KEL_POPUP_TRACE` records, `KEL_POPUP_NODRAW` builds
+  the hosted session); the draw itself is checked by hand with a pty client.
 - `[unguarded]` **`prune_state` is not `kel prune`.** `cmd_prune` reaps dead
   *agents*; `prune_state` reaps orphaned state files and is called from `cmd_ls`
   and `cmd_attach`. A test that drives `kel prune` to exercise `prune_state`

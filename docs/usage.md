@@ -127,8 +127,13 @@ selected (`e edit · p plan · x kill · ?` on an agent) — `?` lists them all.
 | `esc` | back to the pane you were in |
 | click · wheel | select and jump, fold a space · move |
 
-Popups close when their tool quits, and each one's title says how (`q closes`,
-`:q closes`); in lazygit `esc` closes it too, as everywhere in kel. A tool that is not installed is said in
+**`prefix q` closes any popup**, whatever is running in it — even vim that
+yazi opened for you. It says so in every popup's title. Quitting the tool
+itself closes it too (`q` in yazi and lazygit, where `esc` also works, `:q` in
+nvim). yazi and lazygit keep running when closed with `prefix q`, so
+reopening them lands where you left off; the diff, plan and editor popups are
+made fresh each time. Outside a popup `prefix q` is tmux's usual
+`display-panes`. A tool that is not installed is said in
 the footer (`kel doctor` lists them as optional). The browser is `$BROWSER`,
 else `open` / `xdg-open` / `wslview`, else Windows' `start` from WSL.
 

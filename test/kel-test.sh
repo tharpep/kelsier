@@ -1041,10 +1041,10 @@ S5="$(sbpane "$W5")"
 wait_until 'sbtext "$S5" | grep -q wt5'
 tmux send-keys -t "$S5" f
 wait_until 'grep -q yazi "$KEL_POPUP_TRACE"'
-ok "f opens yazi, titled, at the worktree"       'grep -q "^$WT5	yazi · api-gw/wt5 · q closes	yazi$" "$KEL_POPUP_TRACE"'
+ok "f opens yazi, titled, at the worktree"       'grep -q "^$WT5	yazi · api-gw/wt5 · prefix q closes	yazi$" "$KEL_POPUP_TRACE"'
 tmux send-keys -t "$S5" g
 wait_until 'grep -q lazygit "$KEL_POPUP_TRACE"'
-ok "g opens lazygit there"                      'grep -q "^$WT5	lazygit · api-gw/wt5 · q closes	lazygit --use-config-file .*lazygit-overlay.yml$" "$KEL_POPUP_TRACE"'
+ok "g opens lazygit there"                      'grep -q "^$WT5	lazygit · api-gw/wt5 · prefix q closes	lazygit --use-config-file .*lazygit-overlay.yml$" "$KEL_POPUP_TRACE"'
 ok "  ...where esc closes it, as everywhere in kel" 'grep -qx "quitOnTopLevelReturn: true" "$STATE/lazygit-overlay.yml"'
 
 # o: the lowest port, the rest named in the footer
@@ -1060,7 +1060,7 @@ sbdiag "$S5" "$f0"
 echo more >> "$WT5/README.md"
 tmux send-keys -t "$S5" d
 wait_until 'grep -q "diff ·" "$KEL_POPUP_TRACE"'
-ok "d diffs the worktree against its base"      'grep -q "^$WT5	diff · api-gw/wt5 · main · q closes	" "$KEL_POPUP_TRACE"'
+ok "d diffs the worktree against its base"      'grep -q "^$WT5	diff · api-gw/wt5 · main · prefix q closes	" "$KEL_POPUP_TRACE"'
 git -C "$WT5" checkout -q -- README.md
 ok "  ...no changes is said, not an empty diff" '[[ "$("$KEL" _panel diff "$WT5" t main 2>&1)" == *"no changes against main"* ]]'
 ok "  ...and no base is said, not an empty diff" '[[ "$("$KEL" _panel diff "$WT5" t "" 2>&1)" == *"no base"* ]]'
@@ -1075,7 +1075,7 @@ printf '%s' "{\"session_id\":\"s\",\"cwd\":\"$WT5\",\"hook_event_name\":\"PostTo
 ok "an Edit records the file and its first changed line" '[ "$(sed -n 1p "$STATE/$W5.edit")" = "$WT5/README.md" ] && [ "$(sed -n 2p "$STATE/$W5.edit")" = 12 ]'
 ok "  ...and leaves the agent's state alone"    '[ ! -f "$STATE/$W5.state" ]'
 "$KEL" _panel edit "$WT5" api-gw/wt5 "$W5" >/dev/null 2>&1
-ok "e with no nvim open there: a popup at the line" 'grep -q "^$WT5	nvim · api-gw/wt5 · :q closes	nvim +12 $WT5/README.md$" "$KEL_POPUP_TRACE"'
+ok "e with no nvim open there: a popup at the line" 'grep -q "^$WT5	nvim · api-gw/wt5 · prefix q closes	nvim +12 $WT5/README.md$" "$KEL_POPUP_TRACE"'
 # a pane whose process is called nvim (a renamed sleep), and a socket where
 # nvim 0.9+ would listen: e must reach it over the socket and select the pane
 mkdir -p "$WORK/nvimbin"; cp "$(command -v sleep)" "$WORK/nvimbin/nvim"
@@ -1099,7 +1099,7 @@ ok "a Write under the plans dir is the plan"     '[ "$(sed -n 1p "$STATE/$W5.pla
 ok "  ...and not the last edit"                  '[ "$(sed -n 1p "$STATE/$W5.edit")" = "$WT5/README.md" ]'
 : > "$KEL_POPUP_TRACE"
 "$KEL" _panel plan "$WT5" api-gw/wt5 "$W5" >/dev/null 2>&1
-ok "p opens the plan in a popup"                 'grep -q "^$WT5	plan · api-gw/wt5 · q closes	" "$KEL_POPUP_TRACE"'
+ok "p opens the plan in a popup"                 'grep -q "^$WT5	plan · api-gw/wt5 · prefix q closes	" "$KEL_POPUP_TRACE"'
 ok "  ...the plan's own text"                    'grep -q "Fix the parser" "$STATE/$W5.view"'
 ok "  ...and says when the session keeps no tasks" 'grep -q "no task list" "$STATE/$W5.view"'
 # tasks: Claude Code's own list, as it stands on disk for the agent's session
@@ -1122,6 +1122,26 @@ ok "with neither again, p refuses"              '! "$KEL" _panel plan "$WT5" t "
 mkdir -p "$TD"; printf '{"id":"1","subject":"solo","status":"pending","blockedBy":[]}' > "$TD/1.json"
 ok "tasks alone are enough for p, the plan said missing" '"$KEL" _panel plan "$WT5" t "$W5" >/dev/null 2>&1 && grep -q "has not written one" "$V" && grep -q "solo" "$V"'
 unset CLAUDE_CONFIG_DIR
+
+# the hosted session behind every real popup: a popup takes every key, so it
+# attaches to a small session of its own where prefix q works. Drawing needs a
+# terminal client the suite lacks — its control client is hung up by one — so
+# KEL_POPUP_NODRAW stops just before; the draw was checked by hand
+printf '#!/bin/sh\nexec sleep 30\n' > "$WORK/shim/yazi"
+( unset KEL_POPUP_TRACE; KEL_POPUP_NODRAW=1 TMUX="$TMUX_TMPDIR/tmux-$(id -u)/default,1,0" "$KEL" _panel files "$WT5" api-gw/wt5 ) >/dev/null 2>&1
+POP="$(tmux list-sessions -F '#{session_name}' | grep '^_kelpop_' | head -1)"
+ok "a popup's tool runs in a hosted session"     '[ -n "$POP" ] && [ "$(tmux list-panes -t "=$POP:" -F "#{pane_current_command}")" = sleep ]'
+ok "  ...marked, and with no status bar of its own" '[ "$(tmux show-options -v -t "=$POP:" @kel-popup)" = 1 ] && [ "$(tmux show-options -v -t "=$POP:" status)" = off ]'
+ok "  ...which kel never counts: not the fleet"  '! "$KEL" _fleet --panes | jq -r ".panes[].window_id" | grep -qxF "$(tmux display -p -t "=$POP:" "#{window_id}")"'
+ok "  ...nor gives a sidebar"                    '[ "$(tmux list-panes -t "=$POP:" -F x | grep -c x)" = 1 ]'
+"$KEL" snapshot >/dev/null 2>&1
+ok "  ...nor snapshots"                           '! grep -q _kelpop_ "$STATE/snapshot.json" && [ "$(jq ".windows | length" "$STATE/snapshot.json")" = "$(tmux list-windows -t =keltest -F x | grep -c x)" ]'
+( unset KEL_POPUP_TRACE; KEL_POPUP_NODRAW=1 TMUX="$TMUX_TMPDIR/tmux-$(id -u)/default,1,0" "$KEL" _panel files "$WT5" api-gw/wt5 ) >/dev/null 2>&1
+ok "files and git keep theirs between opens"     '[ "$(tmux list-sessions -F "#{session_name}" | grep -c "^_kelpop_")" = 1 ]'
+tmux kill-session -t "=$POP" 2>/dev/null
+printf '#!/bin/sh\nexit 0\n' > "$WORK/shim/yazi"
+ok "kel.conf: prefix q closes a popup, and only a popup" \
+  'tmux -L kelconf -f /dev/null start-server \; source-file "$HERE/../tmux/kel.conf" \; list-keys -T prefix q 2>/dev/null | grep -q "if-shell -F \"#{@kel-popup}\" detach-client display-panes"; r=$?; tmux -L kelconf kill-server 2>/dev/null; [ $r = 0 ]'
 
 ok "a missing tool is said, not a crash"        '[[ "$(PATH="/usr/bin:/bin" KEL_FLEET_BIN="$KEL_FLEET_BIN" "$KEL" _panel files "$WT5" t 2>&1)" == *"yazi is not installed"* ]]'
 kill "$CC" 2>/dev/null; wait "$CC" 2>/dev/null
