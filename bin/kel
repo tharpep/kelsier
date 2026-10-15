@@ -110,6 +110,11 @@ SELF="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)/$(basename "${BA
 # commands worth re-running per pane on restore (agents handled separately)
 KEL_RESTORE_CMDS="${KEL_RESTORE_CMDS:-nvim vim hx nano lazygit lazydocker htop btop k9s}"
 KEL_SIDEBAR_WIDTH="${KEL_SIDEBAR_WIDTH:-32}"      # identical in every window (spec.md §5c)
+# the sidebar's own background, so it reads as chrome rather than a pane in a
+# box (spec.md §5a, §5d) — true black (colour16, not ANSI black, which themes
+# often lighten to a grey; the author found colour234 too grey). "default"
+# gives it the terminal's background like any other pane.
+KEL_SIDEBAR_STYLE="${KEL_SIDEBAR_STYLE:-bg=colour16}"
 SIDEBAR_OFF="$STATE_DIR/sidebar-off"              # `kel sidebar off`, persisted
 
 # guarded: an unconditional mkdir -p of three existing dirs measured ~10ms,
@@ -322,8 +327,19 @@ sidebar_ensure() { # wid
   # then swallowed every key, C-c included.  Found because the suite's
   # dead-agent check could not kill its agent.
   tmux if-shell -F -t "$wid" '#{?@kel-has-sidebar,,1}' \
-    "set-option -w -t '$wid' @kel-has-sidebar 1 ; split-window -hbdf -l $KEL_SIDEBAR_WIDTH -t '$wid' -c '#{pane_current_path}' \"exec '$KEL_TOP_BIN' --sidebar\" ; set-option -p -t '$wid.{top-left}' @kel-sidebar 1" \
+    "set-option -w -t '$wid' @kel-has-sidebar 1 ; split-window -hbdf -l $KEL_SIDEBAR_WIDTH -t '$wid' -c '#{pane_current_path}' -e 'KEL_BIN=$SELF' \"exec '$KEL_TOP_BIN' --sidebar\" ; set-option -p -t '$wid.{top-left}' @kel-sidebar 1" \
     2>/dev/null || true
+  sidebar_style "$wid"
+}
+
+# per-pane styles are tmux 3.1+; below that the sidebar just wears the
+# terminal's background, so a failure here is ignored, not reported
+sidebar_style() { # wid
+  local id
+  id="$(tmux list-panes -t "$1" -F '#{@kel-sidebar} #{pane_id}' 2>/dev/null | awk '$1==1 {print $2; exit}')"
+  [ -n "$id" ] || return 0
+  tmux set-option -p -t "$id" window-style "$KEL_SIDEBAR_STYLE" \; \
+       set-option -p -t "$id" window-active-style "$KEL_SIDEBAR_STYLE" 2>/dev/null || true
 }
 
 # nudge every sidebar to look again (SIGUSR1); each decides for itself, with
@@ -345,6 +361,19 @@ sidebar_fit() {
       [ "$flag" = 1 ] && [ "$w" != "$KEL_SIDEBAR_WIDTH" ] \
         && tmux resize-pane -t "$id" -x "$KEL_SIDEBAR_WIDTH" 2>/dev/null
     done
+  return 0
+}
+
+# prefix Space: put the keyboard in the sidebar of the window you are in,
+# making one first if the window has none. esc in the sidebar goes back
+# (tmux last-pane). The window comes from the client running the binding —
+# with one session, "the current window" of the server is not it.
+sidebar_focus() {
+  local wid id
+  wid="$(tmux display-message -p '#{window_id}' 2>/dev/null)" || return 0
+  sidebar_ensure "$wid"
+  id="$(tmux list-panes -t "$wid" -F '#{@kel-sidebar} #{pane_id}' 2>/dev/null | awk '$1==1 {print $2; exit}')"
+  [ -n "$id" ] && tmux select-pane -t "$id" 2>/dev/null
   return 0
 }
 
@@ -513,9 +542,9 @@ prune_state() {
   local live f wid panes pane
   live="$(tmux list-windows -a -F '#{window_id}' 2>/dev/null || true)"
   [ -n "$live" ] || return 0
-  for f in "$STATE_DIR"/*.state "$STATE_DIR"/*.ctx; do
+  for f in "$STATE_DIR"/*.state "$STATE_DIR"/*.ctx "$STATE_DIR"/*.seen; do
     [ -e "$f" ] || continue
-    wid="${f##*/}"; wid="${wid%.state}"; wid="${wid%.ctx}"
+    wid="${f##*/}"; wid="${wid%.state}"; wid="${wid%.ctx}"; wid="${wid%.seen}"
     printf '%s\n' "$live" | grep -qxF "$wid" || rm -f "$f"
   done
   # SessionEnd removes a session's own stash entry, including on /clear, which
@@ -2185,7 +2214,8 @@ main() {
                     wake)   sidebar_wake ;;
                     fit)    sidebar_fit ;;
                     reap)   sidebar_reap ;;
-                    *)      die "kel _sidebar ensure|wake|fit|reap" ;;
+                    focus)  sidebar_focus ;;
+                    *)      die "kel _sidebar ensure|wake|fit|reap|focus" ;;
                   esac ;;
     doctor)       cmd_doctor "$@" ;;
     config)       cmd_config ;;

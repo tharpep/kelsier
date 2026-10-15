@@ -55,3 +55,30 @@ func TestRepoGroup(t *testing.T) {
 		t.Errorf("a non-slug .kel/group: got %q, want api-gw", got)
 	}
 }
+
+// done is unseen until the window's .seen epoch catches up with the state's;
+// no .seen, or a done with no epoch, is unseen — the loud side of the guess.
+func TestUnseen(t *testing.T) {
+	sd := t.TempDir()
+	n := func(v float64) *float64 { return &v }
+	if !unseen(sd, "@1", n(100)) {
+		t.Error("no .seen file must read unseen")
+	}
+	os.WriteFile(filepath.Join(sd, "@1.seen"), []byte("150\n"), 0o600)
+	if unseen(sd, "@1", n(100)) {
+		t.Error("shown after it finished must read seen")
+	}
+	if !unseen(sd, "@1", n(150)) {
+		t.Error("finished in the second it was shown must read unseen — the order is unknown")
+	}
+	if !unseen(sd, "@1", n(200)) {
+		t.Error("finished again after being shown must read unseen")
+	}
+	if !unseen(sd, "@1", nil) {
+		t.Error("a done with no epoch must read unseen")
+	}
+	os.WriteFile(filepath.Join(sd, "@1.seen"), []byte("garbage"), 0o600)
+	if !unseen(sd, "@1", n(100)) {
+		t.Error("an unreadable .seen must read unseen")
+	}
+}

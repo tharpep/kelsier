@@ -53,6 +53,12 @@ type Agent struct {
 	Panes         []string `json:"panes"`
 	Activity      *float64 `json:"activity"`
 	Context       *Context `json:"context"`
+	// Unseen marks a `done` the user has not looked at since it finished: the
+	// state is newer than the epoch in <window-id>.seen, which the sidebar
+	// writes when the window is shown (spec.md §9). No .seen file means never
+	// looked at. A flag beside State, never a state of its own, so kel jump,
+	// the notifications and the bar — which all match on state — see `done`.
+	Unseen bool `json:"unseen"`
 }
 
 type Current struct {
@@ -407,6 +413,9 @@ func Load(o Options) Doc {
 		if hasState {
 			a.StateSince, a.Note = st.since, st.note
 		}
+		if eff != nil && *eff == "done" {
+			a.Unseen = unseen(sd, w.wid, a.StateSince)
+		}
 		if managed {
 			a.Isolation, a.Branch, a.Repo, a.Cwd = rec.Isolation, rec.Branch, rec.Repo, rec.Cwd
 			a.AgentCmd, a.ClaudeSession, a.Compactions = rec.Agent, rec.ClaudeSession, rec.Compactions
@@ -535,4 +544,22 @@ func gitDirty(dir string) (*float64, bool) {
 	}
 	n := float64(len(lines(string(out))))
 	return &n, true
+}
+
+// unseen: the window's .seen epoch is older than the state's, or absent. A
+// done with no epoch of its own cannot be dated, so it counts as unseen —
+// loud is the safe side of a guess about whether you have looked.
+func unseen(sd, wid string, since *float64) bool {
+	b, err := os.ReadFile(filepath.Join(sd, wid+".seen"))
+	if err != nil {
+		return true
+	}
+	seen := numPtr(strings.TrimSpace(string(b)))
+	if seen == nil || since == nil {
+		return true
+	}
+	// a tie is unseen: epochs are whole seconds, so "shown at 100, finished at
+	// 100" may be either order. If you were looking, the sidebar showing it
+	// marks it seen again on its next load, so the loud side costs a blink.
+	return *since >= *seen
 }

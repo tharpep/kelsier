@@ -20,6 +20,7 @@
 # sidebar      = "on"           # the pane on the left of every kel window
                                 # ("off" here, or `kel sidebar off` for now)
 # sidebar_width = 32            # identical in every window
+# sidebar_style = "bg=colour16"  # its background; "default" for the terminal's
 # top_w        = "90%"          # the kel top popup
 # top_h        = "80%"
 

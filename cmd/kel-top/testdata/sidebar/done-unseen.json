@@ -1,0 +1,129 @@
+{
+ "generated_at": "2026-10-14T23:00:00Z",
+ "current": {
+  "group": "kelsier",
+  "window_id": "@1"
+ },
+ "agents": [
+  {
+   "group": "kelsier",
+   "name": "kelsier",
+   "window_id": "@1",
+   "index": 1,
+   "current": true,
+   "managed": true,
+   "state": "working",
+   "state_since": 1792018740,
+   "note": null,
+   "isolation": "inplace",
+   "branch": null,
+   "repo": "/home/me/code/kelsier",
+   "cwd": "/home/me/code/kelsier",
+   "agent": "claude",
+   "claude_session": null,
+   "compactions": null,
+   "dirty": null,
+   "land": null,
+   "panes": [
+    "claude"
+   ],
+   "activity": 1792018740,
+   "context": {
+    "pct": 30,
+    "cost_usd": 2.0,
+    "in_tokens": null,
+    "size": 1000000,
+    "rate_5h": 43,
+    "at": 1792018795,
+    "model": "Opus 5.5 (1M context)"
+   },
+   "unseen": false
+  },
+  {
+   "group": "kelsier",
+   "name": "finished",
+   "window_id": "@2",
+   "index": 2,
+   "current": false,
+   "managed": true,
+   "state": "done",
+   "state_since": 1792018380,
+   "note": null,
+   "isolation": "inplace",
+   "branch": null,
+   "repo": "/home/me/code/kelsier-fix-auth",
+   "cwd": "/home/me/code/kelsier-fix-auth",
+   "agent": "claude",
+   "claude_session": null,
+   "compactions": null,
+   "dirty": null,
+   "land": null,
+   "panes": [
+    "claude"
+   ],
+   "activity": 1792018380,
+   "context": {
+    "pct": 52,
+    "cost_usd": 3.3,
+    "in_tokens": null,
+    "size": 1000000,
+    "rate_5h": 43,
+    "at": 1792018795,
+    "model": "Opus 5.5 (1M context)"
+   },
+   "unseen": true
+  }
+ ],
+ "panes": [
+  {
+   "pane_id": "%1",
+   "window_id": "@1",
+   "window_index": 1,
+   "window_name": "kelsier",
+   "group": "kelsier",
+   "pane_index": 1,
+   "active": true,
+   "current": true,
+   "cmd": "claude",
+   "pid": 1001,
+   "cwd": "/home/me/code/kelsier",
+   "kind": "agent",
+   "agent": true,
+   "ports": [],
+   "git": {
+    "root": "/home/me/code/kelsier",
+    "worktree": false,
+    "branch": "main",
+    "upstream": "origin/main",
+    "ahead": 0,
+    "behind": 0,
+    "dirty": 0
+   }
+  },
+  {
+   "pane_id": "%2",
+   "window_id": "@2",
+   "window_index": 2,
+   "window_name": "finished",
+   "group": "kelsier",
+   "pane_index": 1,
+   "active": true,
+   "current": false,
+   "cmd": "claude",
+   "pid": 1002,
+   "cwd": "/home/me/code/kelsier-fix-auth",
+   "kind": "agent",
+   "agent": true,
+   "ports": [],
+   "git": {
+    "root": "/home/me/code/kelsier-fix-auth",
+    "worktree": true,
+    "branch": "finished",
+    "upstream": "origin/finished",
+    "ahead": 3,
+    "behind": 0,
+    "dirty": 0
+   }
+  }
+ ]
+}

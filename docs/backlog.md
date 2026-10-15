@@ -98,6 +98,20 @@ Full design at the `v0.9.0` tag. The sidebar's panel may make most of it moot.
 
 **Gate:** you type the same `kel new … && tmux split …` sequence twice.
 
+### 39. Read-only commands for agents — `kel state`, `kel wait`  ·  `[fits]`
+
+herdr's socket API lets agents split panes, read each other's output, type
+into each other and `wait --state`. Most of that is out for kel — typing into
+an agent pane breaks invariant 4, and reading another pane's output is kel
+storing agent output. What survives is **read-only**: `kel state <agent>`
+prints a state, `kel wait <agent> --state done` blocks until it holds (a poll
+of the state file, in the calling process — not a daemon). An agent can then
+coordinate others through commands it chose to run. `kel url` (`spec.md` §10)
+is the first of these and is designed already.
+
+**Gate:** the first time you want one agent to wait on another and end up
+watching both yourself.
+
 ### 38. Automations view  ·  `[borderline]`
 
 The author's sixth want (`spec.md` §3): see and organise scheduled or looping
@@ -160,3 +174,27 @@ branch, never a viewer or a conflict check.
 Cut 2026-08-30: `kel top`'s LAST OUTPUT column showed every agent at once. In
 the sidebar design selecting a row *is* the peek — it shows the
 real pane. Original design at the `v0.9.0` tag.
+
+### R7. A browser inside the terminal  ·  `[violates]`
+
+`carbonyl` runs Chromium in a terminal and works; it is a novelty, and tmux
+passes terminal graphics through poorly. The need underneath is "see what this
+worktree serves", which `o` meets by opening the port in the real browser
+(`spec.md` §5f). Browser automation is the agent's own tooling (R2).
+
+### R8 – R11. What the desktop ADEs do that kel will not  ·  `[violates]`
+
+Recorded 2026-10-14 from a look at Orca, Superset, Conductor, T3 Code and
+herdr, so they stop looking like gaps:
+
+- **R8. Cloud or remote sandboxes** (Conductor, Superset) — not
+  cloud-anything.
+- **R9. One prompt fanned out to N agents, best one merged** (Orca) — doable
+  with only launch commands, but it is a demo and team feature, not the
+  author's loop.
+- **R10. A plugin marketplace** (herdr) — a personal tool's extension point is
+  its source.
+- **R11. Becoming the multiplexer** (herdr) — owning the event loop is
+  herdr's real advantage, and it costs a reimplementation of tmux's
+  persistence, detach and SSH. kel closes the gap by asking tmux properly
+  (`spec.md` §5a: control mode, format subscriptions) instead.

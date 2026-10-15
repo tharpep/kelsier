@@ -1,68 +1,172 @@
 package main
 
 import (
+	"encoding/json"
+	"flag"
+	"os"
+	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
+	tea "charm.land/bubbletea/v2"
 	"github.com/tharpep/kelsier/internal/fleet"
 )
 
-func f64(v float64) *float64 { return &v }
+// -update rewrites the golden frames from what renders now. Only after the
+// author has looked at them (test/sidebar-frames.sh): a golden file is an
+// approved frame, not a snapshot of whatever the code happens to draw.
+var update = flag.Bool("update", false, "rewrite testdata/sidebar/*.golden")
 
-func sampleDoc() fleet.Doc {
-	working := "working"
-	ports := []int{3000}
-	none := []int{}
-	panes := []fleet.Pane{
-		{PaneID: "%2", WindowID: "@1", WindowIndex: f64(1), WindowName: "auth-fix-with-a-long-name",
-			Group: "api-gw", PaneIndex: f64(1), Kind: "agent", Agent: true, Ports: &none},
-		{PaneID: "%3", WindowID: "@1", WindowIndex: f64(1), WindowName: "auth-fix-with-a-long-name",
-			Group: "api-gw", PaneIndex: f64(2), Kind: "server", Cmd: "node", Ports: &ports},
-		{PaneID: "%5", WindowID: "@2", WindowIndex: f64(2), WindowName: "zsh",
-			Group: "", PaneIndex: f64(1), Kind: "shell", Ports: &none, Current: true},
+const fixtures = "testdata/sidebar"
+
+func loadFixture(t *testing.T, name string) fleet.Doc {
+	t.Helper()
+	b, err := os.ReadFile(filepath.Join(fixtures, name+".json"))
+	if err != nil {
+		t.Fatal(err)
 	}
-	return fleet.Doc{
-		Agents: []fleet.Agent{{WindowID: strPtr("@1"), State: &working}},
-		Panes:  &panes,
+	var d fleet.Doc
+	if err := json.Unmarshal(b, &d); err != nil {
+		t.Fatal(err)
+	}
+	return d
+}
+
+var ansi = regexp.MustCompile(`\x1b\[[0-9;]*m`)
+
+func plain(s string) string { return ansi.ReplaceAllString(s, "") }
+
+// Every fixture at every width the sidebar is meant for, colours included.
+func TestSidebarGolden(t *testing.T) {
+	t.Setenv("HOME", "/home/me") // the fixtures' home, for ~ in paths
+	files, _ := filepath.Glob(filepath.Join(fixtures, "*.json"))
+	if len(files) == 0 {
+		t.Fatal("no fixtures")
+	}
+	for _, f := range files {
+		name := strings.TrimSuffix(filepath.Base(f), ".json")
+		for _, w := range []int{28, 32, 40} {
+			got, err := fixtureFrame(f, w, 0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			gold := filepath.Join(fixtures, name+"."+itoa(w)+".golden")
+			if *update {
+				if err := os.WriteFile(gold, []byte(got+"\n"), 0o644); err != nil {
+					t.Fatal(err)
+				}
+				continue
+			}
+			want, err := os.ReadFile(gold)
+			if err != nil {
+				t.Fatalf("%s: %v (run: go test ./cmd/kel-top -run Golden -update, after reviewing the frames)", gold, err)
+			}
+			if got+"\n" != string(want) {
+				t.Errorf("%s at %d cols changed:\n--- got\n%s\n--- want\n%s", name, w, plain(got), plain(string(want)))
+			}
+		}
 	}
 }
 
-func strPtr(s string) *string { return &s }
-
-func TestSidebarRows(t *testing.T) {
-	rows := sbRows(sampleDoc())
-	var got []string
-	for _, r := range rows {
-		if r.pane == nil {
-			got = append(got, "#"+r.group)
-		} else {
-			got = append(got, r.pane.PaneID)
-		}
-	}
-	// groups in name order, an empty group shown as misc, panes by index
-	want := "#api-gw %2 %3 #misc %5"
-	if strings.Join(got, " ") != want {
-		t.Errorf("rows: got %q, want %q", strings.Join(got, " "), want)
-	}
+func itoa(n int) string {
+	b, _ := json.Marshal(n)
+	return string(b)
 }
 
 // Every width from 0 up must render without panicking: tmux squeezes the
 // pane on a resize before kel re-pins it. The first version died at 1 column.
 func TestSidebarRendersAtAnyWidth(t *testing.T) {
+	doc := loadFixture(t, "fifteen-three-repos")
 	for w := 0; w <= 40; w++ {
-		m := sbModel{rows: sbRows(sampleDoc()), sel: "%3", width: w, height: 10}
-		out := m.render()
-		if w >= 15 && !strings.Contains(out, "node :3000") {
-			t.Errorf("width %d: server row missing:\n%s", w, out)
+		for _, h := range []int{0, 1, 2, 5, 40} {
+			out, refs := renderView(buildView(doc, uiState{}), w, h, 0)
+			if h > 0 && len(refs) > h {
+				t.Errorf("%dx%d: %d lines", w, h, len(refs))
+			}
+			if h > 0 && strings.Count(out, "\n")+1 != len(refs) {
+				t.Errorf("%dx%d: refs out of step with lines", w, h)
+			}
 		}
 	}
-	m := sbModel{rows: sbRows(sampleDoc()), sel: "%2", width: 32, height: 10}
-	out := m.render()
-	if !strings.Contains(out, "›") {
-		t.Error("the current pane is not marked")
+}
+
+func TestSidebarView(t *testing.T) {
+	v := buildView(loadFixture(t, "fifteen-three-repos"), uiState{})
+	var keys []string
+	for _, s := range v.spaces {
+		keys = append(keys, s.label+"|"+filepath.Base(s.key))
+		for _, p := range s.panes {
+			if p.Kind == "agent" {
+				t.Errorf("agent pane %s listed under space %s: agents have one home", p.PaneID, s.label)
+			}
+			if p.Cmd == "bash" && p.WindowID == "@8" {
+				t.Errorf("a dead agent's shell reappeared under %s", s.label)
+			}
+		}
+		if s.open != s.current {
+			t.Errorf("space %s: open=%v current=%v; only the current space opens by default", s.label, s.open, s.current)
+		}
 	}
-	if !strings.Contains(out, "*") {
-		t.Error("a working agent shows no state glyph")
+	// a worktree is its own space; the main checkout sorts before its worktrees
+	want := "api-gw|api-gw kelsier|kelsier kelsier|kelsier-docs kelsier|kelsier-fix-auth misc|group:misc web-dashboard|web-dashboard web-dashboard|web-dashboard-usage-charts"
+	if got := strings.Join(keys, " "); got != want {
+		t.Errorf("spaces:\n got %s\nwant %s", got, want)
+	}
+	var names []string
+	for _, a := range v.agents {
+		names = append(names, a.agent.Name)
+	}
+	// triage: waiting, working, an unseen done, throttled, seen done, idle, dead
+	if got := strings.Join(names, " "); got != "fix-auth kelsier usage-charts docs rate-limits dashboard gateway spike" {
+		t.Errorf("agents in triage order: got %s", got)
+	}
+	if v.sel != "a:@1" {
+		t.Errorf("default selection: got %q, want the current agent", v.sel)
+	}
+
+	// a toggle closes the current space and opens another
+	v = buildView(loadFixture(t, "fifteen-three-repos"), uiState{expanded: map[string]bool{
+		"/home/me/code/kelsier": false, "/home/me/code/api-gw": true}})
+	for _, s := range v.spaces {
+		if want := s.label == "api-gw"; s.open != want {
+			t.Errorf("after toggles, space %s open=%v", s.key, s.open)
+		}
+	}
+
+	// unknown panes say so, in both sections
+	out, _ := renderView(buildView(fleet.Doc{}, uiState{}), 32, 0, 0)
+	if strings.Count(plain(out), "? panes unknown") != 2 {
+		t.Errorf("a doc with no panes list must read unknown, not empty:\n%s", plain(out))
+	}
+}
+
+// Each screen line maps to the entry drawn on it — what a click will hit.
+func TestSidebarLineRefs(t *testing.T) {
+	v := buildView(loadFixture(t, "one-agent"), uiState{})
+	out, refs := renderView(v, 32, 12, 0)
+	lines := strings.Split(plain(out), "\n")
+	for i, l := range lines {
+		if strings.Contains(l, "working") && refs[i].id != "a:@1" {
+			t.Errorf("line %d %q maps to %+v", i, l, refs[i])
+		}
+		if strings.Contains(l, "main ↑2") && refs[i].kind != "space" {
+			t.Errorf("line %d %q maps to %+v", i, l, refs[i])
+		}
+	}
+	if !strings.Contains(lines[len(lines)-1], "j/k") {
+		t.Error("the footer is not pinned to the last line")
+	}
+}
+
+// Selection is an accent bar, never inverse video (spec.md §5d).
+func TestSidebarNoInverse(t *testing.T) {
+	out, _ := renderView(buildView(loadFixture(t, "fifteen-three-repos"), uiState{}), 32, 0, 0)
+	if strings.Contains(out, "\x1b[7m") {
+		t.Error("inverse video in the sidebar")
+	}
+	if !strings.Contains(out, accent+"▌") {
+		t.Error("no selection bar")
 	}
 }
 
@@ -72,5 +176,111 @@ func TestParseVisible(t *testing.T) {
 		if parseVisible(in) != want {
 			t.Errorf("parseVisible(%q) != %v", in, want)
 		}
+	}
+}
+
+func TestSummarise(t *testing.T) {
+	refusal := "\x1b[1;33mkel\x1b[0m refusing to kill 'x' — the worktree has work that isn't safe to lose:\n" +
+		"  uncommitted changes:\n    ?? notes.txt\n    M  main.go\n\x1b[1;31mkel\x1b[0m commit & push, or run: kel kill x --force\n"
+	if got := summarise(refusal); got != "kept — at risk: ?? notes.txt, M  main.go" {
+		t.Errorf("refusal: %q", got)
+	}
+	if got := summarise("creating worktree  /x\nkel new agent  a  [g]  (inplace)\n"); got != "new agent  a  [g]  (inplace)" {
+		t.Errorf("last line: %q", got)
+	}
+}
+
+// keys and clicks, driven through Update with no tmux: nothing here jumps,
+// because a jump would talk to whatever tmux server the test runs under
+func TestSidebarKeys(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	os.MkdirAll(filepath.Join(os.Getenv("XDG_STATE_HOME"), "kel"), 0o700)
+	m := sbModel{doc: loadFixture(t, "fifteen-three-repos"), width: 32, height: 60, visible: true}
+	press := func(k string) {
+		var msg tea.KeyPressMsg
+		switch k {
+		case "esc":
+			msg = tea.KeyPressMsg{Code: tea.KeyEscape}
+		case "space":
+			msg = tea.KeyPressMsg{Code: tea.KeySpace, Text: " "}
+		default:
+			msg = tea.KeyPressMsg{Code: rune(k[0]), Text: k}
+		}
+		nm, _ := m.Update(msg)
+		m = nm.(sbModel)
+	}
+
+	if m.view().sel != "a:@1" {
+		t.Fatalf("start: %q", m.view().sel)
+	}
+	press("k")
+	if sel := m.view().sel; sel != "a:@2" {
+		t.Errorf("k from kelsier: %q, want fix-auth above it", sel)
+	}
+	if sbLoadShared().Selected != "a:@2" {
+		t.Error("the cursor is not shared through sidebar.json")
+	}
+
+	// space on the current space folds it, and the fold is shared
+	m.ui.sel = spaceID("/home/me/code/kelsier")
+	press("space")
+	for _, s := range m.view().spaces {
+		if s.key == "/home/me/code/kelsier" && s.open {
+			t.Error("space did not fold the current space")
+		}
+	}
+	if sbLoadShared().Expanded["/home/me/code/kelsier"] != false {
+		t.Error("the fold is not shared")
+	}
+
+	// / filters live; esc clears
+	press("/")
+	for _, c := range "usage" {
+		press(string(c))
+	}
+	if n := len(m.view().agents); n != 1 {
+		t.Errorf("filter usage: %d agents", n)
+	}
+	press("esc")
+	if m.ui.filter != "" || m.mode != modeNormal {
+		t.Error("esc did not clear the filter")
+	}
+
+	// x asks first, and anything but y leaves the agent alone
+	m.ui.sel = "a:@2"
+	press("x")
+	if m.mode != modeKill || !strings.Contains(plain(m.render()), "kill fix-auth? y/n") {
+		t.Errorf("x did not ask:\n%s", plain(m.render()))
+	}
+	press("n")
+	if m.mode != modeNormal {
+		t.Error("n did not cancel the kill")
+	}
+
+	// r and x need an agent
+	m.ui.sel = spaceID("/home/me/code/api-gw")
+	press("r")
+	if m.mode != modeNormal || !strings.Contains(m.msg, "select an agent") {
+		t.Errorf("r on a space: mode %v msg %q", m.mode, m.msg)
+	}
+
+	// a click on a space's line toggles it
+	_, refs := renderView(m.view(), m.width, m.height, 0)
+	y := -1
+	for i, r := range refs {
+		if r.id == spaceID("/home/me/code/api-gw") {
+			y = i
+			break
+		}
+	}
+	nm, _ := m.Update(tea.MouseClickMsg{X: 5, Y: y, Button: tea.MouseLeft})
+	m = nm.(sbModel)
+	for _, s := range m.view().spaces {
+		if s.key == "/home/me/code/api-gw" && !s.open {
+			t.Error("a click did not open the space")
+		}
+	}
+	if m.view().sel != spaceID("/home/me/code/api-gw") {
+		t.Error("a click did not select")
 	}
 }

@@ -35,6 +35,13 @@ bringing the terminal into an IDE. The terminal is the lightest, leanest and
 most compatible place to start. A desktop app may follow (§12c), as a second
 reader of the same state.
 
+The closest reference in the terminal is **herdr** (`herdrdev/herdr`): an
+agent-aware multiplexer in Rust with a `spaces` / `agents` sidebar. kel
+borrows its sidebar's shape (§5) and differs on purpose in two places: it
+stays on tmux rather than replacing it (`backlog.md` R11), and it reads state
+from the agent's hooks rather than parsing the screen (§9), so a permission
+prompt can never be mistaken for an idle agent.
+
 **The bet is unchanged:** the valuable part is the bookkeeping, not the
 *agent's* interface. kel never wraps Claude Code, proxies its API calls,
 injects prompts or manages its context — an agent in kel is byte-identical to
@@ -53,7 +60,13 @@ about.
   `lazygit` exist and are better than anything this would build. kel decides
   *where* they open and *which directory* they point at; it never reimplements
   what they show. (Rejected items R4 and R5 in `backlog.md` still hold — this
-  is how the IDE views arrive without violating them.)
+  is how the IDE views arrive without violating them.) The three an ADE builds
+  in arrive the same way (§5f): **editing** is a long-lived Neovim per
+  worktree that kel hands files to over its own RPC socket; **diffs** are
+  `diffview.nvim` or `delta` against the land base; **the browser** is your
+  real one, opened at a server pane's port. Browser *automation* — Playwright
+  and the like — is the agent's tooling, configured where the agent's tooling
+  lives, never shipped or wired by kel (R2).
 - **Not a daemon.** State lives on disk and in `tmux`; nothing runs in the
   background but `tmux` itself and, when it is open, the sidebar.
 - **Not cloud-anything.** Fully local, no telemetry, no account.
@@ -96,23 +109,35 @@ the bash that remains.
 
 ---
 
-## 5. Layout — the workspace  ·  *designed, not built*
+## 5. Layout — the workspace  ·  *sidebar built (M2, M3); panel designed*
 
 ```
-┌ kel ──────────────┬──────── the window's own panes ──┬ panel (toggle) ┐
-│ kelsier           │                                  │ [files] git    │
-│ ▸ main      ↑2 ●  │  claude            │ nvim        │  plan  tasks   │
-│   ◐ claude  41%   │                    │             │                │
-│     opus $1.20    │  (your splits, as  │             │  yazi / lazygit│
-│   ▪ npm dev :3000 │   you made them —  │             │  / plan.md     │
-│ ▸ wt/fix-auth  ✓  │   kel never moves  │             │                │
-│   ● claude WAIT   │   or resizes them) │             │                │
-│   $ zsh           │                    │             │                │
-│ api-server        │                    │             │                │
-├───────────────────┴──────────────────────────────────┴────────────────┤
-│ claude 58% 5h · 41% wk                      4 agents · 1 waiting      │
-└───────────────────────────────────────────────────────────────────────┘
+┌ sidebar ─────────────────┬──────── the window's own panes ──────────┐
+│ spaces                   │                                          │
+│ ● kelsier                │  claude              │ nvim              │
+│   main  ↑2 ●             │                      │                   │
+│ ○ kelsier                │  (your splits, as you made them —       │
+│   wt/fix-auth  ✓         │   kel never moves or resizes them)      │
+│ ● api-server             │                      │                   │
+│   main  :3000            │                      │                   │
+│                          │                      │                   │
+│ agents                   │                      │                   │
+│ ● fix-auth               │                      │                   │
+│   waiting 6m             │                      │                   │
+│ ◐ kelsier                │                      │                   │
+│   41% · $1.20            │                      │                   │
+│ ◆ docs                   │                      │                   │
+│   done                   │                      │                   │
+│                          │                      │                   │
+│ j/k · enter · ? keys     │                      │                   │
+├──────────────────────────┴──────────────────────────────────────────┤
+│ claude ▓▓▓░░ 58% (1h20m) · wk 41%  │  1 waiting 6m · $24.10          │
+└─────────────────────────────────────────────────────────────────────┘
 ```
+
+Glyphs and colours above are placeholders; the visual language is §5d and is
+settled on rendered frames, not on this drawing. The panel (files, git, plan,
+tasks) is a popup over all of it (§5c), so it has no column of its own.
 
 **A sidebar pane in every window** (decided 2026-10-14, after measuring — §5b).
 Agents and everything else stay ordinary tmux windows, with whatever splits
@@ -122,26 +147,45 @@ reads as one persistent thing that is simply always there. Selecting a row is
 `select-window` (plus `select-pane` for a pane row): **nothing is moved, swapped
 or resized.**
 
-- **Sidebar** — a Go TUI (Bubble Tea v2), grown from `kel top`. Repo →
-  worktree → *every* pane. Each row: what is running (agent / server / shell,
-  from the pane's process), and for the worktree its git position (branch,
-  ahead/behind, dirty). Agent rows add state, context %, cost and model. It is
-  **the only kel surface**: no board, no menus, no cheat sheet.
+- **Sidebar** — a Go TUI (Bubble Tea v2), grown from `kel top`. **Two
+  sections**, after herdr (`herdrdev/herdr`), which answers the same question
+  in the terminal:
+  - **`spaces`** — *where*: one entry per repo / worktree, its git position
+    (branch, ahead/behind, dirty, land) and the ports its servers listen on.
+    Expanding an entry lists its panes — agent, server, shell, program — so
+    *every* pane is still one keystroke away.
+  - **`agents`** — *who needs me*: a flat list of every agent with its state
+    dot, then context % and cost. This is `` prefix ` `` kept on screen: with
+    ten panes, a single repo → worktree → pane tree buries the one agent that
+    is blocked, which is why the tree the first draft of this section drew was
+    split.
+
+  Each entry is two lines — the name, then a dim detail line. It is **the only
+  kel surface**: no board, no menus, no cheat sheet.
 - **The window's own panes** — untouched. Agents stay byte-identical; an
   `[agent | nvim]` pair stays a pair.
 - **Panel** — files (`yazi`), git (`lazygit`), the session's plan and its task
-  list, opened at the selected pane's directory. Off by default; whether it is
-  a pane in the window or a `display-popup` is a step-4 decision.
-- **Bottom bar** — quota burn (5h / weekly) and fleet counts.
-- **Keys** live in the sidebar, about eight of them, all shown in its footer.
+  list, opened at the selected pane's directory as a titled `display-popup`
+  (§5c).
+- **Bottom bar** — only what belongs to no pane: quota and the waiting alarm
+  (§7).
+- **Keys** live in the sidebar, all shown in its footer. **The mouse is a
+  first-class way to drive it**, not a fallback: clicking an entry is the
+  fastest jump there is, and herdr's users single it out.
 
 **What one sidebar per window costs, and how it is paid:**
 
 - **N processes.** One `kel-top` measured ~10–12 MB and ~2.5% CPU while
   polling. Ten polling instances would be a quarter of a core for nothing, so
   **a sidebar whose window is not active idles** — no polling, no rendering —
-  and is woken when its window becomes active (a `session-window-changed` /
-  `after-select-window` hook, or control-mode events).
+  and is woken when its window becomes active. *Built in M2:* the visible
+  sidebar reloads every 2 s, a hidden one only checks every 10 s whether it has
+  become visible, and `SIGUSR1` (`kel _sidebar wake`, from the window-change
+  hooks and every state change) makes it look at once.
+- **Thin renderers.** Every sidebar draws the same thing, so each one should
+  be a renderer of one computed model, not N computations of it: one fleet
+  read feeds a cached model in the state directory, and the sidebars draw it.
+  N sidebars then cost N renders, never N `git status` sweeps.
 - **Identical everywhere.** Cursor, expanded rows and filter are *view state*
   shared through the state directory, so switching windows shows the same
   sidebar, not a different one. That is also what a later desktop app would
@@ -154,12 +198,31 @@ or resized.**
 
 ### 5a. What tmux gives this
 
+herdr's one structural advantage is that it owns the event loop — it *is* the
+multiplexer, so it never has to ask what changed. kel stays on tmux (it keeps
+tmux's persistence, detach, SSH and thirty years of config for free — herdr's
+reviewers list resurrection and status widgets among what it is missing) and
+closes that gap by asking tmux properly:
+
 - **Control mode** (`tmux -C`) — subscribe to tmux's own events (window added,
   pane exited, window changed) instead of polling.
+- **Format subscriptions** (`refresh-client -B name:what:format`, tmux 3.2+) —
+  a control-mode client is sent `%subscription-changed` whenever a format's
+  value changes: the active window, each pane's path or current command. This
+  is how the sidebar becomes event-driven instead of polling every 2 s. It
+  raises the **sidebar's** floor to tmux 3.2 (2021; Ubuntu 22.04 ships 3.2a)
+  while kel's own stays 3.0 — below 3.2 the sidebar keeps M2's poll.
 - **Hooks** (`after-new-window`, `session-window-changed`, `pane-exited`) —
   create a window's sidebar, wake the visible one.
+- **Per-pane styles** (`set -p window-style`, `window-active-style`) and
+  `pane-active-border-style` — the sidebar gets a background of its own and a
+  border that matches it, so it reads as **chrome, not a pane in a box**; the
+  pane you are in gets the one accent-coloured border. Much of herdr's polish
+  is exactly this.
 - **`display-popup`** — floating overlays (lazygit, yazi, a plan) dismissed
-  with `q`.
+  with `q`. Titled and bordered (`-T " lazygit · fix-auth "`, `-b rounded`,
+  3.3+, plain border below) so a popup reads as part of kel, with where it
+  opened in its title.
 - **Per-pane user options** (`@kel-sidebar`, `@kel-kind`) — metadata tmux keeps
   for us, readable in one `list-panes -F`.
 - **`#{pane_current_command}` / `#{pane_pid}` / `#{pane_current_path}`** —
@@ -208,11 +271,106 @@ where it already is** — which is exactly what a sidebar per window does.
 | groups | *built (M0).* **One `kel` tmux session for everything.** The sidebar groups by repo → worktree from each pane's directory; sessions-per-repo would only duplicate that and make navigation two-level. `group` stays in the records as the repo label (no format change); `.kel/group` keeps working as a display grouping; restore merges old per-repo sessions into the one |
 | the panel | **a `display-popup` first** (~90%) for `yazi`, `lazygit`, plan and tasks — no layout cost, nothing resizes. A pinned right-hand pane only if the popup gets reopened constantly |
 | sidebar width | *built (M2).* **Fixed, 32 columns by default**, `sidebar_width` in config, identical in every window. Hide/show applies to every window at once and resizes the user's panes, so it is a rare gesture |
-| idle and wake | *built (M2).* **Hook-driven.** Hidden sidebars sleep; `session-window-changed` wakes the shown one; it refreshes when kel's state hooks fire, plus a slow fallback poll. Control mode only if this proves insufficient |
+| idle and wake | *built (M2).* **Hook-driven.** Hidden sidebars sleep; `session-window-changed` wakes the shown one; it refreshes when kel's state hooks fire, plus a slow fallback poll. **Next (decided after M2):** format subscriptions (§5a) replace the visible sidebar's 2 s poll on tmux ≥ 3.2; the hooks and `SIGUSR1` stay, as the wake for kel's own state changes, which tmux cannot see |
 | restore | *built (M2).* **Rebuild windows and splits as today, sidebars included, under the existing `.restoring` lock.** A snapshot records each sidebar as a `@kel-sidebar` pane (its geometry is part of the window's layout string, so skipping it would break `select-layout`), and restore relaunches it rather than replaying a command — so a restore cannot duplicate one. The author found the old restore hard to work with — the rebuild is a chance to simplify it, not just extend it |
 | scope | **only kel's session.** Panes in other tmux sessions are not part of the workspace |
-| focus | **one key to focus the sidebar** (`prefix Space` proposed); `enter` jumps to the selected pane, `esc` returns where you were; mouse clicks work. `` prefix ` `` is unchanged |
-| keys | `j`/`k` move · `enter` jump · `/` filter · `n` new agent · `w` new worktree agent · `x` kill (kill-safety intact) · `r` rename · `f` files · `g` git · `p` plan/tasks · `?` help. All in the footer, none deeper than one key |
+| focus | *built (M3).* **One key to focus the sidebar** (`prefix Space`, taking tmux's `next-layout`); `enter` jumps to the selected pane, `esc` returns where you were. `` prefix ` `` is unchanged |
+| keys | `j`/`k` move · `enter` jump · `/` filter · `n` new agent · `w` new worktree agent · `x` kill (kill-safety intact) · `r` rename · `f` files · `g` git · `p` plan/tasks · `?` help. All in the footer, none deeper than one key. *Proposed, with §5f:* `e` edit what the agent last touched · `d` review the worktree's diff · `o` open a server's port in the browser |
+| sections | *built (M3).* **`spaces` above `agents`** (§5), after herdr, replacing the single repo → worktree → pane tree |
+| mouse | *built (M3).* **First-class.** A click selects and jumps; the wheel scrolls; every gesture a key does on a row, a click can reach. Bubble Tea v2 reports mouse events; tmux passes them to the pane under the pointer with `mouse on`, which kel's config already sets |
+| done, until seen | *built (M3).* **`done` stays loud until you have looked at the agent**, then quietens — herdr's semantics, and what makes the dots worth reading. A **flag on `done`, not a new state**: `kel jump`, the notifications and every reader that matches on state are untouched. When "looked at" happened is recorded from the window-change event the sidebar already receives (§9) |
+| visual language | *built (M3).* §5d. Settled on rendered frames, approved by the author, before M3 was wired to live data; the background is true black (`colour16`), the author's call after `colour234` read as grey |
+
+**Still open** — settled when their milestone is planned, not before:
+
+- **The per-worktree Neovim's lifecycle** (§5f): who starts it (the first `e`,
+  or `kel new -w`), and whether `kel kill` closes it and removes its socket.
+  `kill` must never close an editor holding unsaved buffers — invariant 1's
+  spirit, applied to the editor.
+- ~~Whether `agents` repeats what `spaces` lists~~ — settled in M3 planning:
+  **agents only under `agents`**; an open space lists the other panes.
+
+### 5d. Visual language  ·  *decided 2026-10-14*
+
+The fear this section answers is a sidebar that works and is unpleasant to look
+at. M2's frame — a repo name, one inverse-video row, a key hint — is the
+baseline it improves on. The rules, most of which are why herdr looks at home
+in any terminal:
+
+- **The terminal's 16 ANSI colours, never hex.** The sidebar then wears the
+  user's terminal theme, light or dark, with no theme of its own to maintain.
+- **Colour means state, and nothing else.** One colour per state (waiting,
+  working, done-unseen, throttled, dead); everything else is the default
+  foreground, bold, or dim. A colour that does not mean a state is noise.
+- **Name bold, detail dim.** Two lines per entry; the second is always dim.
+- **One accent for the selected entry**, and it is not inverse video.
+- **Dots, not words, for state.** The word appears only where there is room to
+  say *why* (`waiting 6m`), never as the only signal.
+- **Whitespace, not box-drawing.** No borders inside the sidebar; sections are
+  separated by a blank line and a dim lowercase label (`spaces`, `agents`).
+- **Chrome, not a box** — the sidebar's background and border come from tmux
+  per-pane styles (§5a), so it reads as part of the window, the way herdr's
+  does.
+- **Nerd Font glyphs only as an option**, with a plain-Unicode default. They
+  break on half the machines you SSH into, and an unknown glyph renders as a
+  box — a guess displayed as a fact, in miniature.
+- **Unknown is its own look** (invariant 3): dim `?`, never a plausible
+  default.
+
+### 5e. How we know the sidebar is good  ·  *decided 2026-10-14*
+
+Green tests are not sign-off (the author verifies UX by hand), but they can
+make sure a frame the author approved stays approved.
+
+- **Design frames before wiring.** M3 starts from fixture fleet documents —
+  none, one agent, fifteen across three repos, a 60-character branch, unknown
+  context, a dead agent, servers with ports — rendered at 28, 32 and 40
+  columns. The frames are iterated with the author until they are right;
+  only then is the sidebar connected to live data.
+- **Golden frames.** Those approved frames are committed, and `View()` over
+  each fixture is compared against them (`teatest`, or the same direct
+  rendering `kel top`'s tests use). An accidental visual change shows up as a
+  diff to accept or reject.
+- **Real frames from real tmux.** `tmux capture-pane -e -p -t <sidebar>`
+  inside the suite's isolated server is the pane as tmux actually drew it,
+  colours included — what catches a style that is right in `View()` and wrong
+  in the terminal.
+- **Timing budgets, asserted:** a window switch shows the correct sidebar
+  within ~50 ms; a keypress produces a frame without waiting on git; a hidden
+  sidebar does no work. *Measured in M3:* the switch reaches the shown sidebar
+  in ~130–140 ms, most of it `kel _sidebar wake` starting bash; every
+  sidebar already knows its own window, so the frame is right before the
+  fresh load lands. The suite asserts under a second so CI cannot flake;
+  format subscriptions (§5a) are what would close the gap.
+- **Recorded, and compared honestly.** A VHS tape (`charmbracelet/vhs`) drives
+  a real session and exports a GIF or PNG per milestone, to be put beside
+  herdr's own screenshots.
+
+### 5f. Editor, diffs and the browser  ·  *designed*
+
+What the desktop ADEs (Orca, Superset, Conductor, T3 Code) build in, kel gets
+by deciding where existing tools open — invariant 7.
+
+- **Editor: one Neovim per worktree, driven over its own socket.** Started as
+  `nvim --listen <state>/nvim/<worktree>.sock`; kel hands it a file with
+  `nvim --server <sock> --remote <file>`. That is the editor's RPC, not typing
+  into a pane, so invariant 4 is untouched. The point is `e`: a `PostToolUse`
+  hook on `Edit` / `Write` records the last file each agent touched (§9), and
+  `e` opens it, at the line, in that worktree's editor. The IDE features —
+  tree, signs, search — are Neovim plugins the user already chose.
+- **Diffs: `d` reviews a worktree** against its land base — `nvim -c
+  "DiffviewOpen <base>...HEAD"` when `diffview.nvim` is installed, else `git
+  diff <base>... | delta` (or plain `git diff`) in a popup. Land state (§9d)
+  already knows the base; that is the whole contribution. A diff renderer is
+  years of work kel would do worse (R5).
+- **Browser: `o` opens a server pane's port** in the real browser —
+  `xdg-open`, `wslview` on WSL2, `open` on macOS. M1 already knows every
+  pane's ports. A browser *inside* the terminal (`carbonyl`) is rejected
+  (backlog R7).
+- **`kel url [worktree]`** prints that worktree's server URL, so an agent's
+  own browser tooling (a Playwright skill, say) can ask kel where the dev
+  server is instead of guessing `:3000`. Read-only — the agent asks, kel never
+  tells it unprompted (R2).
 
 ---
 
@@ -238,48 +396,74 @@ per-window list both used to carry.
 | Claude Code's own row, inside each agent pane | `kel statusline` | **this session** — what you need while typing to it |
 | tmux's bottom bar | `kel status-line` | **the account and the workspace** — what belongs to no single pane (Orca's footer) |
 
-### 7a. Claude's row  ·  *designed (decided 2026-10-14)*
+**Every fact has one home** *(decided 2026-10-14)*. The first draft of this
+section put land state in three places — Claude's row, the bar and the sidebar
+— and fleet counts, ports and location in both the bar and the sidebar. Each
+fact now lives where you are looking when you need it. Nothing was dropped;
+facts moved.
+
+| fact | its one home | the draft also had it in |
+|---|---|---|
+| model, context bar, cost, `fast` / `xhigh` | **Claude's row** — you are typing to that session | — |
+| repo / worktree, branch, `↑N`, dirty, land | **sidebar**, per space | Claude's row; the bar's location |
+| agent state, per-agent context % and cost | **sidebar**, per agent | — |
+| listening ports | **sidebar**, on the space whose server holds them | the bar's machine segment |
+| pane count | **sidebar** — it *is* the list | the bar |
+| quota: 5 h with reset, weekly | **the bar** — per account, belongs to no pane | Claude's row |
+| total cost of live sessions | **the bar** — an aggregate has no row | — |
+| waiting count, oldest wait | **the bar** — the alarm, visible while the sidebar is scrolled, filtered or hidden | (the sidebar shows each dot; the bar the count) |
+| keys, the restore hint | **the sidebar's footer** | startup text |
+
+**When the sidebar is hidden, the bar takes location back.** Hiding is one
+global gesture (`kel sidebar off`, which leaves `sidebar-off` in the state
+directory), so the bar checks that one file and appends the focused pane's
+repo, branch and land code while it exists. A fact never disappears; it only
+moves to where there is room.
+
+### 7a. Claude's row  ·  *designed (revised 2026-10-14)*
 
 ```
-kelsier@fix-auth · fix-auth ↑2 ● · Opus 5.5 · ████░░ 36% ctx · $10.65 · quota 58% · wk 41%
+Opus 5.5 · ████░░ 36% ctx · $10.65
 ```
 
-- **where it is** — repo@worktree, branch, `↑N` unpushed, `●` dirty: the same
-  land code the sidebar shows (this needs the land state cached somewhere the
-  row can read without running git — the row runs on every update)
 - **the session** — model, context bar, cost; `fast` / `xhigh` only when not
-  default; `ctx ?` when unmeasured
-- **quota** — always, whenever Claude Code reports one (API-key sessions have
-  none, and show nothing — never a fake `0%`). Labelled `quota`, because the
-  bar-and-percentage shape already means context in this row
+  default; `ctx ?` when unmeasured. That is all: this row is read while typing
+  to one agent, and everything else on it was a copy.
+- *Moved out:* location and land to the sidebar; quota to the bar. Both were
+  in the first draft of this row. Dropping them also drops the cached git
+  position this row needed — it runs on every update and could never run git.
 
-### 7b. tmux's bottom bar  ·  *designed (decided 2026-10-14)*
-
-```
-claude ▓▓▓░░ 58% (1h20m) · wk 41%  │  4 agents · 1 waiting 6m · 2 done · $24.10  │  7 panes · :3000 :8000  │  kelsier · fix-auth ↑2 ●
-```
-
-With no agents running, quota and location still show:
+### 7b. tmux's bottom bar  ·  *designed (revised 2026-10-14)*
 
 ```
-claude ▓▓▓░░ 58% (1h20m) · wk 41%  │  no agents  │  3 panes · :5173  │  api-gw · main ✓
+claude ▓▓▓░░ 58% (1h20m) · wk 41%  │  1 waiting 6m · $24.10
+```
+
+With nothing waiting, and with the sidebar hidden:
+
+```
+claude ▓▓▓░░ 58% (1h20m) · wk 41%  │  $24.10
+claude ▓▓▓░░ 58% (1h20m) · wk 41%  │  1 waiting 6m · $24.10  │  kelsier · fix-auth ↑2 ●
 ```
 
 1. **quota** — the 5-hour window as a bar and percentage with its reset time,
    and the weekly window. No `5h` label: the window is always five hours, and
    the weekly is the only other one Claude Code reports. Always shown when
-   known.
-2. **fleet** — counts by state, the age of the oldest waiting agent, and the
-   total cost of live sessions (cumulative per session, so "spent by open
-   sessions", never "today").
-3. **machine** — pane count (sidebars excluded) and the TCP ports listening
-   in kel's panes' process trees. Memory was considered and dropped: it has
-   never been the problem.
-4. **location** — the *focused* pane's repo, branch and land state, for any
-   pane, plain shells and servers included.
+   known; API-key sessions have none and show nothing, never a fake `0%`.
+2. **the alarm** — how many agents wait on you and for how long the oldest has
+   waited; absent when none do. Then the total cost of live sessions
+   (cumulative per session, so "spent by open sessions", never "today").
+3. **location** — only while the sidebar is hidden: the focused pane's repo,
+   branch and land code.
+
+Cut from the first draft, each because the sidebar holds it: per-state counts
+(`4 agents · 2 done`), pane count, the port list, and location while the
+sidebar is showing. Memory was considered earlier and dropped: it has never
+been the problem.
 
 The per-window list (`1:auth-fix? 2:docs`) goes — the sidebar replaces it,
-and it was what overflowed the bar past about six windows.
+and it was what overflowed the bar past about six windows. Until M4 builds
+this bar, M2's windows still show it.
 
 **Stale quota reads as unknown.** Quota is per account, so it moves out of the
 per-window `.ctx` into its own small file (5h %, its reset, weekly %, its
@@ -288,13 +472,13 @@ reset, the epoch it was observed) — an on-disk addition, recorded in
 last observation, the bar shows `░░░░░ ?`, never the old figure (invariant 3).
 Same for the weekly.
 
-**Ports are too slow for the hot path.** On macOS they need `lsof`, which costs
-~100 ms and up; the bar redraws constantly (invariant 5). `kel-fleet` computes
-them on a short cache (~10 s) and the bar only reads the cached value.
+**Ports are too slow for the hot path** — on macOS they need `lsof`, ~100 ms
+and up — which is one more reason they live in the sidebar, off the bar's
+redraw path (invariant 5). `kel-fleet` computes them on a ~10 s cache.
 
-**Narrow terminals** are deliberately not designed yet. Whether the bar
-overflows is something daily use will show; if it does, groups drop from the
-right, quota and waiting last.
+**Narrow terminals** mostly stop being a question: the bar is two short
+segments. If it still overflows, location drops first, then cost; quota and
+the alarm stay.
 
 ### 7c. How it updates
 
@@ -355,6 +539,24 @@ with the payload on stdin:
 | `SessionEnd` | state file removed |
 | `PreCompact` | no change — increments `compactions` |
 | `PostCompact` | no change — redraws the bar |
+| `PostToolUse` on `TodoWrite` | *designed.* no change — records the session's task list for the panel's tasks view (M6) |
+| `PostToolUse` on `Edit` / `Write` | *designed.* no change — records the last file the agent touched, for `e` (§5f) |
+
+The two `PostToolUse` entries are wired with a **matcher limited to those
+tools**: `PostToolUse` fires after every tool call, so an unmatched hook would
+put a `kel` start on the agent's hottest path (invariant 5). Both read the
+tool's own payload — the task list and the file path are in it — so neither
+scrapes a transcript. Each adds a small per-window file to the on-disk
+contract, recorded in `CLAUDE.md` when built.
+
+**Done, until seen** *(built, M3)*. `done` carries a flag: unseen until the
+agent's window is shown, then seen. The sidebar records the moment from the
+window-change event it already receives, as an epoch next to the state file;
+`done` is unseen while the state's epoch is newer than the last time its
+window was shown — a tie in the same second reads unseen, since the order is
+unknown and the sidebar showing it re-marks it on its next load. Only the
+sidebar's look changes — `kel jump`, notifications
+and every reader that matches on state see plain `done`, as today.
 
 | `notification_type` | state |
 |---|---|
@@ -470,7 +672,14 @@ worktrees are all dirty or unpushed is never refreshed at all.
 
 The command list is `usage.md` (and `kel --help`, which the suite checks
 against the dispatcher and both completions). What belongs here is the design
-two of them carry:
+two of them carry, and one that is designed:
+
+**`kel url [worktree]`** *(designed, §5f)* prints the URL of the server
+listening in that worktree (or the one you are standing in) — read from the
+fleet document's ports, never by probing. Several servers print one line each;
+none prints nothing and exits 1, so a script can tell "no server" from a URL.
+It is the first of a small set of **read-only commands an agent may call**;
+the rest (`kel state`, `kel wait --state`) wait in `backlog.md` #39.
 
 **Workspace snapshot.** `kel snapshot` (fired by tmux hooks and by
 state-changing commands) writes the full shape to `snapshot.json`, keeping one

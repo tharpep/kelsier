@@ -90,18 +90,41 @@ counts windows from 1, and labels each pane.
 
 ## The sidebar
 
-Every kel window has a 32-column pane on its left listing every pane in the
-workspace — grouped by repo, agents with their state (`?` waiting, `*`
-working…), servers with their ports, shells and programs — with `›` on the
-pane you are in. Click into it (the mouse is on) and `j`/`k` move, `enter`
-jumps to that pane. It is the same list in every window.
+Every kel window has a 32-column pane on its left — the same in every window —
+in two sections:
 
-This is the rough M2 version: M3 adds a focus key, actions (new, kill,
-rename) and a filter. Hidden sidebars do no work; the one you can see refreshes
-every two seconds and at once when an agent changes state. `kel sidebar off`
-removes it everywhere (and new windows get none) until `kel sidebar on`;
-`sidebar = "off"` in config disables it outright; `sidebar_width` sets the
-width.
+- **`spaces`** — where things are: one entry per repo checkout or worktree,
+  with its branch, `↑` unpushed / `↓` behind, `●` uncommitted files and the
+  ports its servers listen on. The space you are in is open, listing its
+  servers, shells and programs; the others are folded.
+- **`agents`** — who needs you, most urgent first: a dot per state (yellow
+  waiting, cyan working, green finished-and-not-yet-looked-at, dim idle or
+  seen, magenta throttled, red `✕` dead, dim `?` unknown), then how long, the
+  context % and the cost.
+
+A blue `▌` marks the selection, `›` where you are.
+
+| key | |
+|---|---|
+| `prefix Space` | put the keyboard in the sidebar (replaces tmux's `next-layout` on that key) |
+| `j` / `k` | move |
+| `enter` | jump to an agent or pane · open or fold a space |
+| `space` / `l` / `h` | fold, open, close a space |
+| `/` | filter by name, live · `esc` clears |
+| `n` / `w` | new agent / new worktree agent in the selected entry's space — type the name in the footer |
+| `r` | rename the selected agent |
+| `x` | kill the selected agent, after `y` — a worktree with unsaved work is refused, and the footer names what is at risk |
+| `?` | every key |
+| `esc` | back to the pane you were in |
+| click · wheel | select and jump, fold a space · move |
+
+A finished agent stays green until its window has been shown; after that it
+dims. Hidden sidebars do no work; the one you can see refreshes every two
+seconds and at once when an agent changes state. `kel sidebar off` removes it
+everywhere (and new windows get none) until `kel sidebar on`; `sidebar =
+"off"` in config disables it outright; `sidebar_width` sets the width and
+`sidebar_style` its background (black by default; `"default"` for the
+terminal's own).
 
 ## Groups
 
@@ -113,7 +136,7 @@ wins). Non-repo agents go to `misc`. A window you make yourself (`prefix c`)
 gets the group of the repo its pane is standing in.
 
 The group is what `kel ls` sorts by, what `kel kill <group>/<name>` names, and
-— from M3 — what the sidebar groups rows under.
+the label each of the sidebar's spaces carries.
 
 **window vs pane:** `kel new` makes a **window** — one agent. `prefix | / -`
 makes a **pane** inside it, for your own editor, shell or tests. kel tracks

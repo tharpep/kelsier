@@ -879,6 +879,88 @@ wait_until '[ -n "$(tmux capture-pane -p -t "$(userpane "$WW")" | grep .)" ]' 50
 "$KEL" restore >/dev/null 2>&1
 wait_until '[ -n "$(window_of api-gw keep)" ]'
 ok "restore still closes an unused fresh-start shell beside its sidebar" '[ "$(wins)" = 2 ]'
+
+# ---- v0.10 M3: the sidebar itself, driven through its real pane
+# A control client makes one window the shown one, so its sidebar loads live
+# data; keys go in with send-keys, exactly as typed. Agents are sleep, also
+# for the ones the sidebar's own `n` starts (KEL_AGENT reaches it through the
+# server's environment).
+export KEL_AGENT='sleep 9999'
+reset
+sbpane() { tmux list-panes -t "$1" -F '#{@kel-sidebar} #{pane_id}' | awk '$1==1 {print $2; exit}'; }
+sbtext() { tmux capture-pane -p -t "$1" 2>/dev/null; }
+active_win() { tmux list-windows -t '=keltest' -F '#{window_active} #{window_id}' | awk '$1==1 {print $2}'; }
+ms() { perl -MTime::HiRes=time -e 'printf "%d\n", time*1000'; }   # BSD date has no %N
+K api-gw new wt -w >/dev/null 2>&1
+WTW="$(window_of api-gw wt)"; agent_up "$WTW"
+echo wip > "$WORK/repos/.kel-worktrees/api-gw-wt/scratch.txt"
+NEW api-gw main1
+MW="$(window_of api-gw main1)"
+( sleep 40 ) | tmux -C attach -t '=keltest' >/dev/null 2>&1 &
+CC=$!
+wait_until 'tmux list-clients 2>/dev/null | grep -q .' 30
+tmux select-window -t "$MW"; "$KEL" _sidebar wake
+SP="$(sbpane "$MW")"
+wait_until 'sbtext "$SP" | grep -q "wt"' 50
+ok "the sidebar draws spaces, then agents"       'sbtext "$SP" | grep -qx spaces && sbtext "$SP" | grep -qx agents'
+ok "  ...the worktree as a space of its own"     '[ "$(sbtext "$SP" | grep -c "api-gw")" -ge 2 ]'
+ok "  ...and selects with a bar, not inverse video" '! tmux capture-pane -e -p -t "$SP" | grep -q "\[7m" && sbtext "$SP" | grep -q "▌"'
+
+tmux send-keys -t "$SP" j
+wait_until '[ "$(jq -r .selected "$STATE/sidebar.json" 2>/dev/null)" = "a:$WTW" ]'
+ok "j moves the shared cursor"                   '[ "$(jq -r .selected "$STATE/sidebar.json")" = "a:$WTW" ]'
+tmux send-keys -t "$SP" Enter
+wait_until '[ "$(active_win)" = "$WTW" ]'
+ok "enter jumps to the agent's window"          '[ "$(active_win)" = "$WTW" ]'
+
+# invariant 1, through the sidebar: x, y on dirty work is refused by kel kill
+"$KEL" _sidebar wake
+SW="$(sbpane "$WTW")"
+wait_until 'sbtext "$SW" | grep -q agents'
+tmux send-keys -t "$SW" x
+wait_until 'sbtext "$SW" | grep -q "kill wt? y/n"'
+ok "x asks before killing"                      'sbtext "$SW" | grep -q "kill wt? y/n"'
+tmux send-keys -t "$SW" y
+wait_until 'sbtext "$SW" | grep -q "at risk"' 80
+ok "  ...and a dirty worktree is refused"        '[ -n "$(window_of api-gw wt)" ]'
+ok "  ...naming the file at risk, in the sidebar" 'sbtext "$SW" | grep -q "scratch.txt"'
+
+# n: a new agent in the selected entry's space, named in the footer
+tmux send-keys -t "$SW" n
+wait_until 'sbtext "$SW" | grep -q "^new: "'
+tmux send-keys -t "$SW" -l fresh
+tmux send-keys -t "$SW" Enter
+wait_until '[ -n "$(window_of api-gw fresh)" ]' 80
+ok "n names and starts an agent, in that space's repo" '[ -n "$(window_of api-gw fresh)" ] && [ -f "$SESSIONS/api-gw/fresh.json" ]'
+
+# prefix Space is `kel _sidebar focus`; esc goes back
+tmux select-window -t "$MW"
+UP="$(userpane "$MW")"; tmux select-pane -t "$UP"
+"$KEL" _sidebar focus
+ok "_sidebar focus puts the keyboard in the sidebar" '[ "$(tmux display -p -t "$MW" "#{pane_id}")" = "$SP" ]'
+tmux send-keys -t "$SP" Escape
+wait_until '[ "$(tmux display -p -t "$MW" "#{pane_id}")" = "$UP" ]'
+ok "  ...and esc returns to your pane"           '[ "$(tmux display -p -t "$MW" "#{pane_id}")" = "$UP" ]'
+
+# done until seen: finished while you were elsewhere stays loud until shown
+hook "$(userpane "$WTW")" Stop
+U() { "$KEL" _fleet | jq -r --arg w "$WTW" '.agents[] | select(.window_id == $w) | "\(.state) \(.unseen)"'; }
+ok "a done agent you have not looked at is unseen" '[ "$(U)" = "done true" ]'
+# the earlier jump already marked this window; time a fresh mark, not that
+tmux select-window -t "$MW"; rm -f "$STATE/$WTW.seen"
+t0="$(ms)"
+tmux select-window -t "$WTW"; "$KEL" _sidebar wake
+wait_until '[ -f "$STATE/$WTW.seen" ]' 30
+t1="$(ms)"
+# shown in the same second it finished is a tie, read unseen; the shown
+# sidebar marks it again on its next load (2 s)
+wait_until '[ "$(U)" = "done false" ]' 60
+ok "  ...and seen once its window is shown"      '[ "$(U)" = "done false" ]'
+printf '       (the shown sidebar noticed in %s ms)\n' "$((t1 - t0))"
+ok "a window switch reaches the shown sidebar in under a second" '[ $((t1 - t0)) -lt 1000 ]'
+kill "$CC" 2>/dev/null; wait "$CC" 2>/dev/null
+unset KEL_AGENT
+
 export KEL_SIDEBAR=off
 unset KEL_SIDEBAR_TRACE
 

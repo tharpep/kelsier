@@ -558,8 +558,27 @@ func (m model) View() tea.View {
 
 func main() {
 	once, sidebar := false, false
-	for _, a := range os.Args[1:] {
+	fixture, widths, height := "", []int{28, 32, 40}, 0
+	args := os.Args[1:]
+	for i := 0; i < len(args); i++ {
+		a := args[i]
 		switch a {
+		case "--fixture", "--width", "--height":
+			if i+1 >= len(args) {
+				fmt.Fprintf(os.Stderr, "kel-top: %s needs a value\n", a)
+				os.Exit(2)
+			}
+			i++
+			switch a {
+			case "--fixture":
+				fixture = args[i]
+			case "--width":
+				var w int
+				fmt.Sscanf(args[i], "%d", &w)
+				widths = []int{w}
+			default:
+				fmt.Sscanf(args[i], "%d", &height)
+			}
 		case "--once":
 			once = true
 		case "--sidebar":
@@ -570,7 +589,7 @@ func main() {
 			fmt.Print(dumpHelpKeys(newKeys()))
 			return
 		case "-h", "--help":
-			fmt.Fprintln(os.Stderr, "usage: kel-top [--once] [--sidebar] [--dump-help-keys]")
+			fmt.Fprintln(os.Stderr, "usage: kel-top [--once] [--sidebar [--fixture FILE|DIR [--width N] [--height N]]] [--dump-help-keys]")
 			return
 		default:
 			fmt.Fprintf(os.Stderr, "kel-top: unknown flag %s\n", a)
@@ -578,6 +597,10 @@ func main() {
 		}
 	}
 
+	if sidebar && fixture != "" {
+		runFixtures(fixture, widths, height)
+		return
+	}
 	if sidebar {
 		runSidebar(once)
 		return

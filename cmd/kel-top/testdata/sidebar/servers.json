@@ -1,0 +1,107 @@
+{
+ "generated_at": "2026-10-14T23:00:00Z",
+ "current": {
+  "group": "api-gw",
+  "window_id": "@1"
+ },
+ "agents": [],
+ "panes": [
+  {
+   "pane_id": "%1",
+   "window_id": "@1",
+   "window_index": 1,
+   "window_name": "api",
+   "group": "api-gw",
+   "pane_index": 1,
+   "active": true,
+   "current": true,
+   "cmd": "python3",
+   "pid": 1001,
+   "cwd": "/home/me/code/api-gw",
+   "kind": "server",
+   "agent": false,
+   "ports": [
+    8000
+   ],
+   "git": {
+    "root": "/home/me/code/api-gw",
+    "worktree": false,
+    "branch": "main",
+    "upstream": "origin/main",
+    "ahead": 0,
+    "behind": 4,
+    "dirty": 0
+   }
+  },
+  {
+   "pane_id": "%2",
+   "window_id": "@1",
+   "window_index": 1,
+   "window_name": "api",
+   "group": "api-gw",
+   "pane_index": 2,
+   "active": false,
+   "current": false,
+   "cmd": "bash",
+   "pid": 1002,
+   "cwd": "/home/me/code/api-gw",
+   "kind": "shell",
+   "agent": false,
+   "ports": [],
+   "git": {
+    "root": "/home/me/code/api-gw",
+    "worktree": false,
+    "branch": "main",
+    "upstream": "origin/main",
+    "ahead": 0,
+    "behind": 4,
+    "dirty": 0
+   }
+  },
+  {
+   "pane_id": "%3",
+   "window_id": "@2",
+   "window_index": 2,
+   "window_name": "web",
+   "group": "web-dashboard",
+   "pane_index": 1,
+   "active": true,
+   "current": false,
+   "cmd": "node",
+   "pid": 1003,
+   "cwd": "/home/me/code/web-dashboard",
+   "kind": "server",
+   "agent": false,
+   "ports": [
+    3000,
+    5173
+   ],
+   "git": {
+    "root": "/home/me/code/web-dashboard",
+    "worktree": false,
+    "branch": "main",
+    "upstream": "origin/main",
+    "ahead": 0,
+    "behind": 0,
+    "dirty": 0
+   }
+  },
+  {
+   "pane_id": "%4",
+   "window_id": "@3",
+   "window_index": 3,
+   "window_name": "notes",
+   "group": "misc",
+   "pane_index": 1,
+   "active": true,
+   "current": false,
+   "cmd": "nvim",
+   "pid": 1004,
+   "cwd": "/home/me/notes",
+   "kind": "program",
+   "agent": false,
+   "ports": [],
+   "git": null
+  }
+ ]
+}

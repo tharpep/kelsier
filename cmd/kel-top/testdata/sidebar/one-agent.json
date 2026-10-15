@@ -1,0 +1,70 @@
+{
+ "generated_at": "2026-10-14T23:00:00Z",
+ "current": {
+  "group": "kelsier",
+  "window_id": "@1"
+ },
+ "agents": [
+  {
+   "group": "kelsier",
+   "name": "kelsier",
+   "window_id": "@1",
+   "index": 1,
+   "current": true,
+   "managed": true,
+   "state": "working",
+   "state_since": 1792018760,
+   "note": null,
+   "isolation": "inplace",
+   "branch": null,
+   "repo": "/home/me/code/kelsier",
+   "cwd": "/home/me/code/kelsier",
+   "agent": "claude",
+   "claude_session": null,
+   "compactions": null,
+   "dirty": null,
+   "land": null,
+   "panes": [
+    "claude"
+   ],
+   "activity": 1792018760,
+   "context": {
+    "pct": 41,
+    "cost_usd": 1.2,
+    "in_tokens": null,
+    "size": 1000000,
+    "rate_5h": 43,
+    "at": 1792018795,
+    "model": "Opus 5.5 (1M context)"
+   },
+   "unseen": false
+  }
+ ],
+ "panes": [
+  {
+   "pane_id": "%1",
+   "window_id": "@1",
+   "window_index": 1,
+   "window_name": "kelsier",
+   "group": "kelsier",
+   "pane_index": 1,
+   "active": true,
+   "current": true,
+   "cmd": "claude",
+   "pid": 1001,
+   "cwd": "/home/me/code/kelsier",
+   "kind": "agent",
+   "agent": true,
+   "ports": [],
+   "git": {
+    "root": "/home/me/code/kelsier",
+    "worktree": false,
+    "branch": "main",
+    "upstream": "origin/main",
+    "ahead": 2,
+    "behind": 0,
+    "dirty": 1
+   }
+  }
+ ]
+}
