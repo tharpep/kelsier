@@ -294,6 +294,15 @@ the `TodoWrite` design was stale, and the plan turned out to need no new hook.
   footer now shows the selection's keys, and `prefix space` when unfocused),
   and trapped in vim inside yazi — so every popup now hosts a small tmux
   session where `prefix q` always closes it (`spec.md` §5c, "the panel")
+- *the daily-use batch (2026-10-15, from three screenshots):* spaces named by
+  their repo (two read "kelsier · main", one was ai-context); `idle_prompt`
+  ends a `working` no `Stop` ended; no pane titles inside popups; `t` / `kel
+  shell`; `e` on a space opens a kept nvim; `kel quit` and `Q` (backlog #33);
+  an `actions` group in the sidebar's empty lower half; `prefix k`, a kel
+  prompt. Plain windows (a shell, a server) are no longer listed as `?`
+  agents. Separately, outside the repo: the author's nvim gained LSP for Go
+  (gopls), Python (basedpyright + ruff) and TypeScript (TS 7's own `tsc
+  --lsp`), treesitter parsers and diffview, and `EDITOR=nvim`
 - *found on the way:* M5's `hook_edit` had real newlines inside its `printf`
   format — a quoting slip in its writing that happened to print the same
   thing; rewritten while the plan / edit split went in

@@ -16,6 +16,9 @@
 #                              (one agent — `kel restore` rebuilds the workspace)
 #   kel top                    the fleet dashboard (prefix t)
 #   kel sidebar on|off         the sidebar pane in every window (default on)
+#   kel shell [dir]            a plain shell window, no agent (sidebar: t)
+#   kel quit [-f]              save the workspace, then close all of it; refuses
+#                              while a worktree holds unsaved work (sidebar: Q)
 #   kel url [dir|agent]        the dev-server URLs of a worktree, one per line
 #                              (exit 1 for none) — for scripts and agents
 #   kel sweep [-n] [-f]        close every finished agent whose work has merged
@@ -34,7 +37,8 @@
 #   kel snapshot               save the workspace shape (hooks call this)
 #   kel hook <EVENT>           Claude Code state hook
 #   kel statusline             Claude Code statusLine — context % / cost
-#   kel _panel <what> ...      the sidebar's popups: files, git, diff, edit, plan, browse
+#   kel _panel <what> ...      the sidebar's popups: files, git, diff, edit, editor, plan, browse
+#   kel _prompt '<args>'       prefix k: run `kel <args>`, answer in a message or a popup
 set -uo pipefail
 
 # --------------------------------------------------------------------------
@@ -1516,6 +1520,89 @@ cmd_doctor() {
 }
 
 # --------------------------------------------------------------------------
+# kel shell   — a plain window, no agent
+# --------------------------------------------------------------------------
+# For a server, a test run, or a look around: a window in kel's session at DIR,
+# with its sidebar and its repo's group, but no record — it is not an agent,
+# so kel kill / sweep / restore's agent replay never treat it as one. The
+# sidebar lists it under its space.
+cmd_shell() { # [dir]
+  need tmux
+  local dir="${1:-$PWD}" group wid
+  [ -d "$dir" ] || die "no such directory: $dir"
+  dir="$(cd "$dir" && pwd -P)"
+  group="$(cd "$dir" && group_for_cwd)"
+  # in a linked worktree, the repo it belongs to — not the worktree folder's
+  # own name, which group_for_cwd (git root's basename) would give
+  local common
+  common="$(git -C "$dir" rev-parse --git-common-dir 2>/dev/null)" && [ -z "${KEL_GROUP:-}" ] \
+    && [ "$(cd "$dir" && git rev-parse --absolute-git-dir 2>/dev/null)" != "$(cd "$dir" && cd "$common" 2>/dev/null && pwd)" ] \
+    && group="$(basename "$(dirname "$(cd "$dir" && cd "$common" && pwd -P)")")"
+  wid="$(open_window "$(basename "$dir")" "$dir" "$group")" || die "failed to create tmux window"
+  goto_window "$wid"
+}
+
+# --------------------------------------------------------------------------
+# kel quit   — close the whole workspace, never the only copy of work
+# --------------------------------------------------------------------------
+# There was no way to end kel: prefix d leaves every agent running, and
+# killing the session by hand skips every check. This is the one command that
+# can end several agents at once, so it takes kill's care for all of them
+# (invariant 1): any worktree with uncommitted or unpushed work stops it, and
+# the refusal names what is at risk. The workspace is snapshotted first, so
+# the next `kel` archives it and `kel restore` brings it back — windows,
+# splits and conversations.
+cmd_quit() { # [-f]
+  need tmux; need jq
+  local force=0
+  case "${1:-}" in -f|--force) force=1 ;; '') ;; *) die "usage: kel quit [-f]" ;; esac
+  [ -n "$(kel_sessions)" ] || die "kel is not running"
+  if [ "$force" != 1 ]; then
+    local g n f iso cwd risk=''
+    while IFS=$'\t' read -r g n f; do
+      iso="$(jq -r '.isolation // ""' "$f" 2>/dev/null)"; cwd="$(jq -r '.cwd // ""' "$f" 2>/dev/null)"
+      [ "$iso" = worktree ] && [ -d "$cwd" ] && worktree_unsafe "$cwd" || continue
+      risk="$risk $g/$n"
+      warn "$g/$n has work that isn't safe to lose:"
+      git -C "$cwd" status --short 2>/dev/null | sed 's/^/    /' >&2
+      has_remote "$cwd" && git -C "$cwd" log --oneline HEAD --not --remotes 2>/dev/null | sed 's/^/    /' >&2
+    done < <(all_metas)
+    [ -z "$risk" ] || die "refusing to quit —${risk} — commit & push, or: kel quit -f"
+  fi
+  snapshot
+  # the popups' hosted sessions are kel's too, though no filter counts them
+  tmux list-sessions -F '#{session_name}' 2>/dev/null | grep '^_kelpop_' \
+    | while read -r s; do tmux kill-session -t "=$s" 2>/dev/null; done
+  local s
+  for s in $(kel_sessions); do tmux kill-session -t "=$s" 2>/dev/null; done
+  say "kel closed — the workspace is saved: kel, then kel restore"
+}
+
+# --------------------------------------------------------------------------
+# kel _prompt   — prefix k: kel commands without leaving the agent you are in
+# --------------------------------------------------------------------------
+# The author types into Claude all day; a kel command needed a shell pane to
+# type it in. prefix k opens tmux's prompt as `kel`, and this runs what was
+# typed: a one-line answer is a message, anything longer opens in a popup
+# rather than view-mode on the pane you are in, which would swallow your keys
+# (CLAUDE.md, traps). Words split on spaces; quoting is not supported.
+cmd_prompt() { # 'args'
+  local -a args=()
+  read -ra args <<< "${1:-}"
+  [ "${#args[@]}" -gt 0 ] || exit 0
+  local out rc
+  out="$("$SELF" "${args[@]}" 2>&1)"; rc=$?
+  out="$(printf '%s' "$out" | sed 's/\x1b\[[0-9;]*m//g')"
+  if [ "$(printf '%s\n' "$out" | grep -c .)" -le 1 ]; then
+    tmux display-message "kel ${args[*]}: ${out:-done}$( [ $rc = 0 ] || printf ' (failed)')"
+  else
+    local f="$STATE_DIR/prompt.out"
+    printf '%s\n' "$out" > "$f"
+    popup "$PWD" "kel ${args[*]} · prefix q closes" less -R "$f"
+  fi
+}
+
+# --------------------------------------------------------------------------
 # kel url   — where a worktree's dev server is, for scripts and agents
 # --------------------------------------------------------------------------
 # Read-only and asked for, never told (spec.md §5f, backlog R2): an agent's own
@@ -1553,6 +1640,7 @@ cmd_url() { # [dir|agent]
 #   _panel diff   <dir> <title> <base>   what changed against the land base
 #   _panel edit   <dir> <title> <wid>    the file the agent last touched
 #   _panel plan   <dir> <title> <wid>    the agent's plan, then its tasks
+#   _panel editor <dir> <title>          nvim at the space, kept between opens
 #   _panel browse <url>                  the real browser
 cmd_panel() {
   local what="${1:-}"
@@ -1567,6 +1655,11 @@ cmd_panel() {
     diff)  panel_diff "$dir" "$title" "$arg" ;;
     edit)  panel_edit "$dir" "$title" "$arg" ;;
     plan)  panel_plan "$dir" "$title" "$arg" ;;
+    editor) need_tool nvim
+           # nvim at the space, kept between opens like yazi and lazygit: your
+           # buffers are still there when you come back. `nvim .` opens the
+           # directory (oil, or netrw), so there is somewhere to start
+           KEL_POPUP_KEEP=1 popup "$dir" "nvim · $title · prefix q closes" nvim . ;;
     *)     die "kel _panel: unknown panel '$what'" ;;
   esac
 }
@@ -1626,6 +1719,7 @@ popup() {
   if ! tmux has-session -t "=$name" 2>/dev/null; then
     tmux new-session -d -s "$name" -c "$dir" "$cmd" \; \
          set-option -t "=$name:" status off \; \
+         set-option -w -t "=$name:" pane-border-status off \; \
          set-option -t "=$name:" @kel-popup 1 >/dev/null 2>&1 \
       || die "could not start $1"
   fi
@@ -2411,7 +2505,14 @@ cmd_hook() {
       # `waiting` made `prefix \`` jump to agents that were merely sitting idle
       # or already finished — the one keystroke the tool exists for, lying.
       case "$ntype" in
-        idle_prompt|auth_success|elicitation_complete|elicitation_response)
+        # idle_prompt is Claude Code waiting at its prompt for ~60 s. It says
+        # nothing about the agent — unless kel still has it `working`: an
+        # interrupt (esc, C-c) fires no Stop, and the author saw an agent read
+        # "working 13h29m" while it sat at its prompt. Then it is idle.
+        idle_prompt)
+          [ "$prev" = working ] || exit 0
+          state=idle ;;
+        auth_success|elicitation_complete|elicitation_response)
           exit 0 ;;                       # says something about you, not the agent
         agent_completed)      state=done ;;
         quota_auto_resume_*)  state=throttled ;;
@@ -2567,6 +2668,9 @@ main() {
     snapshot)     cmd_snapshot ;;
     sidebar)      cmd_sidebar "$@" ;;
     url)          cmd_url "$@" ;;
+    shell)        cmd_shell "$@" ;;
+    quit)         cmd_quit "$@" ;;
+    _prompt)      cmd_prompt "$@" ;;
     _panel)       cmd_panel "$@" ;;
     _sidebar)     case "${1:-}" in
                     ensure) sidebar_ensure "${2:-}" ;;

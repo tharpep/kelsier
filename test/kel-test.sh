@@ -1132,6 +1132,7 @@ printf '#!/bin/sh\nexec sleep 30\n' > "$WORK/shim/yazi"
 POP="$(tmux list-sessions -F '#{session_name}' | grep '^_kelpop_' | head -1)"
 ok "a popup's tool runs in a hosted session"     '[ -n "$POP" ] && [ "$(tmux list-panes -t "=$POP:" -F "#{pane_current_command}")" = sleep ]'
 ok "  ...marked, and with no status bar of its own" '[ "$(tmux show-options -v -t "=$POP:" @kel-popup)" = 1 ] && [ "$(tmux show-options -v -t "=$POP:" status)" = off ]'
+ok "  ...nor a pane title — kel's labels stay out" '[ "$(tmux show-options -wv -t "=$POP:" pane-border-status)" = off ]'
 ok "  ...which kel never counts: not the fleet"  '! "$KEL" _fleet --panes | jq -r ".panes[].window_id" | grep -qxF "$(tmux display -p -t "=$POP:" "#{window_id}")"'
 ok "  ...nor gives a sidebar"                    '[ "$(tmux list-panes -t "=$POP:" -F x | grep -c x)" = 1 ]'
 "$KEL" snapshot >/dev/null 2>&1
@@ -1147,6 +1148,41 @@ printf '#!/bin/sh\nexit 0\n' > "$WORK/shim/yazi"
 # by hand on 3.4 and is unverified on 3.7
 ok "kel.conf: prefix q closes a popup, and only a popup" \
   'grep -qxF "bind-key q if-shell -F '"'"'#{@kel-popup}'"'"' '"'"'detach-client'"'"' '"'"'display-panes'"'"'" "$HERE/../tmux/kel.conf"'
+
+# ---- daily-use batch (2026-10-15): from the author's screenshots
+# idle_prompt: an interrupt fires no Stop, so a turn stopped with esc stayed
+# `working` for 13 hours; Claude Code's ~60 s idle_prompt now ends it
+UP5="$(userpane "$W5")"
+hook "$UP5" UserPromptSubmit
+hook "$UP5" Notification idle_prompt
+ok "idle_prompt ends a working that no Stop ended" '[ "$(cut -d" " -f1 "$STATE/$W5.state")" = idle ]'
+hook "$UP5" Stop
+hook "$UP5" Notification idle_prompt
+ok "  ...and leaves any other state alone"      '[ "$(cut -d" " -f1 "$STATE/$W5.state")" = done ]'
+# e on a space: your nvim at that directory, kept between opens
+: > "$KEL_POPUP_TRACE"
+"$KEL" _panel editor "$WT5" api-gw/wt5 >/dev/null 2>&1
+ok "e on a space opens nvim there"              'grep -q "^$WT5	nvim · api-gw/wt5 · prefix q closes	nvim .$" "$KEL_POPUP_TRACE"'
+# kel shell: a plain window, no agent, no record
+"$KEL" shell "$WT5" >/dev/null 2>&1
+SHW="$(tmux list-windows -t =keltest -F '#{window_id} #{window_name}' | awk '$2=="api-gw-wt5" {print $1; exit}')"
+ok "kel shell opens a plain window in that directory" '[ -n "$SHW" ] && [ "$(tmux display -p -t "$SHW" "#{@kel-group}")" = api-gw ] && [ "$(tmux display -p -t "$SHW" "#{pane_current_path}")" = "$WT5" ]'
+ok "  ...in its repo's group, not the worktree folder's" '[ -n "$SHW" ] && [ "$(tmux display -p -t "$SHW" "#{@kel-group}")" != api-gw-wt5 ]'
+ok "  ...with its sidebar, and no agent record"  '[ -n "$SHW" ] && [ "$(sbcount "$SHW")" = 1 ] && ! grep -rqs "\"window_id\": *\"$SHW\"" "$SESSIONS"'
+# prefix k: a multi-line answer opens in a popup, not view-mode on your pane
+: > "$KEL_POPUP_TRACE"
+"$KEL" _prompt "url $WT5" >/dev/null 2>&1
+ok "prefix k: a long answer goes to a popup"     'grep -q "kel url $WT5 · prefix q closes	less -R" "$KEL_POPUP_TRACE" && grep -c localhost "$STATE/prompt.out" | grep -qx 2'
+# kel quit: never the only copy of work, then everything, saved first
+echo wip > "$WT5/scratch-quit.txt"
+qout="$("$KEL" quit 2>&1)"
+ok "kel quit refuses while a worktree holds unsaved work" '[[ "$qout" == *"refusing to quit"* ]] && tmux has-session -t =keltest 2>/dev/null'
+ok "  ...and names the file at risk"            '[[ "$qout" == *scratch-quit.txt* ]]'
+rm -f "$WT5/scratch-quit.txt"
+tmux new-session -d -s _kelpop_quitcheck 'sleep 30'
+"$KEL" quit >/dev/null 2>&1
+ok "kel quit closes kel and its popups' sessions" '! tmux has-session -t =keltest 2>/dev/null && ! tmux has-session -t =_kelpop_quitcheck 2>/dev/null'
+ok "  ...having saved the workspace first"      'jq -r ".windows[].name" "$STATE/snapshot.json" | grep -qx wt5'
 
 ok "a missing tool is said, not a crash"        '[[ "$(PATH="/usr/bin:/bin" KEL_FLEET_BIN="$KEL_FLEET_BIN" "$KEL" _panel files "$WT5" t 2>&1)" == *"yazi is not installed"* ]]'
 kill "$CC" 2>/dev/null; wait "$CC" 2>/dev/null
@@ -1256,7 +1292,9 @@ ok "permission_prompt -> waiting"                   '[ "$(state_of a)" = waiting
 ok "  ...and the reason is kept"                    '[[ "$("$KEL" _fleet | jq -r ".agents[0].note")" == *"needs Bash"* ]]'
 hook "$P" UserPromptSubmit
 hook "$P" Notification idle_prompt "still there?"
-ok "idle_prompt does NOT claim your attention"      '[ "$(state_of a)" = working ]'
+# never `waiting` — it is you being idle, not the agent asking. Since
+# 2026-10-15 it does end a `working` no Stop ended (an interrupt): idle
+ok "idle_prompt does NOT claim your attention"      '[ "$(state_of a)" != waiting ] && [ "$(state_of a)" = idle ]'
 hook "$P" Notification agent_completed "done"
 ok "agent_completed -> done"                        '[ "$(state_of a)" = done ]'
 hook "$P" Notification quota_auto_resume_fired "q"
@@ -1448,7 +1486,10 @@ ok "  ...and none uses a single -E"      '[ "$POPUP_SINGLE_E" = 0 ]'
 # (client-detached, after-split-window, pane-exited) stay fire-and-forget on
 # purpose either way — do not add this to them.
 CONF="$HERE/../tmux/kel.conf"
-KELBINDS=$(grep -n '^bind.*run-shell -b .*local/bin/kel ' "$CONF")
+# prefix k (`kel _prompt`) is excluded: it discards run-shell's output on
+# purpose and answers through its own message or popup, so view-mode never
+# opens on the pane you are in
+KELBINDS=$(grep -n '^bind.*run-shell -b .*local/bin/kel ' "$CONF" | grep -v '_prompt')
 ok "kel.conf's foreground kel bind exists"             '[ "$(printf "%s\n" "$KELBINDS" | grep -c .)" = 1 ]'
 ok "  ...and surfaces run-shell's stderr"               '[ "$(printf "%s\n" "$KELBINDS" | grep -c "2>&1")" = 1 ]'
 ok "  ...while every hook discards its output"          '[ -z "$(grep "^set-hook" "$CONF" | grep "run-shell" | grep -v ">/dev/null 2>&1")" ]'
@@ -1474,7 +1515,7 @@ else
 fi
 # prove the stderr-redirect guard bites: drop one 2>&1 in a scratch copy.
 sed 's/kel top 2>&1"/kel top"/' "$CONF" > "$WORK/kel-conf-revert"
-REVERTED=$(grep -n '^bind.*run-shell -b .*local/bin/kel ' "$WORK/kel-conf-revert")
+REVERTED=$(grep -n '^bind.*run-shell -b .*local/bin/kel ' "$WORK/kel-conf-revert" | grep -v '_prompt')
 ok "  ...and dropping it is caught"       '[ "$(printf "%s\n" "$REVERTED" | grep -c "2>&1")" != 1 ]'
 
 section "statusline records context without a live agent"

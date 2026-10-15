@@ -90,6 +90,7 @@ change; migrate old records in `migrate_meta`.
 | `<window-id>.plan` | two lines like `.edit`: the plan file a plan-mode `Write` under `$CLAUDE_CONFIG_DIR/plans/` named. The same hook, sorted by path |
 | `<window-id>.view` | what `p` last composed (plan, then tasks) for its popup; overwritten each time |
 | `lazygit-overlay.yml` | `quitOnTopLevelReturn: true`, laid over the user's lazygit config (never written into it) so `esc` closes kel's lazygit popup |
+| `prompt.out` | the last multi-line answer `prefix k` showed in a popup |
 | `sidebar-off` | present after `kel sidebar off`; no new sidebars until `kel sidebar on` |
 | `ports.json` | `{at, panes:{<pane pid>: [ports]}}` — the listening-port scan behind `_fleet --panes`, reused for 10 s |
 
@@ -369,7 +370,9 @@ suite check what a popup would open without a terminal client. **M6 is
 done**: `p` shows the agent's plan and Claude Code's own task list, read from
 `~/.claude/tasks/<session>/` (undocumented — a file that will not parse reads
 unreadable). Automations stay gated (`backlog.md` #38); `v0.10.0` is the
-author's call. The
+author's call. After M6, a batch from daily use: `kel quit` / `kel shell`,
+the sidebar's actions group, `prefix k` for kel commands, `idle_prompt`
+ending a stuck `working`, spaces named by their repo. The
 sidebar's look is held by golden frames (`cmd/kel-top/testdata/sidebar`);
 change one only after showing the author the frame. The layout
 is decided — a sidebar pane in every window, measured against `swap-pane` in

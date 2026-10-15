@@ -49,6 +49,10 @@ kel ls [--json]        every agent, grouped by repo (state, context %, cost);
 kel rename <newname>   rename THIS window and keep its record in sync
 kel sidebar on|off     the sidebar pane in every window (on by default; off is
                        remembered until you turn it back on)
+kel shell [dir]        a plain shell window there — no agent, no record
+kel quit [-f]          save the workspace, then close it all; refuses while a
+                       worktree holds unsaved work (-f overrides). `kel`, then
+                       `kel restore`, brings it back
 kel url [dir|agent]    a worktree's dev-server URLs, one per line; exit 1 for none
                        (for scripts — a Playwright skill can ask instead of guessing)
 kel top                every agent, sorted so the one needing you is first —
@@ -104,6 +108,13 @@ in two sections:
   seen, magenta throttled, red `✕` dead, dim `?` unknown), then how long, the
   context % and the cost.
 
+At the foot, when there is room, an `actions` group lists the keys that do
+not depend on the selection — `n` `w` `t` `Q` `?` — and each can be clicked.
+
+**`prefix k`** opens a `kel` prompt at the bottom of the screen, so a kel
+command never needs a shell: type `new docs -w`, `restore`, `url`… A
+one-line answer comes back as a message, a longer one in a popup.
+
 A blue `▌` marks the selection, `›` where you are. The footer reads `prefix
 space` until the sidebar has the keyboard, then shows the keys for whatever is
 selected (`e edit · p plan · x kill · ?` on an agent) — `?` lists them all.
@@ -122,6 +133,9 @@ selected (`e edit · p plan · x kill · ?` on an agent) — `?` lists them all.
 | `d` | that worktree's changes — committed and uncommitted — against the branch it lands on (diffview.nvim if installed, else `delta`, else `git diff`) |
 | `e` | the file the selected agent last edited, at the line — in the nvim you have open in that worktree, else a popup |
 | `o` | the selected server in your browser — its lowest port; the footer names the others |
+| `e` on a space | nvim at that directory, kept between opens — your buffers are still there next time |
+| `t` | a plain shell window in the selected space — no agent |
+| `Q` | quit kel, after `y`: saves the workspace, then closes it all; refuses while a worktree holds unsaved work |
 | `p` | the selected agent's plan (from plan mode), then its task list — `✓` done, `▸` in progress, `·` pending, and what blocks what. Most sessions on newer models keep no task list; it says so |
 | `?` | every key |
 | `esc` | back to the pane you were in |

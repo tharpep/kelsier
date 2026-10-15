@@ -84,6 +84,13 @@ func spaceKey(p fleet.Pane) (key, label string) {
 		label = "misc"
 	}
 	if p.Git != nil && p.Git.Root != "" {
+		// a main checkout is named by its own directory: the window's group
+		// is wherever the agent was filed, and the author saw two spaces both
+		// "kelsier · main" because one of them was ~/code/ai-context. A
+		// linked worktree keeps the group, which names the repo it belongs to
+		if !p.Git.Worktree {
+			label = filepath.Base(p.Git.Root)
+		}
 		return p.Git.Root, label
 	}
 	return "group:" + label, label
@@ -118,6 +125,14 @@ func buildView(doc fleet.Doc, ui uiState) sbView {
 			continue
 		}
 		wid := *a.WindowID
+		// a window kel did not start is an agent only if something agent-
+		// like runs in it; a `kel shell` or a hand-made window holding a
+		// shell or a server belongs under its space, not here as "?"
+		if !a.Managed {
+			if _, ok := agentPane[wid]; !ok {
+				continue
+			}
+		}
 		if _, ok := agentPane[wid]; !ok && len(byWin[wid]) > 0 {
 			first := byWin[wid][0]
 			for _, p := range byWin[wid] {
@@ -487,6 +502,19 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 		add("    "+wc+word+reset+dim+rest+reset, r)
 	}
 
+	// actions: what does not depend on the selection, as keys you can also
+	// click — the author found the lower half empty and keys hard to recall.
+	// Only when the height leaves room below the lists; the same keys as
+	// everywhere, so it is not a second surface (invariant 6).
+	var acts []line
+	if h > 0 {
+		acts = append(acts, line{dim + truncate("actions", w) + reset, lineRef{}})
+		for _, a := range sbActions {
+			acts = append(acts, line{" " + bold + a[0] + reset + "  " + dim + truncate(a[1], w-4) + reset,
+				lineRef{id: "act:" + a[0], kind: "action"}})
+		}
+	}
+
 	// The footer teaches the keys by showing the ones that fit what is
 	// selected, so nothing has to be remembered and nothing is added: one
 	// line, as before. Without the keyboard it says only how to get it.
@@ -527,6 +555,14 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 				body = body[:room]
 			}
 		}
+		// the actions sit at the bottom, above the footer, when they fit
+		// under everything else with a blank line between
+		if len(body)+1+len(acts) <= room {
+			for len(body)+len(acts) < room {
+				body = append(body, line{"", lineRef{}})
+			}
+			body = append(body, acts...)
+		}
 		for len(body) < room {
 			body = append(body, line{"", lineRef{}})
 		}
@@ -561,9 +597,9 @@ func hint(v sbView, w int) string {
 		// enter is the one key everybody tries; the room goes to the rest
 		keys = []string{"e edit", "p plan", "x kill", "r rename", "enter"}
 	case strings.HasPrefix(v.sel, "s:"):
-		keys = []string{"f files", "g git", "d diff", "n new", "enter fold"}
+		keys = []string{"f files", "g git", "e edit", "d diff", "n new", "t shell"}
 	default: // a pane
-		keys = []string{"f files", "g git", "enter"}
+		keys = []string{"f files", "g git", "e edit", "enter"}
 		for _, s := range v.spaces {
 			for _, p := range s.panes {
 				if p.PaneID == v.sel && p.Kind == "server" {
@@ -587,4 +623,14 @@ func hint(v sbView, w int) string {
 		out += " · ?"
 	}
 	return out
+}
+
+// sbActions are the keys that do not depend on the selection, shown at the
+// foot of the sidebar when there is room, and clickable.
+var sbActions = [][2]string{
+	{"n", "new agent"},
+	{"w", "new worktree agent"},
+	{"t", "shell here"},
+	{"Q", "quit kel"},
+	{"?", "all keys"},
 }

@@ -47,17 +47,21 @@ func TestSidebarGolden(t *testing.T) {
 	for _, f := range files {
 		name := strings.TrimSuffix(filepath.Base(f), ".json")
 		for _, c := range []struct {
-			w       int
+			w, h    int
 			focused bool
-		}{{28, false}, {32, false}, {40, false}, {32, true}} {
+		}{{28, 0, false}, {32, 0, false}, {40, 0, false}, {32, 0, true}, {32, 30, true}} {
 			w := c.w
-			got, err := fixtureFrame(f, w, 0, c.focused)
+			got, err := fixtureFrame(f, w, c.h, c.focused)
 			if err != nil {
 				t.Fatal(err)
 			}
 			gold := filepath.Join(fixtures, name+"."+itoa(w)+".golden")
 			if c.focused {
 				gold = filepath.Join(fixtures, name+".focused."+itoa(w)+".golden")
+			}
+			if c.h > 0 {
+				// at a real height: the actions group at the foot
+				gold = filepath.Join(fixtures, name+".focused."+itoa(w)+"x"+itoa(c.h)+".golden")
 			}
 			if *update {
 				if err := os.WriteFile(gold, []byte(got+"\n"), 0o644); err != nil {
@@ -203,7 +207,7 @@ func TestSidebarHint(t *testing.T) {
 	if got := foot(uiState{focused: true}, 32); !strings.HasPrefix(got, "e edit · p plan · x kill") {
 		t.Errorf("agent footer: %q", got)
 	}
-	if got := foot(uiState{focused: true, sel: spaceID("/home/me/code/api-gw")}, 32); !strings.HasPrefix(got, "f files · g git · d diff") {
+	if got := foot(uiState{focused: true, sel: spaceID("/home/me/code/api-gw")}, 32); !strings.HasPrefix(got, "f files · g git · e edit") {
 		t.Errorf("space footer: %q", got)
 	}
 	if got := foot(uiState{focused: true, sel: "%7", expanded: map[string]bool{"/home/me/code/api-gw": true}}, 40); !strings.Contains(got, "o open") {
@@ -322,5 +326,45 @@ func TestSidebarKeys(t *testing.T) {
 	}
 	if m.view().sel != spaceID("/home/me/code/api-gw") {
 		t.Error("a click did not select")
+	}
+}
+
+// The actions group sits at the foot when there is room, and a click on one
+// is its key: Q asks to quit.
+func TestSidebarActions(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	m := sbModel{doc: loadFixture(t, "one-agent"), width: 32, height: 30, visible: true}
+	out, refs := renderView(m.view(), 32, 30, 0)
+	if !strings.Contains(plain(out), "actions") {
+		t.Fatalf("no actions at 32x30:\n%s", plain(out))
+	}
+	y := -1
+	for i, r := range refs {
+		if r.id == "act:Q" {
+			y = i
+		}
+	}
+	if y < 0 {
+		t.Fatal("no Q action line")
+	}
+	nm, _ := m.Update(tea.MouseClickMsg{X: 2, Y: y, Button: tea.MouseLeft})
+	if nm.(sbModel).mode != modeQuit {
+		t.Error("a click on Q did not ask to quit")
+	}
+	// no room, no actions: fifteen agents fill a short sidebar
+	out, _ = renderView(buildView(loadFixture(t, "fifteen-three-repos"), uiState{}), 32, 20, 0)
+	if strings.Contains(plain(out), "actions") {
+		t.Error("actions shown with no room for them")
+	}
+}
+
+// A main checkout is named by its directory, not its window's group.
+func TestSidebarSpaceLabel(t *testing.T) {
+	doc := loadFixture(t, "one-agent")
+	(*doc.Panes)[0].Group = "kelsier"
+	(*doc.Panes)[0].Git.Root = "/home/me/code/ai-context"
+	v := buildView(doc, uiState{})
+	if v.spaces[0].label != "ai-context" {
+		t.Errorf("label %q, want the repo's own name", v.spaces[0].label)
 	}
 }

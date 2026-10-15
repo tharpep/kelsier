@@ -280,6 +280,8 @@ where it already is** — which is exactly what a sidebar per window does.
 | mouse | *built (M3).* **First-class.** A click selects and jumps; the wheel scrolls; every gesture a key does on a row, a click can reach. Bubble Tea v2 reports mouse events; tmux passes them to the pane under the pointer with `mouse on`, which kel's config already sets |
 | done, until seen | *built (M3).* **`done` stays loud until you have looked at the agent**, then quietens — herdr's semantics, and what makes the dots worth reading. A **flag on `done`, not a new state**: `kel jump`, the notifications and every reader that matches on state are untouched. When "looked at" happened is recorded from the window-change event the sidebar already receives (§9) |
 | footer | *built 2026-10-15, after daily use.* **The keys for what is selected, and only while the sidebar has the keyboard.** The author did not want to remember keys and did not want a busier sidebar, so the one footer line teaches them: an agent shows `e edit · p plan · x kill · ?`, a space `f files · g git · d diff · ?`, a server `o open · …`, as many as fit, then `?` for the rest; `enter` is left out as the key everybody tries. Without the keyboard it reads `prefix space` — how to get in. Focus comes from the terminal's focus events (kel sets `focus-events on`), else `#{pane_active}` on each tick, and any key or click proves it |
+| actions | *built 2026-10-15, after daily use.* **The keys that do not depend on the selection, at the foot of the sidebar, clickable** — `n` new agent · `w` worktree agent · `t` shell · `Q` quit · `?` all keys. Only when the lists leave room; the same keys as everywhere, so one surface still (invariant 6). The author found the lower half empty and the keys hard to recall |
+| `kel>` prompt | *built 2026-10-15.* **`prefix k`** runs a typed kel command from wherever you are — the author asked where kel commands are meant to be typed when every pane is an agent. A one-line answer is a message, a longer one a popup, never view-mode on your pane |
 | visual language | *built (M3).* §5d. Settled on rendered frames, approved by the author, before M3 was wired to live data; the background is true black (`colour16`), the author's call after `colour234` read as grey |
 
 **Still open** — settled when their milestone is planned, not before:
@@ -616,7 +618,8 @@ and every reader that matches on state see plain `done`, as today.
 | `permission_prompt`, `agent_needs_input`, `elicitation_*dialog` | `waiting` |
 | `agent_completed` | `done` |
 | `quota_auto_resume_*` | `throttled` — waiting on quota, not on you |
-| `idle_prompt`, `auth_success`, `elicitation_complete/response` | no change |
+| `idle_prompt` | no change — except a `working` becomes `idle`: an interrupt fires no `Stop`, and an agent read "working 13h29m" at its prompt (2026-10-15) |
+| `auth_success`, `elicitation_complete/response` | no change |
 | anything added later | `waiting` (safe default) |
 
 `notification_text` is kept as the third field of the state file — the literal

@@ -61,6 +61,7 @@ const (
 	modeNewWorktree
 	modeRename
 	modeKill
+	modeQuit
 )
 
 type sbModel struct {
@@ -280,6 +281,8 @@ func (m sbModel) view() sbView {
 		v.footer, v.footerColour = "rename: "+m.input+"▏", ""
 	case modeKill:
 		v.footer, v.footerColour = "kill "+m.entryName(m.target)+"? y/n", yellow
+	case modeQuit:
+		v.footer, v.footerColour = "quit kel? y/n", yellow
 	default:
 		if m.msg != "" {
 			v.footer, v.footerColour = m.msg, ""
@@ -422,6 +425,10 @@ func (m sbModel) panel(what string) (sbModel, tea.Cmd) {
 		return m, func() tea.Msg { return kelDone("", dir, nil, "_panel", "diff", dir, title, fleet.BaseRef(dir)) }
 	case "edit", "plan":
 		a, ok := m.agentOf(m.view().sel)
+		if !ok && what == "edit" {
+			// e on a space or a pane: your own nvim at that directory
+			return m, runKel(dir, nil, "_panel", "editor", dir, title)
+		}
 		if !ok {
 			m.msg, m.msgBad = "select an agent first", true
 			return m, nil
@@ -531,6 +538,11 @@ func (m sbModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		_, refs := renderView(m.view(), m.width, m.height, time.Now().Unix())
+		if msg.Y >= 0 && msg.Y < len(refs) && refs[msg.Y].kind == "action" {
+			// an action is its key, pressed
+			k := strings.TrimPrefix(refs[msg.Y].id, "act:")
+			return m.key(tea.KeyPressMsg{Code: rune(k[0]), Text: k})
+		}
 		if msg.Y >= 0 && msg.Y < len(refs) && refs[msg.Y].id != "" {
 			m.ui.sel = refs[msg.Y].id
 			m.saveShared()
@@ -569,6 +581,15 @@ func (m sbModel) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	m.ui.focused = true
 
 	switch m.mode {
+	case modeQuit:
+		m.mode = modeNormal
+		if k == "y" {
+			m.msg = "saving, then quitting…"
+			// kel quit refuses while a worktree holds unsaved work, and says
+			// what — that lands in the footer like a kill's refusal
+			return m, runKel("", nil, "quit")
+		}
+		return m, nil
 	case modeKill:
 		m.mode = modeNormal
 		if k == "y" {
@@ -682,6 +703,11 @@ func (m sbModel) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m.browse()
 	case "p":
 		return m.panel("plan")
+	case "t":
+		dir, _ := m.spaceFor(m.view().sel)
+		return m, runKel(dir, nil, "shell", dir)
+	case "Q", "shift+q":
+		m.mode = modeQuit
 	case "?":
 		m.help = true
 	case "esc":
@@ -715,10 +741,12 @@ var sbHelp = [][2]string{
 	{"w", "new worktree agent"},
 	{"r", "rename agent"},
 	{"x", "kill agent"},
+	{"t", "shell window here"},
+	{"Q", "quit kel (saved first)"},
 	{"f", "files (yazi)"},
 	{"g", "git (lazygit)"},
 	{"d", "diff against base"},
-	{"e", "edit agent's last file"},
+	{"e", "edit: agent's last file, else nvim"},
 	{"o", "open server in browser"},
 	{"p", "agent's plan and tasks"},
 	{"esc", "back to your pane"},

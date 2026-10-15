@@ -54,7 +54,7 @@ with the board gone it takes a typo to reach. Still a guess reported as a fact:
 a three-segment name must be refused, naming what it could not resolve. Fix
 when the resolver is next touched — likely when `kill` moves to Go.
 
-### 33. There is no way to close kel  ·  `[fits]`
+### 33. There is no way to close kel  ·  **built 2026-10-15** (`kel quit`, sidebar `Q`)
 
 No command ends the workspace. `prefix d` detaches and snapshots, leaving every
 agent running; to stop, you kill each session by hand. A `kel quit` would
