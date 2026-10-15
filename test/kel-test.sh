@@ -913,6 +913,13 @@ sbpane() { tmux list-panes -t "$1" -F '#{@kel-sidebar} #{pane_id}' | awk '$1==1 
 sbtext() { tmux capture-pane -p -t "$1" 2>/dev/null; }
 active_win() { tmux list-windows -t '=keltest' -F '#{window_active} #{window_id}' | awk '$1==1 {print $2}'; }
 ms() { perl -MTime::HiRes=time -e 'printf "%d\n", time*1000'; }   # BSD date has no %N
+# when an assertion here fails, show what the sidebar had on screen — these
+# have failed only on CI's macOS runner, where nothing can be looked at after
+sbdiag() { # pane  fail-count-before
+  [ "$fail" -gt "$2" ] || return 0
+  printf '       sidebar %s showed:\n' "$1"; sbtext "$1" | sed 's/^/       | /'
+  printf '       windows: %s\n' "$(tmux list-windows -t '=keltest' -F '#{window_active}#{window_name}' | tr '\n' ' ')"
+}
 K api-gw new wt -w >/dev/null 2>&1
 WTW="$(window_of api-gw wt)"; agent_up "$WTW"
 echo wip > "$WORK/repos/.kel-worktrees/api-gw-wt/scratch.txt"
@@ -948,12 +955,14 @@ ok "  ...and a dirty worktree is refused"        '[ -n "$(window_of api-gw wt)" 
 ok "  ...naming the file at risk, in the sidebar" 'sbtext "$SW" | grep -q "scratch.txt"'
 
 # n: a new agent in the selected entry's space, named in the footer
+f0=$fail
 tmux send-keys -t "$SW" n
 wait_until 'sbtext "$SW" | grep -q "^new: "'
 tmux send-keys -t "$SW" -l fresh
 tmux send-keys -t "$SW" Enter
 wait_until '[ -n "$(window_of api-gw fresh)" ]' 80
 ok "n names and starts an agent, in that space's repo" '[ -n "$(window_of api-gw fresh)" ] && [ -f "$SESSIONS/api-gw/fresh.json" ]'
+sbdiag "$SW" "$f0"
 
 # prefix Space is `kel _sidebar focus`; esc goes back. kel new ends by
 # jumping to the window it made, just after the window exists — wait for that
@@ -963,9 +972,11 @@ tmux select-window -t "$MW"
 UP="$(userpane "$MW")"; tmux select-pane -t "$UP"
 "$KEL" _sidebar focus "$MW"   # what prefix Space passes: the window it was pressed in
 ok "_sidebar focus puts the keyboard in the sidebar" '[ "$(tmux display -p -t "$MW" "#{pane_id}")" = "$SP" ]'
+f0=$fail
 tmux send-keys -t "$SP" Escape
 wait_until '[ "$(tmux display -p -t "$MW" "#{pane_id}")" = "$UP" ]'
 ok "  ...and esc returns to your pane"           '[ "$(tmux display -p -t "$MW" "#{pane_id}")" = "$UP" ]'
+sbdiag "$SP" "$f0"
 
 # done until seen: finished while you were elsewhere stays loud until shown
 hook "$(userpane "$WTW")" Stop

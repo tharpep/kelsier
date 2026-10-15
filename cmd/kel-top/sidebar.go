@@ -572,8 +572,14 @@ func (m sbModel) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.ui.filter = ""
 			return m, nil
 		}
-		// back to where you were before prefix Space
-		_ = exec.Command("tmux", "last-pane").Run()
+		// back to where you were before prefix Space — in this sidebar's own
+		// window: with no target, which window tmux calls current differs
+		// between versions (macOS CI picked another one)
+		args := []string{"last-pane"}
+		if m.myPane != "" {
+			args = append(args, "-t", m.myPane)
+		}
+		_ = exec.Command("tmux", args...).Run()
 	}
 	return m, nil
 }
