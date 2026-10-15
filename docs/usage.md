@@ -3,7 +3,7 @@
 The reference for what exists **today**. kel is mid-pivot (v0.10, see
 `rollout.md`): the old board and menus are gone, replaced by the sidebar; kel
 is the sidebar, the commands below, the status bar, `kel top` and
-jump-to-blocked. The panel popups (files, git, plan) are not built yet.
+jump-to-blocked. The plan / tasks popup is not built yet.
 
 ## Install
 
@@ -49,6 +49,8 @@ kel ls [--json]        every agent, grouped by repo (state, context %, cost);
 kel rename <newname>   rename THIS window and keep its record in sync
 kel sidebar on|off     the sidebar pane in every window (on by default; off is
                        remembered until you turn it back on)
+kel url [dir|agent]    a worktree's dev-server URLs, one per line; exit 1 for none
+                       (for scripts — a Playwright skill can ask instead of guessing)
 kel top                every agent, sorted so the one needing you is first —
                        state, time in state, LAND, context, cost, last output.
                        j/k scroll, s sort, / filter, q quit   (prefix t)
@@ -114,9 +116,17 @@ A blue `▌` marks the selection, `›` where you are.
 | `n` / `w` | new agent / new worktree agent in the selected entry's space — type the name in the footer |
 | `r` | rename the selected agent |
 | `x` | kill the selected agent, after `y` — a worktree with unsaved work is refused, and the footer names what is at risk |
+| `f` / `g` | yazi / lazygit in a popup, at the selected entry's worktree |
+| `d` | that worktree's changes — committed and uncommitted — against the branch it lands on (diffview.nvim if installed, else `delta`, else `git diff`) |
+| `e` | the file the selected agent last edited, at the line — in the nvim you have open in that worktree, else a popup |
+| `o` | the selected server in your browser — its lowest port; the footer names the others |
 | `?` | every key |
 | `esc` | back to the pane you were in |
 | click · wheel | select and jump, fold a space · move |
+
+Popups close when their tool quits. A tool that is not installed is said in
+the footer (`kel doctor` lists them as optional). The browser is `$BROWSER`,
+else `open` / `xdg-open` / `wslview`, else Windows' `start` from WSL.
 
 A finished agent stays green until its window has been shown; after that it
 dims. Hidden sidebars do no work; the one you can see refreshes every two
@@ -213,6 +223,8 @@ Everything lives in `${XDG_STATE_HOME:-~/.local/state}/kel/`, mode `0700`:
 - `<window-id>.ctx` — context, cost and model from `kel statusline`
 - `quota` — the account's rate limits, from `kel statusline`
 - `<window-id>.seen`, `sidebar.json`, `sidebar-cache.json` — the sidebar's
+- `<window-id>.edit` — the file the agent last edited, and the line, from a
+  `PostToolUse` hook on Edit / Write
 - `snapshot.json` (+ `.prev`), `snapshots/` (previous workspaces),
   `doctor.json`, `pr-cache/`,
   `.stash/`

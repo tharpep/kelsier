@@ -997,6 +997,97 @@ ok "a window switch reaches the shown sidebar in under a second" '[ $((t1 - t0))
 kill "$CC" 2>/dev/null; wait "$CC" 2>/dev/null
 unset KEL_AGENT
 
+# ---- v0.10 M5: the popups and the embeds
+# A popup needs a client with a terminal and the suite has only control-mode
+# ones, so KEL_POPUP_TRACE records what would open — tool, directory, title —
+# while everything before the draw (refusals, the tool lookup, the base, the
+# socket) runs for real. The tools are stubs on PATH: CI has none of them.
+export KEL_AGENT='sleep 9999' KEL_POPUP_TRACE="$WORK/popups" BROWSER="$WORK/shim/browser"
+export XDG_RUNTIME_DIR="$WORK/run"; mkdir -p "$XDG_RUNTIME_DIR"
+for t in yazi lazygit; do printf '#!/bin/sh\nexit 0\n' > "$WORK/shim/$t"; chmod +x "$WORK/shim/$t"; done
+printf '#!/bin/sh\necho "$@" >> %s/nvim.calls\n' "$WORK" > "$WORK/shim/nvim"; chmod +x "$WORK/shim/nvim"
+printf '#!/bin/sh\necho "$1" >> %s/browsed\n' "$WORK" > "$WORK/shim/browser"; chmod +x "$WORK/shim/browser"
+: > "$KEL_POPUP_TRACE"
+reset
+R="$WORK/repos/api-gw"
+K api-gw new wt5 -w >/dev/null 2>&1
+W5="$(window_of api-gw wt5)"; agent_up "$W5"
+WT5="$(cd "$WORK/repos/.kel-worktrees/api-gw-wt5" && pwd -P)"
+
+# kel url: none, one, two
+ok "kel url with no server exits 1"              '! "$KEL" url "$WT5" >/dev/null 2>&1'
+listen() { # dir file — a server on a free port, which it writes to file
+  tmux split-window -d -t "$W5" -c "$1" \
+    "python3 -c 'import socket,time; s=socket.socket(); s.bind((\"127.0.0.1\",0)); s.listen(); open(\"$2\",\"w\").write(str(s.getsockname()[1])); time.sleep(9999)'"
+  wait_until "[ -s '$2' ]" 50
+}
+listen "$WT5" "$WORK/p1"
+wait_until '"$KEL" url "$WT5" >/dev/null 2>&1' 40
+ok "  ...with one, its URL"                     '[ "$("$KEL" url "$WT5")" = "http://localhost:$(cat "$WORK/p1")" ]'
+ok "  ...found by the agent's name too"         '[ "$("$KEL" url wt5)" = "http://localhost:$(cat "$WORK/p1")" ]'
+listen "$WT5" "$WORK/p2"
+wait_until '[ "$("$KEL" url "$WT5" | grep -c .)" = 2 ]' 40
+ok "  ...with two, both, one per line"          '[ "$("$KEL" url "$WT5" | grep -c localhost)" = 2 ]'
+
+# the popups, through the sidebar's keys
+( sleep 40 ) | tmux -C attach -t '=keltest' >/dev/null 2>&1 &
+CC=$!
+wait_until 'tmux list-clients 2>/dev/null | grep -q .' 30
+tmux select-window -t "$W5"; "$KEL" _sidebar wake
+S5="$(sbpane "$W5")"
+wait_until 'sbtext "$S5" | grep -q wt5'
+tmux send-keys -t "$S5" f
+wait_until 'grep -q yazi "$KEL_POPUP_TRACE"'
+ok "f opens yazi, titled, at the worktree"       'grep -q "^$WT5	yazi · api-gw/wt5	yazi$" "$KEL_POPUP_TRACE"'
+tmux send-keys -t "$S5" g
+wait_until 'grep -q lazygit "$KEL_POPUP_TRACE"'
+ok "g opens lazygit there"                      'grep -q "^$WT5	lazygit · api-gw/wt5	lazygit$" "$KEL_POPUP_TRACE"'
+
+# o: the lowest port, the rest named in the footer
+f0=$fail
+tmux send-keys -t "$S5" o
+wait_until '[ -s "$WORK/browsed" ]'
+lo="$(sort -n "$WORK/p1" "$WORK/p2" | head -1)"; hi="$(sort -n "$WORK/p1" "$WORK/p2" | tail -1)"
+ok "o opens the lowest port in the browser"     '[ "$(cat "$WORK/browsed")" = "http://localhost:$lo" ]'
+ok "  ...and names the other"                   'wait_until "sbtext \"$S5\" | grep -q \"also :$hi\""'
+sbdiag "$S5" "$f0"
+
+# d: committed and uncommitted work against the land base
+echo more >> "$WT5/README.md"
+tmux send-keys -t "$S5" d
+wait_until 'grep -q "diff ·" "$KEL_POPUP_TRACE"'
+ok "d diffs the worktree against its base"      'grep -q "^$WT5	diff · api-gw/wt5 · main	" "$KEL_POPUP_TRACE"'
+git -C "$WT5" checkout -q -- README.md
+ok "  ...no changes is said, not an empty diff" '[[ "$("$KEL" _panel diff "$WT5" t main 2>&1)" == *"no changes against main"* ]]'
+ok "  ...and no base is said, not an empty diff" '[[ "$("$KEL" _panel diff "$WT5" t "" 2>&1)" == *"no base"* ]]'
+
+# e: the edit hook, then the file — into a running nvim, else a popup
+ok "e with nothing edited says so"              '[[ "$("$KEL" _panel edit "$WT5" t "$W5" 2>&1)" == *"nothing edited yet"* ]]'
+printf '%s' "{\"session_id\":\"s\",\"cwd\":\"$WT5\",\"hook_event_name\":\"PostToolUse\",\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"ls\"}}" \
+  | TMUX_PANE="$(userpane "$W5")" "$KEL" hook PostToolUse
+ok "a tool call that edits no file records nothing" '[ ! -f "$STATE/$W5.edit" ]'
+printf '%s' "{\"session_id\":\"s\",\"cwd\":\"$WT5\",\"hook_event_name\":\"PostToolUse\",\"tool_name\":\"Edit\",\"tool_input\":{\"file_path\":\"$WT5/README.md\"},\"tool_response\":{\"structuredPatch\":[{\"newStart\":12}]}}" \
+  | TMUX_PANE="$(userpane "$W5")" "$KEL" hook PostToolUse
+ok "an Edit records the file and its first changed line" '[ "$(sed -n 1p "$STATE/$W5.edit")" = "$WT5/README.md" ] && [ "$(sed -n 2p "$STATE/$W5.edit")" = 12 ]'
+ok "  ...and leaves the agent's state alone"    '[ ! -f "$STATE/$W5.state" ]'
+"$KEL" _panel edit "$WT5" api-gw/wt5 "$W5" >/dev/null 2>&1
+ok "e with no nvim open there: a popup at the line" 'grep -q "^$WT5	nvim · api-gw/wt5	nvim +12 $WT5/README.md$" "$KEL_POPUP_TRACE"'
+# a pane whose process is called nvim (a renamed sleep), and a socket where
+# nvim 0.9+ would listen: e must reach it over the socket and select the pane
+mkdir -p "$WORK/nvimbin"; cp "$(command -v sleep)" "$WORK/nvimbin/nvim"
+NP="$(tmux split-window -d -P -F '#{pane_id}' -t "$W5" -c "$WT5" "'$WORK/nvimbin/nvim' 9999")"
+wait_until '[ "$(tmux display -p -t "$NP" "#{pane_current_command}")" = nvim ]'
+python3 -c 'import socket,sys; socket.socket(socket.AF_UNIX).bind(sys.argv[1])' "$XDG_RUNTIME_DIR/nvim.$(tmux display -p -t "$NP" '#{pane_pid}').0"
+: > "$WORK/nvim.calls"
+"$KEL" _panel edit "$WT5" api-gw/wt5 "$W5" >/dev/null 2>&1
+ok "e with nvim open there: the file goes over its socket" 'grep -q -- "--server $XDG_RUNTIME_DIR/nvim\..*--remote-expr .*edit +12 .*README.md" "$WORK/nvim.calls"'
+ok "  ...and its pane is selected"              '[ "$(tmux display -p -t "$W5" "#{pane_id}")" = "$NP" ]'
+
+ok "a missing tool is said, not a crash"        '[[ "$(PATH="/usr/bin:/bin" KEL_FLEET_BIN="$KEL_FLEET_BIN" "$KEL" _panel files "$WT5" t 2>&1)" == *"yazi is not installed"* ]]'
+kill "$CC" 2>/dev/null; wait "$CC" 2>/dev/null
+unset KEL_AGENT KEL_POPUP_TRACE BROWSER XDG_RUNTIME_DIR
+rm -f "$WORK/shim/yazi" "$WORK/shim/lazygit" "$WORK/shim/nvim" "$WORK/shim/browser"
+
 export KEL_SIDEBAR=off
 unset KEL_SIDEBAR_TRACE
 
@@ -1274,7 +1365,10 @@ section "errors cannot be swallowed"
 # closes only on success, leaving a failure on screen. Counted, not matched
 # to line numbers.
 POPUP_EE=$(grep -c -- '-EE' "$HERE/../bin/kel")
-ok "the top/config popups use -EE"       '[ "$POPUP_EE" = 2 ]'
+# three: kel top, kel config, and the sidebar's popup() (M5) — whose comment
+# names -EE again, so it is counted on the option line only
+POPUP_EE=$(grep -c -- '-EE -w\|-EE "' "$HERE/../bin/kel")
+ok "the top/config/sidebar popups use -EE" '[ "$POPUP_EE" = 3 ]'
 POPUP_SINGLE_E=$(grep -cE '(^|[^E-])-E([^E]|$)' "$HERE/../bin/kel")
 ok "  ...and none uses a single -E"      '[ "$POPUP_SINGLE_E" = 0 ]'
 

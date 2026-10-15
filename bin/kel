@@ -16,6 +16,8 @@
 #                              (one agent — `kel restore` rebuilds the workspace)
 #   kel top                    the fleet dashboard (prefix t)
 #   kel sidebar on|off         the sidebar pane in every window (default on)
+#   kel url [dir|agent]        the dev-server URLs of a worktree, one per line
+#                              (exit 1 for none) — for scripts and agents
 #   kel sweep [-n] [-f]        close every finished agent whose work has merged
 #                              (closes windows; -n shows the plan first)
 #   kel prune [-f]             forget dead agent records (closes nothing)
@@ -32,6 +34,7 @@
 #   kel snapshot               save the workspace shape (hooks call this)
 #   kel hook <EVENT>           Claude Code state hook
 #   kel statusline             Claude Code statusLine — context % / cost
+#   kel _panel <what> ...      the sidebar's popups: files, git, diff, edit, browse
 set -uo pipefail
 
 # --------------------------------------------------------------------------
@@ -544,9 +547,9 @@ prune_state() {
   local live f wid panes pane
   live="$(tmux list-windows -a -F '#{window_id}' 2>/dev/null || true)"
   [ -n "$live" ] || return 0
-  for f in "$STATE_DIR"/*.state "$STATE_DIR"/*.ctx "$STATE_DIR"/*.seen; do
+  for f in "$STATE_DIR"/*.state "$STATE_DIR"/*.ctx "$STATE_DIR"/*.seen "$STATE_DIR"/*.edit; do
     [ -e "$f" ] || continue
-    wid="${f##*/}"; wid="${wid%.state}"; wid="${wid%.ctx}"; wid="${wid%.seen}"
+    wid="${f##*/}"; wid="${wid%.state}"; wid="${wid%.ctx}"; wid="${wid%.seen}"; wid="${wid%.edit}"
     printf '%s\n' "$live" | grep -qxF "$wid" || rm -f "$f"
   done
   # SessionEnd removes a session's own stash entry, including on /clear, which
@@ -1453,6 +1456,14 @@ cmd_doctor() {
   r_top=$(probe    "kel-top built (required)"         "./install.sh   (needs Go — install/20-user-tools.sh)" test -x "$KEL_TOP_BIN")
   r_pass=$(probe   "tmux allow-passthrough on"        "tmux/kel.conf sets it — tmux source-file ~/.tmux.conf" bash -c 'tmux start-server \; show -gv allow-passthrough 2>/dev/null | grep -qx on')
 
+  # optional: what the sidebar's popups open. Missing is not a failure — the
+  # key says so when pressed — so these are listed, not counted
+  local t
+  for t in yazi lazygit delta nvim; do
+    if command -v "$t" >/dev/null 2>&1; then printf '  \033[1;32m✓\033[0m %s\n' "$t (optional, for the sidebar)" >&2
+    else printf '  \033[2m·\033[0m %s\n' "$t not installed (optional — $pm $t)" >&2; fi
+  done
+
   # install.sh writes the absolute path of the clone it ran from into
   # settings.json. Move or rename that clone and every hook plus the statusLine
   # silently stops firing, with settings.json still naming the old path.
@@ -1501,6 +1512,176 @@ cmd_doctor() {
     > "$DOCTOR_CACHE"
   printf '  cached -> %s\n' "${DOCTOR_CACHE/#$HOME/~}" >&2
   case "$r_tmux$r_ver$r_jq$r_go" in *false*) exit 1 ;; esac
+}
+
+# --------------------------------------------------------------------------
+# kel url   — where a worktree's dev server is, for scripts and agents
+# --------------------------------------------------------------------------
+# Read-only and asked for, never told (spec.md §5f, backlog R2): an agent's own
+# browser tooling can run `kel url` instead of guessing :3000.  The ports are
+# the fleet document's, from the panes standing in that worktree.
+cmd_url() { # [dir|agent]
+  need jq
+  local want="${1:-$PWD}" dir root
+  if [ -d "$want" ]; then dir="$want"
+  else
+    dir="$(fleet_json | jq -r --arg n "$want" '[.agents[] | select(.name == $n) | .cwd // empty] | first // empty')"
+    [ -n "$dir" ] && [ -d "$dir" ] || die "no directory or agent called '$want'"
+  fi
+  # physical paths: tmux reports them, and macOS's /tmp is a symlink
+  root="$(git -C "$dir" rev-parse --show-toplevel 2>/dev/null || printf '%s' "$dir")"
+  root="$(cd "$root" 2>/dev/null && pwd -P)" || die "cannot read $dir"
+  local urls
+  urls="$(fleet_json --panes | jq -r --arg r "$root" '
+    [ .panes[]? | select((.git.root // .cwd) == $r) | (.ports // [])[] ] | unique | .[]
+    | "http://localhost:\(.)"')"
+  [ -n "$urls" ] || { warn "no server listening in ${root/#$HOME/~}"; return 1; }
+  printf '%s\n' "$urls"
+}
+
+# --------------------------------------------------------------------------
+# kel _panel   — the sidebar's popups (spec.md §5f, invariant 7)
+# --------------------------------------------------------------------------
+# kel decides where a tool opens and at which directory; the tool does the
+# rest.  Every action is here rather than in the sidebar so it is one bash
+# function a test can drive, and so a refusal (a missing tool, no base) comes
+# back on stderr, which the sidebar shows in its footer.
+#
+#   _panel files  <dir> <title>          yazi
+#   _panel git    <dir> <title>          lazygit
+#   _panel diff   <dir> <title> <base>   what changed against the land base
+#   _panel edit   <dir> <title> <wid>    the file the agent last touched
+#   _panel browse <url>                  the real browser
+cmd_panel() {
+  local what="${1:-}"
+  [ -n "$what" ] || die "usage: kel _panel files|git|diff|edit|browse ..."
+  shift
+  [ "$what" = browse ] && { open_url "${1:-}"; return; }
+  local dir="${1:-}" title="${2:-}" arg="${3:-}"
+  [ -d "$dir" ] || die "no such directory: $dir"
+  case "$what" in
+    files) need_tool yazi;    popup "$dir" "yazi · $title" yazi ;;
+    git)   need_tool lazygit; popup "$dir" "lazygit · $title" lazygit ;;
+    diff)  panel_diff "$dir" "$title" "$arg" ;;
+    edit)  panel_edit "$dir" "$title" "$arg" ;;
+    *)     die "kel _panel: unknown panel '$what'" ;;
+  esac
+}
+
+need_tool() { command -v "$1" >/dev/null 2>&1 || die "$1 is not installed"; }
+
+# tmux_at_least MAJOR MINOR — compared arithmetically: BSD sort has no -V
+tmux_at_least() {
+  local v; v="$(tmux -V 2>/dev/null | grep -oE '[0-9]+\.[0-9]+' | head -1)"
+  [ -n "$v" ] || return 1
+  [ "${v%%.*}" -gt "$1" ] || { [ "${v%%.*}" -eq "$1" ] && [ "${v#*.}" -ge "$2" ]; }
+}
+
+# popup DIR TITLE CMD... — a titled popup at DIR, closed when CMD exits.
+# KEL_POPUP_TRACE records instead of drawing: a popup needs a client with a
+# terminal, and the suite has only control-mode clients, which cannot show
+# one.  Everything up to the draw — which tool, which directory, the refusals —
+# still runs for real.
+popup() {
+  local dir="$1" title="$2"; shift 2
+  if [ -n "${KEL_POPUP_TRACE:-}" ]; then
+    printf '%s\t%s\t%s\n' "$dir" "$title" "$*" >> "$KEL_POPUP_TRACE"
+    return 0
+  fi
+  local cmd='' a
+  for a in "$@"; do cmd="$cmd $(printf '%q' "$a")"; done
+  # Two E flags, not one: a lone one closes the popup the moment the tool
+  # exits, a failure included, so its error would never be read ("errors
+  # cannot be swallowed" in the suite counts these)
+  local -a opt=( -EE -w "${KEL_POPUP_W:-90%}" -h "${KEL_POPUP_H:-85%}" -d "$dir" -T " $title " )
+  tmux_at_least 3 3 && opt+=( -b rounded )            # border styles are 3.3+
+  [ -n "${TMUX_PANE:-}" ] && opt+=( -t "$TMUX_PANE" )
+  tmux display-popup "${opt[@]}" "${cmd# }"
+}
+
+# diff: what the agent changed — committed and uncommitted — against the base
+# it is landing on.  No base is said, never shown as an empty diff (invariant 3).
+panel_diff() { # dir title base
+  local dir="$1" title="$2" base="$3"
+  [ -n "$base" ] || die "no base branch — can't diff"
+  git -C "$dir" rev-parse --verify --quiet "$base" >/dev/null || die "base $base is not in this repo"
+  if git -C "$dir" diff --quiet --merge-base "$base" 2>/dev/null; then
+    die "no changes against $base"
+  fi
+  if command -v nvim >/dev/null 2>&1 && nvim --headless -c 'lua io.write(pcall(require, "diffview") and "y" or "n")' -c 'qa!' 2>/dev/null | grep -q y; then
+    popup "$dir" "diff · $title · $base" nvim -c "DiffviewOpen $base"
+  elif command -v delta >/dev/null 2>&1; then
+    popup "$dir" "diff · $title · $base" sh -c 'git diff --merge-base "$1" | delta --paging=always' sh "$base"
+  else
+    popup "$dir" "diff · $title · $base" git diff --merge-base "$base"
+  fi
+}
+
+# edit: the file this window's agent last touched, at its line.  Into an nvim
+# already open in that worktree, over the socket every nvim 0.9+ listens on —
+# its RPC, not keys typed into a pane (invariant 4) — else a popup.  kel owns
+# no editor, so nothing here ever closes one (spec.md §5f).
+panel_edit() { # dir title wid
+  local dir="$1" title="$2" wid="$3" f="$STATE_DIR/$3.edit" path line
+  [ -n "$wid" ] && [ -f "$f" ] || die "nothing edited yet in this window"
+  { read -r path; read -r line; } < "$f"
+  case "${line:-}" in ''|*[!0-9]*) line=1 ;; esac
+  [ -f "$path" ] || die "$path is gone"
+  need_tool nvim
+  local root pane sock
+  root="$(cd "$dir" 2>/dev/null && pwd -P)"
+  if pane="$(nvim_pane_in "$root")" && [ -n "$pane" ] && sock="$(nvim_socket "${pane#* }")" && [ -n "$sock" ]; then
+    local q="${path//\'/\'\'}"
+    nvim --server "$sock" --remote-expr "execute('edit +$line ' . fnameescape('$q'))" >/dev/null 2>&1 \
+      || die "the nvim in that worktree did not answer"
+    tmux select-window -t "${pane%% *}" \; select-pane -t "${pane%% *}" 2>/dev/null
+    say "opened in your nvim"
+  else
+    popup "$dir" "nvim · $title" nvim "+$line" "$path"
+  fi
+}
+
+# the first pane of kel's session running nvim at or under ROOT, as
+# "<pane id> <nvim pid>"
+nvim_pane_in() { # root
+  local id ppid cmd path pid
+  while IFS='|' read -r id ppid cmd path; do
+    [ "$cmd" = nvim ] || continue
+    case "$path/" in "$1"/*) ;; *) continue ;; esac
+    # nvim is the pane's process when the pane was started on it, else the
+    # shell's child
+    if [ "$(ps -o comm= -p "$ppid" 2>/dev/null | sed 's#.*/##')" = nvim ]; then pid="$ppid"
+    else pid="$(pgrep -P "$ppid" -x nvim 2>/dev/null | head -1)"; fi
+    [ -n "$pid" ] && { printf '%s %s' "$id" "$pid"; return 0; }
+  done < <(tmux list-panes -s -t "=$KEL_PREFIX" -F '#{pane_id}|#{pane_pid}|#{pane_current_command}|#{pane_current_path}' 2>/dev/null)
+  return 1
+}
+
+# where nvim <pid> listens: nvim.<pid>.0 under stdpath("run") — $XDG_RUNTIME_DIR,
+# else a per-user directory in the temp dir
+nvim_socket() { # pid
+  local c
+  for c in "${XDG_RUNTIME_DIR:-/nonexistent}/nvim.$1.0" "${TMPDIR:-/tmp}"/nvim.*/*/"nvim.$1.0" /tmp/nvim.*/*/"nvim.$1.0"; do
+    [ -S "$c" ] && { printf '%s' "$c"; return 0; }
+  done
+  return 1
+}
+
+# open_url: the user's real browser.  WSL2 forwards localhost to Windows, so
+# its last resort is Windows' own `start`.
+open_url() { # url
+  local url="$1"
+  [ -n "$url" ] || die "usage: kel _panel browse <url>"
+  if [ -n "${BROWSER:-}" ]; then ( "$BROWSER" "$url" >/dev/null 2>&1 & ); return 0; fi
+  if [ "$(uname -s)" = Darwin ]; then ( open "$url" >/dev/null 2>&1 & ); return 0; fi
+  local c
+  for c in xdg-open wslview; do
+    command -v "$c" >/dev/null 2>&1 && { ( "$c" "$url" >/dev/null 2>&1 & ); return 0; }
+  done
+  # cmd.exe from a Linux cwd prints a UNC warning; run it from C:
+  command -v cmd.exe >/dev/null 2>&1 \
+    && { ( cd /mnt/c 2>/dev/null; cmd.exe /c start "" "$url" >/dev/null 2>&1 & ); return 0; }
+  die "no browser found — set \$BROWSER"
 }
 
 # --------------------------------------------------------------------------
@@ -2049,6 +2230,25 @@ cmd_statusline() {
 # --------------------------------------------------------------------------
 # kel hook <EVENT>
 # --------------------------------------------------------------------------
+# PostToolUse, matched to Edit|Write|MultiEdit by install.sh: remember the
+# file this window's agent last touched, and its first changed line, for the
+# sidebar's `e` (spec.md §9).  State is untouched.  This runs after every
+# edit, so it is one jq and one write — and the path and the line arrive in
+# the payload, so nothing is read from a transcript.
+hook_edit() { # payload sid cwd
+  local path line pane wid
+  { read -r path; read -r line; } < <(printf '%s' "$1" | jq -r '
+      (.tool_input.file_path // ""),
+      ((.tool_response.structuredPatch // [])[0].newStart // 1)' 2>/dev/null)
+  [ -n "$path" ] || return 0
+  pane="$(resolve_pane "$2" "$3")"; [ -n "$pane" ] || return 0
+  wid="$(tmux display-message -p -t "$pane" '#{window_id}' 2>/dev/null)"; [ -n "$wid" ] || return 0
+  case "$path" in /*) ;; *) path="$3/$path" ;; esac
+  printf '%s
+%s
+' "$path" "$line" > "$STATE_DIR/$wid.edit.$$" && mv -f "$STATE_DIR/$wid.edit.$$" "$STATE_DIR/$wid.edit"
+}
+
 cmd_hook() {
   local event="${1:-}"
   command -v tmux >/dev/null 2>&1 || exit 0
@@ -2063,6 +2263,7 @@ cmd_hook() {
       (.notification_type // ""), (.notification_text // "")
     ] | .[] | tostring | gsub("[\n\t]"; " ")' 2>/dev/null)
   [ -n "$event" ] || event="$evt"
+  [ "$event" = PostToolUse ] && { hook_edit "$payload" "$sid" "$cwd"; exit 0; }
 
   local pane; pane="$(resolve_pane "$sid" "$cwd")"
   if [ "$event" = "SessionStart" ] && [ -n "$pane" ] && [ -n "$sid" ]; then
@@ -2249,6 +2450,8 @@ main() {
     prune)        migrate_meta; cmd_prune "$@" ;;
     snapshot)     cmd_snapshot ;;
     sidebar)      cmd_sidebar "$@" ;;
+    url)          cmd_url "$@" ;;
+    _panel)       cmd_panel "$@" ;;
     _sidebar)     case "${1:-}" in
                     ensure) sidebar_ensure "${2:-}" ;;
                     wake)   sidebar_wake ;;

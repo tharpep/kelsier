@@ -86,6 +86,7 @@ change; migrate old records in `migrate_meta`.
 | `sidebar-cache.json` | the last fleet document the visible sidebar loaded, so a sidebar just shown draws at once, before git is asked anything |
 | `quota` | `<5h%> <5h reset> <7d%> <7d reset> <spend%> <spend reset> <epoch seen>`, space-separated; `-1` = not reported, `0` reset = not given. Written by `kel statusline` only from a payload carrying rate limits; `kel-fleet` reads it as `quota`, nulling a figure whose window reset or that is older than its window |
 | `<window-id>.seen` | one epoch: when the window was last shown. `kel-fleet` reads it for `unseen` on a `done` agent (no file = unseen); the shown sidebar writes it for its own window |
+| `<window-id>.edit` | two lines: the path the window's agent last edited, then its first changed line. Written by the `PostToolUse` hook (matched to `Edit\|Write\|MultiEdit` in settings.json), read by `kel _panel edit` |
 | `sidebar-off` | present after `kel sidebar off`; no new sidebars until `kel sidebar on` |
 | `ports.json` | `{at, panes:{<pane pid>: [ports]}}` — the listening-port scan behind `_fleet --panes`, reused for 10 s |
 
@@ -150,7 +151,7 @@ column exists rather than a trailing sentence.
 | 4 | **kel never types into an agent pane** except the initial launch command — and never into its own sidebar. kel adds its sidebar pane to every window (and `fit` re-pins *that pane's* width), but never moves, resizes or re-points the user's panes, and never alters what runs in one. **Changed in v0.10:** the old rule forbade kel splitting a window at all; the sidebar is the one exception. (Moving panes with `swap-pane` was considered and rejected — `spec.md` §5b.) | prohibition | nothing, deliberately — "never, across a codebase" holds by reviewing the `send-keys` call sites (launch, restore's pane replay, relaunch). |
 | 5 | **Hot paths stay cheap.** `kel statusline` runs on a 300 ms debounce and is cancelled if it overruns; `kel status-line` runs on every bar redraw. One `jq` pass, one atomic write, and only call `refresh-client -S` when the rendered value actually changed. | ⚠ unguarded | nothing. `refresh-client` appears nowhere in the suite. |
 | 6 | **One surface.** Every interactive kel gesture lives in the sidebar (or is a CLI command). No second board, no menus, no cheat sheet — four overlapping surfaces with four key schemes is what v0.10 deleted. A new view is a sidebar mode or a panel tab. | prohibition | review. |
-| 7 | **Embed, don't build.** Files, diffs, editing and git are `yazi`, `lazygit`, `$EDITOR` / Neovim (`diffview.nvim` or `delta` for diffs); the browser is the user's own. kel decides where they open and at which directory; it never renders a tree or a diff itself (`backlog.md` R4, R5, R7). | prohibition | review. |
+| 7 | **Embed, don't build.** Files, diffs, editing and git are `yazi`, `lazygit`, `$EDITOR` / Neovim (`diffview.nvim` or `delta` for diffs); the browser is the user's own. kel starts or owns none of them: `e` reuses an nvim you opened, or a popup that ends with it. kel decides where they open and at which directory; it never renders a tree or a diff itself (`backlog.md` R4, R5, R7). | prohibition | review. |
 
 ---
 
@@ -347,7 +348,10 @@ code. **M0–M3 are done**: one session, `kel` never prompts (`kel restore` by c
 `spaces` / `agents`, keys, mouse, `done` until seen. `v0.10.0` is tagged
 when the author has daily-driven it. **M4 is done** too: the bar is the
 workspace footer and Claude's row is the session only, inside kel. **M5 is
-next**: the panel popups and the embeds. The
+done**: `f` `g` `d` `e` `o` open yazi, lazygit, the diff, the agent's last
+file and the browser — kel owns none of them, and `KEL_POPUP_TRACE` lets the
+suite check what a popup would open without a terminal client. **M6 is next**:
+plan and tasks. The
 sidebar's look is held by golden frames (`cmd/kel-top/testdata/sidebar`);
 change one only after showing the author the frame. The layout
 is decided — a sidebar pane in every window, measured against `swap-pane` in

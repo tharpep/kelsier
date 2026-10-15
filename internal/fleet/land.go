@@ -48,6 +48,10 @@ func countLines(s string) float64 {
 	return float64(len(lines(s)))
 }
 
+// BaseRef is the branch this one is trying to land on; "" when there is none.
+// Exported for the sidebar's `d`, which diffs against it.
+func BaseRef(dir string) string { return baseRef(dir) }
+
 // baseRef is the branch this one is trying to land on.
 func baseRef(dir string) string {
 	if b, ok := git(dir, "symbolic-ref", "--short", "refs/remotes/origin/HEAD"); ok && b != "" {

@@ -275,7 +275,7 @@ where it already is** — which is exactly what a sidebar per window does.
 | restore | *built (M2).* **Rebuild windows and splits as today, sidebars included, under the existing `.restoring` lock.** A snapshot records each sidebar as a `@kel-sidebar` pane (its geometry is part of the window's layout string, so skipping it would break `select-layout`), and restore relaunches it rather than replaying a command — so a restore cannot duplicate one. The author found the old restore hard to work with — the rebuild is a chance to simplify it, not just extend it |
 | scope | **only kel's session.** Panes in other tmux sessions are not part of the workspace |
 | focus | *built (M3).* **One key to focus the sidebar** (`prefix Space`, taking tmux's `next-layout`); `enter` jumps to the selected pane, `esc` returns where you were. `` prefix ` `` is unchanged |
-| keys | `j`/`k` move · `enter` jump · `/` filter · `n` new agent · `w` new worktree agent · `x` kill (kill-safety intact) · `r` rename · `f` files · `g` git · `p` plan/tasks · `?` help. All in the footer, none deeper than one key. *Proposed, with §5f:* `e` edit what the agent last touched · `d` review the worktree's diff · `o` open a server's port in the browser |
+| keys | *built (M3, M5).* `j`/`k` move · `enter` jump · `/` filter · `n` new agent · `w` new worktree agent · `x` kill (kill-safety intact) · `r` rename · `f` files · `g` git · `d` the worktree's diff · `e` edit what the agent last touched · `o` a server in the browser · `?` help. `p` plan/tasks comes with M6. None deeper than one key |
 | sections | *built (M3).* **`spaces` above `agents`** (§5), after herdr, replacing the single repo → worktree → pane tree |
 | mouse | *built (M3).* **First-class.** A click selects and jumps; the wheel scrolls; every gesture a key does on a row, a click can reach. Bubble Tea v2 reports mouse events; tmux passes them to the pane under the pointer with `mouse on`, which kel's config already sets |
 | done, until seen | *built (M3).* **`done` stays loud until you have looked at the agent**, then quietens — herdr's semantics, and what makes the dots worth reading. A **flag on `done`, not a new state**: `kel jump`, the notifications and every reader that matches on state are untouched. When "looked at" happened is recorded from the window-change event the sidebar already receives (§9) |
@@ -283,10 +283,10 @@ where it already is** — which is exactly what a sidebar per window does.
 
 **Still open** — settled when their milestone is planned, not before:
 
-- **The per-worktree Neovim's lifecycle** (§5f): who starts it (the first `e`,
-  or `kel new -w`), and whether `kel kill` closes it and removes its socket.
-  `kill` must never close an editor holding unsaved buffers — invariant 1's
-  spirit, applied to the editor.
+- ~~The per-worktree Neovim's lifecycle~~ — settled in M5 planning by not
+  having one: **kel owns no editor.** `e` uses an nvim you already have open
+  in that worktree, else a popup (§5f). With nothing of kel's running, there
+  is nothing for `kill` to close, and no unsaved buffer it could lose.
 - ~~Whether `agents` repeats what `spaces` lists~~ — settled in M3 planning:
   **agents only under `agents`**; an open space lists the other panes.
 
@@ -346,26 +346,36 @@ make sure a frame the author approved stays approved.
   a real session and exports a GIF or PNG per milestone, to be put beside
   herdr's own screenshots.
 
-### 5f. Editor, diffs and the browser  ·  *designed*
+### 5f. Editor, diffs and the browser  ·  *built (M5)*
 
 What the desktop ADEs (Orca, Superset, Conductor, T3 Code) build in, kel gets
 by deciding where existing tools open — invariant 7.
 
-- **Editor: one Neovim per worktree, driven over its own socket.** Started as
-  `nvim --listen <state>/nvim/<worktree>.sock`; kel hands it a file with
-  `nvim --server <sock> --remote <file>`. That is the editor's RPC, not typing
-  into a pane, so invariant 4 is untouched. The point is `e`: a `PostToolUse`
-  hook on `Edit` / `Write` records the last file each agent touched (§9), and
-  `e` opens it, at the line, in that worktree's editor. The IDE features —
-  tree, signs, search — are Neovim plugins the user already chose.
-- **Diffs: `d` reviews a worktree** against its land base — `nvim -c
-  "DiffviewOpen <base>...HEAD"` when `diffview.nvim` is installed, else `git
-  diff <base>... | delta` (or plain `git diff`) in a popup. Land state (§9d)
+- **Editor: your nvim, else a popup** *(decided in M5 planning, replacing a
+  kel-owned nvim per worktree)*. Every nvim since 0.9 listens on a socket of
+  its own (`v:servername`, `nvim.<pid>.0` under `$XDG_RUNTIME_DIR` or the temp
+  dir). So `e` looks for an nvim already running in a pane of that worktree,
+  hands it the file with `nvim --server <sock> --remote` — the editor's RPC,
+  not typing into a pane, so invariant 4 is untouched — and selects that
+  pane. Finding none, it opens nvim on the file in a popup, gone when you quit
+  it. kel owns no editor, so it never has to decide where one lives or when
+  `kill` may close it. The point is `e`: a `PostToolUse` hook on `Edit` /
+  `Write` records the last file each agent touched (§9), and `e` opens it, at
+  the line. The IDE features — tree, signs, search — are Neovim plugins the
+  user already chose.
+- **Diffs: `d` reviews a worktree** against its land base — committed and
+  uncommitted, what the agent changed — `nvim -c "DiffviewOpen <base>"` when
+  `diffview.nvim` is installed, else `git diff --merge-base <base> | delta`
+  (or plain `git diff`) in a popup. No base reads `no base — can't diff` in
+  the footer, never an empty diff (invariant 3). Land state (§9d)
   already knows the base; that is the whole contribution. A diff renderer is
   years of work kel would do worse (R5).
 - **Browser: `o` opens a server pane's port** in the real browser —
-  `xdg-open`, `wslview` on WSL2, `open` on macOS. M1 already knows every
-  pane's ports. A browser *inside* the terminal (`carbonyl`) is rejected
+  `$BROWSER`, then `open` (macOS), `xdg-open`, `wslview`, and on WSL2 without
+  either, `cmd.exe /c start` (WSL forwards `localhost`). M1 already knows
+  every pane's ports. Several ports open the lowest and list the rest in the
+  footer (`opened :3000 · also :3001 :9229`) — the extras are often a
+  debugger. *(Decided in M5 planning.)* A browser *inside* the terminal (`carbonyl`) is rejected
   (backlog R7).
 - **`kel url [worktree]`** prints that worktree's server URL, so an agent's
   own browser tooling (a Playwright skill, say) can ask kel where the dev
@@ -559,7 +569,7 @@ with the payload on stdin:
 | `PreCompact` | no change — increments `compactions` |
 | `PostCompact` | no change — redraws the bar |
 | `PostToolUse` on `TodoWrite` | *designed.* no change — records the session's task list for the panel's tasks view (M6) |
-| `PostToolUse` on `Edit` / `Write` | *designed.* no change — records the last file the agent touched, for `e` (§5f) |
+| `PostToolUse` on `Edit` / `Write` | *built (M5).* no change — records the last file the agent touched and its first changed line (`tool_response.structuredPatch[0].newStart`), for `e` (§5f) |
 
 The two `PostToolUse` entries are wired with a **matcher limited to those
 tools**: `PostToolUse` fires after every tool call, so an unmatched hook would
@@ -693,7 +703,7 @@ The command list is `usage.md` (and `kel --help`, which the suite checks
 against the dispatcher and both completions). What belongs here is the design
 two of them carry, and one that is designed:
 
-**`kel url [worktree]`** *(designed, §5f)* prints the URL of the server
+**`kel url [worktree]`** *(built, M5)* prints the URL of the server
 listening in that worktree (or the one you are standing in) — read from the
 fleet document's ports, never by probing. Several servers print one line each;
 none prints nothing and exits 1, so a script can tell "no server" from a URL.

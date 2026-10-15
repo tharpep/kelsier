@@ -196,8 +196,13 @@ jq --arg k "$KEL" '
   | .hooks.SessionEnd       = wire("SessionEnd")
   | .hooks.PreCompact       = wire("PreCompact")
   | .hooks.PostCompact      = wire("PostCompact")
+  # only after an edit: PostToolUse fires after every tool call, and an
+  # unmatched hook would start kel on the agents hottest path (invariant 5)
+  | .hooks.PostToolUse      = (((.hooks.PostToolUse // []) | strip_kel)
+      + [{ "matcher": "Edit|Write|MultiEdit",
+           "hooks": [{ "type": "command", "command": ($k + " hook PostToolUse") }] }])
 ' "$SETTINGS" > "$tmp" && mv "$tmp" "$SETTINGS"
-echo "  wired: SessionStart UserPromptSubmit Notification Stop SessionEnd PreCompact PostCompact"
+echo "  wired: SessionStart UserPromptSubmit Notification Stop SessionEnd PreCompact PostCompact PostToolUse (edits)"
 
 say "Claude Code statusLine -> $SETTINGS"
 # kel's statusLine reports this agent's context window / cost, and records them

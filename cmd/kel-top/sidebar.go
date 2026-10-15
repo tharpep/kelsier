@@ -180,13 +180,24 @@ func kelBin() string {
 // runKel runs a kel command and reports its last line. stderr is where kel's
 // refusals go — the file a kill would lose — so it is what the footer shows.
 func runKel(dir string, env []string, args ...string) tea.Cmd {
-	return func() tea.Msg {
-		c := exec.Command(kelBin(), args...)
-		c.Dir = dir
-		c.Env = append(os.Environ(), env...)
-		out, err := c.CombinedOutput()
-		return sbDone{ok: err == nil, msg: summarise(string(out))}
+	return runKelSaying("", dir, env, args...)
+}
+
+// runKelSaying is runKel with the footer's words for a success, when kel's
+// own output is not the thing to show.
+func runKelSaying(ok, dir string, env []string, args ...string) tea.Cmd {
+	return func() tea.Msg { return kelDone(ok, dir, env, args...) }
+}
+
+func kelDone(ok, dir string, env []string, args ...string) sbDone {
+	c := exec.Command(kelBin(), args...)
+	c.Dir = dir
+	c.Env = append(os.Environ(), env...)
+	out, err := c.CombinedOutput()
+	if err == nil && ok != "" {
+		return sbDone{ok: true, msg: ok}
 	}
+	return sbDone{ok: err == nil, msg: summarise(string(out))}
 }
 
 // summarise picks the line worth a footer. A kill refusal ends with the
@@ -340,7 +351,32 @@ func (m *sbModel) activate(id string) {
 // group keeps a new agent beside its repo's others even from a worktree,
 // whose directory name is not the repo's.
 func (m sbModel) spaceFor(id string) (dir, group string) {
-	v := m.view()
+	s, ok := m.selSpace(id)
+	if !ok {
+		return os.Getenv("HOME"), ""
+	}
+	return s.dir(), s.label
+}
+
+func (s sbSpace) dir() string {
+	if s.git != nil && s.git.Root != "" {
+		return s.git.Root
+	}
+	return s.cwd
+}
+
+// title names a space in a popup's border: the repo, and the branch when
+// there is one — `kelsier/fix-auth`
+func (s sbSpace) title() string {
+	if s.git != nil && s.git.Branch != nil {
+		return s.label + "/" + *s.git.Branch
+	}
+	return s.label
+}
+
+// selSpace is the space the selected entry stands in.
+func (m sbModel) selSpace(id string) (sbSpace, bool) {
+	v := buildView(m.doc, m.ui)
 	key := ""
 	switch {
 	case strings.HasPrefix(id, "s:"):
@@ -359,13 +395,66 @@ func (m sbModel) spaceFor(id string) (dir, group string) {
 	}
 	for _, s := range v.spaces {
 		if s.key == key {
-			if s.git != nil {
-				return s.git.Root, s.label
-			}
-			return s.cwd, s.label
+			return s, true
 		}
 	}
-	return os.Getenv("HOME"), ""
+	return sbSpace{}, false
+}
+
+// panel opens one of the popups at the selected entry's space (spec.md §5f).
+func (m sbModel) panel(what string) (sbModel, tea.Cmd) {
+	sp, ok := m.selSpace(m.view().sel)
+	if !ok {
+		m.msg, m.msgBad = "select something first", true
+		return m, nil
+	}
+	dir, title := sp.dir(), sp.title()
+	switch what {
+	case "diff":
+		// the base is a few git calls: worked out off the key path
+		return m, func() tea.Msg { return kelDone("", dir, nil, "_panel", "diff", dir, title, fleet.BaseRef(dir)) }
+	case "edit":
+		a, ok := m.agentOf(m.view().sel)
+		if !ok {
+			m.msg, m.msgBad = "select an agent first", true
+			return m, nil
+		}
+		return m, runKel(dir, nil, "_panel", "edit", dir, title, a.wid)
+	}
+	return m, runKel(dir, nil, "_panel", what, dir, title)
+}
+
+// browse opens the selected server's lowest port — a server pane's own, else
+// its space's — and names the rest, which are often a debugger.
+func (m sbModel) browse() (sbModel, tea.Cmd) {
+	var ports []int
+	id := m.view().sel
+	if m.doc.Panes != nil {
+		for _, p := range *m.doc.Panes {
+			if p.PaneID == id && p.Ports != nil {
+				ports = append(ports, *p.Ports...)
+			}
+		}
+	}
+	if len(ports) == 0 {
+		if sp, ok := m.selSpace(id); ok && sp.ports != nil {
+			ports = append(ports, *sp.ports...)
+		}
+	}
+	if len(ports) == 0 {
+		m.msg, m.msgBad = "no server here", true
+		return m, nil
+	}
+	sort.Ints(ports)
+	say := fmt.Sprintf("opened :%d", ports[0])
+	if len(ports) > 1 {
+		var rest []string
+		for _, p := range ports[1:] {
+			rest = append(rest, fmt.Sprintf(":%d", p))
+		}
+		say += " · also " + strings.Join(rest, " ")
+	}
+	return m, runKelSaying(say, "", nil, "_panel", "browse", fmt.Sprintf("http://localhost:%d", ports[0]))
 }
 
 // ---------------------------------------------------------------- update
@@ -565,6 +654,16 @@ func (m sbModel) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		} else {
 			m.mode, m.input = modeRename, m.entryName(v.sel)
 		}
+	case "f":
+		return m.panel("files")
+	case "g":
+		return m.panel("git")
+	case "d":
+		return m.panel("diff")
+	case "e":
+		return m.panel("edit")
+	case "o":
+		return m.browse()
 	case "?":
 		m.help = true
 	case "esc":
@@ -597,6 +696,11 @@ var sbHelp = [][2]string{
 	{"w", "new worktree agent"},
 	{"r", "rename agent"},
 	{"x", "kill agent"},
+	{"f", "files (yazi)"},
+	{"g", "git (lazygit)"},
+	{"d", "diff against base"},
+	{"e", "edit agent's last file"},
+	{"o", "open server in browser"},
 	{"esc", "back to your pane"},
 	{"prefix space", "focus the sidebar"},
 	{"prefix `", "next waiting agent"},

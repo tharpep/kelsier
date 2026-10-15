@@ -20,6 +20,7 @@ _kel() {
     'rename:rename the current window (keeps metadata in sync)'
     'top:fleet dashboard — sorted by who needs you'
     'sidebar:the sidebar pane in every window (on|off)'
+    'url:the dev-server URLs of a worktree'
     'restore:bring back a previous workspace (--list to choose)'
     'relaunch:relaunch ONE crashed agent in its existing window'
     'sweep:close finished agents whose work has merged'

@@ -87,7 +87,7 @@ TUI pass over the old board, which no longer exists.
 fix: `kel-fleet` ignored `pr = off`, and it called `gh` for repos that local git
 had already answered.
 
-### Step 4 — the build plan  ·  *M0–M4 done, M5 next*
+### Step 4 — the build plan  ·  *M0–M5 done, M6 next*
 
 Agreed 2026-10-14. Each milestone ends with something to try, and the suite
 stays green throughout. The decisions behind it are `spec.md` §5c and §7.
@@ -230,17 +230,45 @@ too: the first background, `colour234`, read as grey and became true black
 - *added in building:* with live agents and nothing to report, the bar says
   `nothing waiting` — a blank second segment looked broken
 
-**M5 — panel popups and the embeds**  →  `v0.11`  ·  *next*
-- `f` yazi, `g` lazygit, `p` plan/tasks — titled popups at the selected
-  pane's directory
-- `d` reviews a worktree's diff against its land base; `o` opens a server's
-  port in the browser; `kel url` (`spec.md` §5f, §10)
-- `e` and the per-worktree Neovim — its lifecycle is the open question in
-  `spec.md` §5c, settled when this milestone is planned
-- *tests:* each popup opens at the right directory; `kel url` with none, one
-  and two servers; `d` with no base reads unknown, never an empty diff
+**M5 — panel popups and the embeds**  →  `v0.11`  ·  **done**
+- **popups** at the selected entry's directory, titled with the tool and the
+  space (` lazygit · kelsier/fix-auth `), closed when the tool quits: `f`
+  yazi, `g` lazygit
+- **`d`** reviews a worktree against its land base (`baseRef`, already in
+  `land.go`), committed and uncommitted: `diffview.nvim` if installed, else
+  `git diff --merge-base <base> | delta`. No base: the footer says so
+- **`o`** opens a server's lowest port in the browser — `$BROWSER`, `open`,
+  `xdg-open`, `wslview`, then WSL's `cmd.exe /c start` — and lists the rest
+- **`kel url [worktree]`**: that worktree's server URLs, one per line; exit 1
+  for none
+- **`e`** opens the file the agent last touched, at its line: a new
+  `PostToolUse` hook matched to `Edit|Write` records it per window (merged by
+  `install.sh`, removed by `--uninstall`). It goes to an nvim already open in
+  that worktree, over nvim's own socket, else a popup. kel owns no editor
+- a missing tool is a footer message, never a crash; `kel doctor` lists
+  yazi, lazygit and delta as optional
+- `p` (plan / tasks) **moved to M6**, where the task list it shows arrives
+- *tests:* popups' commands and directories through stub tools on PATH;
+  `kel url` with none, one and two servers; `d` with no base reads unknown;
+  the hook records Edit / Write and nothing else; `e` with nothing recorded
+  says so; `e` reaches a running nvim's socket (a stub listening on it)
+- *how the popups are tested:* a popup needs a client with a terminal, and the
+  suite's are control-mode, so `KEL_POPUP_TRACE` records what would open.
+  Everything before the draw — the tool lookup, the refusals, the base, the
+  socket — runs for real; the `display-popup` flags themselves are checked by
+  hand. A renamed `sleep` plays nvim, and a bound unix socket plays its
+  listener
+- *not built:* the `diffview.nvim` path is chosen when it loads, but this
+  machine does not have it, so only `delta` was tried by hand
+- *found on the way:* the suite's "errors cannot be swallowed" guard caught
+  the first `popup()` using a single `-E`, which closes a popup the instant its
+  tool exits — a failed lazygit's error would have flashed and gone. It is
+  `-EE`, and the guard counts it. And by hand, on an isolated server with a
+  real pty client: `display-popup` blocks its caller until the popup closes,
+  harmless only because the sidebar runs actions off its key path
 
-**M6 — plan and tasks, then automations**  →  `v0.12+`
+**M6 — plan and tasks, then automations**  →  `v0.12+`  ·  *next*
+- `p`, the plan / tasks popup (moved from M5 with its data)
 - tasks come from a `PostToolUse` hook on `TodoWrite` (`spec.md` §9) — the
   payload carries the list, so no transcript is read
 - plan files in `~/.claude/plans/` have generated names; tying one to a
