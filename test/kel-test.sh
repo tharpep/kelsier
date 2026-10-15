@@ -1140,8 +1140,10 @@ ok "  ...nor snapshots"                           '! grep -q _kelpop_ "$STATE/sn
 ok "files and git keep theirs between opens"     '[ "$(tmux list-sessions -F "#{session_name}" | grep -c "^_kelpop_")" = 1 ]'
 tmux kill-session -t "=$POP" 2>/dev/null
 printf '#!/bin/sh\nexit 0\n' > "$WORK/shim/yazi"
+# parts, not one string: tmux 3.7 (Homebrew) quotes list-keys differently
+# from 3.4 (Ubuntu), which failed the exact match on CI's macOS runner
 ok "kel.conf: prefix q closes a popup, and only a popup" \
-  'tmux -L kelconf -f /dev/null start-server \; source-file "$HERE/../tmux/kel.conf" \; list-keys -T prefix q 2>/dev/null | grep -q "if-shell -F \"#{@kel-popup}\" detach-client display-panes"; r=$?; tmux -L kelconf kill-server 2>/dev/null; [ $r = 0 ]'
+  'qk="$(tmux -L kelconf -f /dev/null start-server \; source-file "$HERE/../tmux/kel.conf" \; list-keys -T prefix q 2>/dev/null)"; tmux -L kelconf kill-server 2>/dev/null; [[ "$qk" == *@kel-popup* ]] && [[ "$qk" == *detach-client* ]] && [[ "$qk" == *display-panes* ]]'
 
 ok "a missing tool is said, not a crash"        '[[ "$(PATH="/usr/bin:/bin" KEL_FLEET_BIN="$KEL_FLEET_BIN" "$KEL" _panel files "$WT5" t 2>&1)" == *"yazi is not installed"* ]]'
 kill "$CC" 2>/dev/null; wait "$CC" 2>/dev/null
