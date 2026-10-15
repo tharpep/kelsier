@@ -125,7 +125,8 @@ A blue `▌` marks the selection, `›` where you are.
 | `esc` | back to the pane you were in |
 | click · wheel | select and jump, fold a space · move |
 
-Popups close when their tool quits. A tool that is not installed is said in
+Popups close when their tool quits, and each one's title says how (`q closes`,
+`:q closes`); in lazygit `esc` closes it too, as everywhere in kel. A tool that is not installed is said in
 the footer (`kel doctor` lists them as optional). The browser is `$BROWSER`,
 else `open` / `xdg-open` / `wslview`, else Windows' `start` from WSL.
 
@@ -156,14 +157,14 @@ state per window, so a second agent belongs in its own window.
 ## The status bar
 
 ```
-claude ▓▓▓░░ 58% (1h20m) · wk 41%  │  1 waiting 6m · $24.10
+claude ███░░ 58% (1h20m) · wk 41%  │  1 waiting 6m · $24.10
 ```
 
 Only what belongs to no single pane — everything per pane is in the sidebar:
 
 | segment | |
 |---|---|
-| `claude ▓▓▓░░ 58% (1h20m)` | the 5-hour quota and when it resets; `░░░░░ ?` once it has reset since it was last seen, never the old figure |
+| `claude ███░░ 58% (1h20m)` | the 5-hour quota and when it resets; `░░░░░ ?` once it has reset since it was last seen, never the old figure |
 | `wk 41%` | the weekly quota (`wk ?` when stale) |
 | `spend 61%` | the spend limit, from 50% only |
 | `1 waiting 6m` | agents blocked on you, and the longest wait; `nothing waiting` when none are |

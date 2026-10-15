@@ -1562,8 +1562,8 @@ cmd_panel() {
   local dir="${1:-}" title="${2:-}" arg="${3:-}"
   [ -d "$dir" ] || die "no such directory: $dir"
   case "$what" in
-    files) need_tool yazi;    popup "$dir" "yazi · $title" yazi ;;
-    git)   need_tool lazygit; popup "$dir" "lazygit · $title" lazygit ;;
+    files) need_tool yazi;    popup "$dir" "yazi · $title · q closes" yazi ;;
+    git)   need_tool lazygit; panel_lazygit "$dir" "$title" ;;
     diff)  panel_diff "$dir" "$title" "$arg" ;;
     edit)  panel_edit "$dir" "$title" "$arg" ;;
     plan)  panel_plan "$dir" "$title" "$arg" ;;
@@ -1572,6 +1572,19 @@ cmd_panel() {
 }
 
 need_tool() { command -v "$1" >/dev/null 2>&1 || die "$1 is not installed"; }
+
+# lazygit: esc means "back" everywhere in kel, so in kel's popup it also
+# closes lazygit — its quitOnTopLevelReturn, laid over the user's own config
+# (lazygit merges a comma-separated list, later files winning), never written
+# into it. Without this, esc at lazygit's top level only printed a hint and the
+# author could not find the way out.
+panel_lazygit() { # dir title
+  local own over="$STATE_DIR/lazygit-overlay.yml"
+  own="$(lazygit --print-config-dir 2>/dev/null)/config.yml"
+  [ -f "$over" ] || printf '# written by kel: esc at the top level closes its popup\nquitOnTopLevelReturn: true\n' > "$over"
+  if [ -f "$own" ]; then popup "$1" "lazygit · $2 · q closes" lazygit --use-config-file "$own,$over"
+  else popup "$1" "lazygit · $2 · q closes" lazygit --use-config-file "$over"; fi
+}
 
 # tmux_at_least MAJOR MINOR — compared arithmetically: BSD sort has no -V
 tmux_at_least() {
@@ -1612,11 +1625,11 @@ panel_diff() { # dir title base
     die "no changes against $base"
   fi
   if command -v nvim >/dev/null 2>&1 && nvim --headless -c 'lua io.write(pcall(require, "diffview") and "y" or "n")' -c 'qa!' 2>/dev/null | grep -q y; then
-    popup "$dir" "diff · $title · $base" nvim -c "DiffviewOpen $base"
+    popup "$dir" "diff · $title · $base · :q closes" nvim -c "DiffviewOpen $base"
   elif command -v delta >/dev/null 2>&1; then
-    popup "$dir" "diff · $title · $base" sh -c 'git diff --merge-base "$1" | delta --paging=always' sh "$base"
+    popup "$dir" "diff · $title · $base · q closes" sh -c 'git diff --merge-base "$1" | delta --paging=always' sh "$base"
   else
-    popup "$dir" "diff · $title · $base" git diff --merge-base "$base"
+    popup "$dir" "diff · $title · $base · q closes" git diff --merge-base "$base"
   fi
 }
 
@@ -1640,7 +1653,7 @@ panel_edit() { # dir title wid
     tmux select-window -t "${pane%% *}" \; select-pane -t "${pane%% *}" 2>/dev/null
     say "opened in your nvim"
   else
-    popup "$dir" "nvim · $title" nvim "+$line" "$path"
+    popup "$dir" "nvim · $title · :q closes" nvim "+$line" "$path"
   fi
 }
 
@@ -1666,9 +1679,9 @@ panel_plan() { # dir title wid
     printf '\n---\n\n'
     plan_tasks "$sid" "$tdir"
   } > "$view.$$" && mv -f "$view.$$" "$view"
-  if command -v glow >/dev/null 2>&1; then popup "$dir" "plan · $title" glow -p "$view"
-  elif command -v bat >/dev/null 2>&1; then popup "$dir" "plan · $title" bat --paging=always -l md "$view"
-  else popup "$dir" "plan · $title" less -R "$view"; fi
+  if command -v glow >/dev/null 2>&1; then popup "$dir" "plan · $title · q closes" glow -p "$view"
+  elif command -v bat >/dev/null 2>&1; then popup "$dir" "plan · $title · q closes" bat --paging=always -l md "$view"
+  else popup "$dir" "plan · $title · q closes" less -R "$view"; fi
 }
 
 # the task list as markdown: ✓ done, ▸ in progress, · pending, and what blocks
@@ -1876,6 +1889,8 @@ cmd_status_line() {
     def dur: floor | if . < 60 then "\(.)s"
                      elif . < 3600 then "\(. / 60 | floor)m"
                      else "\(. / 3600 | floor)h\((. % 3600) / 60 | floor | tostring | if length < 2 then "0" + . else . end)m" end;
+    # full blocks, not ▓: in the author'"'"'s terminal font ▓ and ░ were the same
+    # grey, so 23% read as a solid bar. Claude'"'"'s row already used █/░.
     def heat: if . >= 90 then "#[fg=colour167,bold]" elif . >= 70 then "#[fg=colour179]" else "" end;
     def sep: "#[fg=colour240]  │  #[default]";
     def dot: "#[fg=colour240] · #[default]";
@@ -1885,7 +1900,7 @@ cmd_status_line() {
           [ ( $q.five_hour // null | if . == null then empty
               elif .pct == null then "#[fg=colour240]░░░░░ ?#[default]"
               else (.pct | floor) as $p | ((($p + 19) / 20) | floor | if . > 5 then 5 else . end) as $f
-                | ($p | heat) + ([range(0; $f)] | map("▓") | join("")) + ([range($f; 5)] | map("░") | join(""))
+                | ($p | heat) + ([range(0; $f)] | map("█") | join("")) + ([range($f; 5)] | map("░") | join(""))
                   + " \($p)%#[default]"
                   + (if (.resets_at // 0) > $now then "#[fg=colour245] (\(.resets_at - $now | dur))#[default]" else "" end)
               end ),

@@ -89,6 +89,7 @@ change; migrate old records in `migrate_meta`.
 | `<window-id>.edit` | two lines: the path the window's agent last edited, then its first changed line. Written by the `PostToolUse` hook (matched to `Edit\|Write\|MultiEdit` in settings.json), read by `kel _panel edit` |
 | `<window-id>.plan` | two lines like `.edit`: the plan file a plan-mode `Write` under `$CLAUDE_CONFIG_DIR/plans/` named. The same hook, sorted by path |
 | `<window-id>.view` | what `p` last composed (plan, then tasks) for its popup; overwritten each time |
+| `lazygit-overlay.yml` | `quitOnTopLevelReturn: true`, laid over the user's lazygit config (never written into it) so `esc` closes kel's lazygit popup |
 | `sidebar-off` | present after `kel sidebar off`; no new sidebars until `kel sidebar on` |
 | `ports.json` | `{at, panes:{<pane pid>: [ports]}}` — the listening-port scan behind `_fleet --panes`, reused for 10 s |
 

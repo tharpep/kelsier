@@ -131,7 +131,7 @@ the bash that remains.
 │                          │                      │                   │
 │ j/k · enter · ? keys     │                      │                   │
 ├──────────────────────────┴──────────────────────────────────────────┤
-│ claude ▓▓▓░░ 58% (1h20m) · wk 41%  │  1 waiting 6m · $24.10          │
+│ claude ███░░ 58% (1h20m) · wk 41%  │  1 waiting 6m · $24.10          │
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -453,14 +453,14 @@ Opus 5.5 · ████░░ 36% ctx · $10.65
 ### 7b. tmux's bottom bar  ·  *built (M4)*
 
 ```
-claude ▓▓▓░░ 58% (1h20m) · wk 41%  │  1 waiting 6m · $24.10
+claude ███░░ 58% (1h20m) · wk 41%  │  1 waiting 6m · $24.10
 ```
 
 With nothing waiting, and with the sidebar hidden:
 
 ```
-claude ▓▓▓░░ 58% (1h20m) · wk 41%  │  $24.10
-claude ▓▓▓░░ 58% (1h20m) · wk 41%  │  1 waiting 6m · $24.10  │  kelsier · fix-auth ↑2 ●3
+claude ███░░ 58% (1h20m) · wk 41%  │  $24.10
+claude ███░░ 58% (1h20m) · wk 41%  │  1 waiting 6m · $24.10  │  kelsier · fix-auth ↑2 ●3
 ```
 
 1. **quota** — the 5-hour window as a bar and percentage with its reset time,

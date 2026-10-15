@@ -663,7 +663,7 @@ printf 'waiting %s\n' "$(( $(date +%s) - 400 ))" > "$STATE/$DW.state"
 ok "one waiting agent, and for how long"        '[[ "$(bar)" == *"1 waiting 6m"* ]]'
 now=$(date +%s)
 printf '58 %s 41 %s 12 0 %s\n' "$((now + 5400))" "$((now + 300000))" "$now" > "$STATE/quota"
-ok "quota: 5h as a bar with its reset, then the week" '[[ "$(bar)" == *"claude ▓▓▓░░ 58% (1h"* ]] && [[ "$(bar)" == *"wk 41%"* ]]'
+ok "quota: 5h as a bar with its reset, then the week" '[[ "$(bar)" == *"claude ███░░ 58% (1h"* ]] && [[ "$(bar)" == *"wk 41%"* ]]'
 ok "  ...spend only from 50%"                   '[[ "$(bar)" != *spend* ]]'
 printf '58 %s 41 %s 61 0 %s\n' "$((now + 5400))" "$((now + 300000))" "$now" > "$STATE/quota"
 ok "  ...and then it shows"                     '[[ "$(bar)" == *"spend 61%"* ]]'
@@ -1041,10 +1041,11 @@ S5="$(sbpane "$W5")"
 wait_until 'sbtext "$S5" | grep -q wt5'
 tmux send-keys -t "$S5" f
 wait_until 'grep -q yazi "$KEL_POPUP_TRACE"'
-ok "f opens yazi, titled, at the worktree"       'grep -q "^$WT5	yazi · api-gw/wt5	yazi$" "$KEL_POPUP_TRACE"'
+ok "f opens yazi, titled, at the worktree"       'grep -q "^$WT5	yazi · api-gw/wt5 · q closes	yazi$" "$KEL_POPUP_TRACE"'
 tmux send-keys -t "$S5" g
 wait_until 'grep -q lazygit "$KEL_POPUP_TRACE"'
-ok "g opens lazygit there"                      'grep -q "^$WT5	lazygit · api-gw/wt5	lazygit$" "$KEL_POPUP_TRACE"'
+ok "g opens lazygit there"                      'grep -q "^$WT5	lazygit · api-gw/wt5 · q closes	lazygit --use-config-file .*lazygit-overlay.yml$" "$KEL_POPUP_TRACE"'
+ok "  ...where esc closes it, as everywhere in kel" 'grep -qx "quitOnTopLevelReturn: true" "$STATE/lazygit-overlay.yml"'
 
 # o: the lowest port, the rest named in the footer
 f0=$fail
@@ -1059,7 +1060,7 @@ sbdiag "$S5" "$f0"
 echo more >> "$WT5/README.md"
 tmux send-keys -t "$S5" d
 wait_until 'grep -q "diff ·" "$KEL_POPUP_TRACE"'
-ok "d diffs the worktree against its base"      'grep -q "^$WT5	diff · api-gw/wt5 · main	" "$KEL_POPUP_TRACE"'
+ok "d diffs the worktree against its base"      'grep -q "^$WT5	diff · api-gw/wt5 · main · q closes	" "$KEL_POPUP_TRACE"'
 git -C "$WT5" checkout -q -- README.md
 ok "  ...no changes is said, not an empty diff" '[[ "$("$KEL" _panel diff "$WT5" t main 2>&1)" == *"no changes against main"* ]]'
 ok "  ...and no base is said, not an empty diff" '[[ "$("$KEL" _panel diff "$WT5" t "" 2>&1)" == *"no base"* ]]'
@@ -1074,7 +1075,7 @@ printf '%s' "{\"session_id\":\"s\",\"cwd\":\"$WT5\",\"hook_event_name\":\"PostTo
 ok "an Edit records the file and its first changed line" '[ "$(sed -n 1p "$STATE/$W5.edit")" = "$WT5/README.md" ] && [ "$(sed -n 2p "$STATE/$W5.edit")" = 12 ]'
 ok "  ...and leaves the agent's state alone"    '[ ! -f "$STATE/$W5.state" ]'
 "$KEL" _panel edit "$WT5" api-gw/wt5 "$W5" >/dev/null 2>&1
-ok "e with no nvim open there: a popup at the line" 'grep -q "^$WT5	nvim · api-gw/wt5	nvim +12 $WT5/README.md$" "$KEL_POPUP_TRACE"'
+ok "e with no nvim open there: a popup at the line" 'grep -q "^$WT5	nvim · api-gw/wt5 · :q closes	nvim +12 $WT5/README.md$" "$KEL_POPUP_TRACE"'
 # a pane whose process is called nvim (a renamed sleep), and a socket where
 # nvim 0.9+ would listen: e must reach it over the socket and select the pane
 mkdir -p "$WORK/nvimbin"; cp "$(command -v sleep)" "$WORK/nvimbin/nvim"
@@ -1098,7 +1099,7 @@ ok "a Write under the plans dir is the plan"     '[ "$(sed -n 1p "$STATE/$W5.pla
 ok "  ...and not the last edit"                  '[ "$(sed -n 1p "$STATE/$W5.edit")" = "$WT5/README.md" ]'
 : > "$KEL_POPUP_TRACE"
 "$KEL" _panel plan "$WT5" api-gw/wt5 "$W5" >/dev/null 2>&1
-ok "p opens the plan in a popup"                 'grep -q "^$WT5	plan · api-gw/wt5	" "$KEL_POPUP_TRACE"'
+ok "p opens the plan in a popup"                 'grep -q "^$WT5	plan · api-gw/wt5 · q closes	" "$KEL_POPUP_TRACE"'
 ok "  ...the plan's own text"                    'grep -q "Fix the parser" "$STATE/$W5.view"'
 ok "  ...and says when the session keeps no tasks" 'grep -q "no task list" "$STATE/$W5.view"'
 # tasks: Claude Code's own list, as it stands on disk for the agent's session

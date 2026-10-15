@@ -209,7 +209,7 @@ too: the first background, `colour234`, read as grey and became true black
   as `quota`, nulling any figure whose reset has passed. The bar refreshes
   only when a displayed integer moves
 - **the bar** (`cmd_status_line`) becomes the workspace footer:
-  `claude ▓▓▓░░ 58% (1h20m) · wk 41%  │  1 waiting 6m · $24.10`, spend from
+  `claude ███░░ 58% (1h20m) · wk 41%  │  1 waiting 6m · $24.10`, spend from
   50%; the waiting part absent when nothing waits; the per-window list gone
 - **location while the sidebar is hidden**: with `sidebar-off` present, the
   focused pane's repo and `branch ↑N ●N` — one `git status`, only then
