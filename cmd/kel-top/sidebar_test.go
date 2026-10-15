@@ -368,3 +368,55 @@ func TestSidebarSpaceLabel(t *testing.T) {
 		t.Errorf("label %q, want the repo's own name", v.spaces[0].label)
 	}
 }
+
+func TestShortNote(t *testing.T) {
+	for in, want := range map[string]string{
+		"Claude needs your permission to use Bash":  "allow Bash?",
+		"Claude needs your permission to use Edit.": "allow Edit?",
+		"Claude is waiting for your input":           "your input",
+		"something new":                              "something new",
+	} {
+		if got := shortNote(in); got != want {
+			t.Errorf("shortNote(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+// A working agent silent for half an hour reads working?, not working.
+func TestQuietWorking(t *testing.T) {
+	w, d := "working", "done"
+	n := func(v float64) *float64 { return &v }
+	now := int64(100000)
+	if quietFor(fleet.Agent{State: &w, StateSince: n(99000)}, now) != 0 {
+		t.Error("17 minutes is not quiet")
+	}
+	if quietFor(fleet.Agent{State: &w, StateSince: n(90000), Context: &fleet.Context{At: n(99500)}}, now) != 0 {
+		t.Error("a recent statusline update is not quiet")
+	}
+	if quietFor(fleet.Agent{State: &w, StateSince: n(50000)}, now) == 0 {
+		t.Error("14 hours of silence must read quiet")
+	}
+	if quietFor(fleet.Agent{State: &d, StateSince: n(50000)}, now) != 0 {
+		t.Error("only working can be quiet")
+	}
+}
+
+// The entry under the pointer gets a dim bar; the selected one keeps its own.
+func TestSidebarHover(t *testing.T) {
+	doc := loadFixture(t, "fifteen-three-repos")
+	_, refs := renderView(buildView(doc, uiState{}), 32, 40, 0)
+	y := -1
+	for i, r := range refs {
+		if r.id == "a:@2" {
+			y = i
+			break
+		}
+	}
+	out, _ := renderView(buildView(doc, uiState{hover: y + 1}), 32, 40, 0)
+	if !strings.Contains(strings.Split(out, "\n")[y], "▏") {
+		t.Errorf("hovered line has no hover bar: %q", plain(strings.Split(out, "\n")[y]))
+	}
+	if strings.Count(out, "▏") != 2 {
+		t.Errorf("hover marks the whole entry (2 lines), got %d", strings.Count(out, "▏"))
+	}
+}

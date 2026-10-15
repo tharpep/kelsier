@@ -48,7 +48,7 @@
    "managed": true,
    "state": "waiting",
    "state_since": 1792018440,
-   "note": null,
+   "note": "Claude needs your permission to use Bash",
    "isolation": "inplace",
    "branch": null,
    "repo": "/home/me/code/kelsier-fix-auth",

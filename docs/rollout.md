@@ -303,6 +303,11 @@ the `TodoWrite` design was stale, and the plan turned out to need no new hook.
   agents. Separately, outside the repo: the author's nvim gained LSP for Go
   (gopls), Python (basedpyright + ruff) and TypeScript (TS 7's own `tsc
   --lsp`), treesitter parsers and diffview, and `EDITOR=nvim`
+- *the second look at herdr and Orca (2026-10-15):* notifications by default
+  (bell + Windows toast / osascript / notify-send), the reason a waiting agent
+  waits on its row (`allow Bash?`), `working?` for an agent silent half an hour,
+  and a hover bar for what a click would hit. Orca's "what it is doing now" line
+  is not built: it needs a hook on every tool call — backlog, gated
 - *found on the way:* M5's `hook_edit` had real newlines inside its `printf`
   format — a quoting slip in its writing that happened to print the same
   thing; rewritten while the plan / edit split went in

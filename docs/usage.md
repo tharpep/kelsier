@@ -152,7 +152,15 @@ the footer (`kel doctor` lists them as optional). The browser is `$BROWSER`,
 else `open` / `xdg-open` / `wslview`, else Windows' `start` from WSL.
 
 A finished agent stays green until its window has been shown; after that it
-dims. Hidden sidebars do no work; the one you can see refreshes every two
+dims. A waiting agent says what it waits for — `waiting 6m · allow Bash?`. An
+agent kel has heard nothing from for half an hour while "working" reads
+`◌ working? · quiet 14h`: an interrupt (esc) fires no hook, so kel will not
+claim it is still at work. The entry under the mouse pointer shows a dim bar —
+what a click would hit.
+
+When an agent starts waiting and you are looking elsewhere, kel rings your
+terminal's bell and shows a desktop notification (a Windows toast on WSL) —
+see `setup.md` §5b to change either. Hidden sidebars do no work; the one you can see refreshes every two
 seconds and at once when an agent changes state. `kel sidebar off` removes it
 everywhere (and new windows get none) until `kel sidebar on`; `sidebar =
 "off"` in config disables it outright; `sidebar_width` sets the width and

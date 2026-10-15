@@ -531,6 +531,10 @@ func (m sbModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.ui.focused = true
 	case tea.BlurMsg:
 		m.ui.focused = false
+		m.ui.hover = 0
+
+	case tea.MouseMotionMsg:
+		m.ui.hover = msg.Y + 1
 
 	case tea.MouseClickMsg:
 		m.ui.focused = true
@@ -771,7 +775,9 @@ func (m sbModel) render() string {
 func (m sbModel) View() tea.View {
 	v := tea.NewView(m.render())
 	v.AltScreen = true
-	v.MouseMode = tea.MouseModeCellMotion
+	// all motion, not just with a button down: hover needs the pointer's
+	// position when nothing is pressed
+	v.MouseMode = tea.MouseModeAllMotion
 	v.ReportFocus = true
 	return v
 }

@@ -39,6 +39,7 @@
 #   kel statusline             Claude Code statusLine — context % / cost
 #   kel _panel <what> ...      the sidebar's popups: files, git, diff, edit, editor, plan, browse
 #   kel _prompt '<args>'       prefix k: run `kel <args>`, answer in a message or a popup
+#   kel _notify [title] [body] fire kel's notification (bell + desktop) — to try it
 set -uo pipefail
 
 # --------------------------------------------------------------------------
@@ -2164,17 +2165,73 @@ repaint_all() {   # fleet-json
 # it.  This is the push half, fired from the state hook.  It is never polled:
 # a poller would be a background daemon, which is a hard non-goal.
 #
-# `notify` is the ONLY place delivery lives.  Teaching kel about
-# powershell.exe (WSL), osascript (macOS) or notify-send (Linux desktop) later
-# is a `command -v` ladder inside this one function and nowhere else; today it
-# stays out, and setup.md carries paste-ready recipes for $KEL_NOTIFY_CMD.
+# `notify` is the ONLY place delivery lives. Until 2026-10-15 kel shipped no
+# platform detection and left recipes in setup.md for $KEL_NOTIFY_CMD — and so,
+# in practice, nothing reached the author outside the terminal. Both tools kel
+# was measured against tell you when an agent needs you; this is the push half
+# of "go to whoever needs me". Now, by default:
+#
+#   the bell   BEL to every terminal attached to kel — the terminal decides:
+#              a screen flash on the Mac, a taskbar flash or sound in Windows
+#              Terminal. What Claude Code's own "flash" is.
+#   a desktop notification   WSL: a Windows toast through powershell.exe
+#              (built-in WinRT, no module to install); macOS: osascript;
+#              Linux: notify-send.
+#
+# $KEL_NOTIFY_CMD still overrides the desktop half; notify_bell / notify_desktop
+# = off silence either. Paths are stat'ed, never `command -v`'d, on WSL: a
+# lookup walks every /mnt/c dir on PATH (CLAUDE.md, traps).
 notify() {   # title body
   tmux display-message "$1 — $2" 2>/dev/null || true
-  [ -n "${KEL_NOTIFY_CMD:-}" ] || return 0
+  case "${KEL_NOTIFY_BELL:-on}" in off|0|no|false) ;; *) notify_bell ;; esac
   # Backgrounded, and deliberately not with setsid — macOS has no setsid.  A
   # hook is synchronous: Claude Code waits for it, and a PowerShell toast
-  # costs a third of a second before it has done anything useful.
-  ( "$KEL_NOTIFY_CMD" "$1" "$2" >/dev/null 2>&1 & ) 2>/dev/null || true
+  # costs half a second before it has done anything useful.
+  if [ -n "${KEL_NOTIFY_CMD:-}" ]; then
+    ( "$KEL_NOTIFY_CMD" "$1" "$2" >/dev/null 2>&1 & ) 2>/dev/null || true
+    return 0
+  fi
+  case "${KEL_NOTIFY_DESKTOP:-on}" in off|0|no|false) return 0 ;; esac
+  ( notify_desktop "$1" "$2" >/dev/null 2>&1 & ) 2>/dev/null || true
+}
+
+# BEL to each terminal attached to kel's session: written to the client's tty,
+# so it reaches the terminal itself rather than a pane
+notify_bell() {
+  local tty
+  tmux list-clients -t "=$KEL_PREFIX" -F '#{client_tty}' 2>/dev/null \
+    | while read -r tty; do [ -w "$tty" ] && printf '\a' > "$tty"; done
+  return 0
+}
+
+notify_desktop() { # title body
+  local ps=/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe
+  if [ -n "${WSL_DISTRO_NAME:-}" ] && [ -x "$ps" ]; then
+    # The body is Claude Code's notification text — the agent quoting a
+    # command back at you — so it is untrusted. It crosses into PowerShell as
+    # base64, which has no character a script could be built from, and is
+    # decoded there; nothing from it is ever parsed as code. cd /mnt/c: a
+    # Windows process started from a Linux directory warns about UNC paths.
+    local t b
+    t="$(printf '%s' "$1" | base64 | tr -d '\n')"; b="$(printf '%s' "$2" | base64 | tr -d '\n')"
+    ( cd /mnt/c 2>/dev/null; "$ps" -NoProfile -NonInteractive -Command "
+\$d={param(\$s)[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String(\$s))}
+[Windows.UI.Notifications.ToastNotificationManager,Windows.UI.Notifications,ContentType=WindowsRuntime]>\$null
+\$x=[Windows.UI.Notifications.ToastNotificationManager]::GetTemplateContent([Windows.UI.Notifications.ToastTemplateType]::ToastText02)
+\$e=\$x.GetElementsByTagName('text')
+[void]\$e.Item(0).AppendChild(\$x.CreateTextNode((& \$d '$t')))
+[void]\$e.Item(1).AppendChild(\$x.CreateTextNode((& \$d '$b')))
+[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier('{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\\WindowsPowerShell\\v1.0\\powershell.exe').Show([Windows.UI.Notifications.ToastNotification]::new(\$x))" )
+  elif [ "$(uname -s)" = Darwin ]; then
+    # arguments, not a script built from the text: AppleScript never parses it
+    osascript - "$1" "$2" <<'APPLESCRIPT'
+on run argv
+  display notification (item 2 of argv) with title (item 1 of argv)
+end run
+APPLESCRIPT
+  elif command -v notify-send >/dev/null 2>&1; then
+    notify-send "$1" "$2"
+  fi
 }
 
 # Is the user actually looking at this window?  Active in its session AND that
@@ -2671,6 +2728,7 @@ main() {
     shell)        cmd_shell "$@" ;;
     quit)         cmd_quit "$@" ;;
     _prompt)      cmd_prompt "$@" ;;
+    _notify)      notify "${1:-kel}" "${2:-test notification}" ;;
     _panel)       cmd_panel "$@" ;;
     _sidebar)     case "${1:-}" in
                     ensure) sidebar_ensure "${2:-}" ;;

@@ -672,9 +672,21 @@ The row Claude Code shows (repo identity, `250k/1M`, quota resets, `fast` /
 ### 9b. Notifications
 
 When an agent **transitions into** a state listed in `KEL_NOTIFY` (default
-`waiting`) and you are **not looking at that window**, kel notifies: `tmux
-display-message` always, plus `$KEL_NOTIFY_CMD "<title>" "<body>"` if set.
-Hook-driven, never polled — a poller would be a daemon.
+`waiting`) and you are **not looking at that window**, kel notifies:
+`tmux display-message`, **the bell** on every terminal attached to kel, and
+**a desktop notification** — a Windows toast from WSL (built-in WinRT via
+`powershell.exe`), `osascript` on macOS, `notify-send` on Linux.
+`$KEL_NOTIFY_CMD` replaces the desktop half. Hook-driven, never polled — a
+poller would be a daemon.
+
+*Revised 2026-10-15.* kel used to ship no platform detection and leave
+recipes in `setup.md`; in practice nothing reached the author outside the
+terminal, while both tools kel was measured against (herdr, Orca) tell you
+when an agent needs you. The text is untrusted (the agent quoting a command):
+it crosses into PowerShell as base64 and into AppleScript as arguments. The
+bell is the terminal's own — the "screen flash" Claude Code itself uses on a
+Mac. On WSL, the PowerShell path is stat'ed, never looked up on `PATH` (the
+76 ms trap).
 
 ### 9c. The fleet document
 

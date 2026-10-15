@@ -34,6 +34,7 @@ type uiState struct {
 	filter   string
 	myWindow string // the window this sidebar sits in — current, whatever the doc says
 	focused  bool   // the keyboard is in this sidebar
+	hover    int    // screen line under the pointer, plus one; 0 = none
 }
 
 type sbSpace struct {
@@ -65,6 +66,7 @@ type sbView struct {
 
 	footer, footerColour string // a prompt or a message; "" = the key hint
 	focused              bool
+	hover                int
 }
 
 // lineRef says which entry a screen line belongs to — what a click hits.
@@ -97,7 +99,7 @@ func spaceKey(p fleet.Pane) (key, label string) {
 }
 
 func buildView(doc fleet.Doc, ui uiState) sbView {
-	v := sbView{sel: ui.sel, filter: ui.filter, focused: ui.focused}
+	v := sbView{sel: ui.sel, filter: ui.filter, focused: ui.focused, hover: ui.hover}
 	if doc.Panes == nil {
 		v.unknown = true
 		return v
@@ -396,9 +398,48 @@ func tildify(p string) string {
 	return p
 }
 
+// quietFor: a `working` agent kel has heard nothing from — no state change, no
+// statusline update — for half an hour. An interrupt (esc) fires no Stop, and
+// the author saw "working 14h28m" on an agent sitting at its prompt. Claude
+// Code's statusLine updates through a working turn, so this much silence is
+// not work; it reads "working?", never a confident "working" (invariant 3).
+// Window activity was the first idea and does not work: the window's own
+// sidebar redraws in it.
+func quietFor(a fleet.Agent, now int64) int64 {
+	if a.State == nil || *a.State != "working" {
+		return 0
+	}
+	last := f(a.StateSince)
+	if a.Context != nil && f(a.Context.At) > last {
+		last = f(a.Context.At)
+	}
+	if last == 0 || now-int64(last) < 1800 {
+		return 0
+	}
+	return now - int64(last)
+}
+
+// shortNote turns Claude Code's notification text into the reason, short
+// enough for a 32-column line: what it is waiting for.
+func shortNote(n string) string {
+	n = strings.TrimSpace(n)
+	if t := strings.TrimPrefix(n, "Claude needs your permission to use "); t != n {
+		return "allow " + strings.TrimSuffix(t, ".") + "?"
+	}
+	if strings.HasPrefix(n, "Claude is waiting for your input") {
+		return "your input"
+	}
+	return n
+}
+
 // agentDetail: why it is in this state and for how long, then context and
-// cost. The state word carries the state's colour; the rest is dim.
+// cost — or, when it waits on you, what it is waiting for (Orca shows
+// "awaiting permission"; kel had the exact text all along and showed none of
+// it). The state word carries the state's colour; the rest is dim.
 func agentDetail(a fleet.Agent, now int64) (word, colour, rest string) {
+	if q := quietFor(a, now); q > 0 {
+		return "working?", "", " · quiet " + humanizeSecs(q)
+	}
 	_, colour = stateLook(a.State, a.Unseen)
 	word = "?"
 	if a.State != nil && *a.State != "" {
@@ -409,6 +450,9 @@ func agentDetail(a fleet.Agent, now int64) (word, colour, rest string) {
 	}
 	if colour == dim {
 		colour = ""
+	}
+	if a.State != nil && *a.State == "waiting" && a.Note != nil && *a.Note != "" {
+		return word, colour, " · " + shortNote(*a.Note)
 	}
 	if a.Context == nil {
 		return word, colour, " · ctx ?"
@@ -487,6 +531,9 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 		id := agentID(a.wid)
 		r := lineRef{id: id, kind: "agent"}
 		d, c := stateLook(a.agent.State, a.agent.Unseen)
+		if quietFor(a.agent, now) > 0 {
+			d, c = "◌", dim // not heard from: no state colour it has not earned
+		}
 		name := truncate(a.agent.Name, text)
 		// the repo, dim beside the name, when there is room: two repos can
 		// each have an agent called docs
@@ -572,6 +619,17 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 	}
 	if h > 0 && len(body) > h {
 		body = body[:h]
+	}
+	// hover: the entry under the pointer gets a dim bar where the selection's
+	// would be, so what a click would hit is visible before the click
+	if v.hover > 0 && v.hover <= len(body) {
+		if id := body[v.hover-1].ref.id; id != "" && id != v.sel {
+			for i, l := range body {
+				if l.ref.id == id && strings.HasPrefix(l.s, " ") {
+					body[i].s = dim + "▏" + reset + l.s[1:]
+				}
+			}
+		}
 	}
 	var b strings.Builder
 	refs := make([]lineRef, len(body))

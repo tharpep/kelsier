@@ -98,6 +98,15 @@ Full design at the `v0.9.0` tag. The sidebar's panel may make most of it moot.
 
 **Gate:** you type the same `kel new … && tmux split …` sequence twice.
 
+### 40. What each agent is doing now  ·  `[borderline]`
+
+Orca shows a one-line activity per agent ("running checkout regression
+tests"). The source would be a `PreToolUse` hook on every tool — kel on the
+agent's hottest path (invariant 5), where today it is matched to edits only.
+Borderline on cost, not principle.
+
+**Gate:** you keep switching to agents just to see what they are doing.
+
 ### 39. Read-only commands for agents — `kel state`, `kel wait`  ·  `[fits]`
 
 herdr's socket API lets agents split panes, read each other's output, type

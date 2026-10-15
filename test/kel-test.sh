@@ -26,6 +26,10 @@ VERBOSE=0; [ "${1:-}" = "-v" ] && VERBOSE=1
 WORK="$(mktemp -d "${TMPDIR:-/tmp}/kel-test.XXXXXX")"
 export XDG_STATE_HOME="$WORK/state"
 export KEL_SESSION=keltest
+# kel notifies by default since 2026-10-15 (a bell, and a Windows toast on
+# WSL): a suite that fakes waiting agents would pop real notifications on the
+# developer's desktop. The notification tests use a KEL_NOTIFY_CMD stub instead
+export KEL_NOTIFY_DESKTOP=off KEL_NOTIFY_BELL=off
 # Sidebars off unless a section turns them on: the sections written before
 # v0.10 count panes, and a sidebar is one more.  The sidebar's own section
 # turns it on and re-checks what matters with it present.

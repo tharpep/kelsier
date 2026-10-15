@@ -25,6 +25,9 @@
 # top_h        = "80%"
 
 [notify]
+# notify_bell    = "on"            # the terminal's bell: a flash on the Mac, a sound or
+                                  # taskbar flash in Windows Terminal
+# notify_desktop = "on"            # Windows toast (WSL) / osascript / notify-send
 # notify       = "waiting"      # states worth interrupting you for, space separated
                                 # e.g. "waiting dead"
 # notify_cmd   = ""             # a command taking title + body; run in the background.
