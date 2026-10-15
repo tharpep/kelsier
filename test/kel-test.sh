@@ -961,7 +961,7 @@ ok "n names and starts an agent, in that space's repo" '[ -n "$(window_of api-gw
 wait_until '[ "$(active_win)" = "$(window_of api-gw fresh)" ]' 50
 tmux select-window -t "$MW"
 UP="$(userpane "$MW")"; tmux select-pane -t "$UP"
-"$KEL" _sidebar focus
+"$KEL" _sidebar focus "$MW"   # what prefix Space passes: the window it was pressed in
 ok "_sidebar focus puts the keyboard in the sidebar" '[ "$(tmux display -p -t "$MW" "#{pane_id}")" = "$SP" ]'
 tmux send-keys -t "$SP" Escape
 wait_until '[ "$(tmux display -p -t "$MW" "#{pane_id}")" = "$UP" ]'

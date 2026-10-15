@@ -366,11 +366,13 @@ sidebar_fit() {
 
 # prefix Space: put the keyboard in the sidebar of the window you are in,
 # making one first if the window has none. esc in the sidebar goes back
-# (tmux last-pane). The window comes from the client running the binding —
-# with one session, "the current window" of the server is not it.
-sidebar_focus() {
-  local wid id
-  wid="$(tmux display-message -p '#{window_id}' 2>/dev/null)" || return 0
+# (tmux last-pane). The binding passes its window (#{window_id}, expanded from
+# the client that pressed the key): asked with no target, tmux's idea of "the
+# current window" differs between versions — CI's macOS tmux named another
+# window than Linux's did, and focus went to the wrong sidebar.
+sidebar_focus() { # [wid]
+  local wid="${1:-}" id
+  [ -n "$wid" ] || wid="$(tmux display-message -p '#{window_id}' 2>/dev/null)" || return 0
   sidebar_ensure "$wid"
   id="$(tmux list-panes -t "$wid" -F '#{@kel-sidebar} #{pane_id}' 2>/dev/null | awk '$1==1 {print $2; exit}')"
   [ -n "$id" ] && tmux select-pane -t "$id" 2>/dev/null
@@ -2252,7 +2254,7 @@ main() {
                     wake)   sidebar_wake ;;
                     fit)    sidebar_fit ;;
                     reap)   sidebar_reap ;;
-                    focus)  sidebar_focus ;;
+                    focus)  sidebar_focus "${2:-}" ;;
                     *)      die "kel _sidebar ensure|wake|fit|reap|focus" ;;
                   esac ;;
     doctor)       cmd_doctor "$@" ;;
