@@ -70,6 +70,9 @@ type Doc struct {
 	GeneratedAt string  `json:"generated_at"`
 	Current     Current `json:"current"`
 	Agents      []Agent `json:"agents"`
+	// Quota is null when no session has reported rate limits (quota.go).
+	Quota *Quota `json:"quota"`
+	Here  *Here  `json:"here,omitempty"` // only with Options.Here
 	// Panes is present only when asked for (Options.Panes): every pane in
 	// every kel window, for the sidebar. A pointer so that "asked, and there
 	// are none" is [] while "not asked" omits the key.
@@ -166,6 +169,7 @@ type Options struct {
 	Land  bool
 	PR    bool // may refresh the PR cache — never on a refresh path
 	Panes bool // every pane, with kind, git position and ports (panes.go)
+	Here  bool // the focused pane's repo and git position (quota.go)
 }
 
 // Load assembles the fleet document.
@@ -475,10 +479,21 @@ func Load(o Options) Doc {
 		cur.WindowID = sp(curWid)
 	}
 
+	now := time.Now()
 	doc := Doc{
-		GeneratedAt: time.Now().UTC().Format(time.RFC3339),
+		GeneratedAt: now.UTC().Format(time.RFC3339),
 		Current:     cur,
 		Agents:      agents,
+		Quota:       loadQuota(sd, now.Unix()),
+	}
+	if o.Here {
+		for _, rows := range paneRows {
+			for _, r := range rows {
+				if r.id == curPane {
+					doc.Here = loadHere(r.path)
+				}
+			}
+		}
 	}
 	if o.Panes {
 		ps := buildPanes(paneRows, paneWins, curPane)

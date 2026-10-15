@@ -652,11 +652,33 @@ ok "a hand-made window gets its repo's group" '[ "$("$KEL" _fleet | jq -r ".agen
 tmux new-session -d -s 'keltest/legacy' -n old -c "$WORK"
 ok "a v0.9 per-repo session still reads, with its group" '[ "$("$KEL" _fleet | jq -r ".agents[] | select(.name==\"old\") | .group")" = legacy ]'
 tmux kill-session -t '=keltest/legacy'
-export TMUX="$TMUX_TMPDIR/tmux-$(id -u)/default,$(tmux display-message -p '#{pid}'),0"
-bar="$("$KEL" status-line)"
-unset TMUX
-# grep -c ., not wc -l: BSD pads the count (CLAUDE.md, portability)
-ok "the bar lists every agent in the session" '[ "$(printf "%s" "$bar" | grep -o ":docs" | grep -c .)" = 2 ] && [[ "$bar" == *handmade* ]]'
+# the bar is the workspace footer (v0.10 M4, spec.md §7b): quota, the
+# waiting alarm, live cost — and where you stand only while the sidebar is off
+bar() { TMUX="$TMUX_TMPDIR/tmux-$(id -u)/default,$(tmux display-message -p '#{pid}'),0" "$KEL" status-line | sed 's/#\[[^]]*\]//g'; }
+ok "the bar no longer lists windows"            '[[ "$(bar)" != *docs* ]] && [[ "$(bar)" != *handmade* ]]'
+ok "  ...shows no quota no session reported"    '[[ "$(bar)" != *claude* ]] && [[ "$(bar)" != *%* ]]'
+ok "  ...and says when nothing waits"           '[[ "$(bar)" == *"nothing waiting"* ]]'
+DW="$(window_of api-gw docs)"
+printf 'waiting %s\n' "$(( $(date +%s) - 400 ))" > "$STATE/$DW.state"
+ok "one waiting agent, and for how long"        '[[ "$(bar)" == *"1 waiting 6m"* ]]'
+now=$(date +%s)
+printf '58 %s 41 %s 12 0 %s\n' "$((now + 5400))" "$((now + 300000))" "$now" > "$STATE/quota"
+ok "quota: 5h as a bar with its reset, then the week" '[[ "$(bar)" == *"claude ▓▓▓░░ 58% (1h"* ]] && [[ "$(bar)" == *"wk 41%"* ]]'
+ok "  ...spend only from 50%"                   '[[ "$(bar)" != *spend* ]]'
+printf '58 %s 41 %s 61 0 %s\n' "$((now + 5400))" "$((now + 300000))" "$now" > "$STATE/quota"
+ok "  ...and then it shows"                     '[[ "$(bar)" == *"spend 61%"* ]]'
+printf '58 %s 41 %s -1 0 %s\n' "$((now - 60))" "$((now + 300000))" "$now" > "$STATE/quota"
+ok "a 5h window that has reset reads unknown, not 58%" '[[ "$(bar)" == *"░░░░░ ?"* ]] && [[ "$(bar)" != *58%* ]]'
+ok "  ...while the week still shows"            '[[ "$(bar)" == *"wk 41%"* ]]'
+ok "no location while the sidebar shows"        '[[ "$(bar)" != *main* ]]'
+# "focused" needs a client: with none attached tmux has no pane to name
+: > "$STATE/sidebar-off"
+( sleep 6 ) | tmux -C attach -t '=keltest' >/dev/null 2>&1 &
+CC=$!
+wait_until 'tmux list-clients 2>/dev/null | grep -q .' 30
+ok "  ...and the focused pane's repo and branch when it is off" '[[ "$(bar)" == *" · main"* ]]'
+kill "$CC" 2>/dev/null; wait "$CC" 2>/dev/null
+rm -f "$STATE/sidebar-off" "$STATE/quota" "$STATE/$DW.state"
 
 section "kel never prompts; restore is by choice (v0.10)"
 reset
@@ -933,7 +955,10 @@ tmux send-keys -t "$SW" Enter
 wait_until '[ -n "$(window_of api-gw fresh)" ]' 80
 ok "n names and starts an agent, in that space's repo" '[ -n "$(window_of api-gw fresh)" ] && [ -f "$SESSIONS/api-gw/fresh.json" ]'
 
-# prefix Space is `kel _sidebar focus`; esc goes back
+# prefix Space is `kel _sidebar focus`; esc goes back. kel new ends by
+# jumping to the window it made, just after the window exists — wait for that
+# jump, or it can land after the select below and take the client with it
+wait_until '[ "$(active_win)" = "$(window_of api-gw fresh)" ]' 50
 tmux select-window -t "$MW"
 UP="$(userpane "$MW")"; tmux select-pane -t "$UP"
 "$KEL" _sidebar focus
@@ -1329,16 +1354,31 @@ sl '{"session_id":"a","context_window":{"total_input_tokens":170000,"context_win
 # the `kel <group>/<name>` label owns that slot.
 IDROW="$(printf '%s' '{"session_id":"zz","workspace":{"current_dir":"/nonexistent-kel-test","repo":{"owner":"tharpep","name":"kelsier"}},"worktree":{"name":"wt1"},"context_window":{"context_window_size":200000,"used_percentage":5}}' | "$KEL" statusline)"
 ok "repo identity renders from the payload"         '[[ "$IDROW" == *tharpep/kelsier@wt1* ]]'
-ok "  ...and yields to the kel label inside kel"    '[[ "$(sl "{\"session_id\":\"a\",\"workspace\":{\"repo\":{\"owner\":\"tharpep\",\"name\":\"kelsier\"}},\"context_window\":{\"context_window_size\":200000,\"used_percentage\":5}}")" != *tharpep/kelsier* ]]'
+# inside a kel window the row is the session only (spec.md §7a): no repo
+# identity, no kel label (both "/"-shaped), no quota — those are the
+# sidebar's and the bar's
+INROW="$(sl "{\"session_id\":\"a\",\"workspace\":{\"repo\":{\"owner\":\"tharpep\",\"name\":\"kelsier\"}},\"context_window\":{\"context_window_size\":200000,\"used_percentage\":5}}")"
+ok "  ...but inside kel the row is the session only" '[[ "$INROW" != */* ]] && [[ "$INROW" == *"5%"* ]]'
 ok "absolute tokens appear once past the warn"      '[[ "$(sl "{\"session_id\":\"a\",\"context_window\":{\"total_input_tokens\":847000,\"context_window_size\":1000000,\"used_percentage\":85}}")" == *847k/1M* ]]'
 ok "  ...and not below it"                          '[[ "$(sl "{\"session_id\":\"a\",\"context_window\":{\"total_input_tokens\":20000,\"context_window_size\":1000000,\"used_percentage\":2}}")" != *20k/1M* ]]'
 # 5400s sits mid-hour, so the hour digit cannot flip while the test runs. An
 # exact minute count would race the clock; only the shape is asserted.
 RESET_AT=$(( $(date +%s) + 5400 ))
-QROW="$(sl "{\"session_id\":\"a\",\"context_window\":{\"context_window_size\":200000,\"used_percentage\":5},\"rate_limits\":{\"five_hour\":{\"used_percentage\":74,\"resets_at\":$RESET_AT}}}")"
-ok "a quota past 50% names its reset"               '[[ "$QROW" == *"5h 74% (1h"* ]]'
-ok "  ...and a quota below 50% stays hidden"        '[[ "$(sl "{\"session_id\":\"a\",\"context_window\":{\"context_window_size\":200000,\"used_percentage\":5},\"rate_limits\":{\"five_hour\":{\"used_percentage\":31}}}")" != *5h* ]]'
-ok "a reset already in the past is omitted"         '[[ "$(sl "{\"session_id\":\"a\",\"context_window\":{\"context_window_size\":200000,\"used_percentage\":5},\"rate_limits\":{\"five_hour\":{\"used_percentage\":74,\"resets_at\":1}}}")" == *"5h 74%"* ]]'
+# the quota chips live in the row only outside kel, where there is no bar:
+# no $TMUX_PANE and a cwd no pane holds, as for the identity above
+slout() { printf '%s' "$1" | env -u TMUX -u TMUX_PANE "$KEL" statusline; }
+QP="{\"session_id\":\"zz\",\"workspace\":{\"current_dir\":\"/nonexistent-kel-test\"},\"context_window\":{\"context_window_size\":200000,\"used_percentage\":5},\"rate_limits\":{\"five_hour\":{\"used_percentage\":74,\"resets_at\":$RESET_AT}}}"
+QROW="$(slout "$QP")"
+ok "outside kel, a quota past 50% names its reset"  '[[ "$QROW" == *"5h 74% (1h"* ]]'
+ok "  ...and a quota below 50% stays hidden"        '[[ "$(slout "{\"session_id\":\"zz\",\"workspace\":{\"current_dir\":\"/nonexistent-kel-test\"},\"context_window\":{\"context_window_size\":200000,\"used_percentage\":5},\"rate_limits\":{\"five_hour\":{\"used_percentage\":31}}}")" != *5h* ]]'
+ok "a reset already in the past is omitted"         '[[ "$(slout "{\"session_id\":\"zz\",\"workspace\":{\"current_dir\":\"/nonexistent-kel-test\"},\"context_window\":{\"context_window_size\":200000,\"used_percentage\":5},\"rate_limits\":{\"five_hour\":{\"used_percentage\":74,\"resets_at\":1}}}")" == *"5h 74%"* ]]'
+ok "inside kel the row carries no quota"            '[[ "$(sl "$QP")" != *5h* ]]'
+# the account file the bar reads: written from a payload with rate limits,
+# never from one without (an API-key session has none — no fake 0%)
+ok "a payload with rate limits writes the quota file" '[ "$(cut -d" " -f1 "$STATE/quota")" = 74 ]'
+rm -f "$STATE/quota"
+sl '{"session_id":"a","context_window":{"context_window_size":200000,"used_percentage":5}}' >/dev/null
+ok "  ...and one without writes none"               '[ ! -f "$STATE/quota" ]'
 ok "non-default modes render"                       '[[ "$(sl "{\"session_id\":\"a\",\"fast_mode\":true,\"effort\":{\"level\":\"xhigh\"},\"context_window\":{\"context_window_size\":200000,\"used_percentage\":5}}")" == *"fast xhigh"* ]]'
 ok "  ...and default ones do not"                   '[[ "$(sl "{\"session_id\":\"a\",\"effort\":{\"level\":\"medium\"},\"thinking\":{\"enabled\":true},\"context_window\":{\"context_window_size\":200000,\"used_percentage\":5}}")" != *medium* ]]'
 

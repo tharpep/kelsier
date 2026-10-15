@@ -87,7 +87,7 @@ TUI pass over the old board, which no longer exists.
 fix: `kel-fleet` ignored `pr = off`, and it called `gh` for repos that local git
 had already answered.
 
-### Step 4 — the build plan  ·  *M0–M3 done, M4 next*
+### Step 4 — the build plan  ·  *M0–M4 done, M5 next*
 
 Agreed 2026-10-14. Each milestone ends with something to try, and the suite
 stays green throughout. The decisions behind it are `spec.md` §5c and §7.
@@ -202,15 +202,35 @@ too: the first background, `colour234`, read as grey and became true black
   the timing check removes the old `.seen` first — it had been passing on one
   left by an earlier jump
 
-**M4 — the two bottom rows**  →  `v0.11`
-- one home per fact (`spec.md` §7): Claude's row shrinks to the session; a
-  quota state file; the bar becomes quota plus the waiting alarm and live
-  cost, taking location back only while the sidebar is hidden
-- *tests:* stale quota renders `?`; no `0%` without a quota; location appears
-  exactly when `sidebar-off` exists; the bar stays one `jq` pass and refreshes
-  only on change
+**M4 — the two bottom rows**  →  `v0.11`  ·  **done**
+- **a quota file**: `kel statusline` writes `quota` (5h %, its reset, 7d %,
+  its reset, spend %, its reset, the epoch seen) to the state dir, only from a
+  payload that carries rate limits; `kel-fleet` adds it to the fleet document
+  as `quota`, nulling any figure whose reset has passed. The bar refreshes
+  only when a displayed integer moves
+- **the bar** (`cmd_status_line`) becomes the workspace footer:
+  `claude ▓▓▓░░ 58% (1h20m) · wk 41%  │  1 waiting 6m · $24.10`, spend from
+  50%; the waiting part absent when nothing waits; the per-window list gone
+- **location while the sidebar is hidden**: with `sidebar-off` present, the
+  focused pane's repo and `branch ↑N ●N` — one `git status`, only then
+- **Claude's row** (`cmd_statusline`) inside a kel window: model, modes,
+  context, cost, nothing else. Outside kel it keeps repo identity and the
+  quota chips (`spec.md` §7a)
+- *try:* a day with the sidebar on, then `kel sidebar off` — is anything
+  missed?
+- *tests:* stale 5h and 7d each render `?`; an API-key payload writes no
+  quota and the bar shows none; spend absent below 50%; the waiting segment
+  absent when nothing waits; location appears exactly when `sidebar-off`
+  exists; inside kel the row carries no label or quota, outside it keeps
+  both; a fleet-document `quota` unit test in Go
+- *found on the way:* the bar's jq bound an absent segment to `empty`, which
+  ends the whole program in jq — a bar with no quota would have been blank.
+  Absent segments are `null` now. And the M3 focus test raced `kel new`'s
+  own jump to the window it made; it waits for that jump first
+- *added in building:* with live agents and nothing to report, the bar says
+  `nothing waiting` — a blank second segment looked broken
 
-**M5 — panel popups and the embeds**  →  `v0.11`
+**M5 — panel popups and the embeds**  →  `v0.11`  ·  *next*
 - `f` yazi, `g` lazygit, `p` plan/tasks — titled popups at the selected
   pane's directory
 - `d` reviews a worktree's diff against its land base; `o` opens a server's

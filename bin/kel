@@ -1612,42 +1612,61 @@ cmd_status_line() {
   # The bar is the one surface where a missing kel-fleet would otherwise just
   # go blank — and a blank bar reads as "no agents".  Say so instead.
   [ -x "$KEL_FLEET_BIN" ] || { printf '#[fg=colour196]kel-fleet missing — run install.sh#[default]'; exit 0; }
-  # One fleet_json, one jq.  This used to walk every window calling
-  # effective_state (a tmux fork each) and then walk them all again to count
-  # waiting agents elsewhere.  --dirty is deliberately NOT passed: the bar
-  # never shows it and `git status` per worktree is the expensive part.
-  #
-  # One session since v0.10, so the bar is every live window in index order —
-  # no per-group row and no ⟨other groups⟩ badge.  This is the interim bar:
-  # spec.md §7b replaces it with the workspace footer in M4.  A v0.9 session
-  # may still pass a group argument from its own status-left; it is ignored.
-  fleet_json | jq -r --argjson warn "${KEL_CTX_WARN:-70}" '
-    def glyph:
-      if   . == "waiting"   then {s:"?", c:"#[fg=colour214,bold]"}
-      elif . == "working"   then {s:"*", c:"#[fg=colour111]"}
-      elif . == "done"      then {s:"!", c:"#[fg=colour114]"}
-      elif . == "throttled" then {s:"~", c:"#[fg=colour141]"}
-      elif . == "dead"      then {s:"x", c:"#[fg=colour167,bold]"}
-      else {s:"", c:""} end;
-
-    [ .agents[] | select(.window_id != null) ] | sort_by(.index)
-    | if length == 0 then ""
-      else
-        map(
-          . as $a | ($a.state // "" | glyph) as $gl
-          | ($a.panes | length) as $np
-          | ($a.context.pct // null) as $pct
-          | ( $a.name
-              + (if $np > 1 then "#[fg=colour240]·\($np)#[default]" + $gl.c else "" end)
-              + (if ($pct != null and $pct >= $warn)
-                 then (if $pct >= 90 then "#[fg=colour167,bold]" else "#[fg=colour179]" end)
-                      + "·\($pct)%#[default]" + $gl.c
-                 else "" end) ) as $nm
-          | $gl.c
-            + (if $a.current then "[\($a.index):\($nm)\($gl.s)]" else "\($a.index):\($nm)\($gl.s)" end)
-            + "#[default]" )
-        | "#[fg=colour245][kel]#[default] " + join(" ") + " "
-      end'
+  # The workspace footer (spec.md §7b): only what belongs to no pane — the
+  # account's quota, the waiting alarm, the cost of live sessions — because the
+  # sidebar holds everything per pane.  While the sidebar is hidden, where the
+  # focused pane stands comes back here (--here: one `git status`, of one repo,
+  # and only then).  One fleet_json, one jq.  --dirty is NOT passed: `git
+  # status` per worktree is the expensive part and the bar never shows it.
+  local here=''
+  [ -e "$SIDEBAR_OFF" ] && here='--here'
+  fleet_json $here | jq -r '
+    def dur: floor | if . < 60 then "\(.)s"
+                     elif . < 3600 then "\(. / 60 | floor)m"
+                     else "\(. / 3600 | floor)h\((. % 3600) / 60 | floor | tostring | if length < 2 then "0" + . else . end)m" end;
+    def heat: if . >= 90 then "#[fg=colour167,bold]" elif . >= 70 then "#[fg=colour179]" else "" end;
+    def sep: "#[fg=colour240]  │  #[default]";
+    def dot: "#[fg=colour240] · #[default]";
+    now as $now
+    | (.quota // null) as $q
+    | ( if $q == null then null else
+          [ ( $q.five_hour // null | if . == null then empty
+              elif .pct == null then "#[fg=colour240]░░░░░ ?#[default]"
+              else (.pct | floor) as $p | ((($p + 19) / 20) | floor | if . > 5 then 5 else . end) as $f
+                | ($p | heat) + ([range(0; $f)] | map("▓") | join("")) + ([range($f; 5)] | map("░") | join(""))
+                  + " \($p)%#[default]"
+                  + (if (.resets_at // 0) > $now then "#[fg=colour245] (\(.resets_at - $now | dur))#[default]" else "" end)
+              end ),
+            ( $q.seven_day // null | if . == null then empty
+              elif .pct == null then "wk ?"
+              else (.pct | floor) as $p | ($p | heat) + "wk \($p)%#[default]" end ),
+            ( $q.spend // null | if . == null or .pct == null or .pct < 50 then empty
+              else (.pct | floor) as $p | ($p | heat) + "spend \($p)%#[default]" end ) ]
+          | if length == 0 then null else "#[fg=colour245]claude#[default] " + join(dot) end
+        end ) as $quota
+    | [ .agents[] | select(.window_id != null and .state != "dead") ] as $live
+    | [ $live[] | select(.state == "waiting") ] as $wait
+    | ( [ $live[] | .context.cost_usd // empty ] | add // 0 ) as $cost
+    | ( if ($live | length) == 0 then "#[fg=colour245]no agents#[default]"
+        else
+          [ ( if ($wait | length) == 0 then empty
+              else "#[fg=colour214,bold]\($wait | length) waiting"
+                   + ( [ $wait[] | .state_since // empty ] | min
+                       | if . == null then "" else " \($now - . | dur)" end )
+                   + "#[default]" end ),
+            ( if $cost > 0 then "$" + ($cost * 100 | round / 100 | tostring
+                                       | if test("\\.") then (if test("\\.[0-9]$") then . + "0" else . end) else . + ".00" end)
+              else empty end ) ]
+          | if length == 0 then "#[fg=colour245]nothing waiting#[default]" else join(dot) end
+        end ) as $fleet
+    | ( .here // null | if . == null then null else
+          .group + ( .git // null | if . == null then ""
+                     else dot + (.branch // "detached")
+                          + (if (.ahead // 0) > 0 then " ↑\(.ahead)" else "" end)
+                          + (if (.dirty // 0) > 0 then " ●\(.dirty)" else "" end) end )
+        end ) as $here
+    | [ $quota, $fleet, $here ] | map(select(. != null and . != "")) | join(sep)
+  ' 2>/dev/null | tr -d '\n'
 }
 
 # --------------------------------------------------------------------------
@@ -1927,6 +1946,21 @@ cmd_statusline() {
     [ "$pct" != "$old" ] && tmux refresh-client -S 2>/dev/null
   fi
 
+  # The account's quota, for the bar (spec.md §7b): one small file, written
+  # only from a payload that carries rate limits — an API-key session never
+  # writes one, so the bar never shows a 0% that was never measured.  The bar
+  # is redrawn only when a figure it shows moved (invariant 5); `read` is a
+  # builtin, so comparing costs no fork.
+  if { [ "$rl5" -ge 0 ] || [ "$rl7d" -ge 0 ] || [ "$spend" -ge 0 ]; } && [ -d "$STATE_DIR" ]; then
+    local q="$STATE_DIR/quota" o5='' o7='' os=''
+    [ -f "$q" ] && read -r o5 _ o7 _ os _ < "$q" 2>/dev/null
+    printf '%s %s %s %s %s %s %s\n' "$rl5" "$rl5at" "$rl7d" "$rl7dat" "$spend" "$spendat" "$now" > "$q.$$" \
+      && mv -f "$q.$$" "$q"
+    if [ "$rl5" != "$o5" ] || [ "$rl7d" != "$o7" ] || [ "$spend" != "$os" ]; then
+      [ -n "${TMUX:-}" ] && tmux refresh-client -S 2>/dev/null
+    fi
+  fi
+
   # ---- render Claude Code's row ----
   local label=''
   if [ -n "$wid" ]; then
@@ -1975,7 +2009,9 @@ cmd_statusline() {
   case "$effort" in ''|medium) ;; *) modes="${modes:+$modes }$effort" ;; esac
   [ "$thinking" = 0 ] && modes="${modes:+$modes }no-think"
 
-  [ -n "$label" ] && printf '\033[2mkel\033[0m \033[36m%s\033[0m \033[2m·\033[0m ' "$label"
+  # Inside a kel window the row is the session only (spec.md §7a): where it
+  # stands is the sidebar's, the quota the bar's.  Outside kel neither exists,
+  # so there the row keeps the repo identity and the quota chips.
   [ -n "$ident" ] && printf '\033[36m%s\033[0m \033[2m·\033[0m ' "$ident"
   [ -n "$model" ] && printf '%s' "$model"
   [ -n "$modes" ] && printf ' \033[2m%s\033[0m' "$modes"
@@ -1993,9 +2029,11 @@ cmd_statusline() {
     printf '\033[2mctx ?\033[0m'
   fi
   [ -n "$cost" ] && [ "$cost" != "0" ] && printf ' \033[2m·\033[0m $%.2f' "$cost" 2>/dev/null
-  quota_chip 5h    "$rl5"   "$rl5at"   "$now"
-  quota_chip 7d    "$rl7d"  "$rl7dat"  "$now"
-  quota_chip spend "$spend" "$spendat" "$now"
+  if [ -z "$label" ]; then
+    quota_chip 5h    "$rl5"   "$rl5at"   "$now"
+    quota_chip 7d    "$rl7d"  "$rl7dat"  "$now"
+    quota_chip spend "$spend" "$spendat" "$now"
+  fi
   # agent.name marks a `claude --agent` session, not a Task-tool subagent.
   [ -n "$agent" ] && printf ' \033[2m·\033[0m \033[35m%s\033[0m' "$agent"
   printf '\n'

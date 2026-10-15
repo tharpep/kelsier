@@ -420,7 +420,7 @@ directory), so the bar checks that one file and appends the focused pane's
 repo, branch and land code while it exists. A fact never disappears; it only
 moves to where there is room.
 
-### 7a. Claude's row  ·  *designed (revised 2026-10-14)*
+### 7a. Claude's row  ·  *built (M4)*
 
 ```
 Opus 5.5 · ████░░ 36% ctx · $10.65
@@ -432,8 +432,15 @@ Opus 5.5 · ████░░ 36% ctx · $10.65
 - *Moved out:* location and land to the sidebar; quota to the bar. Both were
   in the first draft of this row. Dropping them also drops the cached git
   position this row needed — it runs on every update and could never run git.
+- **Outside kel it keeps them** *(decided 2026-10-14, M4 planning)*. One home
+  is a rule *inside* kel, where the sidebar and the bar exist. Claude Code run
+  in a plain terminal has neither, so there the row is the only place either
+  fact can live: it keeps the payload's repo@worktree identity (no git — it is
+  in the JSON) and the quota chips it shows today. "Inside kel" is what the
+  row already knows: it found a kel window to label. The `quota` file is
+  written either way — it is the account's, wherever it was observed.
 
-### 7b. tmux's bottom bar  ·  *designed (revised 2026-10-14)*
+### 7b. tmux's bottom bar  ·  *built (M4)*
 
 ```
 claude ▓▓▓░░ 58% (1h20m) · wk 41%  │  1 waiting 6m · $24.10
@@ -443,7 +450,7 @@ With nothing waiting, and with the sidebar hidden:
 
 ```
 claude ▓▓▓░░ 58% (1h20m) · wk 41%  │  $24.10
-claude ▓▓▓░░ 58% (1h20m) · wk 41%  │  1 waiting 6m · $24.10  │  kelsier · fix-auth ↑2 ●
+claude ▓▓▓░░ 58% (1h20m) · wk 41%  │  1 waiting 6m · $24.10  │  kelsier · fix-auth ↑2 ●3
 ```
 
 1. **quota** — the 5-hour window as a bar and percentage with its reset time,
@@ -453,24 +460,36 @@ claude ▓▓▓░░ 58% (1h20m) · wk 41%  │  1 waiting 6m · $24.10  │  
 2. **the alarm** — how many agents wait on you and for how long the oldest has
    waited; absent when none do. Then the total cost of live sessions
    (cumulative per session, so "spent by open sessions", never "today").
-3. **location** — only while the sidebar is hidden: the focused pane's repo,
-   branch and land code.
+3. **location** — only while the sidebar is hidden: the focused pane's repo
+   and branch position — `↑N` unpushed, `●N` uncommitted — from one `git
+   status` of that pane's root. *Not* the land code (decided in M4 planning):
+   `review` / `merged` / `no PR` need the base branch and the PR cache, which
+   do not belong on a path that redraws constantly.
+4. **spend** — the spend limit, after the weekly window, **only from 50%**:
+   account-wide like the others, and almost always irrelevant.
 
 Cut from the first draft, each because the sidebar holds it: per-state counts
 (`4 agents · 2 done`), pane count, the port list, and location while the
 sidebar is showing. Memory was considered earlier and dropped: it has never
 been the problem.
 
-The per-window list (`1:auth-fix? 2:docs`) goes — the sidebar replaces it,
-and it was what overflowed the bar past about six windows. Until M4 builds
-this bar, M2's windows still show it.
+The per-window list (`1:auth-fix? 2:docs`) is gone — the sidebar replaced it,
+and it was what overflowed the bar past about six windows. With live agents
+and nothing to say, the second segment reads `nothing waiting` rather than
+going blank: an empty bar would look like a broken one.
 
 **Stale quota reads as unknown.** Quota is per account, so it moves out of the
 per-window `.ctx` into its own small file (5h %, its reset, weekly %, its
 reset, the epoch it was observed) — an on-disk addition, recorded in
 `CLAUDE.md`'s contract table when built. If the 5h reset has passed since the
 last observation, the bar shows `░░░░░ ?`, never the old figure (invariant 3).
-Same for the weekly.
+Same for the weekly. It is written only from a payload that carries rate
+limits — an API-key session never writes one — and `kel-fleet` reads it into
+the fleet document as `quota`, so the bar stays one `jq` over one document.
+
+**Total cost** is the sum of the live agents' known costs. An agent with no
+figure yet has made no measured call, so it adds nothing rather than an
+unknown.
 
 **Ports are too slow for the hot path** — on macOS they need `lsof`, ~100 ms
 and up — which is one more reason they live in the sidebar, off the bar's

@@ -84,6 +84,7 @@ change; migrate old records in `migrate_meta`.
 | `pr-cache/<owner>__<repo>.json` | PR list from `gh`, plus `.at` with the fetch epoch |
 | `sidebar.json` | `{selected: <entry id>, expanded: {<space key>: bool}}` — the sidebar's cursor (`s:<space>`, `a:<window id>` or a pane id) and the spaces opened or folded by hand, shared so every window's sidebar shows the same thing |
 | `sidebar-cache.json` | the last fleet document the visible sidebar loaded, so a sidebar just shown draws at once, before git is asked anything |
+| `quota` | `<5h%> <5h reset> <7d%> <7d reset> <spend%> <spend reset> <epoch seen>`, space-separated; `-1` = not reported, `0` reset = not given. Written by `kel statusline` only from a payload carrying rate limits; `kel-fleet` reads it as `quota`, nulling a figure whose window reset or that is older than its window |
 | `<window-id>.seen` | one epoch: when the window was last shown. `kel-fleet` reads it for `unseen` on a `done` agent (no file = unseen); the shown sidebar writes it for its own window |
 | `sidebar-off` | present after `kel sidebar off`; no new sidebars until `kel sidebar on` |
 | `ports.json` | `{at, panes:{<pane pid>: [ports]}}` — the listening-port scan behind `_fleet --panes`, reused for 10 s |
@@ -121,7 +122,9 @@ document, and `ls` / `--json` / `status-line` / the completions / `kel top` all
 read it. Adding a field means adding it there once, in Go. `--panes` (v0.10 M1)
 adds every pane in every kel window — kind (agent / server / shell / program),
 cwd, listening ports and git position — for the sidebar; it is opt-in because
-its git and port lookups do not fit the bar's redraw budget.
+its git and port lookups do not fit the bar's redraw budget. `--here` (M4)
+adds where the focused pane stands — one `git status` — for the bar while the
+sidebar is off. `quota` is always present (null when no session reported one).
 
 ### Agent states
 
@@ -342,7 +345,9 @@ fleet reader). Go is now required.
 code. **M0–M3 are done**: one session, `kel` never prompts (`kel restore` by choice),
 `_fleet --panes` knows every pane, and every window carries the sidebar —
 `spaces` / `agents`, keys, mouse, `done` until seen. `v0.10.0` is tagged
-when the author has daily-driven it. **M4 is next**: the two bottom rows. The
+when the author has daily-driven it. **M4 is done** too: the bar is the
+workspace footer and Claude's row is the session only, inside kel. **M5 is
+next**: the panel popups and the embeds. The
 sidebar's look is held by golden frames (`cmd/kel-top/testdata/sidebar`);
 change one only after showing the author the frame. The layout
 is decided — a sidebar pane in every window, measured against `swap-pane` in

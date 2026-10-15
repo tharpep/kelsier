@@ -1,9 +1,9 @@
 # kel — usage
 
 The reference for what exists **today**. kel is mid-pivot (v0.10, see
-`rollout.md`): the old board and menus are gone and the sidebar that replaces
-them is not built yet, so for now kel is the commands below, the status bar,
-`kel top` and jump-to-blocked.
+`rollout.md`): the old board and menus are gone, replaced by the sidebar; kel
+is the sidebar, the commands below, the status bar, `kel top` and
+jump-to-blocked. The panel popups (files, git, plan) are not built yet.
 
 ## Install
 
@@ -145,15 +145,23 @@ state per window, so a second agent belongs in its own window.
 ## The status bar
 
 ```
-[kel] 1:auth-fix? [2:rate-limit·91%*] 3:docs 4:sazed
+claude ▓▓▓░░ 58% (1h20m) · wk 41%  │  1 waiting 6m · $24.10
 ```
 
-`?` waiting on you · `*` working · `!` done · `~` throttled (waiting on quota,
-resumes itself) · `x` dead (the process exited without a clean stop — `kel
-relaunch` or `kel kill` it) · bare = idle · `[ ]` current window · `·91%`
-context, shown from `KEL_CTX_WARN` (default 70) up. If `kel-fleet` is missing
-the bar says so in red rather than going blank. This is an interim bar: M4
-turns it into the workspace footer (`spec.md` §7b).
+Only what belongs to no single pane — everything per pane is in the sidebar:
+
+| segment | |
+|---|---|
+| `claude ▓▓▓░░ 58% (1h20m)` | the 5-hour quota and when it resets; `░░░░░ ?` once it has reset since it was last seen, never the old figure |
+| `wk 41%` | the weekly quota (`wk ?` when stale) |
+| `spend 61%` | the spend limit, from 50% only |
+| `1 waiting 6m` | agents blocked on you, and the longest wait; `nothing waiting` when none are |
+| `$24.10` | the cost of the agents open right now |
+| `kelsier · fix-auth ↑2 ●3` | only while the sidebar is off: where the pane you are in stands |
+
+No quota shows until a session has reported one — an API-key session never
+does, and the bar never invents a `0%`. If `kel-fleet` is missing the bar says
+so in red rather than going blank.
 
 ## Detach, kill, reboot
 
@@ -203,6 +211,8 @@ Everything lives in `${XDG_STATE_HOME:-~/.local/state}/kel/`, mode `0700`:
 - `<window-id>.state` — state from the hooks, including Claude Code's
   notification text (the agent quoting a command back at you)
 - `<window-id>.ctx` — context, cost and model from `kel statusline`
+- `quota` — the account's rate limits, from `kel statusline`
+- `<window-id>.seen`, `sidebar.json`, `sidebar-cache.json` — the sidebar's
 - `snapshot.json` (+ `.prev`), `snapshots/` (previous workspaces),
   `doctor.json`, `pr-cache/`,
   `.stash/`
@@ -217,10 +227,18 @@ never for one whose work is still uncommitted or unpushed, and never with `pr =
 ## Claude Code's own row
 
 `install.sh` wires `kel statusline` as Claude Code's `statusLine`, so this row
-appears in **every** Claude Code session on the machine:
+appears in **every** Claude Code session on the machine. Inside a kel window
+it is the session only — where it stands is the sidebar's, the quota the
+bar's:
 
 ```
-tharpep/kelsier@auth-fix · opus-5[1m] fast xhigh · ███░░░░░░░ 25% ctx · $31.90 · 5h 74% (39m)
+Opus 5.5 fast xhigh · ███░░░░░░░ 25% ctx · $31.90
+```
+
+Outside kel, where there is no sidebar or bar, it also carries those:
+
+```
+tharpep/kelsier@auth-fix · Opus 5.5 · ███░░░░░░░ 25% ctx · $31.90 · 5h 74% (39m)
 ```
 
 | segment | appears when |
@@ -229,7 +247,7 @@ tharpep/kelsier@auth-fix · opus-5[1m] fast xhigh · ███░░░░░░
 | `fast` `xhigh` `no-think` | those modes are not at their defaults |
 | `250k/1M` after the bar | context is at `KEL_CTX_WARN` or above |
 | `$N.NN` | cost is non-zero |
-| `5h` / `7d` / `spend` + reset | that quota is at 50% or above |
+| `5h` / `7d` / `spend` + reset | outside a kel window, and that quota is at 50% or above |
 | an agent name | the session was started with `claude --agent` |
 
 `ctx ?` means not measured yet (before the first reply, and right after
