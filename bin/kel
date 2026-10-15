@@ -2022,10 +2022,13 @@ cmd_status_line() {
     | (.quota // null) as $q
     | ( if $q == null then null else
           [ ( $q.five_hour // null | if . == null then empty
-              elif .pct == null then "#[fg=colour240]░░░░░ ?#[default]"
+              elif .pct == null then "#[fg=colour238]█████#[default] ?"
               else (.pct | floor) as $p | ((($p + 19) / 20) | floor | if . > 5 then 5 else . end) as $f
-                | ($p | heat) + ([range(0; $f)] | map("█") | join("")) + ([range($f; 5)] | map("░") | join(""))
-                  + " \($p)%#[default]"
+                # a solid grey track, not ░: in the authors font ░ is a
+                # checkerboard, busy beside the filled part
+                | ($p | heat) + ([range(0; $f)] | map("█") | join(""))
+                  + "#[fg=colour238]" + ([range($f; 5)] | map("█") | join("")) + "#[default]"
+                  + ($p | heat) + " \($p)%#[default]"
                   + (if (.resets_at // 0) > $now then "#[fg=colour245] (\(.resets_at - $now | dur))#[default]" else "" end)
               end ),
             ( $q.seven_day // null | if . == null then empty
@@ -2442,8 +2445,11 @@ cmd_statusline() {
   # name, then reports THAT as an unbound variable. Braces make the name
   # boundary explicit regardless of what bytes follow. Found from a real CI
   # failure, not by inspection — this predates the board-hub work.
+  # the empty part is a grey track of the same block, not ░ — a checkerboard
+  # in the author's font, and the tmux bar's quota uses the same pair
+  local track=''
   for ((i=0; i<10; i++)); do
-    if [ "$i" -lt "$filled" ]; then bar="${bar}█"; else bar="${bar}░"; fi
+    if [ "$i" -lt "$filled" ]; then bar="${bar}█"; else track="${track}█"; fi
   done
   local cc='\033[32m'                                  # green
   [ "${pct:-0}" -ge "$KEL_CTX_WARN" ] && cc='\033[33m'  # yellow
@@ -2464,7 +2470,7 @@ cmd_statusline() {
   [ -n "$modes" ] && printf ' \033[2m%s\033[0m' "$modes"
   [ -n "$model" ] && printf ' \033[2m·\033[0m '
   if [ -n "$pct" ]; then
-    printf '%b%s %s%%\033[0m \033[2mctx\033[0m' "$cc" "$bar" "$pct"
+    printf '%b%s\033[0m\033[90m%s\033[0m%b %s%%\033[0m \033[2mctx\033[0m' "$cc" "$bar" "$track" "$cc" "$pct"
     # absolute figures only once the percentage is worth acting on — that is
     # when "how much room is left" stops being idle curiosity
     if [ "$pct" -ge "$KEL_CTX_WARN" ] && [ "$ctxsz" -gt 0 ]; then

@@ -667,12 +667,13 @@ printf 'waiting %s\n' "$(( $(date +%s) - 400 ))" > "$STATE/$DW.state"
 ok "one waiting agent, and for how long"        '[[ "$(bar)" == *"1 waiting 6m"* ]]'
 now=$(date +%s)
 printf '58 %s 41 %s 12 0 %s\n' "$((now + 5400))" "$((now + 300000))" "$now" > "$STATE/quota"
-ok "quota: 5h as a bar with its reset, then the week" '[[ "$(bar)" == *"claude ███░░ 58% (1h"* ]] && [[ "$(bar)" == *"wk 41%"* ]]'
+rawbar() { TMUX="$TMUX_TMPDIR/tmux-$(id -u)/default,$(tmux display-message -p '#{pid}'),0" "$KEL" status-line; }
+ok "quota: 5h as a bar with its reset, then the week" '[[ "$(bar)" == *"claude █████ 58% (1h"* ]] && [[ "$(rawbar)" == *"███#[fg=colour238]██#[default]"* ]] && [[ "$(bar)" == *"wk 41%"* ]]'
 ok "  ...spend only from 50%"                   '[[ "$(bar)" != *spend* ]]'
 printf '58 %s 41 %s 61 0 %s\n' "$((now + 5400))" "$((now + 300000))" "$now" > "$STATE/quota"
 ok "  ...and then it shows"                     '[[ "$(bar)" == *"spend 61%"* ]]'
 printf '58 %s 41 %s -1 0 %s\n' "$((now - 60))" "$((now + 300000))" "$now" > "$STATE/quota"
-ok "a 5h window that has reset reads unknown, not 58%" '[[ "$(bar)" == *"░░░░░ ?"* ]] && [[ "$(bar)" != *58%* ]]'
+ok "a 5h window that has reset reads unknown, not 58%" '[[ "$(rawbar)" == *"#[fg=colour238]█████#[default] ?"* ]] && [[ "$(bar)" != *58%* ]]'
 ok "  ...while the week still shows"            '[[ "$(bar)" == *"wk 41%"* ]]'
 ok "no location while the sidebar shows"        '[[ "$(bar)" != *main* ]]'
 # "focused" needs a client: with none attached tmux has no pane to name

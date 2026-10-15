@@ -115,7 +115,10 @@ not depend on the selection — `n` `w` `t` `Q` `?` — and each can be clicked.
 command never needs a shell: type `new docs -w`, `restore`, `url`… A
 one-line answer comes back as a message, a longer one in a popup.
 
-A blue `▌` marks the selection, `›` where you are. The footer reads `prefix
+A blue `▌` marks the selection; where you are is the name in bold. Only states
+that need you are coloured — waiting yellow, working cyan, finished-and-unseen
+green, dead red; idle, seen and unknown are grey, and a doubtful `working?` is
+grey italic. The footer reads `prefix
 space` until the sidebar has the keyboard, then shows the keys for whatever is
 selected (`e edit · p plan · x kill · ?` on an agent) — `?` lists them all.
 
@@ -193,7 +196,7 @@ Only what belongs to no single pane — everything per pane is in the sidebar:
 
 | segment | |
 |---|---|
-| `claude ███░░ 58% (1h20m)` | the 5-hour quota and when it resets; `░░░░░ ?` once it has reset since it was last seen, never the old figure |
+| `claude ███`‹grey›`██ 58% (1h20m)` | the 5-hour quota and when it resets; `░░░░░ ?` once it has reset since it was last seen, never the old figure |
 | `wk 41%` | the weekly quota (`wk ?` when stale) |
 | `spend 61%` | the spend limit, from 50% only |
 | `1 waiting 6m` | agents blocked on you, and the longest wait; `nothing waiting` when none are |

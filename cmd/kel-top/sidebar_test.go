@@ -373,8 +373,8 @@ func TestShortNote(t *testing.T) {
 	for in, want := range map[string]string{
 		"Claude needs your permission to use Bash":  "allow Bash?",
 		"Claude needs your permission to use Edit.": "allow Edit?",
-		"Claude is waiting for your input":           "your input",
-		"something new":                              "something new",
+		"Claude is waiting for your input":          "your input",
+		"something new":                             "something new",
 	} {
 		if got := shortNote(in); got != want {
 			t.Errorf("shortNote(%q) = %q, want %q", in, got, want)

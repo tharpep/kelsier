@@ -1,35 +1,35 @@
 [2mspaces[0m
-  [35m◌[0m [1mapi-gw[0m
-    [2mmain ↓4 · :8000[0m
- ›[36m●[0m [1mkelsier[0m
-    [2mmain ↑2 ●3[0m
-    [2m▸[0m nvim
-  [32m●[0m [1mkelsier[0m
-    [2mdocs-pass[0m
-  [33m[1m●[0m [1mkelsier[0m
-    [2mfix-auth ↑1[0m
-    [1mmisc[0m
-    [2m~[0m
-  [2m○[0m [1mweb-dashboard[0m
-    [2mmain · :3000 :3001[0m
-  [36m●[0m [1mweb-dashboard[0m
-    [2mfeat/usage-charts ●5 · …[0m
+ [35m◌[0m api-gw
+   [2mmain ↓4 · :8000[0m
+ [36m●[0m [1mkelsier[0m
+   [2mmain ↑2 ●3[0m
+  [2m▸[0m nvim
+ [32m●[0m kelsier
+   [2mdocs-pass[0m
+ [33m[1m●[0m kelsier
+   [2mfix-auth ↑1[0m
+   misc
+   [2m~[0m
+ [2m○[0m web-dashboard
+   [2mmain · :3000 :3001[0m
+ [36m●[0m web-dashboard
+   [2mfeat/usage-charts ●5 · :…[0m
 
 [2magents[0m
-  [33m[1m●[0m [1mfix-auth[0m  [2mkelsier[0m
-    [33m[1mwaiting 6m[0m[2m · allow Bash?[0m
-[34m▌[0m›[36m●[0m [1mkelsier[0m
-    [36mworking 2m[0m[2m · 36% · $10.…[0m
-  [36m●[0m [1musage-charts[0m
-    [36mworking 30s[0m[2m · 63% · $4.…[0m
-  [32m●[0m [1mdocs[0m  [2mkelsier[0m
-    [32mdone 15m[0m[2m · 22% · $0.84[0m
-  [35m◌[0m [1mrate-limits[0m  [2mapi-gw[0m
-    [35mthrottled 10m[0m[2m · 71% · $…[0m
-  [2m○[0m [1mdashboard[0m  [2mweb-dashboard[0m
-    done 30m[0m[2m · 44% · $2.05[0m
-  [2m○[0m [1mgateway[0m  [2mapi-gw[0m
-    idle 1h06m[0m[2m · 12% · $0.40[0m
-  [31m✕[0m [1mspike[0m  [2mweb-dashboard[0m
-    [31mdead 2h00m[0m[2m · ctx ?[0m
+ [33m[1m●[0m fix-auth  [2mkelsier[0m
+   [33m[1mwaiting 6m[0m · allow Bash?[0m
+[34m▌[0m[36m●[0m [1mkelsier[0m
+   [36mworking 2m[0m[2m · 36% · $10.65[0m
+ [36m●[0m usage-charts
+   [36mworking 30s[0m[2m · 63% · $4.75[0m
+ [32m●[0m docs  [2mkelsier[0m
+   [32mdone 15m[0m[2m · 22% · $0.84[0m
+ [35m◌[0m rate-limits  [2mapi-gw[0m
+   [35mthrottled 10m[0m[2m · 71% · $6…[0m
+ [2m○[0m dashboard  [2mweb-dashboard[0m
+   [2mdone 30m[0m[2m · 44% · $2.05[0m
+ [2m○[0m gateway  [2mapi-gw[0m
+   [2midle 1h06m[0m[2m · 12% · $0.40[0m
+ [31m✕[0m spike  [2mweb-dashboard[0m
+   [31mdead 2h00m[0m[2m · ctx ?[0m
 [2mprefix space[0m

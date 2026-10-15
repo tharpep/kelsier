@@ -308,6 +308,15 @@ the `TodoWrite` design was stale, and the plan turned out to need no new hook.
   waits on its row (`allow Bash?`), `working?` for an agent silent half an hour,
   and a hover bar for what a click would hit. Orca's "what it is doing now" line
   is not built: it needs a hook on every tool call — backlog, gated
+- *a visual pass (2026-10-15):* calm states grey and doubt in grey italic, no
+  `›` (bold name instead), window names on look-alike panes, a gap above the
+  footer, solid bar tracks, a black bar with only the time, no pane title on a
+  single pane (`spec.md` §5d). *Found on the way:* truncating a detail line
+  after colouring it counted escape codes as characters, cutting `working? ·
+  quiet 14h…`; it truncates first now. And reproducing Claude's row by hand
+  through a real pane id wrote made-up numbers into that agent's `.ctx` — an
+  agent read `$0.00`; restored. Reproduce statusline rows without
+  `TMUX_PANE` set to a live pane
 - *found on the way:* M5's `hook_edit` had real newlines inside its `printf`
   format — a quoting slip in its writing that happened to print the same
   thing; rewritten while the plan / edit split went in

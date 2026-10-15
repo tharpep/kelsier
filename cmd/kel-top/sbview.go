@@ -27,6 +27,8 @@ import (
 // accent — no state uses it, so the selection can never read as a state.
 const accent = "\x1b[34m"
 
+const italic = "\x1b[3m"
+
 // uiState is what the user has done to the view; it is not data.
 type uiState struct {
 	sel      string          // selected entry id (see sbEntry.id)
@@ -436,9 +438,13 @@ func shortNote(n string) string {
 // cost — or, when it waits on you, what it is waiting for (Orca shows
 // "awaiting permission"; kel had the exact text all along and showed none of
 // it). The state word carries the state's colour; the rest is dim.
-func agentDetail(a fleet.Agent, now int64) (word, colour, rest string) {
+// Plain text out, styles beside it: the renderer truncates first and colours
+// after, or the escape codes count as characters and cut the line short.
+func agentDetail(a fleet.Agent, now int64) (word, colour, rest, restColour string) {
 	if q := quietFor(a, now); q > 0 {
-		return "working?", "", " · quiet " + humanizeSecs(q)
+		// grey italic, the whole line: kel is not sure, and says so in how it
+		// looks as well as in the `?`
+		return "working?", dim + italic, " · quiet " + humanizeSecs(q), dim + italic
 	}
 	_, colour = stateLook(a.State, a.Unseen)
 	word = "?"
@@ -448,14 +454,14 @@ func agentDetail(a fleet.Agent, now int64) (word, colour, rest string) {
 			word += " " + humanizeSecs(now-int64(*a.StateSince))
 		}
 	}
-	if colour == dim {
-		colour = ""
-	}
+	// calm states (idle, a done you have seen, unknown) keep stateLook's
+	// grey: only what needs you stands out of the list
 	if a.State != nil && *a.State == "waiting" && a.Note != nil && *a.Note != "" {
-		return word, colour, " · " + shortNote(*a.Note)
+		// the reason is the point of the line: readable, not grey
+		return word, colour, " · " + shortNote(*a.Note), ""
 	}
 	if a.Context == nil {
-		return word, colour, " · ctx ?"
+		return word, colour, " · ctx ?", dim
 	}
 	pct := "ctx ?"
 	if a.Context.Pct != nil {
@@ -465,7 +471,7 @@ func agentDetail(a fleet.Agent, now int64) (word, colour, rest string) {
 	if a.Context.CostUSD != nil {
 		c = money(*a.Context.CostUSD)
 	}
-	return word, colour, " · " + pct + " · " + c
+	return word, colour, " · " + pct + " · " + c, dim
 }
 
 // renderView draws the view at w×h. h == 0 means "no size yet": draw it all.
@@ -480,20 +486,22 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 	}
 	var body []line
 	add := func(s string, r lineRef) { body = append(body, line{s, r}) }
-	// every entry line starts with two columns: the selection bar and the
-	// current marker, so text lines up whether or not either is shown
-	lead := func(id string, current bool) string {
-		b := " "
+	// every entry line starts with one column, the selection bar. Where you
+	// are is the name in bold — the author found `▌›○` three marks too many
+	// before a name, so the `›` marker went (2026-10-15)
+	lead := func(id string) string {
 		if id == v.sel {
-			b = accent + "▌" + reset
+			return accent + "▌" + reset
 		}
-		c := " "
-		if current {
-			c = "›"
-		}
-		return b + c
+		return " "
 	}
-	text := w - 4 // lead + dot + space
+	weight := func(s string, current bool) string {
+		if current {
+			return bold + s + reset
+		}
+		return s
+	}
+	text := w - 3 // lead + dot + space
 
 	add(dim+truncate("spaces", w)+reset, lineRef{})
 	if v.unknown {
@@ -509,14 +517,26 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 			d, c := stateLook(s.state, s.unseen)
 			dot = c + d + reset
 		}
-		add(lead(id, s.current)+dot+" "+bold+truncate(s.label, text)+reset, r)
-		add("    "+dim+truncate(spaceDetail(s), text)+reset, r)
+		add(lead(id)+dot+" "+weight(truncate(s.label, text), s.current), r)
+		add("   "+dim+truncate(spaceDetail(s), text)+reset, r)
 		if !s.open {
 			continue
 		}
+		// two panes that would read the same (`$ bash`, `$ bash`) are told
+		// apart by their window's name
+		seen := map[string]int{}
+		for _, p := range s.panes {
+			seen[paneLabel(p)]++
+		}
 		for _, p := range s.panes {
 			pr := lineRef{id: p.PaneID, kind: "pane"}
-			add(lead(p.PaneID, p.Current)+"  "+paneGlyph(p.Kind)+" "+truncate(paneLabel(p), w-6), pr)
+			label := truncate(paneLabel(p), w-5)
+			if seen[paneLabel(p)] > 1 && p.WindowName != "" {
+				if room := w - 5 - len([]rune(label)) - 3; room > 0 {
+					label += dim + " · " + truncate(p.WindowName, room) + reset
+				}
+			}
+			add(lead(p.PaneID)+" "+paneGlyph(p.Kind)+" "+weight(label, p.Current), pr)
 		}
 	}
 
@@ -534,19 +554,17 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 		if quietFor(a.agent, now) > 0 {
 			d, c = "◌", dim // not heard from: no state colour it has not earned
 		}
-		name := truncate(a.agent.Name, text)
+		name := weight(truncate(a.agent.Name, text), a.current)
 		// the repo, dim beside the name, when there is room: two repos can
 		// each have an agent called docs
-		if g := a.agent.Group; g != "" && g != a.agent.Name && len([]rune(name))+2+len([]rune(g)) <= text {
-			name = bold + name + reset + "  " + dim + g + reset
-		} else {
-			name = bold + name + reset
+		if g := a.agent.Group; g != "" && g != a.agent.Name && len([]rune(a.agent.Name))+2+len([]rune(g)) <= text {
+			name += "  " + dim + g + reset
 		}
-		add(lead(id, a.current)+c+d+reset+" "+name, r)
-		word, wc, rest := agentDetail(a.agent, now)
+		add(lead(id)+c+d+reset+" "+name, r)
+		word, wc, rest, rc := agentDetail(a.agent, now)
 		word = truncate(word, text)
 		rest = truncate(rest, text-len([]rune(word)))
-		add("    "+wc+word+reset+dim+rest+reset, r)
+		add("   "+wc+word+reset+rc+rest+reset, r)
 	}
 
 	// actions: what does not depend on the selection, as keys you can also
@@ -604,8 +622,10 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 		}
 		// the actions sit at the bottom, above the footer, when they fit
 		// under everything else with a blank line between
-		if len(body)+1+len(acts) <= room {
-			for len(body)+len(acts) < room {
+		// and a blank line under them, so the footer does not read as one
+		// more action
+		if len(body)+1+len(acts)+1 <= room {
+			for len(body)+len(acts)+1 < room {
 				body = append(body, line{"", lineRef{}})
 			}
 			body = append(body, acts...)

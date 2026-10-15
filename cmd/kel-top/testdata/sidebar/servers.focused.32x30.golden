@@ -1,16 +1,15 @@
 [2mspaces[0m
-[34m▌[0m›  [1mapi-gw[0m
-    [2mmain ↓4 · :8000[0m
- ›  ▪ python3 :8000
-    [2m$[0m bash
-    [1mmisc[0m
-    [2m~/notes[0m
-    [1mweb-dashboard[0m
-    [2mmain · :3000 :5173[0m
+[34m▌[0m  [1mapi-gw[0m
+   [2mmain ↓4 · :8000[0m
+  ▪ [1mpython3 :8000[0m
+  [2m$[0m bash
+   misc
+   [2m~/notes[0m
+   web-dashboard
+   [2mmain · :3000 :5173[0m
 
 [2magents[0m
   [2mnone[0m
-
 
 
 
@@ -27,4 +26,5 @@
  [1mt[0m  [2mshell here[0m
  [1mQ[0m  [2mquit kel[0m
  [1m?[0m  [2mall keys[0m
+
 [2mf files · g git · e edit · ?[0m

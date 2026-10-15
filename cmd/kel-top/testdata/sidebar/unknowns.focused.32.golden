@@ -1,13 +1,13 @@
 [2mspaces[0m
- ›[2m○[0m [1mkelsier[0m
-    [2m? · :?[0m
-    ▪ node :?
-    [1mmisc[0m
-    [2m/tmp · :?[0m
+ [2m○[0m [1mkelsier[0m
+   [2m? · :?[0m
+  ▪ node :?
+   misc
+   [2m/tmp · :?[0m
 
 [2magents[0m
-  [2m?[0m [1mnostate[0m  [2mmisc[0m
-    ?[0m[2m · ctx ?[0m
-[34m▌[0m›[2m○[0m [1mfresh[0m  [2mkelsier[0m
-    idle 5s[0m[2m · ctx ?[0m
+ [2m?[0m nostate  [2mmisc[0m
+   [2m?[0m[2m · ctx ?[0m
+[34m▌[0m[2m○[0m [1mfresh[0m  [2mkelsier[0m
+   [2midle 5s[0m[2m · ctx ?[0m
 [2me edit · p plan · x kill · ?[0m

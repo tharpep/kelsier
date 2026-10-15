@@ -319,6 +319,16 @@ in any terminal:
   box — a guess displayed as a fact, in miniature.
 - **Unknown is its own look** (invariant 3): dim `?`, never a plausible
   default.
+- *Revised 2026-10-15, from the author's screenshots:* the `›` marker went —
+  `▌›○` was three marks before a name — and "you are here" is the name in
+  bold, others regular. The state word on an agent's second line carries its
+  state's colour, grey for calm ones, so the list is quiet unless something
+  needs you; uncertainty (`working?`) is grey italic, the whole line. Two
+  panes that would read alike (`$ bash`) carry their window's name. A blank
+  line keeps the footer from reading as one more action. Bar tracks are a
+  solid grey block, not `░` (a checkerboard in the author's font), in both
+  the tmux bar and Claude's row; the tmux bar is black, with only the time on
+  its right; a window with one pane of yours has no pane title
 
 ### 5e. How we know the sidebar is good  ·  *decided 2026-10-14*
 
