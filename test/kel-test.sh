@@ -13,7 +13,7 @@
 # no tokens spent.  Everything is torn down on the way out, including on
 # failure.
 #
-# Requires: tmux, jq, git, go.  ~2 min on an M-series Mac (2026-09-01). The suite
+# Requires: tmux, jq, git, go.  ~2 min (2026-10-16, WSL2). The suite
 # prints its pass/fail count at the end.
 set -uo pipefail
 
@@ -144,6 +144,16 @@ NEW() { K "$1" new "$2" --agent 'sleep 9999' >/dev/null 2>&1; agent_up "$(window
 window_of() { tmux list-windows -a -F '#{session_name} #{@kel-group} #{window_id} #{window_name}' 2>/dev/null \
                 | awk -v g="$1" -v n="$2" '$1 ~ /^keltest/ && $2==g && $4==n {print $3; exit}'; }
 pane_of()   { local w; w="$(window_of "$1" "$2")"; [ -n "$w" ] && tmux list-panes -t "$w" -F '#{pane_id}' | head -1; }
+# Hold a control-mode client attached for at most $1 s, and end it at once with
+# release_client. `kill $!` used to target tmux, the pipeline's last process,
+# and `wait` then sat out the whole `sleep` on the left: two 40 s holds cost
+# the suite 77 s of nothing. Killing the sleep closes the client's stdin.
+hold_client() {
+  { sleep "$1" & echo $! > "$WORK/hold.pid"; wait; } | tmux -C attach -t '=keltest' >/dev/null 2>&1 &
+  CC=$!
+  wait_until 'tmux list-clients 2>/dev/null | grep -q .' 30
+}
+release_client() { kill "$(cat "$WORK/hold.pid" 2>/dev/null)" 2>/dev/null; wait "$CC" 2>/dev/null; }
 
 # ---------------------------------------------------------------- isolation
 section "the suite cannot reach your real tmux server"
@@ -166,6 +176,13 @@ ok "ls prints a column header"           '[ -n "$("$KEL" ls 2>/dev/null | grep "
 ok "  ...and an in-place agent is repo"  '[ -n "$("$KEL" ls 2>/dev/null | awk "\$2==\"docs\"" | grep -w repo)" ]'
 ok "  ...while the record says inplace"  '[ "$(jq -r .isolation "$SESSIONS/api-gw/docs.json")" = inplace ]'
 ok "  ...and piped output has no ANSI"   '! "$KEL" ls 2>/dev/null | grep -q "$(printf "\033")"'
+# a directory, so no shell has to cd there first (2026-10-16)
+( cd "$WORK" && "$KEL" new far "$WORK/repos/coppermind" --agent 'sleep 9999' ) >/dev/null 2>&1
+ok "kel new <name> <dir> starts in dir, grouped by its repo" '[ "$(cd "$(jq -r .cwd "$SESSIONS/coppermind/far.json")" && pwd -P)" = "$(cd "$WORK/repos/coppermind" && pwd -P)" ]'
+( cd "$WORK/repos" && "$KEL" new ./api-gw --agent 'sleep 9999' ) >/dev/null 2>&1
+ok "kel new <dir> names the agent after its folder" '[ -f "$SESSIONS/api-gw/api-gw.json" ]'
+ok "kel new with a missing dir says so"  '[[ "$( cd "$WORK" && "$KEL" new x "$WORK/nope" 2>&1 )" == *"no such directory"* ]]'
+"$KEL" kill -f coppermind/far >/dev/null 2>&1; "$KEL" kill -f api-gw/api-gw >/dev/null 2>&1
 
 section "ambiguity is reported, never guessed"
 out="$("$KEL" kill docs 2>&1)"
@@ -685,11 +702,9 @@ ok "  ...while the week still shows"            '[[ "$(bar)" == *"wk 41%"* ]]'
 ok "no location while the sidebar shows"        '[[ "$(bar)" != *main* ]]'
 # "focused" needs a client: with none attached tmux has no pane to name
 : > "$STATE/sidebar-off"
-( sleep 6 ) | tmux -C attach -t '=keltest' >/dev/null 2>&1 &
-CC=$!
-wait_until 'tmux list-clients 2>/dev/null | grep -q .' 30
+hold_client 6
 ok "  ...and the focused pane's repo and branch when it is off" '[[ "$(bar)" == *" · main"* ]]'
-kill "$CC" 2>/dev/null; wait "$CC" 2>/dev/null
+release_client
 rm -f "$STATE/sidebar-off" "$STATE/quota" "$STATE/$DW.state"
 
 section "kel never prompts; restore is by choice (v0.10)"
@@ -798,14 +813,12 @@ ok "with no client attached, no pane claims to be current" '[ "$(P "[.panes[] | 
 # A control-mode client (tmux -C) is a real attached client with no terminal,
 # so the with-a-client case is testable after all: it holds the attach open
 # for as long as its stdin does.
-( sleep 5 ) | tmux -C attach -t '=keltest' >/dev/null 2>&1 &
-CC=$!
-wait_until 'tmux list-clients 2>/dev/null | grep -q .' 30
+hold_client 5
 SHP="$(tmux list-panes -t "$AW" -F '#{pane_id} #{pane_current_command}' | awk '$2=="bash"||$2=="zsh"||$2=="sh"{print $1; exit}')"
 tmux select-window -t "$AW"; tmux select-pane -t "$SHP"
 ok "with a client, exactly the pane it is looking at is current" \
   '[ "$(P "[.panes[] | select(.current) | .pane_id]")" = "[\"$SHP\"]" ]'
-wait "$CC" 2>/dev/null
+release_client
 ok "the ports scan is cached"            '[ -f "$STATE/ports.json" ]'
 
 # ---------------------------------------------------------------- v0.10 M2
@@ -819,6 +832,7 @@ NEW api-gw agent
 SBW="$(window_of api-gw agent)"
 wait_until '[ "$(sbcount "$SBW")" = 1 ]'
 ok "kel new gives the window exactly one sidebar" '[ "$(sbcount "$SBW")" = 1 ]'
+ok "  ...and tmux's own bar is off while sidebars show" '[ "$(tmux show-options -v -t "=keltest:" status 2>/dev/null)" = off ]'
 # no awk here: macOS's awk rejected the escaped program GNU awk accepted
 ok "  ...on the left, at the configured width"    'tmux list-panes -t "$SBW" -F "#{@kel-sidebar}:#{pane_left}:#{pane_width}" | grep -qx "1:0:32"'
 ok "  ...running kel-top"                         'wait_until "tmux list-panes -t $SBW -F \"#{@kel-sidebar} #{pane_current_command}\" | grep -qx \"1 kel-top\""'
@@ -863,16 +877,15 @@ SB2="$(tmux list-panes -t "$OTW" -F '#{@kel-sidebar} #{pane_id}' | awk '$1==1 {p
 reloads() { grep -c " $1 " "$KEL_SIDEBAR_TRACE"; }
 sleep 4
 ok "with no one looking, sidebars do not reload"  '[ "$(reloads "$SB1")" = 1 ] && [ "$(reloads "$SB2")" = 1 ]'
-( sleep 7 ) | tmux -C attach -t '=keltest' >/dev/null 2>&1 &
-CC=$!
-wait_until 'tmux list-clients 2>/dev/null | grep -q .' 30
+hold_client 7
 tmux select-window -t "$SBW"; "$KEL" _sidebar wake
 sleep 5
 ok "the shown sidebar reloads; the hidden one does not" '[ "$(reloads "$SB1")" -ge 3 ] && [ "$(reloads "$SB2")" -le 2 ]'
-wait "$CC" 2>/dev/null
+release_client
 
 "$KEL" sidebar off >/dev/null 2>&1
 ok "kel sidebar off removes every sidebar"        '[ "$(sbcount "$SBW")" = 0 ] && [ "$(sbcount "$OTW")" = 0 ]'
+ok "  ...and gives tmux's bar back"                '[ "$(tmux show-options -v -t "=keltest:" status 2>/dev/null)" != off ]'
 NEW api-gw later
 ok "  ...and new windows get none"                '[ "$(sbcount "$(window_of api-gw later)")" = 0 ]'
 "$KEL" sidebar on >/dev/null 2>&1
@@ -939,9 +952,7 @@ WTW="$(window_of api-gw wt)"; agent_up "$WTW"
 echo wip > "$WORK/repos/.kel-worktrees/api-gw-wt/scratch.txt"
 NEW api-gw main1
 MW="$(window_of api-gw main1)"
-( sleep 40 ) | tmux -C attach -t '=keltest' >/dev/null 2>&1 &
-CC=$!
-wait_until 'tmux list-clients 2>/dev/null | grep -q .' 30
+hold_client 40
 tmux select-window -t "$MW"; "$KEL" _sidebar wake
 SP="$(sbpane "$MW")"
 wait_until 'sbtext "$SP" | grep -q "wt"' 50
@@ -1011,7 +1022,7 @@ wait_until '[ "$(U)" = "done false" ]' 60
 ok "  ...and seen once its window is shown"      '[ "$(U)" = "done false" ]'
 printf '       (the shown sidebar noticed in %s ms)\n' "$((t1 - t0))"
 ok "a window switch reaches the shown sidebar in under a second" '[ $((t1 - t0)) -lt 1000 ]'
-kill "$CC" 2>/dev/null; wait "$CC" 2>/dev/null
+release_client
 unset KEL_AGENT
 
 # ---- v0.10 M5: the popups and the embeds
@@ -1047,9 +1058,7 @@ wait_until '[ "$("$KEL" url "$WT5" | grep -c .)" = 2 ]' 40
 ok "  ...with two, both, one per line"          '[ "$("$KEL" url "$WT5" | grep -c localhost)" = 2 ]'
 
 # the popups, through the sidebar's keys
-( sleep 40 ) | tmux -C attach -t '=keltest' >/dev/null 2>&1 &
-CC=$!
-wait_until 'tmux list-clients 2>/dev/null | grep -q .' 30
+hold_client 40
 tmux select-window -t "$W5"; "$KEL" _sidebar wake
 S5="$(sbpane "$W5")"
 wait_until 'sbtext "$S5" | grep -q wt5'
@@ -1147,7 +1156,7 @@ POP="$(tmux list-sessions -F '#{session_name}' | grep '^_kelpop_' | head -1)"
 ok "a popup's tool runs in a hosted session"     '[ -n "$POP" ] && [ "$(tmux list-panes -t "=$POP:" -F "#{pane_current_command}")" = sleep ]'
 ok "  ...marked as a popup's"                      '[ "$(tmux show-options -v -t "=$POP:" @kel-popup)" = 1 ]'
 ok "  ...nor a pane title — kel's labels stay out" '[ "$(tmux show-options -wv -t "=$POP:" pane-border-status)" = off ]'
-ok "  ...but a bar of its own with a clickable close" '[[ "$(tmux show-options -v -t "=$POP:" status-left)" == *"range=user|close"*"close"*"Ctrl-b q"* ]]'
+ok "  ...but a bar of its own with a clickable close" '[[ "$(tmux show-options -v -t "=$POP:" status-left)" == *"range=user|close"*"close"*"Ctrl-b then q"* ]]'
 ok "  ...which kel never counts: not the fleet"  '! "$KEL" _fleet --panes | jq -r ".panes[].window_id" | grep -qxF "$(tmux display -p -t "=$POP:" "#{window_id}")"'
 ok "  ...nor gives a sidebar"                    '[ "$(tmux list-panes -t "=$POP:" -F x | grep -c x)" = 1 ]'
 "$KEL" snapshot >/dev/null 2>&1
@@ -1228,7 +1237,7 @@ ok "kel quit closes kel and its popups' sessions" '! tmux has-session -t =keltes
 ok "  ...having saved the workspace first"      'jq -r ".windows[].name" "$STATE/snapshot.json" | grep -qx wt5'
 
 ok "a missing tool is said, not a crash"        '[[ "$(PATH="/usr/bin:/bin" KEL_FLEET_BIN="$KEL_FLEET_BIN" "$KEL" _panel files "$WT5" t 2>&1)" == *"yazi is not installed"* ]]'
-kill "$CC" 2>/dev/null; wait "$CC" 2>/dev/null
+release_client
 unset KEL_AGENT KEL_POPUP_TRACE BROWSER XDG_RUNTIME_DIR
 rm -f "$WORK/shim/yazi" "$WORK/shim/lazygit" "$WORK/shim/nvim" "$WORK/shim/browser"
 

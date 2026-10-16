@@ -331,6 +331,16 @@ the `TodoWrite` design was stale, and the plan turned out to need no new hook.
   how to answer on a clickable line (`y yes · n no`, `enter ok · esc
   cancel`); a click closes the keys list; actions gained `` ` `` jump, `:`
   kel command, and `R` restore while a previous workspace waits
+- *before phase 2 (2026-10-16), from the author's review:* tmux's bar is off
+  while sidebars show — it and Claude's row read as one thing said twice; the
+  quota became the sidebar's last line and the waiting alarm its unfocused
+  footer (a click jumps). `n` / `w` take a directory (`fix ~/code/api`, tab
+  completes) and `kel new <name> <dir>` does the same, so starting an agent
+  elsewhere no longer means a shell and a `cd`. The kel-command action is `;`
+  (`:` needs shift). Hints say "Ctrl-b then space": "Ctrl-b space, or click"
+  read as a chord. The suite went from ~3 min to ~1.5: two 40 s control-mode
+  holds were "released" with `kill $!`, which hit tmux while `wait` sat out
+  the `sleep` feeding it
 - *found on the way:* M5's `hook_edit` had real newlines inside its `printf`
   format — a quoting slip in its writing that happened to print the same
   thing; rewritten while the plan / edit split went in

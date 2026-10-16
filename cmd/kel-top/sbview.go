@@ -79,6 +79,9 @@ type sbView struct {
 	hover                int
 	prefix               string
 	restore              bool
+	quota                *fleet.Quota // the account's, for the last line; nil = none reported
+	waiting              int          // agents blocked on you, and since when the oldest
+	waitSince            int64
 }
 
 // lineRef says which entry a screen line belongs to — what a click hits.
@@ -140,7 +143,15 @@ func spaceKey(p fleet.Pane) (key, label string) {
 
 func buildView(doc fleet.Doc, ui uiState) sbView {
 	v := sbView{sel: ui.sel, filter: ui.filter, focused: ui.focused, hover: ui.hover,
-		prefix: ui.prefix, restore: ui.restore}
+		prefix: ui.prefix, restore: ui.restore, quota: doc.Quota}
+	for _, a := range doc.Agents {
+		if a.WindowID != nil && a.State != nil && *a.State == "waiting" {
+			v.waiting++
+			if a.StateSince != nil && (v.waitSince == 0 || int64(*a.StateSince) < v.waitSince) {
+				v.waitSince = int64(*a.StateSince)
+			}
+		}
+	}
 	if v.prefix == "" {
 		v.prefix = "Ctrl-b"
 	}
@@ -683,6 +694,22 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 		footer, fc = v.footer, v.footerColour
 	}
 	foot := line{fc + truncate(footer, w) + reset, lineRef{}}
+	// the waiting alarm, which tmux's bar carried until the sidebar took its
+	// place: while you are elsewhere, it is the footer, and a click jumps
+	if !v.focused && v.footer == "" && v.filter == "" && v.waiting > 0 {
+		t := fmt.Sprintf("%d waiting", v.waiting)
+		if v.waitSince > 0 && now >= v.waitSince {
+			t += " " + humanizeSecs(now-v.waitSince)
+		}
+		foot = line{yellow + bold + truncate(t+" · click to jump", w) + reset, lineRef{id: "act:`", kind: "action"}}
+	}
+	// the quota is the last line, where tmux's bar used to carry it: with
+	// the sidebar showing, kel turns that bar off (it repeated what the
+	// sidebar and Claude's own row already said — the author, 2026-10-16)
+	var qline *line
+	if q := quotaLine(v.quota, w, now); q != "" && h > 3 {
+		qline = &line{q, lineRef{}}
+	}
 	var foot2 *line
 	if v.hint2 != "" {
 		foot2 = &line{dim + truncate(v.hint2, w) + reset, lineRef{id: "hint2", kind: "hint2"}}
@@ -691,6 +718,9 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 	// scroll so the selected entry is on screen; the footer is pinned
 	if h > 0 {
 		room := h - 1
+		if qline != nil {
+			room--
+		}
 		if room < 0 {
 			room = 0
 		}
@@ -737,6 +767,9 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 	if h != 1 || len(body) == 0 {
 		body = append(body, foot)
 	}
+	if qline != nil {
+		body = append(body, *qline)
+	}
 	if h > 0 && len(body) > h {
 		body = body[:h]
 	}
@@ -768,7 +801,9 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 func hint(v sbView, w int) string {
 	if !v.focused {
 		// how to get in, in words: the author did not know "prefix" was Ctrl-b
-		return v.prefix + " space, or click"
+		// "Ctrl-b space, or click" read as one chord plus a click: the
+		// prefix is pressed and let go, then the key
+		return "click, or " + v.prefix + " then space"
 	}
 	var keys []string
 	switch {
@@ -811,7 +846,99 @@ var sbActions = [][2]string{
 	{"w", "new worktree agent"},
 	{"t", "shell here"},
 	{"`", "jump to who waits"},
-	{":", "kel command"},
+	{";", "kel command"}, // not `:` — that needs shift
 	{"Q", "quit kel"},
 	{"?", "all keys"},
+}
+
+// quotaLine is the account's quota as one line: the 5-hour window as a bar,
+// its reset, the week, and spend once it matters. What does not fit goes,
+// least needed first; nothing reported is no line (never a made-up 0%).
+func quotaLine(q *fleet.Quota, w int, now int64) string {
+	if q == nil || w <= 0 {
+		return ""
+	}
+	heat := func(p int) string {
+		switch {
+		case p >= 90:
+			return red + bold
+		case p >= 70:
+			return yellow
+		}
+		return ""
+	}
+	type seg struct{ plain, col string }
+	var five, reset5, week, spend *seg
+	if f := q.FiveHour; f != nil {
+		if f.Pct == nil {
+			five = &seg{"█████ ?", dim + "█████" + reset + " " + dim + "?" + reset}
+		} else {
+			p := int(*f.Pct)
+			n := (p + 19) / 20
+			if n > 5 {
+				n = 5
+			}
+			bar := strings.Repeat("█", n)
+			track := strings.Repeat("█", 5-n)
+			pct := fmt.Sprintf("%d%%", p)
+			five = &seg{bar + track + " " + pct, heat(p) + bar + reset + dim + track + reset + " " + heat(p) + pct + reset}
+			if f.ResetsAt != nil && int64(*f.ResetsAt) > now {
+				d := humanizeSecs(int64(*f.ResetsAt) - now)
+				reset5 = &seg{" " + d, dim + " " + d + reset}
+			}
+		}
+	}
+	if s := q.SevenDay; s != nil {
+		if s.Pct == nil {
+			week = &seg{"wk ?", dim + "wk ?" + reset}
+		} else {
+			p := int(*s.Pct)
+			t := fmt.Sprintf("wk %d%%", p)
+			week = &seg{t, heat(p) + t + reset}
+		}
+	}
+	if s := q.Spend; s != nil && s.Pct != nil && *s.Pct >= 50 {
+		p := int(*s.Pct)
+		t := fmt.Sprintf("spend %d%%", p)
+		spend = &seg{t, heat(p) + t + reset}
+	}
+	build := func(label bool, parts ...*seg) (string, int) {
+		var plain, col []string
+		head := ""
+		for _, p := range parts {
+			if p == nil {
+				continue
+			}
+			if p == reset5 { // glued to the 5-hour figure
+				if len(plain) > 0 {
+					plain[len(plain)-1] += p.plain
+					col[len(col)-1] += p.col
+				}
+				continue
+			}
+			plain, col = append(plain, p.plain), append(col, p.col)
+		}
+		if len(plain) == 0 {
+			return "", 0
+		}
+		if label {
+			head = "claude "
+		}
+		n := len([]rune(head + strings.Join(plain, " · ")))
+		return dim + head + reset + strings.Join(col, dim+" · "+reset), n
+	}
+	for _, try := range [][]*seg{
+		{five, reset5, week, spend},
+		{five, reset5, week},
+		{five, week, spend},
+		{five, week},
+		{five},
+	} {
+		for _, label := range []bool{true, false} {
+			if s, n := build(label, try...); s != "" && n <= w {
+				return s
+			}
+		}
+	}
+	return ""
 }

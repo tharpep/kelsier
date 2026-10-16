@@ -279,7 +279,7 @@ where it already is** — which is exactly what a sidebar per window does.
 | sections | *built (M3).* **`spaces` above `agents`** (§5), after herdr, replacing the single repo → worktree → pane tree |
 | mouse | *built (M3).* **First-class.** A click selects and jumps; the wheel scrolls; every gesture a key does on a row, a click can reach. Bubble Tea v2 reports mouse events; tmux passes them to the pane under the pointer with `mouse on`, which kel's config already sets |
 | done, until seen | *built (M3).* **`done` stays loud until you have looked at the agent**, then quietens — herdr's semantics, and what makes the dots worth reading. A **flag on `done`, not a new state**: `kel jump`, the notifications and every reader that matches on state are untouched. When "looked at" happened is recorded from the window-change event the sidebar already receives (§9) |
-| footer | *built 2026-10-15, after daily use.* **The keys for what is selected, and only while the sidebar has the keyboard.** The author did not want to remember keys and did not want a busier sidebar, so the one footer line teaches them: an agent shows `e edit · p plan · x kill · ?`, a space `f files · g git · d diff · ?`, a server `o open · …`, as many as fit, then `?` for the rest; `enter` is left out as the key everybody tries. Without the keyboard it reads `prefix space` — how to get in. Focus comes from the terminal's focus events (kel sets `focus-events on`), else `#{pane_active}` on each tick, and any key or click proves it |
+| footer | *built 2026-10-15, after daily use.* **The keys for what is selected, and only while the sidebar has the keyboard.** The author did not want to remember keys and did not want a busier sidebar, so the one footer line teaches them: an agent shows `e edit · p plan · x kill · ?`, a space `f files · g git · d diff · ?`, a server `o open · …`, as many as fit, then `?` for the rest; `enter` is left out as the key everybody tries. Without the keyboard it reads `click, or Ctrl-b then space` — how to get in, with "then" because `Ctrl-b space` read as one chord (2026-10-16) — or, while an agent waits, `1 waiting 6m · click to jump`, the alarm tmux's bar used to carry. Focus comes from the terminal's focus events (kel sets `focus-events on`), else `#{pane_active}` on each tick, and any key or click proves it |
 | actions | *built 2026-10-15, after daily use.* **The keys that do not depend on the selection, at the foot of the sidebar, clickable** — `n` new agent · `w` worktree agent · `t` shell · `Q` quit · `?` all keys. Only when the lists leave room; the same keys as everywhere, so one surface still (invariant 6). The author found the lower half empty and the keys hard to recall |
 | `kel>` prompt | *built 2026-10-15.* **`prefix k`** runs a typed kel command from wherever you are — the author asked where kel commands are meant to be typed when every pane is an agent. A one-line answer is a message, a longer one a popup, never view-mode on your pane |
 | visual language | *built (M3).* §5d. Settled on rendered frames, approved by the author, before M3 was wired to live data; the background is true black (`colour16`), the author's call after `colour234` read as grey |
@@ -432,10 +432,15 @@ facts moved.
 | agent state, per-agent context % and cost | **sidebar**, per agent | — |
 | listening ports | **sidebar**, on the space whose server holds them | the bar's machine segment |
 | pane count | **sidebar** — it *is* the list | the bar |
-| quota: 5 h with reset, weekly | **the bar** — per account, belongs to no pane | Claude's row |
-| total cost of live sessions | **the bar** — an aggregate has no row | — |
-| waiting count, oldest wait | **the bar** — the alarm, visible while the sidebar is scrolled, filtered or hidden | (the sidebar shows each dot; the bar the count) |
+| quota: 5 h with reset, weekly | **the sidebar's last line** — per account, belongs to no pane (the bar's, while the sidebar is off) | Claude's row |
+| total cost of live sessions | the bar, while the sidebar is off — an aggregate has no row; with the sidebar, each agent's own cost | — |
+| waiting count, oldest wait | **the sidebar's footer** while it lacks the keyboard — the alarm, a click jumps (the bar's, while the sidebar is off) | (the sidebar shows each dot) |
 | keys, the restore hint | **the sidebar's footer** | startup text |
+
+**tmux's bar is off while sidebars show** (2026-10-16): two status lines
+stacked under every agent — the bar, and Claude's row — read as one repeated
+thing, so kel sets the session's `status off` with the first sidebar and
+`kel sidebar off` unsets it.
 
 **When the sidebar is hidden, the bar takes location back.** Hiding is one
 global gesture (`kel sidebar off`, which leaves `sidebar-off` in the state

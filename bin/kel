@@ -341,6 +341,11 @@ sidebar_ensure() { # wid
     "set-option -w -t '$wid' @kel-has-sidebar 1 ; split-window -hbdf -l $KEL_SIDEBAR_WIDTH -t '$wid' -c '#{pane_current_path}' -e 'KEL_BIN=$SELF' \"exec '$KEL_TOP_BIN' --sidebar\" ; set-option -p -t '$wid.{top-left}' @kel-sidebar 1" \
     2>/dev/null || true
   sidebar_style "$wid"
+  # tmux's bar goes while sidebars show: it repeated what the sidebar and
+  # Claude's own row already say, two status lines stacked (the author,
+  # 2026-10-16). The quota it carried is the sidebar's last line now. A
+  # session option, so kel's popups keep their bars and `✕ close`.
+  tmux set-option -t "$wid" status off 2>/dev/null || true
 }
 
 # per-pane styles are tmux 3.1+; below that the sidebar just wears the
@@ -414,6 +419,8 @@ cmd_sidebar() { # on | off
       tmux list-panes -a -F '#{@kel-sidebar} #{pane_id}' 2>/dev/null \
         | while read -r flag id; do [ "$flag" = 1 ] && tmux kill-pane -t "$id" 2>/dev/null; done
       for wid in $(kel_windows | cut -f3); do tmux set-option -wu -t "$wid" @kel-has-sidebar 2>/dev/null; done
+      # the bar comes back, with where the focused pane stands (--here)
+      tmux set-option -u -t "=$KEL_PREFIX:" status 2>/dev/null
       say "sidebar off — kel sidebar on brings it back" ;;
     on)
       rm -f "$SIDEBAR_OFF"
@@ -590,7 +597,7 @@ worktree_unsafe() { # cwd
 # --------------------------------------------------------------------------
 cmd_new() {
   need tmux; need jq
-  local name='' worktree=0 agent="$KEL_AGENT" start_agent=1 group_override=''
+  local name='' dir='' worktree=0 agent="$KEL_AGENT" start_agent=1 group_override=''
   while [ $# -gt 0 ]; do
     case "$1" in
       -w|--worktree) worktree=1 ;;
@@ -598,11 +605,22 @@ cmd_new() {
       --agent)       shift; agent="${1:-}"; [ -n "$agent" ] || die "--agent needs a command" ;;
       --no-agent)    start_agent=0 ;;
       -*)            die "kel new: unknown flag $1" ;;
-      *)             [ -z "$name" ] || die "kel new: unexpected argument '$1'"; name="$1" ;;
+      *)             if [ -z "$name" ]; then name="$1"
+                     elif [ -z "$dir" ]; then dir="$1"
+                     else die "kel new: unexpected argument '$1'"; fi ;;
     esac
     shift
   done
-  [ -n "$name" ] || die "usage: kel new <name> [-w] [--group G] [--agent CMD] [--no-agent]"
+  [ -n "$name" ] || die "usage: kel new <name> [dir] [-w] [--group G] [--agent CMD] [--no-agent]"
+  # a directory instead of a name: the agent is named after its folder. So
+  # an agent can start anywhere without a shell to cd in first (2026-10-16)
+  if [ -z "$dir" ] && [ -d "$name" ] && { ! slug_ok "$name" || [ "$name" = . ] || [ "$name" = .. ]; }; then
+    dir="$name"; name="$(basename "$(cd "$dir" && pwd -P)" | tr -c 'A-Za-z0-9._\n-' '-')"
+  fi
+  if [ -n "$dir" ]; then
+    [ -d "$dir" ] || die "no such directory: $dir"
+    cd "$dir" || die "cannot enter $dir"
+  fi
   slug_ok "$name" || die "name must be a slug (A-Z a-z 0-9 . _ -)"
 
   local repo cwd branch='' isolation='inplace' group
@@ -1752,7 +1770,7 @@ popup() {
          set-option -t "=$name:" status on \; \
          set-option -t "=$name:" status-style "bg=default,fg=colour245" \; \
          set-option -t "=$name:" status-left-length 60 \; \
-         set-option -t "=$name:" status-left "#[range=user|close]#[fg=colour255,bold] ✕ close #[norange]#[fg=colour240] or $(prefix_words) q" \; \
+         set-option -t "=$name:" status-left "#[range=user|close]#[fg=colour255,bold] ✕ close #[norange]#[fg=colour240] or $(prefix_words) then q" \; \
          set-option -t "=$name:" status-right "" \; \
          set-option -t "=$name:" window-status-format "" \; \
          set-option -t "=$name:" window-status-current-format "" \; \
@@ -1770,7 +1788,7 @@ popup() {
   # "prefix q" told the author nothing: inside a Claude popup esc and q are
   # Claude's, and the title must name the key that actually closes it
   local pk; pk="$(prefix_words)"
-  title="${title//prefix q/$pk q}"
+  title="${title//prefix q/$pk then q}"
   local -a opt=( -EE -w "${KEL_POPUP_W:-90%}" -h "${KEL_POPUP_H:-85%}" -d "$dir" -T " $title " )
   tmux_at_least 3 3 && opt+=( -b rounded )            # border styles are 3.3+
   [ -n "${TMUX_PANE:-}" ] && opt+=( -t "$TMUX_PANE" )

@@ -74,6 +74,7 @@ type sbModel struct {
 
 	mode   sbMode
 	input  string // the name being typed
+	cands  string // tab's choices when a typed directory is ambiguous
 	target string // the entry a pending kill or rename acts on
 	msg    string // the last command's result, shown until the next key
 	msgBad bool
@@ -276,10 +277,18 @@ func (m sbModel) view() sbView {
 	// every prompt says how to answer it, on a line you can also click
 	case modeFilter:
 		v.footer, v.footerColour, v.hint2 = "/"+m.input+"▏", "", "enter keep · esc clear"
-	case modeNew:
-		v.footer, v.footerColour, v.hint2 = "new: "+m.input+"▏", "", "enter ok · esc cancel"
-	case modeNewWorktree:
-		v.footer, v.footerColour, v.hint2 = "new worktree: "+m.input+"▏", "", "enter ok · esc cancel"
+	case modeNew, modeNewWorktree:
+		// where it will start, said before enter: the selected space, or
+		// the directory typed after the name
+		what := "new"
+		if m.mode == modeNewWorktree {
+			what = "new worktree"
+		}
+		label := what + " in " + m.newWhere() + ": "
+		v.footer, v.footerColour, v.hint2 = label+tail(m.input+"▏", m.width-len([]rune(label))), "", "enter ok · esc cancel · tab dir"
+		if m.cands != "" {
+			v.hint2 = m.cands
+		}
 	case modeRename:
 		v.footer, v.footerColour, v.hint2 = "rename: "+m.input+"▏", "", "enter ok · esc cancel"
 	case modeKill:
@@ -559,7 +568,7 @@ func (m sbModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		_, refs := renderView(m.view(), m.width, m.height, time.Now().Unix())
-		if msg.Y >= 0 && msg.Y < len(refs) && refs[msg.Y].kind == "hint2" {
+		if msg.Y >= 0 && msg.Y < len(refs) && refs[msg.Y].kind == "hint2" && m.cands == "" {
 			// a prompt's choices: whichever word was clicked is that key
 			return m.key(hintKey(m.view().hint2, msg.X))
 		}
@@ -643,10 +652,10 @@ func (m sbModel) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			if m.mode == modeFilter {
 				m.ui.filter = ""
 			}
-			m.mode, m.input = modeNormal, ""
+			m.mode, m.input, m.cands = modeNormal, "", ""
 		case "enter":
 			mode, name := m.mode, strings.TrimSpace(m.input)
-			m.mode, m.input = modeNormal, ""
+			m.mode, m.input, m.cands = modeNormal, "", ""
 			if name == "" || mode == modeFilter {
 				return m, nil
 			}
@@ -660,22 +669,38 @@ func (m sbModel) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 				return m, runKel("", []string{"TMUX_PANE=" + a.pane}, "rename", name)
 			default:
 				dir, group := m.spaceFor(m.ui.sel)
+				nm, typed, err := parseNew(name, os.Getenv("HOME"))
+				if err != "" {
+					m.msg, m.msgBad = err, true
+					return m, nil
+				}
 				args := []string{"new"}
 				if mode == modeNewWorktree {
 					args = append(args, "-w")
 				}
-				if group != "" && group != "misc" {
+				if typed != "" {
+					// a directory of your own: its repo names the group,
+					// as `kel new` run there would
+					dir = typed
+				} else if group != "" && group != "misc" {
 					args = append(args, "--group", group)
 				}
-				return m, runKel(dir, nil, append(args, name)...)
+				return m, runKel(dir, nil, append(args, nm)...)
+			}
+		case "tab":
+			if m.mode == modeNew || m.mode == modeNewWorktree {
+				m.input, m.cands = completeDir(m.input, os.Getenv("HOME"))
+				return m, nil
 			}
 		case "backspace":
+			m.cands = ""
 			if r := []rune(m.input); len(r) > 0 {
 				m.input = string(r[:len(r)-1])
 			}
 		default:
 			if msg.Text != "" {
 				m.input += msg.Text
+				m.cands = ""
 			}
 		}
 		if m.mode == modeFilter {
@@ -751,8 +776,10 @@ func (m sbModel) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 	case "`":
 		return m, runKel("", nil, "jump")
-	case ":":
-		// tmux's own prompt, as Ctrl-b k opens it: type a kel command
+	case ";", ":":
+		// tmux's own prompt, as Ctrl-b k opens it: type a kel command.
+		// `;` because `:` needs shift (the author, 2026-10-16); `:` still
+		// works for the hands that try it
 		_ = exec.Command("tmux", "command-prompt", "-p", "kel",
 			"run-shell -b \""+kelBin()+" _prompt '%%' >/dev/null 2>&1\"").Run()
 	case "?":
@@ -785,10 +812,13 @@ var sbHelp = [][2]string{
 	{"click", "jump · fold"},
 	{"/", "filter · esc clears"},
 	{"n", "new agent here"},
+	{"n name dir", "...or in dir (tab)"},
 	{"w", "new worktree agent"},
 	{"r", "rename agent"},
 	{"x", "kill agent"},
 	{"t", "shell window here"},
+	{";", "a kel command"},
+	{"`", "next waiting agent"},
 	{"Q", "quit kel (saved first)"},
 	{"f", "files (yazi)"},
 	{"g", "git (lazygit)"},
@@ -797,10 +827,11 @@ var sbHelp = [][2]string{
 	{"o", "open server in browser"},
 	{"p", "agent's plan and tasks"},
 	{"esc", "back to your pane"},
-	{"P space", "focus the sidebar"},
-	{"P `", "next waiting agent"},
-	{"P k", "a kel command"},
-	{"P q", "close a popup"},
+	{"P", ""},
+	{"  space", "focus the sidebar"},
+	{"  `", "next waiting agent"},
+	{"  k", "a kel command"},
+	{"  q", "close a popup"},
 }
 
 func (m sbModel) render() string {
@@ -812,7 +843,13 @@ func (m sbModel) render() string {
 			pk = "Ctrl-b"
 		}
 		for _, h := range sbHelp {
-			k := strings.Replace(h[0], "P ", pk+" ", 1) // the real prefix, in words
+			if h[0] == "P" {
+				// the prefix keys under one heading that says how they go:
+				// "Ctrl-b space" read as one chord (the author, 2026-10-16)
+				b.WriteString(dim + truncate("anywhere: "+pk+", let go, then", m.width) + reset + "\n")
+				continue
+			}
+			k := h[0]
 			b.WriteString(truncate(pad(k, 13), m.width) + dim + truncate(h[1], m.width-13) + reset + "\n")
 		}
 		b.WriteString(dim + truncate("any key or a click closes", m.width) + reset)
@@ -963,10 +1000,146 @@ func hintKey(hint string, x int) tea.KeyPressMsg {
 				return tea.KeyPressMsg{Code: tea.KeyEscape}
 			case "enter":
 				return tea.KeyPressMsg{Code: tea.KeyEnter}
+			case "tab":
+				return tea.KeyPressMsg{Code: tea.KeyTab}
 			}
 			return tea.KeyPressMsg{Code: rune(k[0]), Text: k}
 		}
 		pos += n + 3
 	}
 	return tea.KeyPressMsg{}
+}
+
+// parseNew reads what n / w typed: a name, a directory, or a name and then a
+// directory — so an agent can start anywhere without a shell to cd in first.
+// A word is a directory when it looks like a path (~, /, .); a directory
+// alone names the agent after its folder. err is what to say instead.
+func parseNew(in, home string) (name, dir, err string) {
+	f := strings.Fields(in)
+	isPath := func(s string) bool {
+		return strings.HasPrefix(s, "~") || strings.HasPrefix(s, "/") || strings.HasPrefix(s, ".")
+	}
+	switch {
+	case len(f) == 1 && !isPath(f[0]):
+		return f[0], "", ""
+	case len(f) == 1:
+		dir = f[0]
+	case len(f) == 2 && isPath(f[1]):
+		name, dir = f[0], f[1]
+	default:
+		return "", "", "type a name, a directory, or both"
+	}
+	dir = expandHome(dir, home)
+	if st, e := os.Stat(dir); e != nil || !st.IsDir() {
+		return "", "", "no such directory: " + tildify(dir)
+	}
+	if abs, e := filepath.Abs(dir); e == nil {
+		dir = abs
+	}
+	if name == "" {
+		name = slugify(filepath.Base(dir))
+	}
+	return name, dir, ""
+}
+
+func expandHome(p, home string) string {
+	if p == "~" {
+		return home
+	}
+	if strings.HasPrefix(p, "~/") {
+		return filepath.Join(home, p[2:])
+	}
+	return p
+}
+
+// slugify makes a folder name a kel name (A-Z a-z 0-9 . _ -).
+func slugify(s string) string {
+	var b strings.Builder
+	for _, r := range s {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '.', r == '_', r == '-':
+			b.WriteRune(r)
+		default:
+			b.WriteByte('-')
+		}
+	}
+	if out := strings.Trim(b.String(), "-."); out != "" {
+		return out
+	}
+	return "agent"
+}
+
+// completeDir completes the directory being typed — the last word, when it
+// looks like a path — as a shell's tab would: as far as it is unambiguous,
+// and the choices, when several remain, for the line above the prompt.
+// Directories only; dotfiles only when asked for with a dot.
+func completeDir(in, home string) (string, string) {
+	i := strings.LastIndexByte(in, ' ')
+	head, word := in[:i+1], in[i+1:]
+	if word == "" || !(strings.HasPrefix(word, "~") || strings.HasPrefix(word, "/") || strings.HasPrefix(word, ".")) {
+		if word == "" {
+			return in + "~/", ""
+		}
+		return in, "a directory starts with ~ / or ."
+	}
+	if word == "~" {
+		return head + "~/", ""
+	}
+	j := strings.LastIndexByte(word, '/')
+	parent, part := word[:j+1], word[j+1:]
+	ents, err := os.ReadDir(expandHome(strings.TrimSuffix(parent, "/"), home) + "/")
+	if parent == "" || err != nil {
+		return in, ""
+	}
+	var names []string
+	for _, e := range ents {
+		n := e.Name()
+		if !strings.HasPrefix(n, part) || (strings.HasPrefix(n, ".") && !strings.HasPrefix(part, ".")) {
+			continue
+		}
+		if e.IsDir() {
+			names = append(names, n)
+		} else if e.Type()&os.ModeSymlink != 0 {
+			if st, err := os.Stat(filepath.Join(expandHome(strings.TrimSuffix(parent, "/"), home), n)); err == nil && st.IsDir() {
+				names = append(names, n)
+			}
+		}
+	}
+	switch len(names) {
+	case 0:
+		return in, "no directory matches"
+	case 1:
+		return head + parent + names[0] + "/", ""
+	}
+	common := names[0]
+	for _, n := range names[1:] {
+		for !strings.HasPrefix(n, common) {
+			common = common[:len(common)-1]
+		}
+	}
+	return head + parent + common, strings.Join(names, " ")
+}
+
+// newWhere says where n / w will start the agent, for the prompt.
+func (m sbModel) newWhere() string {
+	if _, dir, err := parseNew(m.input, os.Getenv("HOME")); err == "" && dir != "" {
+		return filepath.Base(dir) // the folder; the path itself is on the line
+	}
+	if strings.Contains(m.input, "/") || strings.Contains(m.input, "~") {
+		return "?"
+	}
+	if sp, ok := m.selSpace(m.ui.sel); ok {
+		return sp.label
+	}
+	return "~"
+}
+
+// tail keeps the end of what is being typed — where the cursor is — when it
+// is wider than the room: `…code/kelsier/▏`, not `fix ~/co…`.
+func tail(s string, w int) string {
+	r := []rune(s)
+	if w <= 1 || len(r) <= w {
+		return s
+	}
+	return "…" + string(r[len(r)-w+1:])
 }

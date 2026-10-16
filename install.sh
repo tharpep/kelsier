@@ -249,9 +249,9 @@ cat <<'EOF'
 
   Use:
     kel                 go to (or start) this repo's agent — never asks anything
-    kel new <name>      new window + agent   (-w = git worktree, --group G)
+    kel new <name> [dir]  new window + agent there   (-w = git worktree, --group G)
     kel restore         bring back the previous workspace   (--list to choose)
     kel sidebar off|on  the pane on the left of every window
-    prefix t            kel top — every agent at a glance   ·   prefix `  next waiting
+    Ctrl-b then space   the sidebar   ·   Ctrl-b then `   next waiting agent
     kel kill <name>     close one      ·   kel doctor    check the machine
 EOF

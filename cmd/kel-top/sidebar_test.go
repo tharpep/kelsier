@@ -165,7 +165,7 @@ func TestSidebarLineRefs(t *testing.T) {
 			t.Errorf("line %d %q maps to %+v", i, l, refs[i])
 		}
 	}
-	if !strings.Contains(lines[len(lines)-1], "Ctrl-b space") {
+	if !strings.Contains(lines[len(lines)-1], "Ctrl-b then space") {
 		t.Error("the footer is not pinned to the last line")
 	}
 }
@@ -201,8 +201,18 @@ func TestSidebarHint(t *testing.T) {
 		l := strings.Split(plain(out), "\n")
 		return l[len(l)-1]
 	}
-	if got := foot(uiState{}, 32); got != "Ctrl-b space, or click" {
-		t.Errorf("unfocused footer: %q", got)
+	// someone waits: the unfocused footer is the alarm, and jumps on a click
+	if got := foot(uiState{}, 32); got != "1 waiting · click to jump" {
+		t.Errorf("unfocused footer with one waiting: %q", got)
+	}
+	out, refs := renderView(buildView(loadFixture(t, "one-agent"), uiState{}), 32, 30, 0)
+	if l := strings.Split(plain(out), "\n"); l[len(l)-1] != "click, or Ctrl-b then space" {
+		t.Errorf("unfocused footer: %q", l[len(l)-1])
+	}
+	out, refs = renderView(buildView(doc, uiState{}), 32, 30, 0)
+	_ = out
+	if r := refs[len(refs)-1]; r.kind != "action" || r.id != "act:`" {
+		t.Errorf("the alarm does not jump: %+v", r)
 	}
 	if got := foot(uiState{focused: true}, 32); !strings.HasPrefix(got, "e edit · p plan · x kill") {
 		t.Errorf("agent footer: %q", got)
@@ -435,5 +445,84 @@ func TestHintKey(t *testing.T) {
 	}
 	if keyWords("C-b") != "Ctrl-b" || keyWords("M-a") != "Alt-a" {
 		t.Error("the prefix must read in words")
+	}
+}
+
+// The quota line gives up what does not fit, least needed first, and says
+// nothing when nothing was reported — never a made-up 0%.
+func TestQuotaLine(t *testing.T) {
+	f := func(v float64) *float64 { return &v }
+	q := &fleet.Quota{
+		FiveHour: &fleet.Window{Pct: f(27), ResetsAt: f(1000 + 12480)},
+		SevenDay: &fleet.Window{Pct: f(51)},
+		Spend:    &fleet.Window{Pct: f(20)},
+	}
+	if got := plain(quotaLine(q, 32, 1000)); got != "claude █████ 27% 3h28m · wk 51%" {
+		t.Errorf("at 32: %q", got)
+	}
+	if got := plain(quotaLine(q, 24, 1000)); got != "█████ 27% 3h28m · wk 51%" {
+		t.Errorf("at 24: %q", got)
+	}
+	if got := plain(quotaLine(q, 18, 1000)); got != "█████ 27% · wk 51%" {
+		t.Errorf("at 18: %q", got)
+	}
+	if quotaLine(nil, 32, 1000) != "" {
+		t.Error("no quota reported must be no line")
+	}
+	if got := plain(quotaLine(&fleet.Quota{FiveHour: &fleet.Window{}}, 32, 1000)); got != "claude █████ ?" {
+		t.Errorf("unknown 5h: %q", got)
+	}
+	q.Spend.Pct = f(60)
+	if got := plain(quotaLine(q, 40, 1000)); !strings.HasSuffix(got, "· spend 60%") {
+		t.Errorf("spend from 50%%: %q", got)
+	}
+}
+
+// n / w take a name, a directory, or both: no shell needed to cd first.
+func TestParseNew(t *testing.T) {
+	home := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(home, "code", "My App"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cases := []struct{ in, name, dir, err string }{
+		{"fix", "fix", "", ""},
+		{"~/code/My App", "", "", "type a name, a directory, or both"},
+		{"~/code", "code", filepath.Join(home, "code"), ""},
+		{"fix ~/code", "fix", filepath.Join(home, "code"), ""},
+		{"fix ~/nope", "", "", "no such directory: ~/nope"},
+		{"a b c", "", "", "type a name, a directory, or both"},
+	}
+	t.Setenv("HOME", home)
+	for _, c := range cases {
+		n, d, e := parseNew(c.in, home)
+		if n != c.name || d != c.dir || e != c.err {
+			t.Errorf("parseNew(%q) = %q %q %q", c.in, n, d, e)
+		}
+	}
+	if slugify("My App") != "My-App" || slugify("...") != "agent" {
+		t.Error("slugify")
+	}
+}
+
+func TestCompleteDir(t *testing.T) {
+	home := t.TempDir()
+	for _, d := range []string{"code/kelsier", "code/kel-old", "code/api", ".config"} {
+		_ = os.MkdirAll(filepath.Join(home, d), 0o755)
+	}
+	_ = os.WriteFile(filepath.Join(home, "code", "kfile"), nil, 0o644)
+	cases := []struct{ in, out, cands string }{
+		{"fix ~/co", "fix ~/code/", ""},
+		{"~/code/a", "~/code/api/", ""},
+		{"~/code/k", "~/code/kel", "kel-old kelsier"},
+		{"~/code/z", "~/code/z", "no directory matches"},
+		{"~/", "~/code/", ""}, // dotfiles only when asked for
+		{"~/.c", "~/.config/", ""},
+		{"fix ", "fix ~/", ""},
+	}
+	for _, c := range cases {
+		out, cands := completeDir(c.in, home)
+		if out != c.out || cands != c.cands {
+			t.Errorf("completeDir(%q) = %q %q", c.in, out, cands)
+		}
 	}
 }

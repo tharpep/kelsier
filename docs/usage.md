@@ -38,6 +38,7 @@ kel                    in a repo: go to (or start) that repo's agent, the way
                        with no workspace running it starts fresh and, if there
                        was one before, says `kel restore` brings it back
 kel new <name>         new window + agent in the current repo   (inplace)
+kel new <name> <dir>   ...in <dir> instead — no cd first; `kel new <dir>` names it after the folder
 kel new <name> -w      ...in a fresh git worktree on a new branch <name>
 kel new <name> --group G       put it in group G instead of the repo's
 kel new <name> --no-agent      just make the window, don't start the agent
@@ -109,11 +110,19 @@ in two sections:
   context % and the cost.
 
 At the foot, when there is room, an `actions` group lists the keys that do
-not depend on the selection — `n` `w` `t`, `` ` `` jump to whoever waits, `:`
-a kel command, `Q` `?`, and `R` restore while a previous workspace waits — and
-each can be clicked. Every prompt says how to answer it on a line you can
-click (`enter ok · esc cancel`, `y yes · n no`), and in the bar, a click on
-`1 waiting` jumps there.
+not depend on the selection — `n` `w` `t`, `` ` `` jump to whoever waits, `;`
+a kel command (`:` works too, but needs shift), `Q` `?`, and `R` restore while a
+previous workspace waits — and each can be clicked. Every prompt says how to
+answer it on a line you can click (`enter ok · esc cancel`, `y yes · n no`).
+
+**`n` and `w` start an agent anywhere.** Type a name and it starts in the
+selected space; type a directory (`~/code/api`, `/srv/x`, `../other`) and it
+starts there, named after the folder; type both (`fix ~/code/api`) for both.
+`tab` completes the directory as a shell would, and the prompt says where the
+agent will start before you press `enter`.
+
+**`Ctrl-b k` means: press Ctrl-b, let go, then press k** — tmux's prefix, then
+the key. kel writes every one of these the same way, using your real prefix.
 
 **`Ctrl-b k`** opens a `kel` prompt at the bottom of the screen, so a kel
 command never needs a shell: type `new docs -w`, `restore`, `url`… A
@@ -122,9 +131,9 @@ one-line answer comes back as a message, a longer one in a popup.
 A blue `▌` marks the selection; where you are is the name in bold. Only states
 that need you are coloured — waiting yellow, working cyan, finished-and-unseen
 green, dead red; idle, seen and unknown are grey, and a doubtful `working?` is
-grey italic. The footer reads `Ctrl-b
-space, or click` until the sidebar has the keyboard, then shows the keys for whatever is
-selected (`e edit · p plan · x kill · ?` on an agent) — `?` lists them all.
+grey italic. The footer reads `click, or Ctrl-b then space` until the sidebar
+has the keyboard — or, while an agent waits on you, `1 waiting 6m · click to
+jump` in yellow — then shows the keys for whatever is selected (`e edit · p plan · x kill · ?` on an agent) — `?` lists them all.
 
 | key | |
 |---|---|
@@ -196,13 +205,25 @@ the label each of the sidebar's spaces carries.
 makes a **pane** inside it, for your own editor, shell or tests. kel tracks
 state per window, so a second agent belongs in its own window.
 
-## The status bar
+## The quota line, and tmux's bar
+
+While sidebars show, **tmux's own bar is off**: it repeated what the sidebar
+and Claude's row already say. The account's quota — the one thing that
+belongs to no pane — is the sidebar's last line:
+
+```
+claude █████ 58% 1h20m · wk 41%
+```
+
+It drops the `claude` label, then the reset time, when the sidebar is narrow;
+no line until a session has reported a quota. The waiting alarm is the
+sidebar's footer (above).
+
+`kel sidebar off` brings tmux's bar back, carrying the same and more:
 
 ```
 claude ███░░ 58% (1h20m) · wk 41%  │  1 waiting 6m · $24.10
 ```
-
-Only what belongs to no single pane — everything per pane is in the sidebar:
 
 | segment | |
 |---|---|
