@@ -341,6 +341,14 @@ the `TodoWrite` design was stale, and the plan turned out to need no new hook.
   read as a chord. The suite went from ~3 min to ~1.5: two 40 s control-mode
   holds were "released" with `kill $!`, which hit tmux while `wait` sat out
   the `sleep` feeding it
+- *phase 2 (2026-10-16):* worktrees nest under their repo — every one `git
+  worktree list` knows, kel's, Claude Code's and hand-made, open or not — with
+  land state; a checkout with several agents says `2 agents`, nothing more;
+  `s` and `kel sweep [path]` remove landed worktrees no window or Claude
+  session stands in (git refuses changes; branches only via `branch -d`).
+  The `?` keys list runs a clicked key, with the hover bar on what a click
+  would run. Phase 3 next: glow, ccusage, gh-dash, freeze + vhs, the
+  `.claude` viewer
 - *found on the way:* M5's `hook_edit` had real newlines inside its `printf`
   format — a quoting slip in its writing that happened to print the same
   thing; rewritten while the plan / edit split went in

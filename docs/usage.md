@@ -59,9 +59,12 @@ kel url [dir|agent]    a worktree's dev-server URLs, one per line; exit 1 for no
 kel top                every agent, sorted so the one needing you is first —
                        state, time in state, LAND, context, cost, last output.
                        j/k scroll, s sort, / filter, q quit   (Ctrl-b t)
-kel sweep [-n] [-f]    close out every finished agent whose branch has landed;
-                       anything dirty, unpushed or unmerged is reported, never
+kel sweep [-n] [-f]    close out every finished agent whose branch has landed,
+                       and every landed worktree no window or Claude session is
+                       in (with its branch, if git agrees it merged); a gone
+                       one is pruned. Dirty, unpushed or unmerged is never
                        touched. -n shows the plan first
+kel sweep <path>       the same, for one worktree — says why when it won't
 kel relaunch [name]    relaunch ONE crashed agent in its existing window
 kel restore [<n>]      bring back a previous workspace — windows, splits,
                        directories, conversations resumed (--no-resume: don't)
@@ -103,7 +106,13 @@ in two sections:
 - **`spaces`** — where things are: one entry per repo checkout or worktree,
   with its branch, `↑` unpushed / `↓` behind, `●` uncommitted files and the
   ports its servers listen on. The space you are in is open, listing its
-  servers, shells and programs; the others are folded.
+  servers, shells and programs; the others are folded. **Every worktree of a
+  repo nests under it** — kel's, Claude Code's own (`.claude/worktrees`) and
+  ones made by hand, open in a window or not — one line each: `└ ● fix-auth
+  ↑1 · review`, grey when no window stands there, `merged` in green when it
+  has landed. `s` sweeps a landed one (`s` elsewhere: everything landed),
+  asking first. A checkout two or more agents work in says so (`2 agents`)
+  — said, never refused.
 - **`agents`** — who needs you, most urgent first: a dot per state (yellow
   waiting, cyan working, green finished-and-not-yet-looked-at, dim idle or
   seen, magenta throttled, red `✕` dead, dim `?` unknown), then how long, the

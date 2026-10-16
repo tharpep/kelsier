@@ -3,7 +3,7 @@
 // It is what `kel _fleet` runs: bin/kel's fleet_json() execs it, and since
 // v0.10 there is no bash fallback — see internal/fleet.
 //
-//	kel-fleet [--dirty] [--land] [--pr] [--panes] [--here]
+//	kel-fleet [--dirty] [--land] [--pr] [--panes] [--here] [--worktrees]
 package main
 
 import (
@@ -28,8 +28,10 @@ func main() {
 			opt.Panes = true
 		case "--here":
 			opt.Here = true
+		case "--worktrees":
+			opt.Worktrees = true
 		case "-h", "--help":
-			fmt.Fprintln(os.Stderr, "usage: kel-fleet [--dirty] [--land] [--pr] [--panes] [--here]")
+			fmt.Fprintln(os.Stderr, "usage: kel-fleet [--dirty] [--land] [--pr] [--panes] [--here] [--worktrees]")
 			return
 		default:
 			fmt.Fprintf(os.Stderr, "kel-fleet: unknown flag %s\n", a)

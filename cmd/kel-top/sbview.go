@@ -51,6 +51,13 @@ type sbSpace struct {
 	unseen     bool
 	current    bool
 	open       bool
+	// phase 2: a repo's worktrees nest under it (fleet.Repo)
+	parent  string      // the main checkout's key, for a linked worktree
+	land    *fleet.Land // a linked worktree's land state; nil = not known
+	closed  bool        // no pane stands here: known from git, not tmux
+	missing bool        // a worktree whose directory is gone
+	agents  int         // agents working in this checkout
+	repo    string      // the repo's name, for a worktree whose label is its branch
 }
 
 type sbAgent struct {
@@ -245,6 +252,9 @@ func buildView(doc fleet.Doc, ui uiState) sbView {
 		}
 		if agentPane[p.WindowID] == p.PaneID {
 			for _, a := range v.agents {
+				if a.wid == p.WindowID && (a.agent.State == nil || *a.agent.State != "dead") {
+					s.agents++
+				}
 				if a.wid == p.WindowID && (s.state == nil || triageRank(a.agent.State) < triageRank(s.state)) {
 					s.state = a.agent.State
 				}
@@ -255,6 +265,43 @@ func buildView(doc fleet.Doc, ui uiState) sbView {
 			continue
 		}
 		s.panes = append(s.panes, p)
+	}
+	if doc.Background != nil {
+		for _, b := range *doc.Background {
+			if b.Git != nil {
+				if i, ok := idx[b.Git.Root]; ok {
+					v.spaces[i].agents++
+				}
+			}
+		}
+	}
+	// every worktree of each repo, nested under it — open in a window or not,
+	// kel's or Claude Code's (.claude/worktrees): the author found worktrees
+	// hard to keep track of. A repo whose main checkout has no pane still
+	// gets its row, to nest under
+	if doc.Repos != nil {
+		add := func(key string, sp sbSpace) int {
+			if i, ok := idx[key]; ok {
+				return i
+			}
+			idx[key] = len(v.spaces)
+			v.spaces = append(v.spaces, sp)
+			return len(v.spaces) - 1
+		}
+		for _, r := range *doc.Repos {
+			add(r.Root, sbSpace{key: r.Root, label: r.Name, cwd: r.Root, closed: true, ports: &[]int{},
+				git: &fleet.Git{Root: r.Root, Branch: r.Branch}})
+			for _, w := range r.Worktrees {
+				i := add(w.Path, sbSpace{key: w.Path, cwd: w.Path, closed: true, ports: &[]int{},
+					git: &fleet.Git{Root: w.Path, Worktree: true, Branch: w.Branch}})
+				s := &v.spaces[i]
+				s.parent, s.land, s.missing, s.repo = r.Root, w.Land, w.Missing, r.Name
+				s.label = filepath.Base(w.Path)
+				if w.Branch != nil {
+					s.label = *w.Branch
+				}
+			}
+		}
 	}
 	for i := range v.spaces {
 		s := &v.spaces[i]
@@ -274,7 +321,7 @@ func buildView(doc fleet.Doc, ui uiState) sbView {
 		}
 	}
 	// stable order, for muscle memory: by label, the main checkout before its
-	// worktrees, then by path
+	// worktrees, then by path; a repo's listed worktrees right under it
 	sort.SliceStable(v.spaces, func(i, j int) bool {
 		si, sj := v.spaces[i], v.spaces[j]
 		if si.label != sj.label {
@@ -286,6 +333,22 @@ func buildView(doc fleet.Doc, ui uiState) sbView {
 		}
 		return si.key < sj.key
 	})
+	{
+		kids := map[string][]sbSpace{}
+		var tops []sbSpace
+		for _, s := range v.spaces {
+			if _, ok := idx[s.parent]; s.parent != "" && ok {
+				kids[s.parent] = append(kids[s.parent], s)
+			} else {
+				tops = append(tops, s)
+			}
+		}
+		v.spaces = v.spaces[:0:0]
+		for _, t := range tops {
+			v.spaces = append(v.spaces, t)
+			v.spaces = append(v.spaces, kids[t.key]...)
+		}
+	}
 
 	if ui.filter != "" {
 		v.applyFilter(strings.ToLower(ui.filter))
@@ -434,6 +497,13 @@ func paneGlyph(kind string) string {
 func spaceDetail(s sbSpace) string {
 	var parts []string
 	switch g := s.git; {
+	case s.closed && g != nil:
+		// known from git alone: no window stands here to say more
+		b := "detached"
+		if g.Branch != nil {
+			b = *g.Branch
+		}
+		return b + " · no window"
 	case g == nil:
 		parts = append(parts, tildify(s.cwd))
 	case g.Branch == nil && g.Dirty == nil:
@@ -466,7 +536,110 @@ func spaceDetail(s sbSpace) string {
 		}
 		parts = append(parts, strings.Join(ps, " "))
 	}
+	if s.agents > 1 {
+		// passive: several agents in one checkout is allowed, just said
+		parts = append(parts, fmt.Sprintf("%d agents", s.agents))
+	}
 	return strings.Join(parts, " · ")
+}
+
+// worktreeDetail is a worktree row's tail, coloured: where it stands, then
+// what landing it needs. Open ones read git live (pane.Git); closed ones the
+// land check alone. merged is green — it is what `s` sweeps.
+func worktreeDetail(s sbSpace) string {
+	if s.missing {
+		return red + "missing" + reset
+	}
+	var parts []string
+	if !s.closed && s.git != nil {
+		g := s.git
+		pos := ""
+		if g.Ahead != nil && *g.Ahead > 0 {
+			pos += fmt.Sprintf("↑%d", *g.Ahead)
+		}
+		if g.Dirty == nil {
+			pos = strings.TrimSpace(pos + " ●?")
+		} else if *g.Dirty > 0 {
+			pos = strings.TrimSpace(fmt.Sprintf("%s ●%d", pos, *g.Dirty))
+		}
+		if pos != "" {
+			parts = append(parts, dim+pos+reset)
+		}
+	}
+	if l := s.land; l == nil {
+		parts = append(parts, dim+"?"+reset)
+	} else {
+		n := 0
+		if l.N != nil {
+			n = int(*l.N)
+		}
+		switch l.Code {
+		case "merged":
+			parts = append(parts, green+"merged"+reset)
+		case "review":
+			parts = append(parts, dim+"review"+reset)
+		case "no_pr":
+			parts = append(parts, dim+"no PR"+reset)
+		case "behind":
+			parts = append(parts, dim+fmt.Sprintf("behind %d", n)+reset)
+		case "unknown":
+			parts = append(parts, dim+"?"+reset)
+		case "dirty":
+			if s.closed {
+				parts = append(parts, dim+fmt.Sprintf("●%d", n)+reset)
+			}
+		case "unpushed":
+			if s.closed {
+				parts = append(parts, dim+fmt.Sprintf("↑%d unpushed", n)+reset)
+			}
+		}
+	}
+	if s.agents > 1 {
+		parts = append(parts, dim+fmt.Sprintf("%d agents", s.agents)+reset)
+	}
+	return strings.Join(parts, dim+" · "+reset)
+}
+
+// truncateStyled cuts a string holding colour codes to w visible columns.
+func truncateStyled(s string, w int) string {
+	var b strings.Builder
+	n, esc := 0, false
+	r := []rune(s)
+	for i, c := range r {
+		switch {
+		case c == '\x1b':
+			esc = true
+		case esc:
+			if c == 'm' {
+				esc = false
+			}
+		default:
+			if n == w-1 && visibleAfter(r[i+1:]) {
+				b.WriteString("…" + reset)
+				return b.String()
+			}
+			n++
+		}
+		b.WriteRune(c)
+	}
+	return b.String()
+}
+
+func visibleAfter(r []rune) bool {
+	esc := false
+	for _, c := range r {
+		switch {
+		case c == '\x1b':
+			esc = true
+		case esc:
+			if c == 'm' {
+				esc = false
+			}
+		default:
+			return true
+		}
+	}
+	return false
 }
 
 func tildify(p string) string {
@@ -593,8 +766,26 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 			d, c := stateLook(s.state, s.unseen)
 			dot = c + d + reset
 		}
-		add(lead(id)+dot+" "+weight(truncate(s.label, text), s.current), r)
-		add("   "+dim+truncate(spaceDetail(s), text)+reset, r)
+		indent := ""
+		if s.parent != "" {
+			// a worktree: one line under its repo, the branch and what
+			// landing it needs — `└ ● fix-auth  ↑2 · review`
+			label := truncate(s.label, text-2)
+			if s.closed {
+				label = dim + label + reset
+			}
+			row := lead(id) + dim + "└" + reset + dot + " " + weight(label, s.current)
+			if d := worktreeDetail(s); d != "" {
+				if room := text - 2 - len([]rune(s.label)) - 2; room > 2 {
+					row += "  " + truncateStyled(d, room)
+				}
+			}
+			add(row, r)
+			indent = "  "
+		} else {
+			add(lead(id)+dot+" "+weight(truncate(s.label, text), s.current), r)
+			add("   "+dim+truncate(spaceDetail(s), text)+reset, r)
+		}
 		if !s.open {
 			continue
 		}
@@ -612,7 +803,7 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 					label += dim + " · " + truncate(p.WindowName, room) + reset
 				}
 			}
-			add(lead(p.PaneID)+" "+paneGlyph(p.Kind)+" "+weight(label, p.Current), pr)
+			add(lead(p.PaneID)+indent+" "+paneGlyph(p.Kind)+" "+weight(label, p.Current), pr)
 		}
 	}
 
@@ -812,6 +1003,11 @@ func hint(v sbView, w int) string {
 		keys = []string{"e edit", "p plan", "x kill", "r rename", "enter"}
 	case strings.HasPrefix(v.sel, "s:"):
 		keys = []string{"f files", "g git", "e edit", "d diff", "n new", "t shell"}
+		for _, s := range v.spaces {
+			if spaceID(s.key) == v.sel && s.land != nil && s.land.Code == "merged" && s.closed {
+				keys = append([]string{"s sweep"}, keys...) // what it is there for
+			}
+		}
 	default: // a pane
 		keys = []string{"f files", "g git", "e edit", "enter"}
 		for _, s := range v.spaces {

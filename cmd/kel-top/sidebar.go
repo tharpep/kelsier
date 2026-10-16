@@ -62,6 +62,7 @@ const (
 	modeRename
 	modeKill
 	modeQuit
+	modeSweep
 )
 
 type sbModel struct {
@@ -295,6 +296,15 @@ func (m sbModel) view() sbView {
 		v.footer, v.footerColour, v.hint2 = "kill "+m.entryName(m.target)+"?", yellow, "y yes · n no"
 	case modeQuit:
 		v.footer, v.footerColour, v.hint2 = "quit kel?", yellow, "y yes · n no"
+	case modeSweep:
+		q := "sweep everything merged?"
+		if m.target != "" {
+			q = "sweep " + filepath.Base(m.target) + "?"
+			if sp, ok := m.selSpace(spaceID(m.target)); ok {
+				q = "sweep " + sp.label + "?"
+			}
+		}
+		v.footer, v.footerColour, v.hint2 = q, yellow, "y yes · n no"
 	default:
 		if m.msg != "" {
 			v.footer, v.footerColour = m.msg, ""
@@ -387,7 +397,16 @@ func (m sbModel) spaceFor(id string) (dir, group string) {
 	if !ok {
 		return os.Getenv("HOME"), ""
 	}
-	return s.dir(), s.label
+	return s.dir(), s.repoName()
+}
+
+// repoName is the group a space's agents belong in: the repo, which for a
+// nested worktree is not its label (that is the branch)
+func (s sbSpace) repoName() string {
+	if s.repo != "" {
+		return s.repo
+	}
+	return s.label
 }
 
 func (s sbSpace) dir() string {
@@ -401,9 +420,9 @@ func (s sbSpace) dir() string {
 // there is one — `kelsier/fix-auth`
 func (s sbSpace) title() string {
 	if s.git != nil && s.git.Branch != nil {
-		return s.label + "/" + *s.git.Branch
+		return s.repoName() + "/" + *s.git.Branch
 	}
-	return s.label
+	return s.repoName()
 }
 
 // selSpace is the space the selected entry stands in.
@@ -637,6 +656,18 @@ func (m sbModel) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			return m, runKel("", nil, "quit")
 		}
 		return m, nil
+	case modeSweep:
+		m.mode = modeNormal
+		if k == "y" {
+			// kel sweep decides, fresh: it removes only what landed, and git
+			// itself refuses a worktree with changes in it (invariant 1)
+			m.msg = "sweeping…"
+			if m.target != "" {
+				return m, runKel("", nil, "sweep", m.target)
+			}
+			return m, runKel("", nil, "sweep")
+		}
+		return m, nil
 	case modeKill:
 		m.mode = modeNormal
 		if k == "y" {
@@ -774,6 +805,12 @@ func (m sbModel) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, runKel(dir, nil, "shell", dir)
 	case "Q", "shift+q":
 		m.mode = modeQuit
+	case "s":
+		// on a worktree: that one; anywhere else: everything that landed
+		m.mode, m.target = modeSweep, ""
+		if sp, ok := m.selSpace(m.view().sel); ok && strings.HasPrefix(m.view().sel, "s:") && sp.parent != "" {
+			m.target = sp.key
+		}
 	case "R", "shift+r":
 		if m.ui.restore {
 			m.msg = "restoring…"
@@ -824,6 +861,7 @@ var sbHelp = [][2]string{
 	{"t", "shell window here"},
 	{";", "a kel command"},
 	{"`", "next waiting agent"},
+	{"s", "sweep what landed"},
 	{"Q", "quit kel (saves)"},
 	{"f", "files (yazi)"},
 	{"g", "git (lazygit)"},
@@ -847,7 +885,7 @@ func (m sbModel) render() string {
 		if pk == "" {
 			pk = "Ctrl-b"
 		}
-		for _, h := range sbHelp {
+		for i, h := range sbHelp {
 			if h[0] == "P" {
 				// the prefix keys under one heading that says how they go:
 				// "Ctrl-b space" read as one chord (the author, 2026-10-16)
@@ -856,10 +894,16 @@ func (m sbModel) render() string {
 			}
 			// what a click runs is bold; the rest is how to move, not a verb
 			k, kc := h[0], dim
+			lead := " "
 			if helpKey(k) != "" {
 				kc = bold
+				// the same hover bar as every other button: what a click
+				// would run shows before the click (line i+1, hover is +1)
+				if m.ui.hover == i+2 {
+					lead = dim + "▏" + reset
+				}
 			}
-			b.WriteString(kc + truncate(pad(k, 13), m.width) + reset + dim + truncate(h[1], m.width-13) + reset + "\n")
+			b.WriteString(lead + kc + truncate(pad(k, 12), m.width-1) + reset + dim + truncate(h[1], m.width-13) + reset + "\n")
 		}
 		b.WriteString(dim + truncate("click a bold key to run it", m.width) + reset)
 		return b.String()
@@ -1169,7 +1213,7 @@ func helpKey(row string) string {
 		return ""
 	default:
 		switch f[0] {
-		case "/", "n", "w", "r", "x", "t", ";", "`", "Q", "f", "g", "d", "e", "o", "p":
+		case "/", "n", "w", "r", "x", "t", ";", "`", "s", "Q", "f", "g", "d", "e", "o", "p":
 			return f[0]
 		}
 	}

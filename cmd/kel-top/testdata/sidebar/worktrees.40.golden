@@ -1,0 +1,43 @@
+[2mspaces[0m
+ [35m◌[0m api-gw
+   [2mmain ↓4 · :8000 · 2 agents[0m
+ [36m●[0m [1mkelsier[0m
+   [2mmain ↑2 ●3[0m
+  [2m▸[0m nvim
+ [2m└[0m[32m●[0m docs
+ [2m└[0m[33m[1m●[0m fix-auth  [2m↑1[0m[2m · [0m[2mreview[0m
+ [2m└[0m  [2mgone[0m  [31mmissing[0m
+ [2m└[0m  [2mold-ui[0m  [32mmerged[0m
+ [2m└[0m  [2mworktree-agent-af1a[0m  [2m●3[0m
+   misc
+   [2m~[0m
+   notes
+   [2mmain · no window[0m
+ [2m└[0m  [2mwip[0m  [2m↑4 unpushed[0m
+ [2m○[0m web-dashboard
+   [2mmain · :3000 :3001[0m
+ [2m└[0m[36m●[0m usage-charts  [2m●5[0m[2m · [0m[2mno PR[0m
+
+[2magents[0m
+ [33m[1m●[0m fix-auth  [2mkelsier[0m
+   [33m[1mwaiting 6m[0m · allow Bash?[0m
+   [2m└[0m [36m●[0m fix-auth · bg · working
+[34m▌[0m[36m●[0m [1mkelsier[0m
+   [36mworking 2m[0m[2m · 36% · $10.65[0m
+   [2m└[0m [36m●[0m [2mReading parser.go · Explore[0m
+   [2m└[0m [2m✓[0m [2mRun the tests[0m
+ [36m●[0m usage-charts  [2mweb-dashboard[0m
+   [36mworking 30s[0m[2m · 63% · $4.75[0m
+ [32m●[0m docs  [2mkelsier[0m
+   [32mdone 15m[0m[2m · 22% · $0.84[0m
+ [35m◌[0m rate-limits  [2mapi-gw[0m
+   [35mthrottled 10m[0m[2m · 71% · $6.20[0m
+ [2m○[0m dashboard  [2mweb-dashboard[0m
+   [2mdone 30m[0m[2m · 44% · $2.05[0m
+ [2m○[0m gateway  [2mapi-gw[0m
+   [2midle 1h06m[0m[2m · 12% · $0.40[0m
+ [31m✕[0m spike  [2mweb-dashboard[0m
+   [31mdead 2h00m[0m[2m · ctx ?[0m
+ [33m[1m●[0m nightly  [2mbg[0m
+   [33m[1mblocked[0m[2m · api-gw[0m
+[33m[1m1 waiting 6m · click to jump[0m

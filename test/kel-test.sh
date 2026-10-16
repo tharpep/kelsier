@@ -549,6 +549,34 @@ ok "keeps the unmerged one"              '[ -d "$SWT/sw-openwork" ] && [ -f "$SE
 ok "keeps the dirty one"                 '[ -d "$SWT/sw-messy" ] && [ -f "$SESSIONS/sw/messy.json" ]'
 ok "  ...and says why for each"          'o="$("$KEL" sweep 2>&1)"; [[ "$o" == *"uncommitted work"* ]]'
 ok "-f still refuses uncommitted work"   '"$KEL" sweep -f >/dev/null 2>&1; [ -d "$SWT/sw-messy" ]'
+# phase 2: worktrees no window stands in — by hand here, as Claude Code
+# makes its own — are listed under their repo, and swept once they landed
+GW() { git -C "$WORK/sw" worktree add -q -b "$1" "$WORK/sw-$1" >/dev/null 2>&1; }
+GW hm                                                   # nothing of its own: merged
+GW hw; ( cd "$WORK/sw-hw" && echo w>w && git add -A && git -c user.email=t@t -c user.name=t commit -qm w ) >/dev/null 2>&1
+GW hd; echo u > "$WORK/sw-hd/untracked"                 # merged, but holding a new file
+GW hg; rm -rf "$WORK/sw-hg"                             # its directory gone
+GW hb                                                   # a Claude Code session is in it
+GW ho; tmux new-window -d -t '=keltest:' -n hoshell -c "$WORK/sw-ho"
+printf '[{"pid":1,"cwd":"%s","kind":"background","sessionId":"x","name":"hb","status":"busy","id":"b1"}]' \
+  "$(cd "$WORK/sw-hb" && pwd -P)" > "$WORK/claude-agents.json"
+rm -f "$STATE/claude-agents.json"
+WTL() { "$KEL" _fleet --panes | jq -r --arg b "$1" '.repos[].worktrees[] | select(.branch == $b) | .land.code // "-"'; }
+ok "a worktree with no window is listed under its repo" '[ "$(WTL hm)" = merged ] && [ "$(WTL hw)" != merged ]'
+ok "  ...and the Claude Code session in one is counted" '[ "$("$KEL" _fleet --panes | jq -r ".repos[].worktrees[] | select(.branch == \"hb\") | .sessions")" = 1 ]'
+o="$("$KEL" sweep -n 2>&1)"
+ok "sweep -n names the landed and the gone"  '[[ "$o" == *"would sweep  hm"* && "$o" == *"would prune  hg"* ]] && [ -d "$WORK/sw-hm" ]'
+o="$("$KEL" sweep "$WORK/sw-hw" 2>&1)"
+ok "sweeping an unmerged one by name refuses, and says why" '[ -d "$WORK/sw-hw" ] && [[ "$o" == *"kept  hw"* ]]'
+o="$("$KEL" sweep "$WORK/sw-ho" 2>&1)"
+ok "  ...as it does where a window is open"  '[ -d "$WORK/sw-ho" ] && [[ "$o" == *"window is open there (hoshell)"* ]]'
+o="$("$KEL" sweep 2>&1)"
+ok "sweep removes a landed worktree and its branch" '[ ! -d "$WORK/sw-hm" ] && ! git -C "$WORK/sw" rev-parse --verify --quiet refs/heads/hm >/dev/null'
+ok "  ...prunes one whose directory is gone"  '! git -C "$WORK/sw" worktree list | grep -q sw-hg'
+ok "  ...leaves one with a new file in it"     '[ -f "$WORK/sw-hd/untracked" ] && [[ "$("$KEL" sweep "$WORK/sw-hd" 2>&1)" == *"kept  hd  — uncommitted work"* ]]'
+ok "  ...and one a Claude Code session is using" '[ -d "$WORK/sw-hb" ] && [[ "$o" == *"kept  hb  — a Claude Code session"* ]]'
+ok "  ...and the unmerged one, without a word"  '[ -d "$WORK/sw-hw" ] && [[ "$o" != *"kept  hw"* ]]'
+rm -f "$WORK/claude-agents.json" "$STATE/claude-agents.json"
 
 section "config.toml (#10-adjacent, v0.8)"
 reset
@@ -982,7 +1010,7 @@ ok "  ...naming the file at risk, in the sidebar" 'sbtext "$SW" | grep -q "scrat
 # n: a new agent in the selected entry's space, named in the footer
 f0=$fail
 tmux send-keys -t "$SW" n
-wait_until 'sbtext "$SW" | grep -q "^new: "'
+wait_until 'sbtext "$SW" | grep -q "^new in "'
 tmux send-keys -t "$SW" -l fresh
 tmux send-keys -t "$SW" Enter
 # kel new stamps the window's group before it writes the record, so wait for

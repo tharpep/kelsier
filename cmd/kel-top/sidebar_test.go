@@ -557,3 +557,49 @@ func TestHelpClick(t *testing.T) {
 		t.Error("helpKey")
 	}
 }
+
+// Phase 2: a repo's worktrees follow it, open or not; a nested worktree's
+// agents belong to the repo, not to a group named after the branch.
+func TestWorktreesNest(t *testing.T) {
+	v := buildView(loadFixture(t, "worktrees"), uiState{})
+	var order []string
+	for _, s := range v.spaces {
+		order = append(order, s.label)
+	}
+	got := strings.Join(order, " ")
+	if !strings.Contains(got, "kelsier docs fix-auth gone old-ui worktree-agent-af1a") {
+		t.Errorf("kelsier's worktrees do not follow it: %s", got)
+	}
+	for _, s := range v.spaces {
+		switch s.label {
+		case "old-ui":
+			if !s.closed || s.repoName() != "kelsier" || s.land.Code != "merged" {
+				t.Errorf("old-ui: %+v", s)
+			}
+			ui := uiState{focused: true, sel: spaceID(s.key)}
+			if h := hint(buildView(loadFixture(t, "worktrees"), ui), 40); !strings.HasPrefix(h, "s sweep") {
+				t.Errorf("a merged worktree's hint: %q", h)
+			}
+		case "fix-auth":
+			if s.closed || s.title() != "kelsier/fix-auth" {
+				t.Errorf("fix-auth: closed %v title %q", s.closed, s.title())
+			}
+		case "notes":
+			if !s.closed || spaceDetail(s) != "main · no window" {
+				t.Errorf("a repo known only from a worktree: %q", spaceDetail(s))
+			}
+		}
+	}
+}
+
+// The keys list shows the hover bar on a key a click would run, and only there.
+func TestHelpHover(t *testing.T) {
+	m := sbModel{help: true, width: 32, height: 40}
+	for i, h := range sbHelp {
+		m.ui.hover = i + 2
+		line := strings.Split(plain(m.render()), "\n")[i+1]
+		if bar := strings.HasPrefix(line, "▏"); bar != (helpKey(h[0]) != "") {
+			t.Errorf("row %q hovered: %q", h[0], line)
+		}
+	}
+}

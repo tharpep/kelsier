@@ -1364,20 +1364,108 @@ cmd_top() {
 # predicate.  Everything else is REPORTED, never touched: the rule from kel
 # kill holds, and deleting an agent's only copy of real work is the one
 # unforgivable bug in this category of tool.
+# real_dir PATH — the path with symlinks resolved (macOS's /var is
+# /private/var, and git prints the resolved one); as given when it is gone
+real_dir() { ( cd "$1" 2>/dev/null && pwd -P ) || printf '%s' "$1"; }
+
+# sweep_worktree DOC PATH DRY — close out one linked worktree that has landed
+# (phase 2: worktrees are listed whether a window is open there or not, so
+# cleaning one must not need a window either). Never forces: the land check
+# says merged, and `git worktree remove` without --force refuses a worktree
+# with changes or untracked files in it — invariant 1, enforced by git. The
+# branch goes only if `git branch -d` agrees it is merged; a squash-merged one
+# is kept, and said. A worktree whose directory is already gone is pruned.
+sweep_worktree() { # doc path dry
+  local doc="$1" path dry="$3" info main branch code missing busy rec label
+  path="$(real_dir "$2")"
+  info="$(printf '%s' "$doc" | jq -r --arg p "$path" '
+    [ .repos[]? | . as $r | .worktrees[] | select(.path == $p)
+      | $r.root, (.branch // ""), (.land.code // "-"), (.missing | tostring), (.sessions | tostring) ] | .[]')"
+  [ -n "$info" ] || { warn "not a worktree of a repo kel can see: $path"; return 1; }
+  main="$(printf '%s\n' "$info" | sed -n 1p)";   branch="$(printf '%s\n' "$info" | sed -n 2p)"
+  code="$(printf '%s\n' "$info" | sed -n 3p)";   missing="$(printf '%s\n' "$info" | sed -n 4p)"
+  label="${branch:-$(basename "$path")}"
+  case "$(printf '%s\n' "$info" | sed -n 5p)" in
+    0) ;;
+    -1) warn "kept  $label  — Claude Code could not say whether a session is using it"; return 1 ;;
+    *)  warn "kept  $label  — a Claude Code session is working there"; return 1 ;;
+  esac
+  if [ "$missing" = true ]; then
+    [ "$dry" = 1 ] && { say "would prune  $label  (its directory is gone)"; return 0; }
+    git -C "$main" worktree prune && say "pruned  $label  (its directory was gone)"
+    return 0
+  fi
+  if [ "$code" != merged ]; then
+    local why
+    case "$code" in
+      dirty)    why="uncommitted work" ;;
+      unpushed) why="commits that are only here" ;;
+      review)   why="its PR is still open" ;;
+      no_pr)    why="no PR — nothing has merged it" ;;
+      behind)   why="behind its base, not merged" ;;
+      *)        why="not merged" ;;
+    esac
+    warn "kept  $label  — $why"
+    return 1
+  fi
+  # a kel agent there: finished, it is closed with its window by kel kill
+  # (which checks again); still running, the worktree stays
+  rec="$(printf '%s' "$doc" | jq -r --arg p "$path" '
+    .agents[] | select(.managed and .window_id != null and .cwd != null)
+    | select(.cwd as $c | $c == $p or ($p | endswith($c | sub("^/private"; ""))))
+    | "\(.group)/\(.name)\t\(.state // "-")"' | head -1)"
+  if [ -n "$rec" ]; then
+    case "${rec#*$'\t'}" in
+      done|dead|idle) ;;
+      *) warn "kept  $label  — ${rec%%$'\t'*} is ${rec#*$'\t'} there"; return 1 ;;
+    esac
+  fi
+  busy="$(printf '%s' "$doc" | jq -r --arg p "$path" --arg rec "${rec%%$'\t'*}" '
+    [ .panes[]? | select(.cwd == $p or (.cwd | startswith($p + "/"))) ] as $ps
+    | [ .agents[] | select("\(.group)/\(.name)" == $rec) | .window_id ] as $own
+    | [ $ps[] | select(.window_id as $w | $own | index($w) | not) | .window_name ] | unique | join(", ")')"
+  if [ -n "$busy" ]; then
+    warn "kept  $label  — a window is open there ($busy)"
+    return 1
+  fi
+  if [ "$dry" = 1 ]; then say "would sweep  $label  (merged)"; return 0; fi
+  if [ -n "$rec" ]; then
+    "$SELF" kill "${rec%%$'\t'*}" >/dev/null 2>&1 || { warn "kept  $label  — kel kill refused"; return 1; }
+  fi
+  if [ -d "$path" ]; then
+    local err; err="$(git -C "$main" worktree remove "$path" 2>&1)" \
+      || { warn "kept  $label  — git: ${err##*: }"; return 1; }
+  fi
+  if [ -n "$branch" ] && git -C "$main" rev-parse --verify --quiet "refs/heads/$branch" >/dev/null; then
+    if git -C "$main" branch -d "$branch" >/dev/null 2>&1; then
+      say "swept  $label  (worktree and branch)"
+    else
+      say "swept  $label  (worktree; branch kept — git does not see it merged, e.g. a squash merge)"
+    fi
+  else
+    say "swept  $label"
+  fi
+}
+
 cmd_sweep() {
   need tmux; need jq
-  local dry=0 force=0
+  local dry=0 force=0 one=''
   while [ $# -gt 0 ]; do
     case "$1" in
       -n|--dry-run) dry=1 ;;
       -f|--force)   force=1 ;;
       -*)           die "kel sweep: unknown flag $1" ;;
-      *)            die "kel sweep takes no arguments" ;;
+      *)            [ -z "$one" ] || die "kel sweep takes one worktree at most"; one="$1" ;;
     esac
     shift
   done
 
-  local doc; doc="$(fleet_json --land --pr)" || exit 1
+  # --worktrees: every repo's worktrees, asked fresh — sweep acts on it
+  local doc; doc="$(fleet_json --land --pr --worktrees)" || exit 1
+  if [ -n "$one" ]; then
+    sweep_worktree "$doc" "$one" "$dry"
+    return
+  fi
   local swept=0 kept=0 g nm code st
 
   # eligible: finished, and its branch is merged (or -f, which still refuses
@@ -1422,6 +1510,21 @@ cmd_sweep() {
     | select((.land.code // "") as $c
              | ($c != "merged") and (($force | not) or ($c == "dirty" or $c == "unpushed" or $c == "unknown" or $c == "behind")))
     | [.group, .name, (.state // "-"), (.land.code // "-")] | @tsv')
+
+  # then worktrees no window stands in — kel's, Claude Code's, or made by
+  # hand — that have landed, or whose directory is gone. Anything else is
+  # left alone without a word: an unmerged worktree nobody has open is
+  # normal, not something to be warned about on every sweep
+  local wt
+  while IFS= read -r wt; do
+    [ -n "$wt" ] || continue
+    if sweep_worktree "$doc" "$wt" "$dry"; then swept=$((swept+1)); else kept=$((kept+1)); fi
+  done < <(printf '%s' "$doc" | jq -r '
+    [ .panes[]?.cwd ] as $open
+    | .repos[]?.worktrees[]
+    | select(.missing or (.land.code // "") == "merged")
+    | select(.path as $p | [ $open[] | select(. == $p or startswith($p + "/")) ] | length == 0)
+    | .path')
 
   if [ "$swept" = 0 ] && [ "$kept" = 0 ]; then
     say "nothing finished to sweep"

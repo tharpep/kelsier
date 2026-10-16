@@ -86,6 +86,9 @@ type Doc struct {
 	// Background lists agents Claude Code runs in no pane (`claude --bg`).
 	// Null, not empty, when Claude Code could not be asked (claude.go)
 	Background *[]Background `json:"background,omitempty"`
+	// Repos: every repo a pane stands in, with all its worktrees and their
+	// land state (worktrees.go). Only with Options.Panes or Worktrees
+	Repos *[]Repo `json:"repos,omitempty"`
 }
 
 // record is the on-disk agent record, sessions/<group>/<name>.json.
@@ -179,6 +182,9 @@ type Options struct {
 	PR    bool // may refresh the PR cache — never on a refresh path
 	Panes bool // every pane, with kind, git position and ports (panes.go)
 	Here  bool // the focused pane's repo and git position (quota.go)
+	// Worktrees: the repos' worktrees asked fresh, not from the sidebar's
+	// cache — for `kel sweep`, which acts on the answer. Implies Panes
+	Worktrees bool
 }
 
 // Load assembles the fleet document.
@@ -505,10 +511,11 @@ func Load(o Options) Doc {
 			}
 		}
 	}
-	if o.Panes {
+	if o.Panes || o.Worktrees {
 		ps := buildPanes(paneRows, paneWins, curPane)
 		doc.Panes = &ps
 		withClaude(&doc, sd, ps)
+		withRepos(&doc, sd, o.Worktrees)
 	}
 	return doc
 }
