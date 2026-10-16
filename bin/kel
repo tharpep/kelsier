@@ -41,6 +41,7 @@
 #   kel _panel <what> ...      the sidebar's popups: files, git, diff, edit, editor, plan, browse
 #   kel _prompt '<args>'       prefix k: run `kel <args>`, answer in a message or a popup
 #   kel _notify [title] [body] fire kel's notification (bell + desktop) — to try it
+#   kel _click <range> ...     a click on a status line: close a popup, jump
 set -uo pipefail
 
 # --------------------------------------------------------------------------
@@ -1211,7 +1212,7 @@ cmd_restore() {
     restore_from_snapshot "$src" "$resume" || return 1
     # an archived workspace that is live again is not "previous" any more;
     # the running one is snapshotted to snapshot.json as usual
-    case "$src" in "$SNAPSHOT_ARCHIVE"/*) rm -f "$src" ;; esac
+    case "$src" in "$SNAPSHOT_ARCHIVE"/*) rm -f "$src" "$STATE_DIR/restore-offer" ;; esac
     return 0
   fi
   [ -n "$pick" ] && die "no saved workspace #$pick — see kel restore --list"
@@ -1693,6 +1694,29 @@ tmux_at_least() {
   [ "${v%%.*}" -gt "$1" ] || { [ "${v%%.*}" -eq "$1" ] && [ "${v#*.}" -ge "$2" ]; }
 }
 
+# prefix_words: tmux's prefix as a person says it — C-b is Ctrl-b, M-a Alt-a.
+# The author did not know "prefix" meant Ctrl-b; kel never shows either word.
+prefix_words() {
+  local k; k="$(tmux show-options -gv prefix 2>/dev/null)"
+  case "$k" in
+    C-*) printf 'Ctrl-%s' "${k#C-}" ;;
+    M-*) printf 'Alt-%s' "${k#M-}" ;;
+    '')  printf 'Ctrl-b' ;;
+    *)   printf '%s' "$k" ;;
+  esac
+}
+
+# kel _click RANGE POPUP CLIENT — a click on a status line (kel.conf binds
+# MouseDown1Status). A popup's bar has `✕ close`; kel's own bar has the
+# waiting count, which jumps there. Anything else does what tmux would.
+cmd_click() { # range popup client
+  case "${1:-}" in
+    close) [ "${2:-}" = 1 ] && tmux detach-client -t "${3:-}" 2>/dev/null ;;
+    jump)  KEL_CLIENT="${3:-}" "$SELF" jump ;;
+  esac
+  return 0
+}
+
 # popup DIR TITLE CMD... — a titled popup at DIR running CMD.
 #
 # The popup hosts a small tmux session of its own, `_kelpop_<n>`, and attaches
@@ -1725,7 +1749,13 @@ popup() {
   # it tmux reads `=name` as a pane and finds no such session
   if ! tmux has-session -t "=$name" 2>/dev/null; then
     tmux new-session -d -s "$name" -c "$dir" "$cmd" \; \
-         set-option -t "=$name:" status off \; \
+         set-option -t "=$name:" status on \; \
+         set-option -t "=$name:" status-style "bg=default,fg=colour245" \; \
+         set-option -t "=$name:" status-left-length 60 \; \
+         set-option -t "=$name:" status-left "#[range=user|close]#[fg=colour255,bold] ✕ close #[norange]#[fg=colour240] or $(prefix_words) q" \; \
+         set-option -t "=$name:" status-right "" \; \
+         set-option -t "=$name:" window-status-format "" \; \
+         set-option -t "=$name:" window-status-current-format "" \; \
          set-option -w -t "=$name:" pane-border-status off \; \
          set-option -t "=$name:" @kel-popup 1 >/dev/null 2>&1 \
       || die "could not start $1"
@@ -1739,8 +1769,8 @@ popup() {
   [ -n "${KEL_POPUP_NODRAW:-}" ] && return 0
   # "prefix q" told the author nothing: inside a Claude popup esc and q are
   # Claude's, and the title must name the key that actually closes it
-  local pk; pk="$(tmux show-options -gv prefix 2>/dev/null)"
-  [ -n "$pk" ] && title="${title//prefix q/$pk q}"
+  local pk; pk="$(prefix_words)"
+  title="${title//prefix q/$pk q}"
   local -a opt=( -EE -w "${KEL_POPUP_W:-90%}" -h "${KEL_POPUP_H:-85%}" -d "$dir" -T " $title " )
   tmux_at_least 3 3 && opt+=( -b rounded )            # border styles are 3.3+
   [ -n "${TMUX_PANE:-}" ] && opt+=( -t "$TMUX_PANE" )
@@ -2054,10 +2084,10 @@ cmd_status_line() {
     | ( if ($live | length) == 0 then "#[fg=colour245]no agents#[default]"
         else
           [ ( if ($wait | length) == 0 then empty
-              else "#[fg=colour214,bold]\($wait | length) waiting"
+              else "#[range=user|jump]#[fg=colour214,bold]\($wait | length) waiting"
                    + ( [ $wait[] | .state_since // empty ] | min
                        | if . == null then "" else " \($now - . | dur)" end )
-                   + "#[default]" end ),
+                   + "#[default]#[norange]" end ),
             ( if $cost > 0 then "$" + ($cost * 100 | round / 100 | tostring
                                        | if test("\\.") then (if test("\\.[0-9]$") then . + "0" else . end) else . + ".00" end)
               else empty end ) ]
@@ -2079,8 +2109,10 @@ cmd_status_line() {
 cmd_jump() {
   [ -n "${TMUX:-}" ] || exit 0
   local cs cw
-  cs="$(tmux display-message -p '#{client_session}' 2>/dev/null || true)"
-  cw="$(tmux display-message -p '#{window_index}' 2>/dev/null || echo '')"
+  # a click on the bar runs this with no client of its own; KEL_CLIENT names it
+  local -a c=(); [ -n "${KEL_CLIENT:-}" ] && c=(-c "$KEL_CLIENT")
+  cs="$(tmux display-message ${c[@]+"${c[@]}"} -p '#{client_session}' 2>/dev/null || true)"
+  cw="$(tmux display-message ${c[@]+"${c[@]}"} -p '#{window_index}' 2>/dev/null || echo '')"
 
   # session, then index: one session since v0.10, but a legacy v0.9 server
   # can still hold kel/<group> sessions, and the cycle must cross them too
@@ -2114,7 +2146,7 @@ cmd_jump() {
   fi
   local ts ti tw
   IFS=$'\t' read -r ts ti tw <<< "$tgt"
-  tmux switch-client -t "=$ts" \; select-window -t "$tw"
+  tmux switch-client ${c[@]+"${c[@]}"} -t "=$ts" \; select-window -t "$tw"
 
   # say where you landed and how long it has been sitting — the jump is
   # otherwise silent, and "which one was that?" is the next question
@@ -2730,7 +2762,9 @@ cmd_attach() {
   #    say so in one line, and carry on.  `kel restore` brings it back.
   if [ -f "$SNAPSHOT" ]; then
     local n; n="$(snapshot_summary "$SNAPSHOT" | cut -f1)"
-    archive_snapshot && say "previous workspace: ${n:-?} window(s) · kel restore"
+    # the sidebar offers it too (`R restore last workspace`) until it is used
+    archive_snapshot && say "previous workspace: ${n:-?} window(s) · kel restore" \
+      && : > "$STATE_DIR/restore-offer"
   elif [ -n "$(dead_sessions)" ]; then
     say "agents from before can be brought back: kel restore   (kel prune discards them)"
   fi
@@ -2776,6 +2810,7 @@ main() {
     quit)         cmd_quit "$@" ;;
     _prompt)      cmd_prompt "$@" ;;
     _notify)      notify "${1:-kel}" "${2:-test notification}" ;;
+    _click)       cmd_click "$@" ;;
     substatus)    cmd_substatus "$@" ;;
     _panel)       cmd_panel "$@" ;;
     _sidebar)     case "${1:-}" in

@@ -60,8 +60,8 @@ throttled, `x` dead, and context once it is worth worrying about:
 [api-gw] 1:auth-fix? 2:rate-limit·91%* 3:docs   ⟨infra·1 web·2⟩
 ```
 
-`` prefix ` `` jumps to whoever is blocked on you, across every repo.
-`prefix t` opens `kel top`:
+`` Ctrl-b ` `` jumps to whoever is blocked on you, across every repo.
+`Ctrl-b t` opens `kel top`:
 
 ```
   GROUP    AGENT       STATE       FOR   CTX     $        LAND        LAST OUTPUT
@@ -77,7 +77,7 @@ or sweep it.
 kel                  go to (or start) this repo's agent, like `claude`
 kel new <name> [-w]  new window + agent, optionally in a git worktree
 kel ls [--json]      every agent, grouped by repo
-kel top              every agent, the one needing you first   (prefix t)
+kel top              every agent, the one needing you first   (Ctrl-b t)
 kel relaunch [name]  relaunch one crashed agent in place
 kel sweep [-n]       close out every finished agent that landed
 kel kill <name>      close one       ·  kel prune    discard dead records

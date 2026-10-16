@@ -93,6 +93,7 @@ change; migrate old records in `migrate_meta`.
 | `prompt.out` | the last multi-line answer `prefix k` showed in a popup |
 | `claude-agents.json` | `{at, bin, sessions, failed}` — `claude agents --json`, cached 10 s for the sidebar's path; `bin` remembers where claude is |
 | `<window-id>.subs` | two lines: the epoch, then the agent panel's subagent rows as JSON, from `kel substatus`; older than 30 s means none now |
+| `restore-offer` | present while an archived workspace waits: set by a fresh `kel`, cleared by `kel restore`; the sidebar offers `R` |
 | `sidebar-off` | present after `kel sidebar off`; no new sidebars until `kel sidebar on` |
 | `ports.json` | `{at, panes:{<pane pid>: [ports]}}` — the listening-port scan behind `_fleet --panes`, reused for 10 s |
 

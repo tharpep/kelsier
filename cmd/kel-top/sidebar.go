@@ -273,18 +273,19 @@ func tickAfter(visible bool) tea.Cmd {
 func (m sbModel) view() sbView {
 	v := buildView(m.doc, m.ui)
 	switch m.mode {
+	// every prompt says how to answer it, on a line you can also click
 	case modeFilter:
-		v.footer, v.footerColour = "/"+m.input+"▏", ""
+		v.footer, v.footerColour, v.hint2 = "/"+m.input+"▏", "", "enter keep · esc clear"
 	case modeNew:
-		v.footer, v.footerColour = "new: "+m.input+"▏", ""
+		v.footer, v.footerColour, v.hint2 = "new: "+m.input+"▏", "", "enter ok · esc cancel"
 	case modeNewWorktree:
-		v.footer, v.footerColour = "new worktree: "+m.input+"▏", ""
+		v.footer, v.footerColour, v.hint2 = "new worktree: "+m.input+"▏", "", "enter ok · esc cancel"
 	case modeRename:
-		v.footer, v.footerColour = "rename: "+m.input+"▏", ""
+		v.footer, v.footerColour, v.hint2 = "rename: "+m.input+"▏", "", "enter ok · esc cancel"
 	case modeKill:
-		v.footer, v.footerColour = "kill "+m.entryName(m.target)+"? y/n", yellow
+		v.footer, v.footerColour, v.hint2 = "kill "+m.entryName(m.target)+"?", yellow, "y yes · n no"
 	case modeQuit:
-		v.footer, v.footerColour = "quit kel? y/n", yellow
+		v.footer, v.footerColour, v.hint2 = "quit kel?", yellow, "y yes · n no"
 	default:
 		if m.msg != "" {
 			v.footer, v.footerColour = m.msg, ""
@@ -550,10 +551,21 @@ func (m sbModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.MouseClickMsg:
 		m.ui.focused = true
-		if msg.Button != tea.MouseLeft || m.mode != modeNormal {
+		if msg.Button != tea.MouseLeft {
+			return m, nil
+		}
+		if m.help { // the keys list: a click anywhere closes it
+			m.help = false
 			return m, nil
 		}
 		_, refs := renderView(m.view(), m.width, m.height, time.Now().Unix())
+		if msg.Y >= 0 && msg.Y < len(refs) && refs[msg.Y].kind == "hint2" {
+			// a prompt's choices: whichever word was clicked is that key
+			return m.key(hintKey(m.view().hint2, msg.X))
+		}
+		if m.mode != modeNormal {
+			return m, nil
+		}
 		if msg.Y >= 0 && msg.Y < len(refs) && refs[msg.Y].kind == "action" {
 			// an action is its key, pressed
 			k := strings.TrimPrefix(refs[msg.Y].id, "act:")
@@ -586,6 +598,8 @@ func (m sbModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // sidebar may have changed.
 func (m sbModel) withShared() uiState {
 	ui := m.ui
+	_, err := os.Stat(sbStatePath("restore-offer"))
+	ui.restore = err == nil
 	sh := sbLoadShared()
 	if sh.Selected != "" {
 		ui.sel = sh.Selected
@@ -730,6 +744,17 @@ func (m sbModel) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, runKel(dir, nil, "shell", dir)
 	case "Q", "shift+q":
 		m.mode = modeQuit
+	case "R", "shift+r":
+		if m.ui.restore {
+			m.msg = "restoring…"
+			return m, runKel("", nil, "restore")
+		}
+	case "`":
+		return m, runKel("", nil, "jump")
+	case ":":
+		// tmux's own prompt, as Ctrl-b k opens it: type a kel command
+		_ = exec.Command("tmux", "command-prompt", "-p", "kel",
+			"run-shell -b \""+kelBin()+" _prompt '%%' >/dev/null 2>&1\"").Run()
 	case "?":
 		m.help = true
 	case "esc":
@@ -772,18 +797,25 @@ var sbHelp = [][2]string{
 	{"o", "open server in browser"},
 	{"p", "agent's plan and tasks"},
 	{"esc", "back to your pane"},
-	{"prefix space", "focus the sidebar"},
-	{"prefix `", "next waiting agent"},
+	{"P space", "focus the sidebar"},
+	{"P `", "next waiting agent"},
+	{"P k", "a kel command"},
+	{"P q", "close a popup"},
 }
 
 func (m sbModel) render() string {
 	if m.help {
 		var b strings.Builder
 		b.WriteString(dim + truncate("keys", m.width) + reset + "\n")
-		for _, h := range sbHelp {
-			b.WriteString(truncate(pad(h[0], 13), m.width) + dim + truncate(h[1], m.width-13) + reset + "\n")
+		pk := m.ui.prefix
+		if pk == "" {
+			pk = "Ctrl-b"
 		}
-		b.WriteString(dim + truncate("any key closes", m.width) + reset)
+		for _, h := range sbHelp {
+			k := strings.Replace(h[0], "P ", pk+" ", 1) // the real prefix, in words
+			b.WriteString(truncate(pad(k, 13), m.width) + dim + truncate(h[1], m.width-13) + reset + "\n")
+		}
+		b.WriteString(dim + truncate("any key or a click closes", m.width) + reset)
 		return b.String()
 	}
 	out, _ := renderView(m.view(), m.width, m.height, time.Now().Unix())
@@ -810,6 +842,7 @@ func runSidebar(once bool) {
 			m.ui.myWindow = strings.TrimSpace(string(out))
 		}
 	}
+	m.ui.prefix = prefixWords()
 	m.checkVisible()
 	// draw once whatever: an empty column helps no one. The first load is the
 	// one synchronous one — there is nothing on screen yet to keep responsive
@@ -892,4 +925,48 @@ func runFixtures(path string, widths []int, h int) {
 			}
 		}
 	}
+}
+
+// prefixWords is tmux's prefix as a person would say it: C-b is Ctrl-b, M-a
+// is Alt-a. The author did not know "prefix" meant Ctrl-b; nothing kel shows
+// says "prefix" or "C-b" now.
+func prefixWords() string {
+	out, err := exec.Command("tmux", "show-options", "-gv", "prefix").Output()
+	if err != nil {
+		return "Ctrl-b"
+	}
+	return keyWords(strings.TrimSpace(string(out)))
+}
+
+func keyWords(k string) string {
+	switch {
+	case k == "":
+		return "Ctrl-b"
+	case strings.HasPrefix(k, "C-"):
+		return "Ctrl-" + k[2:]
+	case strings.HasPrefix(k, "M-"):
+		return "Alt-" + k[2:]
+	}
+	return k
+}
+
+// hintKey maps a click on a prompt's choices line ("y yes · n no") to the key
+// of the choice under x: the first character of the segment clicked.
+func hintKey(hint string, x int) tea.KeyPressMsg {
+	pos := 0
+	for _, seg := range strings.Split(hint, " · ") {
+		n := len([]rune(seg))
+		if x < pos+n+3 {
+			k := strings.Fields(seg)[0]
+			switch k {
+			case "esc":
+				return tea.KeyPressMsg{Code: tea.KeyEscape}
+			case "enter":
+				return tea.KeyPressMsg{Code: tea.KeyEnter}
+			}
+			return tea.KeyPressMsg{Code: rune(k[0]), Text: k}
+		}
+		pos += n + 3
+	}
+	return tea.KeyPressMsg{}
 }

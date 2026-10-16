@@ -24,7 +24,7 @@ kel displaced, and leaves `~/.local/state/kel` alone — uninstalling must not b
 able to lose work. `--uninstall --purge` removes that too, after asking.
 
 **Upgrading from v0.9:** a running tmux server keeps the old bindings
-(`Ctrl+Space`, `prefix b`, `prefix m`, `prefix k`) until it restarts —
+(`Ctrl+Space`, `Ctrl-b b`, `Ctrl-b m`, `Ctrl-b k`) until it restarts —
 `source-file` adds bindings, it does not remove them. `tmux kill-server` (after
 `kel snapshot`) or unbind them by hand. Per-repo sessions from v0.9
 (`kel/<group>`) keep working until their windows close; new windows go into
@@ -57,7 +57,7 @@ kel url [dir|agent]    a worktree's dev-server URLs, one per line; exit 1 for no
                        (for scripts — a Playwright skill can ask instead of guessing)
 kel top                every agent, sorted so the one needing you is first —
                        state, time in state, LAND, context, cost, last output.
-                       j/k scroll, s sort, / filter, q quit   (prefix t)
+                       j/k scroll, s sort, / filter, q quit   (Ctrl-b t)
 kel sweep [-n] [-f]    close out every finished agent whose branch has landed;
                        anything dirty, unpushed or unmerged is reported, never
                        touched. -n shows the plan first
@@ -78,18 +78,18 @@ Internal (wired into tmux / Claude Code): `kel status-line`, `kel jump`,
 
 ## Keys
 
-`prefix` is `Ctrl+b`.
+Keys below use `Ctrl-b`, tmux's default prefix; if you changed yours, kel's own hints use your key.
 
 | | |
 |---|---|
-| `` prefix ` `` | jump to the next agent **waiting** on you — any group |
-| `prefix t` | `kel top` |
-| `prefix 1..9` / `n` / `p` / `w` | move between windows — every agent is in one session (native tmux) |
-| `prefix ,` | rename this window (routes through `kel rename`) |
-| `prefix \|` / `-` | split, keeping the current directory |
-| `prefix [` | scroll mode for a shell pane (`q` to leave) |
+| `` Ctrl-b ` `` | jump to the next agent **waiting** on you — any group |
+| `Ctrl-b t` | `kel top` |
+| `Ctrl-b 1..9` / `n` / `p` / `w` | move between windows — every agent is in one session (native tmux) |
+| `Ctrl-b ,` | rename this window (routes through `kel rename`) |
+| `Ctrl-b \|` / `-` | split, keeping the current directory |
+| `Ctrl-b [` | scroll mode for a shell pane (`q` to leave) |
 | mouse wheel | scroll an agent's conversation (mapped to PageUp/Down) |
-| `prefix d` | detach — agents keep running; `kel` to return |
+| `Ctrl-b d` | detach — agents keep running; `kel` to return |
 
 `kel.conf` also turns on the mouse (to select text, hold Shift while you drag),
 counts windows from 1, and labels each pane.
@@ -109,22 +109,26 @@ in two sections:
   context % and the cost.
 
 At the foot, when there is room, an `actions` group lists the keys that do
-not depend on the selection — `n` `w` `t` `Q` `?` — and each can be clicked.
+not depend on the selection — `n` `w` `t`, `` ` `` jump to whoever waits, `:`
+a kel command, `Q` `?`, and `R` restore while a previous workspace waits — and
+each can be clicked. Every prompt says how to answer it on a line you can
+click (`enter ok · esc cancel`, `y yes · n no`), and in the bar, a click on
+`1 waiting` jumps there.
 
-**`prefix k`** opens a `kel` prompt at the bottom of the screen, so a kel
+**`Ctrl-b k`** opens a `kel` prompt at the bottom of the screen, so a kel
 command never needs a shell: type `new docs -w`, `restore`, `url`… A
 one-line answer comes back as a message, a longer one in a popup.
 
 A blue `▌` marks the selection; where you are is the name in bold. Only states
 that need you are coloured — waiting yellow, working cyan, finished-and-unseen
 green, dead red; idle, seen and unknown are grey, and a doubtful `working?` is
-grey italic. The footer reads `prefix
-space` until the sidebar has the keyboard, then shows the keys for whatever is
+grey italic. The footer reads `Ctrl-b
+space, or click` until the sidebar has the keyboard, then shows the keys for whatever is
 selected (`e edit · p plan · x kill · ?` on an agent) — `?` lists them all.
 
 | key | |
 |---|---|
-| `prefix Space` | put the keyboard in the sidebar (replaces tmux's `next-layout` on that key) |
+| `Ctrl-b Space` | put the keyboard in the sidebar (replaces tmux's `next-layout` on that key) |
 | `j` / `k` | move |
 | `enter` | jump to an agent or pane · open or fold a space |
 | `space` / `l` / `h` | fold, open, close a space |
@@ -144,12 +148,12 @@ selected (`e edit · p plan · x kill · ?` on an agent) — `?` lists them all.
 | `esc` | back to the pane you were in |
 | click · wheel | select and jump, fold a space · move |
 
-**`prefix q` closes any popup**, whatever is running in it — even vim that
+**`Ctrl-b q` closes any popup**, whatever is running in it — even vim that
 yazi opened for you. It says so in every popup's title. Quitting the tool
 itself closes it too (`q` in yazi and lazygit, where `esc` also works, `:q` in
-nvim). yazi and lazygit keep running when closed with `prefix q`, so
+nvim). yazi and lazygit keep running when closed with `Ctrl-b q`, so
 reopening them lands where you left off; the diff, plan and editor popups are
-made fresh each time. Outside a popup `prefix q` is tmux's usual
+made fresh each time. Outside a popup `Ctrl-b q` is tmux's usual
 `display-panes`. A tool that is not installed is said in
 the footer (`kel doctor` lists them as optional). The browser is `$BROWSER`,
 else `open` / `xdg-open` / `wslview`, else Windows' `start` from WSL.
@@ -182,13 +186,13 @@ terminal's own).
 session. By default it is the repo: `kel new` reads `$PWD` at that moment and
 uses the git root's basename. `--group G` or `$KEL_GROUP` override it; a
 `.kel/group` file pins a directory and everything under it (`$KEL_GROUP` still
-wins). Non-repo agents go to `misc`. A window you make yourself (`prefix c`)
+wins). Non-repo agents go to `misc`. A window you make yourself (`Ctrl-b c`)
 gets the group of the repo its pane is standing in.
 
 The group is what `kel ls` sorts by, what `kel kill <group>/<name>` names, and
 the label each of the sidebar's spaces carries.
 
-**window vs pane:** `kel new` makes a **window** — one agent. `prefix | / -`
+**window vs pane:** `kel new` makes a **window** — one agent. `Ctrl-b | / -`
 makes a **pane** inside it, for your own editor, shell or tests. kel tracks
 state per window, so a second agent belongs in its own window.
 
@@ -215,7 +219,7 @@ so in red rather than going blank.
 
 ## Detach, kill, reboot
 
-**`prefix d` detaches** and snapshots; every agent keeps running and `kel`
+**`Ctrl-b d` detaches** and snapshots; every agent keeps running and `kel`
 brings you back. **Killing** the session ends its agents; `kel ls` then shows
 them `dead`.
 

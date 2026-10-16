@@ -165,7 +165,7 @@ func TestSidebarLineRefs(t *testing.T) {
 			t.Errorf("line %d %q maps to %+v", i, l, refs[i])
 		}
 	}
-	if !strings.Contains(lines[len(lines)-1], "prefix space") {
+	if !strings.Contains(lines[len(lines)-1], "Ctrl-b space") {
 		t.Error("the footer is not pinned to the last line")
 	}
 }
@@ -201,7 +201,7 @@ func TestSidebarHint(t *testing.T) {
 		l := strings.Split(plain(out), "\n")
 		return l[len(l)-1]
 	}
-	if got := foot(uiState{}, 32); got != "prefix space" {
+	if got := foot(uiState{}, 32); got != "Ctrl-b space, or click" {
 		t.Errorf("unfocused footer: %q", got)
 	}
 	if got := foot(uiState{focused: true}, 32); !strings.HasPrefix(got, "e edit · p plan · x kill") {
@@ -294,7 +294,7 @@ func TestSidebarKeys(t *testing.T) {
 	// x asks first, and anything but y leaves the agent alone
 	m.ui.sel = "a:@2"
 	press("x")
-	if m.mode != modeKill || !strings.Contains(plain(m.render()), "kill fix-auth? y/n") {
+	if m.mode != modeKill || !strings.Contains(plain(m.render()), "kill fix-auth?") || !strings.Contains(plain(m.render()), "y yes · n no") {
 		t.Errorf("x did not ask:\n%s", plain(m.render()))
 	}
 	press("n")
@@ -419,5 +419,21 @@ func TestSidebarHover(t *testing.T) {
 	}
 	if strings.Count(out, "▏") != 2 {
 		t.Errorf("hover marks the whole entry (2 lines), got %d", strings.Count(out, "▏"))
+	}
+}
+
+// A click on a prompt's choices line is the key of the choice clicked.
+func TestHintKey(t *testing.T) {
+	if k := hintKey("y yes · n no", 1); k.Text != "y" {
+		t.Errorf("click on yes: %+v", k)
+	}
+	if k := hintKey("y yes · n no", 9); k.Text != "n" {
+		t.Errorf("click on no: %+v", k)
+	}
+	if k := hintKey("enter ok · esc cancel", 14); k.Code != tea.KeyEscape {
+		t.Errorf("click on cancel: %+v", k)
+	}
+	if keyWords("C-b") != "Ctrl-b" || keyWords("M-a") != "Alt-a" {
+		t.Error("the prefix must read in words")
 	}
 }

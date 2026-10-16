@@ -671,6 +671,7 @@ ok "  ...and says when nothing waits"           '[[ "$(bar)" == *"nothing waitin
 DW="$(window_of api-gw docs)"
 printf 'waiting %s\n' "$(( $(date +%s) - 400 ))" > "$STATE/$DW.state"
 ok "one waiting agent, and for how long"        '[[ "$(bar)" == *"1 waiting 6m"* ]]'
+ok "  ...a click target that jumps there"        '[[ "$(TMUX="$TMUX_TMPDIR/tmux-$(id -u)/default,$(tmux display-message -p "#{pid}"),0" "$KEL" status-line)" == *"#[range=user|jump]"*"1 waiting"*"#[norange]"* ]]'
 now=$(date +%s)
 printf '58 %s 41 %s 12 0 %s\n' "$((now + 5400))" "$((now + 300000))" "$now" > "$STATE/quota"
 rawbar() { TMUX="$TMUX_TMPDIR/tmux-$(id -u)/default,$(tmux display-message -p '#{pid}'),0" "$KEL" status-line; }
@@ -706,6 +707,7 @@ out="$( (cd "$WORK" && "$KEL" < /dev/null) 2>&1 )"; rc=$?
 ok "kel opens without prompting"         '[ "$rc" = 0 ] && [[ "$out" != *"[Y/n"* ]] && [ "$(grps)" = 1 ]'
 ok "  ...and says how to get it back"    '[[ "$out" == *"previous workspace: 2 window"*"kel restore"* ]]'
 ok "  ...having moved the old snapshot to the archive" '[ "$(ls "$STATE/snapshots" | grep -c .)" = 1 ] && [ ! -e "$STATE/snapshot.json" ]'
+ok "  ...and the sidebar offers it (R) until used" '[ -f "$STATE/restore-offer" ]'
 "$KEL" snapshot >/dev/null 2>&1          # what the tmux hooks do the moment anything changes
 ok "  ...where the fresh start's own snapshot cannot overwrite it" \
   '[ "$(jq -c "[.windows[] | [.group, .name, (.panes | length)]]" "$STATE/snapshots/"*.json)" = "$want" ]'
@@ -715,6 +717,7 @@ wait_until '[ -n "$(tmux capture-pane -p -t "$(tmux list-windows -t =keltest -F 
 "$KEL" restore >/dev/null 2>&1
 wait_until '[ -n "$(window_of api-gw auth-fix)" ] && [ -n "$(window_of coppermind sazed)" ]'
 ok "kel restore brings it back"          '[ -n "$(window_of api-gw auth-fix)" ] && [ -n "$(window_of coppermind sazed)" ]'
+ok "  ...and the offer is gone"           '[ ! -f "$STATE/restore-offer" ]'
 ok "  ...splits included"                '[ "$(tmux list-panes -t "$(window_of api-gw auth-fix)" -F x | grep -c x)" = 2 ]'
 ok "  ...into the one session"           '[ "$(grps)" = 1 ]'
 ok "  ...conversations resumed by default" 'agent_up "$(window_of coppermind sazed)"'
@@ -958,8 +961,8 @@ ok "enter jumps to the agent's window"          '[ "$(active_win)" = "$WTW" ]'
 SW="$(sbpane "$WTW")"
 wait_until 'sbtext "$SW" | grep -q agents'
 tmux send-keys -t "$SW" x
-wait_until 'sbtext "$SW" | grep -q "kill wt? y/n"'
-ok "x asks before killing"                      'sbtext "$SW" | grep -q "kill wt? y/n"'
+wait_until 'sbtext "$SW" | grep -q "kill wt?"'
+ok "x asks before killing, and says how to answer" 'sbtext "$SW" | grep -q "kill wt?" && sbtext "$SW" | grep -q "y yes · n no"'
 tmux send-keys -t "$SW" y
 wait_until 'sbtext "$SW" | grep -q "at risk"' 80
 ok "  ...and a dirty worktree is refused"        '[ -n "$(window_of api-gw wt)" ]'
@@ -1142,8 +1145,9 @@ printf '#!/bin/sh\nexec sleep 30\n' > "$WORK/shim/yazi"
 ( unset KEL_POPUP_TRACE; KEL_POPUP_NODRAW=1 TMUX="$TMUX_TMPDIR/tmux-$(id -u)/default,1,0" "$KEL" _panel files "$WT5" api-gw/wt5 ) >/dev/null 2>&1
 POP="$(tmux list-sessions -F '#{session_name}' | grep '^_kelpop_' | head -1)"
 ok "a popup's tool runs in a hosted session"     '[ -n "$POP" ] && [ "$(tmux list-panes -t "=$POP:" -F "#{pane_current_command}")" = sleep ]'
-ok "  ...marked, and with no status bar of its own" '[ "$(tmux show-options -v -t "=$POP:" @kel-popup)" = 1 ] && [ "$(tmux show-options -v -t "=$POP:" status)" = off ]'
+ok "  ...marked as a popup's"                      '[ "$(tmux show-options -v -t "=$POP:" @kel-popup)" = 1 ]'
 ok "  ...nor a pane title — kel's labels stay out" '[ "$(tmux show-options -wv -t "=$POP:" pane-border-status)" = off ]'
+ok "  ...but a bar of its own with a clickable close" '[[ "$(tmux show-options -v -t "=$POP:" status-left)" == *"range=user|close"*"close"*"Ctrl-b q"* ]]'
 ok "  ...which kel never counts: not the fleet"  '! "$KEL" _fleet --panes | jq -r ".panes[].window_id" | grep -qxF "$(tmux display -p -t "=$POP:" "#{window_id}")"'
 ok "  ...nor gives a sidebar"                    '[ "$(tmux list-panes -t "=$POP:" -F x | grep -c x)" = 1 ]'
 "$KEL" snapshot >/dev/null 2>&1
@@ -1528,7 +1532,7 @@ CONF="$HERE/../tmux/kel.conf"
 # prefix k (`kel _prompt`) is excluded: it discards run-shell's output on
 # purpose and answers through its own message or popup, so view-mode never
 # opens on the pane you are in
-KELBINDS=$(grep -n '^bind.*run-shell -b .*local/bin/kel ' "$CONF" | grep -v '_prompt')
+KELBINDS=$(grep -n '^bind.*run-shell -b .*local/bin/kel ' "$CONF" | grep -v -e '_prompt' -e '_click')
 ok "kel.conf's foreground kel bind exists"             '[ "$(printf "%s\n" "$KELBINDS" | grep -c .)" = 1 ]'
 ok "  ...and surfaces run-shell's stderr"               '[ "$(printf "%s\n" "$KELBINDS" | grep -c "2>&1")" = 1 ]'
 ok "  ...while every hook discards its output"          '[ -z "$(grep "^set-hook" "$CONF" | grep "run-shell" | grep -v ">/dev/null 2>&1")" ]'
@@ -1554,7 +1558,7 @@ else
 fi
 # prove the stderr-redirect guard bites: drop one 2>&1 in a scratch copy.
 sed 's/kel top 2>&1"/kel top"/' "$CONF" > "$WORK/kel-conf-revert"
-REVERTED=$(grep -n '^bind.*run-shell -b .*local/bin/kel ' "$WORK/kel-conf-revert" | grep -v '_prompt')
+REVERTED=$(grep -n '^bind.*run-shell -b .*local/bin/kel ' "$WORK/kel-conf-revert" | grep -v -e '_prompt' -e '_click')
 ok "  ...and dropping it is caught"       '[ "$(printf "%s\n" "$REVERTED" | grep -c "2>&1")" != 1 ]'
 
 section "statusline records context without a live agent"

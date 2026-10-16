@@ -37,6 +37,8 @@ type uiState struct {
 	myWindow string // the window this sidebar sits in — current, whatever the doc says
 	focused  bool   // the keyboard is in this sidebar
 	hover    int    // screen line under the pointer, plus one; 0 = none
+	prefix   string // the tmux prefix in words ("Ctrl-b"), for hints
+	restore  bool   // a previous workspace waits to be restored
 }
 
 type sbSpace struct {
@@ -72,8 +74,11 @@ type sbView struct {
 	entryIDs []string // selectable ids in screen order, for j/k
 
 	footer, footerColour string // a prompt or a message; "" = the key hint
+	hint2                string // a line above the footer: a prompt's choices, clickable
 	focused              bool
 	hover                int
+	prefix               string
+	restore              bool
 }
 
 // lineRef says which entry a screen line belongs to — what a click hits.
@@ -134,7 +139,11 @@ func spaceKey(p fleet.Pane) (key, label string) {
 }
 
 func buildView(doc fleet.Doc, ui uiState) sbView {
-	v := sbView{sel: ui.sel, filter: ui.filter, focused: ui.focused, hover: ui.hover}
+	v := sbView{sel: ui.sel, filter: ui.filter, focused: ui.focused, hover: ui.hover,
+		prefix: ui.prefix, restore: ui.restore}
+	if v.prefix == "" {
+		v.prefix = "Ctrl-b"
+	}
 	if doc.Panes == nil {
 		v.unknown = true
 		return v
@@ -651,7 +660,13 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 	var acts []line
 	if h > 0 {
 		acts = append(acts, line{dim + truncate("actions", w) + reset, lineRef{}})
-		for _, a := range sbActions {
+		list := sbActions
+		if v.restore {
+			// one line at startup was the only mention: until it is used, the
+			// previous workspace stays one click away
+			list = append([][2]string{{"R", "restore last workspace"}}, list...)
+		}
+		for _, a := range list {
 			acts = append(acts, line{" " + bold + a[0] + reset + "  " + dim + truncate(a[1], w-4) + reset,
 				lineRef{id: "act:" + a[0], kind: "action"}})
 		}
@@ -668,6 +683,10 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 		footer, fc = v.footer, v.footerColour
 	}
 	foot := line{fc + truncate(footer, w) + reset, lineRef{}}
+	var foot2 *line
+	if v.hint2 != "" {
+		foot2 = &line{dim + truncate(v.hint2, w) + reset, lineRef{id: "hint2", kind: "hint2"}}
+	}
 
 	// scroll so the selected entry is on screen; the footer is pinned
 	if h > 0 {
@@ -711,6 +730,10 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 			body = append(body, line{"", lineRef{}})
 		}
 	}
+	if foot2 != nil && h > 2 && len(body) > 0 {
+		// a prompt's choices take the last body line: `enter ok · esc cancel`
+		body[len(body)-1] = *foot2
+	}
 	if h != 1 || len(body) == 0 {
 		body = append(body, foot)
 	}
@@ -744,7 +767,8 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 // many as fit, then `?` for the rest when there is room.
 func hint(v sbView, w int) string {
 	if !v.focused {
-		return "prefix space"
+		// how to get in, in words: the author did not know "prefix" was Ctrl-b
+		return v.prefix + " space, or click"
 	}
 	var keys []string
 	switch {
@@ -786,6 +810,8 @@ var sbActions = [][2]string{
 	{"n", "new agent"},
 	{"w", "new worktree agent"},
 	{"t", "shell here"},
+	{"`", "jump to who waits"},
+	{":", "kel command"},
 	{"Q", "quit kel"},
 	{"?", "all keys"},
 }

@@ -323,6 +323,14 @@ the `TodoWrite` design was stale, and the plan turned out to need no new hook.
   worktrees nested under their repo with a passive agent count and tidy-up;
   phase 3: glow, ccusage, gh-dash, freeze + vhs, and a `.claude` viewer.
   Automations stay held until there are some
+- *nothing hidden (2026-10-16):* the author could not close a Claude popup —
+  esc and q are Claude's, and the title said "prefix q". kel now never shows
+  "prefix" or "C-b": every hint reads the real prefix in words (`Ctrl-b`).
+  Each popup's hosted session has a one-line bar with a clickable `✕ close`;
+  the bar's `1 waiting` is a click target that jumps there; every prompt says
+  how to answer on a clickable line (`y yes · n no`, `enter ok · esc
+  cancel`); a click closes the keys list; actions gained `` ` `` jump, `:`
+  kel command, and `R` restore while a previous workspace waits
 - *found on the way:* M5's `hook_edit` had real newlines inside its `printf`
   format — a quoting slip in its writing that happened to print the same
   thing; rewritten while the plan / edit split went in
