@@ -18,7 +18,7 @@ _kel() {
     cword=$COMP_CWORD
   }
 
-  local subcmds="new kill ls rename top sidebar url shell quit restore relaunch sweep prune doctor config update help"
+  local subcmds="new kill ls rename top sidebar url shot shell quit restore relaunch sweep prune doctor config update help"
 
   if [ "$cword" -eq 1 ]; then
     COMPREPLY=( $(compgen -W "$subcmds" -- "$cur") )

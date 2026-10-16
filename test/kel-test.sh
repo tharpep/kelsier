@@ -1253,6 +1253,25 @@ sub="$(printf '%s' "{\"session_id\":\"s\",\"cwd\":\"$WT5\",\"tasks\":[{\"id\":\"
 ok "kel substatus prints nothing (Claude's rows stay its own)" '[ -z "$sub" ]'
 ok "  ...and the agent's subagents are in the fleet" '[ "$("$KEL" _fleet | jq -r ".agents[] | select(.name==\"wt5\") | .subagents[0] | .label + \"/\" + .agentType")" = "Reading parser.go/Explore" ]'
 
+# ---- phase 3: usage, PRs, the claude config, a pane as a picture
+printf '#!/bin/sh\necho ccusage "$@"\n' > "$WORK/shim/ccusage"; chmod +x "$WORK/shim/ccusage"
+"$KEL" _panel usage "$WT5" >/dev/null 2>&1
+ok "u shows ccusage: this block, then two weeks by day" 'grep -q "usage · ccusage.*ccusage blocks --active --color.*ccusage daily --since [0-9]\{8\} --color" "$KEL_POPUP_TRACE"'
+mkdir -p "$WORK/ghshim"; printf '#!/bin/sh\n[ "$1 $2" = "extension list" ] && printf "gh dash\\tdlvhdr/gh-dash\\tv4\\n"\nexit 0\n' > "$WORK/ghshim/gh"; chmod +x "$WORK/ghshim/gh"
+PATH="$WORK/ghshim:$PATH" "$KEL" _panel dash "$WT5" api-gw/wt5 >/dev/null 2>&1
+ok "G opens gh dash at the space"                'grep -q "^$WT5	gh dash · api-gw/wt5 · prefix q closes	gh dash$" "$KEL_POPUP_TRACE"'
+printf '#!/bin/sh\n[ "$1 $2" = "extension list" ] && exit 0\nexit 0\n' > "$WORK/ghshim/gh"
+ok "  ...and says so when gh-dash is missing"    '[[ "$(PATH="$WORK/ghshim:$PATH" "$KEL" _panel dash "$WT5" t 2>&1)" == *"gh-dash is not installed"* ]]'
+CC="$WORK/ccfg"; MEM="$CC/projects/$(printf '%s' "$WT5" | sed 's/[^A-Za-z0-9]/-/g')/memory"
+mkdir -p "$MEM" "$WT5/.claude"; echo g > "$CC/CLAUDE.md"; echo p > "$WT5/CLAUDE.md"
+CLAUDE_CONFIG_DIR="$CC" "$KEL" _panel claude "$WT5" api-gw/wt5 >/dev/null 2>&1
+ok "c opens the claude config in yazi, a tab per place" 'grep -qF "claude config · api-gw/wt5 · tabs: 1-4 · prefix q closes	yazi $WT5/CLAUDE.md $WT5/.claude $CC/CLAUDE.md $MEM" "$KEL_POPUP_TRACE"'
+rm -rf "$WT5/.claude" "$WT5/CLAUDE.md"
+printf '#!/bin/sh\nwhile [ $# -gt 0 ]; do [ "$1" = -o ] && o="$2"; shift; done\ncat > "$o"\n' > "$WORK/shim/freeze"; chmod +x "$WORK/shim/freeze"
+sh_out="$(TMUX_PANE="$(userpane "$W5")" KEL_SHOT_DIR="$WORK/shots" "$KEL" shot 2>&1)"
+ok "kel shot draws the pane to an svg, and says where" '[[ "$sh_out" == *"$WORK/shots/wt5-"*.svg* ]] && [ -s "$(ls "$WORK"/shots/*.svg | head -1)" ]'
+rm -f "$WORK/shim/ccusage" "$WORK/shim/freeze"
+
 # kel quit: never the only copy of work, then everything, saved first
 echo wip > "$WT5/scratch-quit.txt"
 qout="$("$KEL" quit 2>&1)"

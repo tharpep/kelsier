@@ -38,6 +38,7 @@ kel                    in a repo: go to (or start) that repo's agent, the way
                        with no workspace running it starts fresh and, if there
                        was one before, says `kel restore` brings it back
 kel new <name>         new window + agent in the current repo   (inplace)
+kel shot [agent]       the pane (yours, or the agent's) as an SVG in ~/Pictures/kel, with freeze
 kel new <name> <dir>   ...in <dir> instead — no cd first; `kel new <dir>` names it after the folder
 kel new <name> -w      ...in a fresh git worktree on a new branch <name>
 kel new <name> --group G       put it in group G instead of the repo's
@@ -161,7 +162,11 @@ jump` in yellow — then shows the keys for whatever is selected (`e edit · p p
 | `e` on a space | nvim at that directory, kept between opens — your buffers are still there next time |
 | `t` | a plain shell window in the selected space — no agent |
 | `Q` | quit kel, after `y`: saves the workspace, then closes it all; refuses while a worktree holds unsaved work |
-| `p` | the selected agent's plan (from plan mode), then its task list — `✓` done, `▸` in progress, `·` pending, and what blocks what. Most sessions on newer models keep no task list; it says so |
+| `p` | the selected agent's plan (from plan mode), then its task list — `✓` done, `▸` in progress, `·` pending, and what blocks what. Most sessions on newer models keep no task list; it says so. Rendered with glow when installed |
+| `c` | the Claude Code configuration that applies to the selected space, in yazi, a tab per place: the repo's `CLAUDE.md`, its `.claude/`, the global `~/.claude` and the project's memory. To read and open — kel writes none of it |
+| `G` | gh dash at the selected space: your PRs, reviews and issues for that repo; kept between opens |
+| `u` | Claude Code usage from ccusage — the current 5-hour block, then the last two weeks by day. ccusage reads Claude Code's own transcripts, so kel stores no history |
+| `s` | sweep the selected worktree once it has landed (anywhere else: everything landed), after `y` |
 | `?` | every key |
 | `esc` | back to the pane you were in |
 | click · wheel | select and jump, fold a space · move |

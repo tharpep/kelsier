@@ -800,6 +800,18 @@ func (m sbModel) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m.browse()
 	case "p":
 		return m.panel("plan")
+	case "c":
+		return m.panel("claude")
+	case "G", "shift+g":
+		return m.panel("dash")
+	case "u":
+		// the account's usage, not the selection's: from wherever is selected,
+		// or home when nothing is
+		dir := os.Getenv("HOME")
+		if sp, ok := m.selSpace(m.view().sel); ok {
+			dir = sp.dir()
+		}
+		return m, runKel(dir, nil, "_panel", "usage", dir)
 	case "t":
 		dir, _ := m.spaceFor(m.view().sel)
 		return m, runKel(dir, nil, "shell", dir)
@@ -869,6 +881,9 @@ var sbHelp = [][2]string{
 	{"e", "edit agent's file"},
 	{"o", "server in browser"},
 	{"p", "plan and tasks"},
+	{"c", "claude config here"},
+	{"G", "PRs (gh dash)"},
+	{"u", "usage (ccusage)"},
 	{"esc", "back to your pane"},
 	{"P", ""},
 	{"  space", "focus the sidebar"},
@@ -1213,7 +1228,7 @@ func helpKey(row string) string {
 		return ""
 	default:
 		switch f[0] {
-		case "/", "n", "w", "r", "x", "t", ";", "`", "s", "Q", "f", "g", "d", "e", "o", "p":
+		case "/", "n", "w", "r", "x", "t", ";", "`", "s", "Q", "f", "g", "d", "e", "o", "p", "c", "G", "u":
 			return f[0]
 		}
 	}

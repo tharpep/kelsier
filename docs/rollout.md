@@ -349,6 +349,15 @@ the `TodoWrite` design was stale, and the plan turned out to need no new hook.
   The `?` keys list runs a clicked key, with the hover bar on what a click
   would run. Phase 3 next: glow, ccusage, gh-dash, freeze + vhs, the
   `.claude` viewer
+- *phase 3 (2026-10-16):* `install/30-extras.sh` (release binaries into
+  ~/.local/bin, no sudo; Homebrew on the Mac) installs glow, freeze, vhs with
+  ttyd and ffmpeg, ccusage and gh-dash. `p` renders with glow; `u` is ccusage
+  (Claude Code's own transcripts — kel keeps nothing); `G` is gh dash at the
+  space; `c` opens the Claude config that applies there in yazi, a tab per
+  place, view and open only; `kel shot` draws a pane with freeze — SVG,
+  because freeze's PNG path segfaults on this WSL2 (Go build and release
+  alike) and its .webp is an SVG by another name. vhs is installed, not
+  wired: a recording is the author's to script
 - *found on the way:* M5's `hook_edit` had real newlines inside its `printf`
   format — a quoting slip in its writing that happened to print the same
   thing; rewritten while the plan / edit split went in

@@ -1013,7 +1013,7 @@ func hint(v sbView, w int) string {
 		// enter is the one key everybody tries; the room goes to the rest
 		keys = []string{"e edit", "p plan", "x kill", "r rename", "enter"}
 	case strings.HasPrefix(v.sel, "s:"):
-		keys = []string{"f files", "g git", "e edit", "d diff", "n new", "t shell"}
+		keys = []string{"f files", "g git", "e edit", "d diff", "n new", "t shell", "c claude", "G prs"}
 		for _, s := range v.spaces {
 			if spaceID(s.key) == v.sel && s.land != nil && s.land.Code == "merged" && s.closed {
 				keys = append([]string{"s sweep"}, keys...) // what it is there for
@@ -1053,6 +1053,7 @@ var sbActions = [][2]string{
 	{"w", "new worktree agent"},
 	{"t", "shell here"},
 	{"`", "jump to who waits"},
+	{"u", "usage"},
 	{";", "kel command"}, // not `:` — that needs shift
 	{"Q", "quit kel"},
 	{"?", "all keys"},

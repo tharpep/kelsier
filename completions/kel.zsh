@@ -21,6 +21,7 @@ _kel() {
     'top:fleet dashboard — sorted by who needs you'
     'sidebar:the sidebar pane in every window (on|off)'
     'url:the dev-server URLs of a worktree'
+    'shot:the pane as an SVG, with freeze'
     'shell:a plain shell window, no agent'
     'quit:save the workspace, then close it all'
     'restore:bring back a previous workspace (--list to choose)'

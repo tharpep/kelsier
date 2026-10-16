@@ -4,7 +4,7 @@
 #
 #   kel                        enter the workspace — in a repo, go to (or start)
 #                              that repo's agent, like `claude` for a directory
-#   kel new <name> [-w]        window + agent, inplace or in a git worktree
+#   kel new <name> [dir] [-w]  window + agent, inplace or in a git worktree
 #         [--group G] [--agent CMD] [--no-agent]
 #   kel kill <name> [-f]       close the window; remove the worktree; -f overrides
 #                              the uncommitted / unpushed check
@@ -21,8 +21,10 @@
 #                              while a worktree holds unsaved work (sidebar: Q)
 #   kel url [dir|agent]        the dev-server URLs of a worktree, one per line
 #                              (exit 1 for none) — for scripts and agents
-#   kel sweep [-n] [-f]        close every finished agent whose work has merged
-#                              (closes windows; -n shows the plan first)
+#   kel sweep [-n] [-f] [path] close every finished agent whose work has merged,
+#                              and landed worktrees nothing stands in; or one
+#                              worktree (closes windows; -n shows the plan first)
+#   kel shot [agent]           the pane as an SVG, with freeze (~/Pictures/kel)
 #   kel prune [-f]             forget dead agent records (closes nothing)
 #   kel doctor                 capability probe, cached
 #   kel config                 edit config.toml (seeds it from the shipped
@@ -1592,6 +1594,13 @@ cmd_doctor() {
     if command -v "$t" >/dev/null 2>&1; then printf '  \033[1;32m✓\033[0m %s\n' "$t (optional, for the sidebar)" >&2
     else printf '  \033[2m·\033[0m %s\n' "$t not installed (optional — $pm $t)" >&2; fi
   done
+  # phase 3's: install/30-extras.sh (or Homebrew on the Mac) installs them all
+  for t in glow ccusage freeze; do
+    if command -v "$t" >/dev/null 2>&1; then printf '  \033[1;32m✓\033[0m %s\n' "$t (optional)" >&2
+    else printf '  \033[2m·\033[0m %s\n' "$t not installed (optional — install/30-extras.sh)" >&2; fi
+  done
+  if gh extension list 2>/dev/null | grep -q gh-dash; then printf '  \033[1;32m✓\033[0m %s\n' "gh-dash (optional, for G)" >&2
+  else printf '  \033[2m·\033[0m %s\n' "gh-dash not installed (optional — gh extension install dlvhdr/gh-dash)" >&2; fi
 
   # install.sh writes the absolute path of the clone it ran from into
   # settings.json. Move or rename that clone and every hook plus the statusLine
@@ -1789,11 +1798,72 @@ cmd_panel() {
            # buffers are still there when you come back. `nvim .` opens the
            # directory (oil, or netrw), so there is somewhere to start
            KEL_POPUP_KEEP=1 popup "$dir" "nvim · $title · prefix q closes" nvim . ;;
+    usage) panel_usage "$dir" ;;
+    dash)  need_tool gh
+           gh extension list 2>/dev/null | grep -q 'gh-dash' || die "gh-dash is not installed (gh extension install dlvhdr/gh-dash)"
+           # kept like lazygit: its sections and filters are still there
+           KEL_POPUP_KEEP=1 popup "$dir" "gh dash · $title · prefix q closes" gh dash ;;
+    claude) panel_claude "$dir" "$title" ;;
     *)     die "kel _panel: unknown panel '$what'" ;;
   esac
 }
 
 need_tool() { command -v "$1" >/dev/null 2>&1 || die "$1 is not installed"; }
+
+# u: Claude Code usage, from ccusage — which reads Claude Code's own local
+# transcripts, so kel keeps no history of its own (the author wanted none
+# stored). The current 5-hour block, then the last two weeks by day, made at
+# the popup's width; fresh each time.
+panel_usage() { # dir
+  need_tool ccusage
+  local since
+  since="$(date -d '13 days ago' +%Y%m%d 2>/dev/null || date -v-13d +%Y%m%d)"
+  popup "$1" "usage · ccusage · prefix q closes" sh -c \
+    "{ ccusage blocks --active --color; echo; ccusage daily --since $since --color; } 2>&1 | less -R"
+}
+
+# c: the Claude Code configuration that applies here, to look at and open —
+# never written by kel. yazi, one tab per place: this repo's CLAUDE.md, its
+# .claude/ (settings, rules, skills, worktrees), the global ~/.claude with its
+# CLAUDE.md, and the project's memory. Each tab exists only if the place does.
+panel_claude() { # dir title
+  local dir="$1" root mem
+  need_tool yazi
+  root="$(git -C "$dir" rev-parse --show-toplevel 2>/dev/null || printf '%s' "$dir")"
+  local -a tabs=()
+  if [ -f "$root/CLAUDE.md" ]; then tabs+=( "$root/CLAUDE.md" ); fi
+  if [ -d "$root/.claude" ]; then tabs+=( "$root/.claude" ); fi
+  if [ -f "$CLAUDE_HOME/CLAUDE.md" ]; then tabs+=( "$CLAUDE_HOME/CLAUDE.md" )
+  elif [ -d "$CLAUDE_HOME" ]; then tabs+=( "$CLAUDE_HOME" ); fi
+  # Claude Code keys a project's memory by its path, every / and . a -
+  mem="$CLAUDE_HOME/projects/$(printf '%s' "$root" | sed 's/[^A-Za-z0-9]/-/g')/memory"
+  if [ -d "$mem" ]; then tabs+=( "$mem" ); fi
+  [ "${#tabs[@]}" -gt 0 ] || die "no CLAUDE.md, .claude or ~/.claude to show"
+  KEL_POPUP_KEEP=1 popup "$root" "claude config · $2 · tabs: 1-${#tabs[@]} · prefix q closes" yazi "${tabs[@]}"
+}
+
+# kel shot [agent] — the pane as an image, with freeze. SVG: freeze's PNG
+# path crashed (a Go stack overflow) on the author's WSL2, from both a Go
+# build and the release, and its .webp came out as SVG under another name —
+# so kel asks for what works and names it for what it is.
+cmd_shot() { # [agent]
+  need tmux; need_tool freeze
+  local pane out dir name
+  if [ -n "${1:-}" ]; then
+    local m; m="$(resolve_agent "$1")" || die "no single agent named '$1' — try group/name"
+    pane="$(agent_pane "$(jq -r .window_id "${m##*$'\t'}")")"
+  else
+    pane="${TMUX_PANE:-}"
+  fi
+  [ -n "$pane" ] || die "which pane? run it inside kel, or name an agent"
+  name="$(tmux display-message -p -t "$pane" '#{window_name}' 2>/dev/null | tr -c 'A-Za-z0-9._\n-' '-')"
+  dir="${KEL_SHOT_DIR:-$HOME/Pictures/kel}"; mkdir -p "$dir"
+  out="$dir/${name:-pane}-$(date +%Y%m%d-%H%M%S).svg"
+  tmux capture-pane -p -e -t "$pane" | freeze -l ansi -o "$out" >/dev/null 2>&1 \
+    || die "freeze could not draw the pane"
+  [ -s "$out" ] || die "freeze wrote nothing"
+  say "$out"
+}
 
 # lazygit: esc means "back" everywhere in kel, so in kel's popup it also
 # closes lazygit — its quitOnTopLevelReturn, laid over the user's own config
@@ -2927,6 +2997,7 @@ main() {
     snapshot)     cmd_snapshot ;;
     sidebar)      cmd_sidebar "$@" ;;
     url)          cmd_url "$@" ;;
+    shot)         cmd_shot "$@" ;;
     shell)        cmd_shell "$@" ;;
     quit)         cmd_quit "$@" ;;
     _prompt)      cmd_prompt "$@" ;;

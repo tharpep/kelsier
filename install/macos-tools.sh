@@ -65,4 +65,9 @@ fnm use default
 node --version
 npm --version
 
+say "optional tools kel opens: glow (p), freeze (kel shot), vhs, ccusage (u), gh-dash (G)"
+brew install glow freeze vhs ffmpeg ttyd
+npm install -g --silent ccusage
+gh extension install dlvhdr/gh-dash 2>/dev/null || true
+
 say "macOS tools done — now: Claude Code, gh auth login, then ./install.sh"

@@ -365,6 +365,14 @@ make sure a frame the author approved stays approved.
 What the desktop ADEs (Orca, Superset, Conductor, T3 Code) build in, kel gets
 by deciding where existing tools open — invariant 7.
 
+*Phase 3 (2026-10-16) adds four more, the same way:* markdown is glow (`p`);
+usage is ccusage (`u`), which reads Claude Code's own transcripts, so kel stores
+no history; PRs and issues are gh dash (`G`), kept like lazygit; and the Claude
+configuration that applies to a space — the repo's `CLAUDE.md` and `.claude/`,
+the global `~/.claude`, the project's memory — is yazi with a tab per place
+(`c`): to read and open, never written by kel, which stays clear of R2 (wiring
+the agent's environment) and R3 (kel rendering documentation).
+
 - **Editor: your nvim, else a popup** *(decided in M5 planning, replacing a
   kel-owned nvim per worktree)*. Every nvim since 0.9 listens on a socket of
   its own (`v:servername`, `nvim.<pid>.0` under `$XDG_RUNTIME_DIR` or the temp
