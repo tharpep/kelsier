@@ -133,7 +133,7 @@ that need you are coloured — waiting yellow, working cyan, finished-and-unseen
 green, dead red; idle, seen and unknown are grey, and a doubtful `working?` is
 grey italic. The footer reads `click, or Ctrl-b then space` until the sidebar
 has the keyboard — or, while an agent waits on you, `1 waiting 6m · click to
-jump` in yellow — then shows the keys for whatever is selected (`e edit · p plan · x kill · ?` on an agent) — `?` lists them all.
+jump` in yellow — then shows the keys for whatever is selected (`e edit · p plan · x kill · ?` on an agent) — `?` lists them all, and a click on a bold key there runs it.
 
 | key | |
 |---|---|

@@ -563,8 +563,13 @@ func (m sbModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.Button != tea.MouseLeft {
 			return m, nil
 		}
-		if m.help { // the keys list: a click anywhere closes it
+		if m.help { // the keys list: a key clicked is pressed; elsewhere closes it
 			m.help = false
+			if msg.Y >= 1 && msg.Y <= len(sbHelp) {
+				if k := helpKey(sbHelp[msg.Y-1][0]); k != "" {
+					return m.key(tea.KeyPressMsg{Code: rune(k[0]), Text: k})
+				}
+			}
 			return m, nil
 		}
 		_, refs := renderView(m.view(), m.width, m.height, time.Now().Unix())
@@ -819,13 +824,13 @@ var sbHelp = [][2]string{
 	{"t", "shell window here"},
 	{";", "a kel command"},
 	{"`", "next waiting agent"},
-	{"Q", "quit kel (saved first)"},
+	{"Q", "quit kel (saves)"},
 	{"f", "files (yazi)"},
 	{"g", "git (lazygit)"},
 	{"d", "diff against base"},
-	{"e", "edit: agent's last file, else nvim"},
-	{"o", "open server in browser"},
-	{"p", "agent's plan and tasks"},
+	{"e", "edit agent's file"},
+	{"o", "server in browser"},
+	{"p", "plan and tasks"},
 	{"esc", "back to your pane"},
 	{"P", ""},
 	{"  space", "focus the sidebar"},
@@ -849,10 +854,14 @@ func (m sbModel) render() string {
 				b.WriteString(dim + truncate("anywhere: "+pk+", let go, then", m.width) + reset + "\n")
 				continue
 			}
-			k := h[0]
-			b.WriteString(truncate(pad(k, 13), m.width) + dim + truncate(h[1], m.width-13) + reset + "\n")
+			// what a click runs is bold; the rest is how to move, not a verb
+			k, kc := h[0], dim
+			if helpKey(k) != "" {
+				kc = bold
+			}
+			b.WriteString(kc + truncate(pad(k, 13), m.width) + reset + dim + truncate(h[1], m.width-13) + reset + "\n")
 		}
-		b.WriteString(dim + truncate("any key or a click closes", m.width) + reset)
+		b.WriteString(dim + truncate("click a bold key to run it", m.width) + reset)
 		return b.String()
 	}
 	out, _ := renderView(m.view(), m.width, m.height, time.Now().Unix())
@@ -1142,4 +1151,27 @@ func tail(s string, w int) string {
 		return s
 	}
 	return "…" + string(r[len(r)-w+1:])
+}
+
+// helpKey is the key a click on a row of the keys list presses, or "" for a
+// row that is not one action (j k, click, esc, the popup's q). The author
+// asked for every key there to be clickable (2026-10-16); the prefix rows run
+// their sidebar twin — `k` is `;` here.
+func helpKey(row string) string {
+	switch f := strings.Fields(row); {
+	case len(f) == 0:
+		return ""
+	case row == "  k":
+		return ";"
+	case row == "  `":
+		return "`"
+	case strings.HasPrefix(row, " "):
+		return ""
+	default:
+		switch f[0] {
+		case "/", "n", "w", "r", "x", "t", ";", "`", "Q", "f", "g", "d", "e", "o", "p":
+			return f[0]
+		}
+	}
+	return ""
 }

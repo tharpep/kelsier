@@ -526,3 +526,34 @@ func TestCompleteDir(t *testing.T) {
 		}
 	}
 }
+
+// A click on a key in the keys list presses it; a row that is no single
+// action closes the list and does nothing else.
+func TestHelpClick(t *testing.T) {
+	m := sbModel{help: true, width: 32, height: 40}
+	row := func(k string) int {
+		for i, h := range sbHelp {
+			if h[0] == k {
+				return i + 1
+			}
+		}
+		t.Fatalf("no row %q", k)
+		return 0
+	}
+	click := func(y int) sbModel {
+		out, _ := m.Update(tea.MouseClickMsg{Button: tea.MouseLeft, Y: y})
+		return out.(sbModel)
+	}
+	if got := click(row("n")); got.help || got.mode != modeNew {
+		t.Errorf("n row: help %v mode %v", got.help, got.mode)
+	}
+	if got := click(row("/")); got.mode != modeFilter {
+		t.Errorf("/ row: mode %v", got.mode)
+	}
+	if got := click(row("j k")); got.help || got.mode != modeNormal {
+		t.Errorf("j k row should only close: help %v mode %v", got.help, got.mode)
+	}
+	if helpKey("  k") != ";" || helpKey("  q") != "" || helpKey("esc") != "" || helpKey("n name dir") != "n" {
+		t.Error("helpKey")
+	}
+}
