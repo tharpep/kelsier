@@ -614,6 +614,26 @@ every payload, both halves of that were stale:
   the plan rather than the last edit also fixes `e`, which would otherwise
   open the plan as "the file the agent last touched".
 
+**Claude Code's own view** *(built 2026-10-16)*. `claude agents --json` lists
+Claude Code's sessions with a busy/idle status — interactive ones, and
+background ones (`claude --bg`) that run in no pane. On the sidebar's path
+only (a node start, ~0.7 s, cached 10 s in `claude-agents.json`), kel matches
+each interactive session to its window by walking up from its pid to a pane's,
+and lets it correct the hooks where they cannot know: `working` + idle →
+`idle` (an interrupt fires no Stop — the "working 15h" agent), `idle`/`done`
++ busy → `working`. `waiting` is never overridden. Background agents are
+listed (`bg`), nested under the top agent of the same name — Claude Code does
+not say which agent dispatched one — and `enter` opens one with `claude
+attach` in a popup. Unreadable (no claude, a timeout) is null: hooks alone.
+
+**Subagents** *(built 2026-10-16)*. `kel substatus` is Claude Code's
+`subagentStatusLine`: run every refresh tick while the agent panel shows
+subagent rows, all rows in one payload (measured: id, label, agentType,
+status). It records `<window-id>.subs` and prints nothing — which, per the
+docs, keeps Claude Code's own rows as they were. The sidebar nests them under
+their agent (`└ ● Reading parser.go · Explore`); a file older than 30 s is "no
+subagents now", since the panel stops calling once it is empty.
+
 **Done, until seen** *(built, M3)*. `done` carries a flag: unseen until the
 agent's window is shown, then seen. The sidebar records the moment from the
 window-change event it already receives, as an epoch next to the state file;

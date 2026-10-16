@@ -37,6 +37,7 @@
 #   kel snapshot               save the workspace shape (hooks call this)
 #   kel hook <EVENT>           Claude Code state hook
 #   kel statusline             Claude Code statusLine — context % / cost
+#   kel substatus              Claude Code subagentStatusLine — records, prints nothing
 #   kel _panel <what> ...      the sidebar's popups: files, git, diff, edit, editor, plan, browse
 #   kel _prompt '<args>'       prefix k: run `kel <args>`, answer in a message or a popup
 #   kel _notify [title] [body] fire kel's notification (bell + desktop) — to try it
@@ -553,7 +554,7 @@ prune_state() {
   local live f wid panes pane
   live="$(tmux list-windows -a -F '#{window_id}' 2>/dev/null || true)"
   [ -n "$live" ] || return 0
-  for f in "$STATE_DIR"/*.state "$STATE_DIR"/*.ctx "$STATE_DIR"/*.seen "$STATE_DIR"/*.edit "$STATE_DIR"/*.plan "$STATE_DIR"/*.view; do
+  for f in "$STATE_DIR"/*.state "$STATE_DIR"/*.ctx "$STATE_DIR"/*.seen "$STATE_DIR"/*.edit "$STATE_DIR"/*.plan "$STATE_DIR"/*.view "$STATE_DIR"/*.subs; do
     [ -e "$f" ] || continue
     wid="${f##*/}"; wid="${wid%.*}"
     printf '%s\n' "$live" | grep -qxF "$wid" || rm -f "$f"
@@ -1642,6 +1643,7 @@ cmd_url() { # [dir|agent]
 #   _panel edit   <dir> <title> <wid>    the file the agent last touched
 #   _panel plan   <dir> <title> <wid>    the agent's plan, then its tasks
 #   _panel editor <dir> <title>          nvim at the space, kept between opens
+#   _panel attach <dir> <name> <id>      a background agent, `claude attach <id>`
 #   _panel browse <url>                  the real browser
 cmd_panel() {
   local what="${1:-}"
@@ -1656,6 +1658,10 @@ cmd_panel() {
     diff)  panel_diff "$dir" "$title" "$arg" ;;
     edit)  panel_edit "$dir" "$title" "$arg" ;;
     plan)  panel_plan "$dir" "$title" "$arg" ;;
+    attach) need_tool claude
+           # a background agent (`claude --bg`) has no pane: open it here.
+           # Kept like yazi — prefix q closes the popup, the agent runs on
+           KEL_POPUP_KEEP=1 popup "$dir" "$title · bg · prefix q closes" claude attach "$arg" ;;
     editor) need_tool nvim
            # nvim at the space, kept between opens like yazi and lazygit: your
            # buffers are still there when you come back. `nvim .` opens the
@@ -2498,6 +2504,34 @@ cmd_statusline() {
 }
 
 # --------------------------------------------------------------------------
+# kel substatus   —   Claude Code's subagentStatusLine (wired by install.sh)
+# --------------------------------------------------------------------------
+# The agent panel's subagents, for the sidebar to nest under their agent. Run
+# once per refresh tick while subagent rows are visible, with every row in one
+# payload (measured 2026-10-16: id, label, agentType, status, startTime). It
+# prints NOTHING: per the docs a row with no output line keeps Claude Code's
+# own rendering, so kel changes nothing on Claude's screen. One jq, and a write
+# only when what it would write changed — this is a hot path (invariant 5).
+cmd_substatus() {
+  local payload sid cwd tasks pane wid f old
+  payload="$(cat 2>/dev/null || true)"
+  [ -n "$payload" ] || exit 0
+  { read -r sid; read -r cwd; read -r tasks; } < <(printf '%s' "$payload" | jq -r '
+      (.session_id // ""), (.cwd // ""),
+      ([.tasks[]? | {id, name, agentType, status, label: (.label // .description), startTime}] | tojson)' 2>/dev/null)
+  [ -n "${tasks:-}" ] || exit 0
+  pane="$(resolve_pane "$sid" "$cwd")"; [ -n "$pane" ] || exit 0
+  wid="$(tmux display-message -p -t "$pane" '#{window_id}' 2>/dev/null)"; [ -n "$wid" ] || exit 0
+  f="$STATE_DIR/$wid.subs"
+  # the epoch on its own line: the panel stops calling once it has no rows, so
+  # a reader treats an old file as "no subagents now", not as still running
+  old="$(sed -n 2p "$f" 2>/dev/null)"
+  if [ "$old" != "$tasks" ] || [ "$(( $(date +%s) - $(sed -n 1p "$f" 2>/dev/null || echo 0) ))" -gt 10 ]; then
+    printf '%s\n%s\n' "$(date +%s)" "$tasks" > "$f.$$" && mv -f "$f.$$" "$f"
+  fi
+}
+
+# --------------------------------------------------------------------------
 # kel hook <EVENT>
 # --------------------------------------------------------------------------
 # PostToolUse, matched to Edit|Write|MultiEdit by install.sh: remember the
@@ -2735,6 +2769,7 @@ main() {
     quit)         cmd_quit "$@" ;;
     _prompt)      cmd_prompt "$@" ;;
     _notify)      notify "${1:-kel}" "${2:-test notification}" ;;
+    substatus)    cmd_substatus "$@" ;;
     _panel)       cmd_panel "$@" ;;
     _sidebar)     case "${1:-}" in
                     ensure) sidebar_ensure "${2:-}" ;;

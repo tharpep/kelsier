@@ -78,6 +78,8 @@ type sbModel struct {
 	msg    string // the last command's result, shown until the next key
 	msgBad bool
 	help   bool
+
+	pending tea.Cmd // a command activate() started, returned by the caller
 }
 
 // ---------------------------------------------------------------- state dir
@@ -345,6 +347,16 @@ func (m *sbModel) activate(id string) {
 		if a, ok := m.agentOf(id); ok {
 			jump(a.wid, a.pane)
 		}
+	case strings.HasPrefix(id, "b:"):
+		// a background agent has no pane to jump to: open it, `claude
+		// attach`, in a popup — prefix q closes it, and it keeps running
+		if m.doc.Background != nil {
+			for _, b := range *m.doc.Background {
+				if bgID(b.ID) == id {
+					m.pending = runKel(b.Cwd, nil, "_panel", "attach", b.Cwd, b.Name, b.ID)
+				}
+			}
+		}
 	default:
 		if m.doc.Panes != nil {
 			for _, p := range *m.doc.Panes {
@@ -551,6 +563,9 @@ func (m sbModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.ui.sel = refs[msg.Y].id
 			m.saveShared()
 			m.activate(m.ui.sel)
+			c := m.pending
+			m.pending = nil
+			return m, c
 		}
 
 	case tea.MouseWheelMsg:
@@ -666,6 +681,9 @@ func (m sbModel) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.move(-1)
 	case "enter":
 		m.activate(m.view().sel)
+		c := m.pending
+		m.pending = nil
+		return m, c
 	case "space", "l", "right", "h", "left":
 		v := m.view()
 		for _, s := range v.spaces {

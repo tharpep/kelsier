@@ -91,6 +91,8 @@ change; migrate old records in `migrate_meta`.
 | `<window-id>.view` | what `p` last composed (plan, then tasks) for its popup; overwritten each time |
 | `lazygit-overlay.yml` | `quitOnTopLevelReturn: true`, laid over the user's lazygit config (never written into it) so `esc` closes kel's lazygit popup |
 | `prompt.out` | the last multi-line answer `prefix k` showed in a popup |
+| `claude-agents.json` | `{at, bin, sessions, failed}` — `claude agents --json`, cached 10 s for the sidebar's path; `bin` remembers where claude is |
+| `<window-id>.subs` | two lines: the epoch, then the agent panel's subagent rows as JSON, from `kel substatus`; older than 30 s means none now |
 | `sidebar-off` | present after `kel sidebar off`; no new sidebars until `kel sidebar on` |
 | `ports.json` | `{at, panes:{<pane pid>: [ports]}}` — the listening-port scan behind `_fleet --panes`, reused for 10 s |
 

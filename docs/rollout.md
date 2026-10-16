@@ -317,6 +317,12 @@ the `TodoWrite` design was stale, and the plan turned out to need no new hook.
   through a real pane id wrote made-up numbers into that agent's `.ctx` — an
   agent read `$0.00`; restored. Reproduce statusline rows without
   `TMUX_PANE` set to a live pane
+- *phase 1 of the 2026-10-16 batch:* agent state from Claude Code itself
+  (`claude agents --json`), background agents in the sidebar, subagents nested
+  under their agent (`subagentStatusLine`, payload measured first). Phase 2:
+  worktrees nested under their repo with a passive agent count and tidy-up;
+  phase 3: glow, ccusage, gh-dash, freeze + vhs, and a `.claude` viewer.
+  Automations stay held until there are some
 - *found on the way:* M5's `hook_edit` had real newlines inside its `printf`
   format — a quoting slip in its writing that happened to print the same
   thing; rewritten while the plan / edit split went in

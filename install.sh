@@ -84,6 +84,7 @@ if [ "${1:-}" = "--uninstall" ]; then
       (if .hooks then .hooks |= with_entries(.value |= strip_kel) else . end)
       | (if .hooks then .hooks |= with_entries(select((.value | length) > 0)) else . end)
       | (if (.hooks // {}) == {} then del(.hooks) else . end)
+      | (if ((.subagentStatusLine.command // "") | test("kel substatus")) then del(.subagentStatusLine) else . end)
       | if ((.statusLine.command // "") | test("kel statusline"))
         then (if $prev == "" then del(.statusLine)
               else .statusLine = {type:"command", command:$prev} end)
@@ -203,6 +204,20 @@ jq --arg k "$KEL" '
            "hooks": [{ "type": "command", "command": ($k + " hook PostToolUse") }] }])
 ' "$SETTINGS" > "$tmp" && mv "$tmp" "$SETTINGS"
 echo "  wired: SessionStart UserPromptSubmit Notification Stop SessionEnd PreCompact PostCompact PostToolUse (edits)"
+
+say "Claude Code subagentStatusLine -> $SETTINGS"
+# subagents, for the sidebar to nest under their agent. kel's command prints
+# nothing, which keeps Claude Code's own subagent rows exactly as they were.
+# A subagentStatusLine you already have is left alone: it is yours.
+if [ "$(jq -r '.subagentStatusLine.command // ""' "$SETTINGS")" = "" ] \
+   || jq -r '.subagentStatusLine.command // ""' "$SETTINGS" | grep -q 'kel substatus'; then
+  tmp="$(mktemp)"
+  jq --arg k "$KEL" '.subagentStatusLine = {type:"command", command:($k + " substatus")}' \
+    "$SETTINGS" > "$tmp" && mv "$tmp" "$SETTINGS"
+  echo "  wired: subagentStatusLine"
+else
+  echo "  kept your own subagentStatusLine — kel's sidebar will not show subagents"
+fi
 
 say "Claude Code statusLine -> $SETTINGS"
 # kel's statusLine reports this agent's context window / cost, and records them

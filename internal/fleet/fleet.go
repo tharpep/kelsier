@@ -59,6 +59,12 @@ type Agent struct {
 	// looked at. A flag beside State, never a state of its own, so kel jump,
 	// the notifications and the bar — which all match on state — see `done`.
 	Unseen bool `json:"unseen"`
+	// Claude is Claude Code's own view of this agent (claude.go): only on
+	// the sidebar's path (Options.Panes), and null when it could not be read
+	Claude *ClaudeView `json:"claude,omitempty"`
+	// Subagents: the agent panel's rows, from `kel substatus` (claude.go).
+	// Empty when none are showing; recorded within subsFresh or not at all
+	Subagents []Subagent `json:"subagents,omitempty"`
 }
 
 type Current struct {
@@ -77,6 +83,9 @@ type Doc struct {
 	// every kel window, for the sidebar. A pointer so that "asked, and there
 	// are none" is [] while "not asked" omits the key.
 	Panes *[]Pane `json:"panes,omitempty"`
+	// Background lists agents Claude Code runs in no pane (`claude --bg`).
+	// Null, not empty, when Claude Code could not be asked (claude.go)
+	Background *[]Background `json:"background,omitempty"`
 }
 
 // record is the on-disk agent record, sessions/<group>/<name>.json.
@@ -420,6 +429,7 @@ func Load(o Options) Doc {
 		if eff != nil && *eff == "done" {
 			a.Unseen = unseen(sd, w.wid, a.StateSince)
 		}
+		a.Subagents = loadSubs(sd, w.wid, time.Now().Unix())
 		if managed {
 			a.Isolation, a.Branch, a.Repo, a.Cwd = rec.Isolation, rec.Branch, rec.Repo, rec.Cwd
 			a.AgentCmd, a.ClaudeSession, a.Compactions = rec.Agent, rec.ClaudeSession, rec.Compactions
@@ -498,6 +508,7 @@ func Load(o Options) Doc {
 	if o.Panes {
 		ps := buildPanes(paneRows, paneWins, curPane)
 		doc.Panes = &ps
+		withClaude(&doc, sd, ps)
 	}
 	return doc
 }

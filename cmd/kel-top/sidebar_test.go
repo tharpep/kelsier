@@ -258,10 +258,11 @@ func TestSidebarKeys(t *testing.T) {
 		t.Fatalf("start: %q", m.view().sel)
 	}
 	press("k")
-	if sel := m.view().sel; sel != "a:@2" {
-		t.Errorf("k from kelsier: %q, want fix-auth above it", sel)
+	// fix-auth's background agent sits between it and kelsier
+	if sel := m.view().sel; sel != "b:bg1" {
+		t.Errorf("k from kelsier: %q, want fix-auth's background agent above it", sel)
 	}
-	if sbLoadShared().Selected != "a:@2" {
+	if sbLoadShared().Selected != "b:bg1" {
 		t.Error("the cursor is not shared through sidebar.json")
 	}
 

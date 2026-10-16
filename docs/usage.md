@@ -161,6 +161,12 @@ agent kel has heard nothing from for half an hour while "working" reads
 claim it is still at work. The entry under the mouse pointer shows a dim bar —
 what a click would hit.
 
+Under an agent: its subagents (`└ ● Reading parser.go · Explore`, `✓` when
+done), and any background agent (`claude --bg`) of the same name (`└ ● pr52 ·
+bg · blocked`); other background agents are listed on their own, marked `bg`.
+`enter` on one opens it (`claude attach`) in a popup. An agent's working or
+idle comes from Claude Code itself where it can say.
+
 When an agent starts waiting and you are looking elsewhere, kel rings your
 terminal's bell and shows a desktop notification (a Windows toast on WSL) —
 see `setup.md` §5b to change either. Hidden sidebars do no work; the one you can see refreshes every two

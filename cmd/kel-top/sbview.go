@@ -59,9 +59,14 @@ type sbAgent struct {
 }
 
 type sbView struct {
-	spaces   []sbSpace
-	agents   []sbAgent
-	unknown  bool // the fleet could not list panes: say so, never "nothing open"
+	spaces []sbSpace
+	agents []sbAgent
+	// bg: background agents (`claude --bg`), each nested under the top agent
+	// of the same name when there is one — Claude Code does not say which
+	// agent dispatched it, and a same-named one is how the author makes them
+	bgUnder  map[string][]fleet.Background // agent window id -> its children
+	bgLoose  []fleet.Background            // no such agent: listed on their own
+	unknown  bool                          // the fleet could not list panes: say so, never "nothing open"
 	sel      string
 	filter   string
 	entryIDs []string // selectable ids in screen order, for j/k
@@ -78,6 +83,34 @@ type lineRef struct {
 }
 
 func spaceID(key string) string { return "s:" + key }
+func bgID(id string) string     { return "b:" + id }
+
+// subLook: a subagent's dot — working cyan, finished grey ✓, failed red ✕.
+func subLook(status string) (dot, colour string) {
+	switch status {
+	case "running":
+		return "●", cyan
+	case "completed":
+		return "✓", dim
+	case "failed", "killed":
+		return "✕", red
+	}
+	return "?", dim
+}
+
+// bgLook: a background agent's dot and word. Claude Code calls one waiting on
+// you "blocked"; busy is working; idle is calm.
+func bgLook(b fleet.Background) (dot, colour, word string) {
+	switch {
+	case b.State == "blocked":
+		return "●", yellow + bold, "blocked"
+	case b.Status == "busy":
+		return "●", cyan, "working"
+	case b.Status == "idle":
+		return "○", dim, "idle"
+	}
+	return "?", dim, "?"
+}
 func agentID(wid string) string { return "a:" + wid }
 
 // spaceKey groups a pane: its repo root (a linked worktree is its own root, so
@@ -237,6 +270,23 @@ func buildView(doc fleet.Doc, ui uiState) sbView {
 	if ui.filter != "" {
 		v.applyFilter(strings.ToLower(ui.filter))
 	}
+	if doc.Background != nil {
+		names := map[string]string{}
+		for _, a := range v.agents {
+			names[a.agent.Name] = a.wid
+		}
+		v.bgUnder = map[string][]fleet.Background{}
+		for _, b := range *doc.Background {
+			if ui.filter != "" && !strings.Contains(strings.ToLower(b.Name), strings.ToLower(ui.filter)) {
+				continue
+			}
+			if wid, ok := names[b.Name]; ok {
+				v.bgUnder[wid] = append(v.bgUnder[wid], b)
+			} else {
+				v.bgLoose = append(v.bgLoose, b)
+			}
+		}
+	}
 	for _, s := range v.spaces {
 		v.entryIDs = append(v.entryIDs, spaceID(s.key))
 		if s.open {
@@ -247,6 +297,12 @@ func buildView(doc fleet.Doc, ui uiState) sbView {
 	}
 	for _, a := range v.agents {
 		v.entryIDs = append(v.entryIDs, agentID(a.wid))
+		for _, b := range v.bgUnder[a.wid] {
+			v.entryIDs = append(v.entryIDs, bgID(b.ID))
+		}
+	}
+	for _, b := range v.bgLoose {
+		v.entryIDs = append(v.entryIDs, bgID(b.ID))
 	}
 	if v.indexOf(v.sel) < 0 {
 		v.sel = ""
@@ -565,6 +621,27 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 		word = truncate(word, text)
 		rest = truncate(rest, text-len([]rune(word)))
 		add("   "+wc+word+reset+rc+rest+reset, r)
+		// subagents: the Task-tool helpers this agent has running, under it
+		for _, sub := range a.agent.Subagents {
+			d, c := subLook(sub.Status)
+			label := sub.Label
+			if sub.AgentType != "" && sub.AgentType != "general-purpose" {
+				label += " · " + sub.AgentType
+			}
+			add("   "+dim+"└"+reset+" "+c+d+reset+" "+dim+truncate(label, w-7)+reset, r)
+		}
+		for _, b := range v.bgUnder[a.wid] {
+			d, c, w2 := bgLook(b)
+			bid := bgID(b.ID)
+			label := truncate(b.Name+" · bg · "+w2, w-7)
+			add(lead(bid)+"  "+dim+"└"+reset+" "+c+d+reset+" "+label, lineRef{id: bid, kind: "bg"})
+		}
+	}
+	for _, b := range v.bgLoose {
+		d, c, w2 := bgLook(b)
+		bid := bgID(b.ID)
+		add(lead(bid)+c+d+reset+" "+truncate(b.Name, text)+"  "+dim+"bg"+reset, lineRef{id: bid, kind: "bg"})
+		add("   "+c+w2+reset+dim+truncate(" · "+b.Group, text-len([]rune(w2)))+reset, lineRef{id: bid, kind: "bg"})
 	}
 
 	// actions: what does not depend on the selection, as keys you can also

@@ -30,6 +30,10 @@ export KEL_SESSION=keltest
 # WSL): a suite that fakes waiting agents would pop real notifications on the
 # developer's desktop. The notification tests use a KEL_NOTIFY_CMD stub instead
 export KEL_NOTIFY_DESKTOP=off KEL_NOTIFY_BELL=off
+# kel asks Claude Code for its sessions (`claude agents --json`) on the
+# sidebar's path: here a stub answers, from $WORK/claude-agents.json, or the
+# developer's real sessions would leak into the suite's fleet
+export KEL_CLAUDE_BIN="$WORK/claude-stub"
 # Sidebars off unless a section turns them on: the sections written before
 # v0.10 count panes, and a sidebar is one more.  The sidebar's own section
 # turns it on and re-checks what matters with it present.
@@ -60,6 +64,8 @@ mkdir -p "$WORK/shim"
 printf '#!/bin/sh\nexec %s -f /dev/null "$@"\n' "$(command -v tmux)" > "$WORK/shim/tmux"
 chmod +x "$WORK/shim/tmux"
 export PATH="$WORK/shim:$PATH"
+printf '#!/bin/sh\n[ "$1 $2" = "agents --json" ] && { cat "%s/claude-agents.json" 2>/dev/null || echo "[]"; }\n' "$WORK" > "$WORK/claude-stub"
+chmod +x "$WORK/claude-stub"
 STATE="$XDG_STATE_HOME/kel"
 SESSIONS="$STATE/sessions"
 
@@ -1178,6 +1184,30 @@ ok "  ...with its sidebar, and no agent record"  '[ -n "$SHW" ] && [ "$(sbcount 
 : > "$KEL_POPUP_TRACE"
 "$KEL" _prompt "url $WT5" >/dev/null 2>&1
 ok "prefix k: a long answer goes to a popup"     'grep -q "kel url $WT5 · prefix q closes	less -R" "$KEL_POPUP_TRACE" && grep -c localhost "$STATE/prompt.out" | grep -qx 2'
+# ---- Claude Code's own view: `claude agents --json`, and subagents
+# '|', not a space: awk folds a leading empty field away, and the user's pane
+# is the one whose @kel-sidebar is empty
+SPID="$(tmux list-panes -t "$W5" -F '#{@kel-sidebar}|#{pane_pid}' | awk -F'|' '$1=="" {print $2; exit}')"
+APID="$(pgrep -P "$SPID" sleep | head -1)"
+hook "$UP5" UserPromptSubmit
+printf '[{"pid":%s,"cwd":"%s","kind":"interactive","sessionId":"s5","name":"wt5","status":"idle"},{"pid":1,"id":"bg77","cwd":"%s","kind":"background","sessionId":"s77","name":"runner","status":"busy"}]' \
+  "${APID:-0}" "$WT5" "$WT5" > "$WORK/claude-agents.json"
+rm -f "$STATE/claude-agents.json"
+FA() { "$KEL" _fleet --panes | jq -r "$1"; }
+ok "working, but Claude Code says idle: idle"     '[ "$(FA ".agents[] | select(.name==\"wt5\") | .state")" = idle ]'
+ok "  ...the hook state alone still says working" '[ "$("$KEL" _fleet | jq -r ".agents[] | select(.name==\"wt5\") | .state")" = working ]'
+ok "a background agent is listed, with its repo"  '[ "$(FA ".background[0].id")" = bg77 ] && [ "$(FA ".background[0].group")" = api-gw ]'
+printf '#!/bin/sh\nexit 1\n' > "$WORK/claude-stub.fail"; chmod +x "$WORK/claude-stub.fail"
+rm -f "$STATE/claude-agents.json"
+ok "no Claude Code to ask: the hooks alone, and no background list" \
+  '[ "$(KEL_CLAUDE_BIN="$WORK/claude-stub.fail" "$KEL" _fleet --panes | jq -r ".agents[] | select(.name==\"wt5\") | .state, (.background == null)" | tr "\n" " ")" = "working true " ]'
+rm -f "$STATE/claude-agents.json" "$WORK/claude-agents.json"
+# subagents: kel substatus records the panel's rows and prints nothing
+sub="$(printf '%s' "{\"session_id\":\"s\",\"cwd\":\"$WT5\",\"tasks\":[{\"id\":\"t1\",\"type\":\"local_agent\",\"agentType\":\"Explore\",\"status\":\"running\",\"description\":\"Find the parser\",\"label\":\"Reading parser.go\",\"startTime\":1}]}" \
+  | TMUX_PANE="$UP5" "$KEL" substatus)"
+ok "kel substatus prints nothing (Claude's rows stay its own)" '[ -z "$sub" ]'
+ok "  ...and the agent's subagents are in the fleet" '[ "$("$KEL" _fleet | jq -r ".agents[] | select(.name==\"wt5\") | .subagents[0] | .label + \"/\" + .agentType")" = "Reading parser.go/Explore" ]'
+
 # kel quit: never the only copy of work, then everything, saved first
 echo wip > "$WT5/scratch-quit.txt"
 qout="$("$KEL" quit 2>&1)"
@@ -1448,7 +1478,7 @@ ok "  ...and there are some to check"    '[ "$DPROBES" -ge 12 ]'
 # documented under the header's "internal" heading while still being completable.
 DISP=$(awk '/^  case "\$cmd" in/,/^  esac/' "$HERE/../bin/kel" \
        | grep -oE '^    [a-z|-]+\)' | tr -d ' )' | tr '|' '\n' \
-       | grep -vE '^(hook|statusline|status-line|snapshot|jump|attach|list|menu|help|cheat|-h|--help)$' \
+       | grep -vE '^(hook|statusline|substatus|status-line|snapshot|jump|attach|list|menu|help|cheat|-h|--help)$' \
        | grep -v '^_' | grep -v '^$' | sort -u)
 HELP=$(awk '/^# internal \(/{exit} /^#   kel [a-z]/{print $3}' "$HERE/../bin/kel" | sort -u)
 CBASH=$(sed -n 's/.*subcmds="\([^"]*\)".*/\1/p' "$HERE/../completions/kel.bash" \

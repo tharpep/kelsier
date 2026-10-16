@@ -37,7 +37,23 @@
     "at": 1792018795,
     "model": "Opus 5.5 (1M context)"
    },
-   "unseen": false
+   "unseen": false,
+   "subagents": [
+    {
+     "id": "t1",
+     "agentType": "Explore",
+     "status": "running",
+     "label": "Reading parser.go",
+     "startTime": 1
+    },
+    {
+     "id": "t2",
+     "agentType": "general-purpose",
+     "status": "completed",
+     "label": "Run the tests",
+     "startTime": 1
+    }
+   ]
   },
   {
    "group": "kelsier",
@@ -635,6 +651,27 @@
    "kind": "program",
    "agent": false,
    "ports": [],
+   "git": null
+  }
+ ],
+ "background": [
+  {
+   "id": "bg1",
+   "name": "fix-auth",
+   "cwd": "/home/me/code/kelsier-fix-auth",
+   "status": "busy",
+   "session_id": "x",
+   "group": "kelsier",
+   "git": null
+  },
+  {
+   "id": "bg2",
+   "name": "nightly",
+   "cwd": "/home/me/code/api-gw",
+   "status": "idle",
+   "state": "blocked",
+   "session_id": "y",
+   "group": "api-gw",
    "git": null
   }
  ]
