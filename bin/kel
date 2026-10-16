@@ -1737,6 +1737,10 @@ popup() {
   # hosted session, whose clients are control-mode (one cannot show a popup,
   # and is hung up trying)
   [ -n "${KEL_POPUP_NODRAW:-}" ] && return 0
+  # "prefix q" told the author nothing: inside a Claude popup esc and q are
+  # Claude's, and the title must name the key that actually closes it
+  local pk; pk="$(tmux show-options -gv prefix 2>/dev/null)"
+  [ -n "$pk" ] && title="${title//prefix q/$pk q}"
   local -a opt=( -EE -w "${KEL_POPUP_W:-90%}" -h "${KEL_POPUP_H:-85%}" -d "$dir" -T " $title " )
   tmux_at_least 3 3 && opt+=( -b rounded )            # border styles are 3.3+
   [ -n "${TMUX_PANE:-}" ] && opt+=( -t "$TMUX_PANE" )
@@ -2304,8 +2308,8 @@ time_until() { # epoch now
 }
 
 # one quota chip per rate limit; gated at 50%.
-quota_chip() { # label pct resets_at now
-  [ "${2:--1}" -ge 50 ] 2>/dev/null || return 0
+quota_chip() { # label pct resets_at now [from — default 50]
+  [ "${2:--1}" -ge "${5:-50}" ] 2>/dev/null || return 0
   local r; r="$(time_until "${3:-0}" "${4:-0}")"
   printf ' \033[2m·\033[0m \033[33m%s %s%%%s\033[0m' "$1" "$2" "${r:+ ($r)}"
 }
@@ -2489,8 +2493,11 @@ cmd_statusline() {
   fi
   [ -n "$cost" ] && [ "$cost" != "0" ] && printf ' \033[2m·\033[0m $%.2f' "$cost" 2>/dev/null
   if [ -z "$label" ]; then
-    quota_chip 5h    "$rl5"   "$rl5at"   "$now"
-    quota_chip 7d    "$rl7d"  "$rl7dat"  "$now"
+    # the 5-hour window always, when reported — the author needs the smallest
+    # limit in view, and gating it at 50% showed only the week. The week from
+    # 75% (the author's call), spend from 50%: rarely what you are about to hit
+    quota_chip 5h    "$rl5"   "$rl5at"   "$now" 0
+    quota_chip 7d    "$rl7d"  "$rl7dat"  "$now" 75
     quota_chip spend "$spend" "$spendat" "$now"
   fi
   # agent.name marks a `claude --agent` session, not a Task-tool subagent.

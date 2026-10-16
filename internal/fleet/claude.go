@@ -208,6 +208,36 @@ func withClaude(doc *Doc, sd string, panes []Pane) {
 			}
 		}
 	}
+	// A background session with a top agent's name is that agent: Claude Code
+	// can move a session to the background while its window goes on showing
+	// it (the author's pr52 — the "bg child" was the agent in front of them).
+	// kel names its agents (`claude --name`), so the name is meaningful. The
+	// agent gets its status; it is not listed a second time.
+	names := map[string]int{}
+	for i, a := range doc.Agents {
+		if a.WindowID != nil {
+			names[a.Name] = i
+		}
+	}
+	kept := bg[:0]
+	for _, b := range bg {
+		i, ok := names[b.Name]
+		if !ok || doc.Agents[i].Claude != nil {
+			kept = append(kept, b)
+			continue
+		}
+		a := &doc.Agents[i]
+		a.Claude = &ClaudeView{Status: b.Status, SessionID: b.SessionID, Name: b.Name}
+		if a.State != nil {
+			switch {
+			case *a.State == "working" && b.Status == "idle":
+				a.State, a.Unseen = sp("idle"), false
+			case (*a.State == "idle" || *a.State == "done") && b.Status == "busy":
+				a.State, a.Unseen = sp("working"), false
+			}
+		}
+	}
+	bg = kept
 	pos := gitPositions(roots)
 	for i := range bg {
 		if r, linked, ok := repoRoot(bg[i].Cwd); ok && pos[r] != nil {

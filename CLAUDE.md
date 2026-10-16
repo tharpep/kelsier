@@ -288,6 +288,12 @@ with nothing in kel to assert against. Re-breaking an `unguarded` one is silent.
   `.ctx`.** Driving it by hand to reproduce a row put made-up numbers into a
   real agent's state (it read `$0.00`). Reproduce without `TMUX_PANE`, or
   against the suite's server.
+- `[guarded]` **A window can be showing a background session.** Claude Code
+  moves a session to the background while its window keeps displaying it, so
+  the pane's own process is not in `claude agents` and the background entry is
+  the agent itself. kel folds a background session named like a top agent
+  into that agent. Its statusLine runs in the background process, outside any
+  pane — which is why such an agent's Claude row shows the repo identity.
 - `[unguarded]` **`prune_state` is not `kel prune`.** `cmd_prune` reaps dead
   *agents*; `prune_state` reaps orphaned state files and is called from `cmd_ls`
   and `cmd_attach`. A test that drives `kel prune` to exercise `prune_state`

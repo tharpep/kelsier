@@ -1197,6 +1197,10 @@ FA() { "$KEL" _fleet --panes | jq -r "$1"; }
 ok "working, but Claude Code says idle: idle"     '[ "$(FA ".agents[] | select(.name==\"wt5\") | .state")" = idle ]'
 ok "  ...the hook state alone still says working" '[ "$("$KEL" _fleet | jq -r ".agents[] | select(.name==\"wt5\") | .state")" = working ]'
 ok "a background agent is listed, with its repo"  '[ "$(FA ".background[0].id")" = bg77 ] && [ "$(FA ".background[0].group")" = api-gw ]'
+printf '[{"pid":1,"id":"bg55","cwd":"%s","kind":"background","sessionId":"s55","name":"wt5","status":"busy"}]' "$WT5" > "$WORK/claude-agents.json"
+rm -f "$STATE/claude-agents.json"; hook "$UP5" Stop
+ok "a background session named like an agent is that agent" '[ "$(FA ".background | length")" = 0 ] && [ "$(FA ".agents[] | select(.name==\"wt5\") | .state + \"/\" + .claude.status")" = working/busy ]'
+rm -f "$STATE/claude-agents.json"; hook "$UP5" UserPromptSubmit
 printf '#!/bin/sh\nexit 1\n' > "$WORK/claude-stub.fail"; chmod +x "$WORK/claude-stub.fail"
 rm -f "$STATE/claude-agents.json"
 ok "no Claude Code to ask: the hooks alone, and no background list" \
@@ -1616,7 +1620,11 @@ slout() { printf '%s' "$1" | env -u TMUX -u TMUX_PANE "$KEL" statusline; }
 QP="{\"session_id\":\"zz\",\"workspace\":{\"current_dir\":\"/nonexistent-kel-test\"},\"context_window\":{\"context_window_size\":200000,\"used_percentage\":5},\"rate_limits\":{\"five_hour\":{\"used_percentage\":74,\"resets_at\":$RESET_AT}}}"
 QROW="$(slout "$QP")"
 ok "outside kel, a quota past 50% names its reset"  '[[ "$QROW" == *"5h 74% (1h"* ]]'
-ok "  ...and a quota below 50% stays hidden"        '[[ "$(slout "{\"session_id\":\"zz\",\"workspace\":{\"current_dir\":\"/nonexistent-kel-test\"},\"context_window\":{\"context_window_size\":200000,\"used_percentage\":5},\"rate_limits\":{\"five_hour\":{\"used_percentage\":31}}}")" != *5h* ]]'
+# the 5-hour window shows at any figure — the smallest limit is the one to
+# watch; the week still waits for 50%
+ok "  ...the 5h one at any figure"                  '[[ "$(slout "{\"session_id\":\"zz\",\"workspace\":{\"current_dir\":\"/nonexistent-kel-test\"},\"context_window\":{\"context_window_size\":200000,\"used_percentage\":5},\"rate_limits\":{\"five_hour\":{\"used_percentage\":31}}}")" == *"5h 31%"* ]]'
+ok "  ...and the week below 75% stays hidden"       '[[ "$(slout "{\"session_id\":\"zz\",\"workspace\":{\"current_dir\":\"/nonexistent-kel-test\"},\"context_window\":{\"context_window_size\":200000,\"used_percentage\":5},\"rate_limits\":{\"seven_day\":{\"used_percentage\":60}}}")" != *7d* ]]'
+ok "  ...shown from 75%"                            '[[ "$(slout "{\"session_id\":\"zz\",\"workspace\":{\"current_dir\":\"/nonexistent-kel-test\"},\"context_window\":{\"context_window_size\":200000,\"used_percentage\":5},\"rate_limits\":{\"seven_day\":{\"used_percentage\":80}}}")" == *"7d 80%"* ]]'
 ok "a reset already in the past is omitted"         '[[ "$(slout "{\"session_id\":\"zz\",\"workspace\":{\"current_dir\":\"/nonexistent-kel-test\"},\"context_window\":{\"context_window_size\":200000,\"used_percentage\":5},\"rate_limits\":{\"five_hour\":{\"used_percentage\":74,\"resets_at\":1}}}")" == *"5h 74%"* ]]'
 ok "inside kel the row carries no quota"            '[[ "$(sl "$QP")" != *5h* ]]'
 # the account file the bar reads: written from a payload with rate limits,

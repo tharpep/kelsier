@@ -301,7 +301,8 @@ tharpep/kelsier@auth-fix · Opus 5.5 · ███░░░░░░░ 25% ctx �
 | `fast` `xhigh` `no-think` | those modes are not at their defaults |
 | `250k/1M` after the bar | context is at `KEL_CTX_WARN` or above |
 | `$N.NN` | cost is non-zero |
-| `5h` / `7d` / `spend` + reset | outside a kel window, and that quota is at 50% or above |
+| `5h` + reset | outside a kel window, always when reported |
+| `7d` / `spend` + reset | outside a kel window, from 75% / 50% |
 | an agent name | the session was started with `claude --agent` |
 
 `ctx ?` means not measured yet (before the first reply, and right after
