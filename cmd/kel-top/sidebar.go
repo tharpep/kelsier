@@ -63,6 +63,7 @@ const (
 	modeKill
 	modeQuit
 	modeSweep
+	modeCommand
 )
 
 type sbModel struct {
@@ -274,37 +275,47 @@ func tickAfter(visible bool) tea.Cmd {
 
 func (m sbModel) view() sbView {
 	v := buildView(m.doc, m.ui)
+	ask := func(title, colour, hint string) {
+		v.promptTitle, v.promptColour, v.hint2 = title, colour, hint
+	}
+	typed := m.input + "▏"
 	switch m.mode {
-	// every prompt says how to answer it, on a line you can also click
+	// every prompt says what it asks, shows what you type, and how to
+	// answer, on a line you can also click
 	case modeFilter:
-		v.footer, v.footerColour, v.hint2 = "/"+m.input+"▏", "", "enter keep · esc clear"
+		ask("filter by name", "", "enter keep · esc clear")
+		v.input = typed
 	case modeNew, modeNewWorktree:
 		// where it will start, said before enter: the selected space, or
 		// the directory typed after the name
-		what := "new"
+		what := "new agent"
 		if m.mode == modeNewWorktree {
-			what = "new worktree"
+			what = "new worktree agent"
 		}
-		label := what + " in " + m.newWhere() + ": "
-		v.footer, v.footerColour, v.hint2 = label+tail(m.input+"▏", m.width-len([]rune(label))), "", "enter ok · esc cancel · tab dir"
+		ask(what+" in "+m.newWhere(), "", "enter ok · esc cancel · tab dir")
 		if m.cands != "" {
 			v.hint2 = m.cands
 		}
+		v.input = typed
 	case modeRename:
-		v.footer, v.footerColour, v.hint2 = "rename: "+m.input+"▏", "", "enter ok · esc cancel"
+		ask("rename "+m.entryName(m.target), "", "enter ok · esc cancel")
+		v.input = typed
+	case modeCommand:
+		ask("kel command", "", "enter run · esc cancel")
+		v.input = typed
 	case modeKill:
-		v.footer, v.footerColour, v.hint2 = "kill "+m.entryName(m.target)+"?", yellow, "y yes · n no"
+		ask("kill "+m.entryName(m.target)+"?", yellow, "y yes · n no")
 	case modeQuit:
-		v.footer, v.footerColour, v.hint2 = "quit kel?", yellow, "y yes · n no"
+		ask("quit kel?", yellow, "y yes · n no")
 	case modeSweep:
-		q := "sweep everything merged?"
+		q := "sweep everything landed?"
 		if m.target != "" {
 			q = "sweep " + filepath.Base(m.target) + "?"
 			if sp, ok := m.selSpace(spaceID(m.target)); ok {
 				q = "sweep " + sp.label + "?"
 			}
 		}
-		v.footer, v.footerColour, v.hint2 = q, yellow, "y yes · n no"
+		ask(q, yellow, "y yes · n no")
 	default:
 		if m.msg != "" {
 			v.footer, v.footerColour = m.msg, ""
@@ -314,6 +325,16 @@ func (m sbModel) view() sbView {
 		}
 	}
 	return v
+}
+
+// cancel ends a prompt as esc would: what a click elsewhere, or leaving the
+// sidebar, does — the author was stuck typing a name they no longer wanted.
+// A filter is kept: you typed it to see the result.
+func (m *sbModel) cancel() {
+	if m.mode == modeNormal {
+		return
+	}
+	m.mode, m.input, m.cands = modeNormal, "", ""
 }
 
 func (m *sbModel) move(d int) {
@@ -573,9 +594,15 @@ func (m sbModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.BlurMsg:
 		m.ui.focused = false
 		m.ui.hover = 0
+		// leaving the sidebar ends a prompt, as clicking elsewhere does
+		if m.mode == modeFilter {
+			m.mode, m.input = modeNormal, ""
+		} else {
+			m.cancel()
+		}
 
 	case tea.MouseMotionMsg:
-		m.ui.hover = msg.Y + 1
+		m.ui.hover, m.ui.hoverX = msg.Y+1, msg.X
 
 	case tea.MouseClickMsg:
 		m.ui.focused = true
@@ -596,12 +623,19 @@ func (m sbModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// a prompt's choices: whichever word was clicked is that key
 			return m.key(hintKey(m.view().hint2, msg.X))
 		}
-		if m.mode != modeNormal {
-			return m, nil
+		// a click anywhere else ends a prompt, as esc would, and then does
+		// what it would have done
+		if m.mode != modeNormal && m.mode != modeFilter {
+			m.cancel()
+		} else if m.mode == modeFilter {
+			m.mode, m.input = modeNormal, ""
 		}
 		if msg.Y >= 0 && msg.Y < len(refs) && refs[msg.Y].kind == "action" {
-			// an action is its key, pressed
-			k := strings.TrimPrefix(refs[msg.Y].id, "act:")
+			// an action is its key, pressed — the half of the line clicked
+			k := strings.TrimPrefix(refs[msg.Y].at(msg.X), "act:")
+			if k == "enter" {
+				return m.key(tea.KeyPressMsg{Code: tea.KeyEnter})
+			}
 			return m.key(tea.KeyPressMsg{Code: rune(k[0]), Text: k})
 		}
 		if msg.Y >= 0 && msg.Y < len(refs) && refs[msg.Y].id != "" {
@@ -682,7 +716,7 @@ func (m sbModel) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
-	case modeFilter, modeNew, modeNewWorktree, modeRename:
+	case modeFilter, modeNew, modeNewWorktree, modeRename, modeCommand:
 		switch k {
 		case "esc":
 			if m.mode == modeFilter {
@@ -696,6 +730,11 @@ func (m sbModel) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			switch mode {
+			case modeCommand:
+				// kel's own prompt, answered here: one line in the footer,
+				// more in a popup (cmd_prompt)
+				m.msg = "kel " + name + "…"
+				return m, runKel("", []string{"KEL_PROMPT_PRINT=1"}, "_prompt", name)
 			case modeRename:
 				a, ok := m.agentOf(m.target)
 				if !ok {
@@ -802,7 +841,7 @@ func (m sbModel) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m.panel("plan")
 	case "c":
 		return m.panel("claude")
-	case "G", "shift+g":
+	case "v", "G", "shift+g":
 		return m.panel("dash")
 	case "u":
 		// the account's usage, not the selection's: from wherever is selected,
@@ -815,7 +854,7 @@ func (m sbModel) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "t":
 		dir, _ := m.spaceFor(m.view().sel)
 		return m, runKel(dir, nil, "shell", dir)
-	case "Q", "shift+q":
+	case "q", "Q", "shift+q":
 		m.mode = modeQuit
 	case "s":
 		// on a worktree: that one; anywhere else: everything that landed
@@ -823,7 +862,7 @@ func (m sbModel) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		if sp, ok := m.selSpace(m.view().sel); ok && strings.HasPrefix(m.view().sel, "s:") && sp.parent != "" {
 			m.target = sp.key
 		}
-	case "R", "shift+r":
+	case "b", "R", "shift+r":
 		if m.ui.restore {
 			m.msg = "restoring…"
 			return m, runKel("", nil, "restore")
@@ -831,11 +870,10 @@ func (m sbModel) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "`":
 		return m, runKel("", nil, "jump")
 	case ";", ":":
-		// tmux's own prompt, as Ctrl-b k opens it: type a kel command.
-		// `;` because `:` needs shift (the author, 2026-10-16); `:` still
-		// works for the hands that try it
-		_ = exec.Command("tmux", "command-prompt", "-p", "kel",
-			"run-shell -b \""+kelBin()+" _prompt '%%' >/dev/null 2>&1\"").Run()
+		// typed here, like a name — tmux's own prompt opened at the foot of
+		// the window, where the author did not see it had (2026-10-16). `;`
+		// because `:` needs shift; `:` still works for the hands that try it
+		m.mode, m.input = modeCommand, ""
 	case "?":
 		m.help = true
 	case "esc":
@@ -860,35 +898,37 @@ func (m sbModel) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 // the full key list, inside the sidebar — not a second surface (invariant 6)
 var sbHelp = [][2]string{
-	{"j k", "move"},
-	{"enter", "jump · open a space"},
-	{"space h l", "fold a space"},
-	{"click", "jump · fold"},
-	{"/", "filter · esc clears"},
-	{"n", "new agent here"},
-	{"n name dir", "...or in dir (tab)"},
-	{"w", "new worktree agent"},
-	{"r", "rename agent"},
-	{"x", "kill agent"},
-	{"t", "shell window here"},
-	{";", "a kel command"},
-	{"`", "next waiting agent"},
-	{"s", "sweep what landed"},
-	{"Q", "quit kel (saves)"},
+	{"#", "move"},
+	{"j k", "up, down"},
+	{"enter", "jump · fold a space"},
+	{"/", "filter by name"},
+	{"esc", "back to your pane"},
+	{"#", "an agent"},
+	{"e", "edit its last file"},
+	{"p", "plan and tasks"},
+	{"r", "rename"},
+	{"x", "kill"},
+	{"#", "a space"},
 	{"f", "files (yazi)"},
 	{"g", "git (lazygit)"},
 	{"d", "diff against base"},
-	{"e", "edit agent's file"},
-	{"o", "server in browser"},
-	{"p", "plan and tasks"},
-	{"c", "claude config here"},
-	{"G", "PRs (gh dash)"},
+	{"e", "nvim here"},
+	{"t", "shell here"},
+	{"o", "open in browser"},
+	{"c", "claude config"},
+	{"v", "PRs (gh dash)"},
+	{"s", "sweep if landed"},
+	{"#", "kel"},
+	{"n", "new agent (tab: dir)"},
+	{"w", "new worktree agent"},
+	{"`", "next waiting agent"},
 	{"u", "usage (ccusage)"},
-	{"esc", "back to your pane"},
+	{";", "kel command"},
+	{"q", "quit kel"},
 	{"P", ""},
-	{"  space", "focus the sidebar"},
+	{"  space", "the sidebar"},
 	{"  `", "next waiting agent"},
-	{"  k", "a kel command"},
+	{"  k", "kel command"},
 	{"  q", "close a popup"},
 }
 
@@ -901,6 +941,11 @@ func (m sbModel) render() string {
 			pk = "Ctrl-b"
 		}
 		for i, h := range sbHelp {
+			if h[0] == "#" {
+				// a group, named like the sidebar's own sections
+				b.WriteString(dim + truncate(h[1], m.width) + reset + "\n")
+				continue
+			}
 			if h[0] == "P" {
 				// the prefix keys under one heading that says how they go:
 				// "Ctrl-b space" read as one chord (the author, 2026-10-16)
@@ -918,7 +963,7 @@ func (m sbModel) render() string {
 					lead = dim + "▏" + reset
 				}
 			}
-			b.WriteString(lead + kc + truncate(pad(k, 12), m.width-1) + reset + dim + truncate(h[1], m.width-13) + reset + "\n")
+			b.WriteString(lead + kc + truncate(pad(k, 8), m.width-1) + reset + dim + truncate(h[1], m.width-9) + reset + "\n")
 		}
 		b.WriteString(dim + truncate("click a bold key to run it", m.width) + reset)
 		return b.String()
@@ -1194,7 +1239,7 @@ func (m sbModel) newWhere() string {
 		return filepath.Base(dir) // the folder; the path itself is on the line
 	}
 	if strings.Contains(m.input, "/") || strings.Contains(m.input, "~") {
-		return "?"
+		return "…" // a directory being typed: said once it is one
 	}
 	if sp, ok := m.selSpace(m.ui.sel); ok {
 		return sp.label
@@ -1224,11 +1269,11 @@ func helpKey(row string) string {
 		return ";"
 	case row == "  `":
 		return "`"
-	case strings.HasPrefix(row, " "):
+	case strings.HasPrefix(row, " "), row == "#":
 		return ""
 	default:
 		switch f[0] {
-		case "/", "n", "w", "r", "x", "t", ";", "`", "s", "Q", "f", "g", "d", "e", "o", "p", "c", "G", "u":
+		case "/", "n", "w", "r", "x", "t", ";", "`", "s", "q", "f", "g", "d", "e", "o", "p", "c", "v", "u":
 			return f[0]
 		}
 	}

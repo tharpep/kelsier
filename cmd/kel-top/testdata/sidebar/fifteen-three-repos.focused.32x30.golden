@@ -16,15 +16,15 @@
    [2mfeat/usage-charts ●5 · :5173[0m
 
 [2magents[0m
- [33m[1m●[0m fix-auth  [2mkelsier[0m
+ [33m[1m●[0m fix-auth  [2mkelsier-fix-auth[0m
    [33m[1mwaiting 6m[0m · allow Bash?[0m
    [2m└[0m [36m●[0m fix-auth · bg · working
 [34m▌[0m[36m●[0m [1mkelsier[0m
    [36mworking 2m[0m[2m · 36% · $10.65[0m
    [2m└[0m [36m●[0m [2mReading parser.go · Expl…[0m
    [2m└[0m [2m✓[0m [2mRun the tests[0m
- [36m●[0m usage-charts  [2mweb-dashboard[0m
+ [36m●[0m usage-charts
    [36mworking 30s[0m[2m · 63% · $4.75[0m
- [32m●[0m docs  [2mkelsier[0m
+ [32m●[0m docs  [2mkelsier-docs[0m
    [32mdone 15m[0m[2m · 22% · $0.84[0m
 [2me edit · p plan · x kill · ?[0m

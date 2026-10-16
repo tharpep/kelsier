@@ -346,17 +346,17 @@ func TestSidebarActions(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	m := sbModel{doc: loadFixture(t, "one-agent"), width: 32, height: 30, visible: true}
 	out, refs := renderView(m.view(), 32, 30, 0)
-	if !strings.Contains(plain(out), "actions") {
-		t.Fatalf("no actions at 32x30:\n%s", plain(out))
+	if !strings.Contains(plain(out), "\nkel\n") {
+		t.Fatalf("no kel actions at 32x30:\n%s", plain(out))
 	}
 	y := -1
 	for i, r := range refs {
-		if r.id == "act:Q" {
+		if r.id == "act:q" {
 			y = i
 		}
 	}
 	if y < 0 {
-		t.Fatal("no Q action line")
+		t.Fatal("no q action line")
 	}
 	nm, _ := m.Update(tea.MouseClickMsg{X: 2, Y: y, Button: tea.MouseLeft})
 	if nm.(sbModel).mode != modeQuit {
@@ -457,19 +457,19 @@ func TestQuotaLine(t *testing.T) {
 		SevenDay: &fleet.Window{Pct: f(51)},
 		Spend:    &fleet.Window{Pct: f(20)},
 	}
-	if got := plain(quotaLine(q, 32, 1000)); got != "claude █████ 27% 3h28m · wk 51%" {
+	if got := plain(quotaLine(q, 32, 1000)); got != "5h █████ 27% 3h28m · wk 51%" {
 		t.Errorf("at 32: %q", got)
 	}
-	if got := plain(quotaLine(q, 24, 1000)); got != "█████ 27% 3h28m · wk 51%" {
+	if got := plain(quotaLine(q, 24, 1000)); got != "5h █████ 27% · wk 51%" {
 		t.Errorf("at 24: %q", got)
 	}
-	if got := plain(quotaLine(q, 18, 1000)); got != "█████ 27% · wk 51%" {
+	if got := plain(quotaLine(q, 18, 1000)); got != "5h █████ 27%" {
 		t.Errorf("at 18: %q", got)
 	}
 	if quotaLine(nil, 32, 1000) != "" {
 		t.Error("no quota reported must be no line")
 	}
-	if got := plain(quotaLine(&fleet.Quota{FiveHour: &fleet.Window{}}, 32, 1000)); got != "claude █████ ?" {
+	if got := plain(quotaLine(&fleet.Quota{FiveHour: &fleet.Window{}}, 32, 1000)); got != "5h ?" {
 		t.Errorf("unknown 5h: %q", got)
 	}
 	q.Spend.Pct = f(60)
@@ -622,3 +622,78 @@ func TestWorktreeRowKeepsState(t *testing.T) {
 		}
 	}
 }
+
+// A click elsewhere ends a prompt as esc would, then does what it would have
+// done; leaving the sidebar ends it too. The author was stuck typing a name.
+func TestPromptClickOff(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	m := sbModel{doc: loadFixture(t, "one-agent"), width: 32, height: 30, visible: true}
+	nm, _ := m.key(tea.KeyPressMsg{Code: 'n', Text: "n"})
+	m = nm.(sbModel)
+	if m.mode != modeNew || m.view().promptTitle == "" {
+		t.Fatalf("n: mode %v title %q", m.mode, m.view().promptTitle)
+	}
+	_, refs := renderView(m.view(), 32, 30, 0)
+	y := -1
+	for i, r := range refs {
+		if r.kind == "agent" {
+			y = i
+		}
+	}
+	nm, _ = m.Update(tea.MouseClickMsg{X: 4, Y: y, Button: tea.MouseLeft})
+	if got := nm.(sbModel); got.mode != modeNormal || got.input != "" {
+		t.Errorf("a click on an agent left the prompt open: %v %q", got.mode, got.input)
+	}
+	m.mode, m.input = modeNormal, ""
+	nm, _ = m.key(tea.KeyPressMsg{Code: ';', Text: ";"})
+	m = nm.(sbModel)
+	if m.mode != modeCommand {
+		t.Fatalf("; did not open the command prompt")
+	}
+	nm, _ = m.Update(tea.BlurMsg{})
+	if nm.(sbModel).mode != modeNormal {
+		t.Error("leaving the sidebar left the prompt open")
+	}
+}
+
+// The action grid: each half of a line is its own button.
+func TestActionGrid(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	m := sbModel{doc: loadFixture(t, "one-agent"), width: 32, height: 30, visible: true, ui: uiState{focused: true}}
+	out, refs := renderView(m.view(), 32, 30, 0)
+	y := -1
+	for i, r := range refs {
+		if r.id == "act:n" {
+			y = i
+		}
+	}
+	if y < 0 || refs[y].id2 != "act:w" {
+		t.Fatalf("no n|w line:\n%s", plain(out))
+	}
+	nm, _ := m.Update(tea.MouseClickMsg{X: 20, Y: y, Button: tea.MouseLeft})
+	if nm.(sbModel).mode != modeNewWorktree {
+		t.Error("a click on the right half did not press w")
+	}
+	nm, _ = m.Update(tea.MouseClickMsg{X: 2, Y: y, Button: tea.MouseLeft})
+	if nm.(sbModel).mode != modeNew {
+		t.Error("a click on the left half did not press n")
+	}
+	// hover marks the half under the pointer
+	m.ui.hover, m.ui.hoverX = y+1, 20
+	out, _ = renderView(m.view(), 32, 30, 0)
+	if l := strings.Split(plain(out), "\n")[y]; !strings.Contains(l, "▏w") || strings.HasPrefix(l, "▏") {
+		t.Errorf("hover on the right half: %q", l)
+	}
+}
+
+// A working agent says what it is doing; its tag is the repo it stands in.
+func TestAgentDoing(t *testing.T) {
+	doc := loadFixture(t, "one-agent")
+	doc.Agents[0].Doing = sp("editing sbview.go")
+	out, _ := renderView(buildView(doc, uiState{}), 32, 0, 0)
+	if !strings.Contains(plain(out), "   editing sbview.go") {
+		t.Errorf("no doing line:\n%s", plain(out))
+	}
+}
+
+func sp(s string) *string { return &s }

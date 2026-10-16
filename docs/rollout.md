@@ -358,6 +358,18 @@ the `TodoWrite` design was stale, and the plan turned out to need no new hook.
   because freeze's PNG path segfaults on this WSL2 (Go build and release
   alike) and its .webp is an SVG by another name. vhs is installed, not
   wired: a recording is the author's to script
+- *a ux pass (2026-10-16), from the author's screenshots:* the foot of the
+  sidebar is now two clickable grids — the selected thing's verbs under
+  "agent kelsier" / "space kelsier", then kel's own — replacing a flat
+  actions list and a hint cut short at 32 columns; the `?` list is grouped
+  the same way (move · an agent · a space · kel · anywhere). No key needs
+  shift: `Q`→`q`, `G`→`v`, `R`→`b`. Prompts read as a question, a `›` line
+  and their choices; a click elsewhere or leaving the sidebar cancels them.
+  `;` is a sidebar prompt, answered in its footer, not tmux's command line
+  at the foot of the window. Working agents say what they are doing (#40,
+  from the transcript). An agent's tag is the repo it works in, not the
+  group it was filed under. The quota line is `5h …`, and says `5h ?`
+  rather than vanishing
 - *found on the way:* M5's `hook_edit` had real newlines inside its `printf`
   format — a quoting slip in its writing that happened to print the same
   thing; rewritten while the plan / edit split went in

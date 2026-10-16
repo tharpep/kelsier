@@ -52,6 +52,9 @@ type Agent struct {
 	Land          *Land    `json:"land"`
 	Panes         []string `json:"panes"`
 	Activity      *float64 `json:"activity"`
+	// Doing: a working agent's last tool call in words, read from the tail
+	// of Claude Code's transcript (doing.go). Sidebar path only
+	Doing *string `json:"doing,omitempty"`
 	Context       *Context `json:"context"`
 	// Unseen marks a `done` the user has not looked at since it finished: the
 	// state is newer than the epoch in <window-id>.seen, which the sidebar
@@ -515,6 +518,7 @@ func Load(o Options) Doc {
 		ps := buildPanes(paneRows, paneWins, curPane)
 		doc.Panes = &ps
 		withClaude(&doc, sd, ps)
+		withDoing(&doc)
 		withRepos(&doc, sd, o.Worktrees)
 	}
 	return doc

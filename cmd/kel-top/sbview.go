@@ -38,6 +38,7 @@ type uiState struct {
 	myWindow string // the window this sidebar sits in — current, whatever the doc says
 	focused  bool   // the keyboard is in this sidebar
 	hover    int    // screen line under the pointer, plus one; 0 = none
+	hoverX   int    // and its column
 	prefix   string // the tmux prefix in words ("Ctrl-b"), for hints
 	restore  bool   // a previous workspace waits to be restored
 }
@@ -62,6 +63,9 @@ type sbSpace struct {
 }
 
 type sbAgent struct {
+	repo    string // the repo its pane stands in — not its record's group,
+	// which says where it was filed: the author's `newer` read "kelsier"
+	// while it worked in ai-context
 	wid     string
 	pane    string // the pane to jump to; "" when the window lists none
 	agent   fleet.Agent
@@ -81,10 +85,14 @@ type sbView struct {
 	filter   string
 	entryIDs []string // selectable ids in screen order, for j/k
 
-	footer, footerColour string // a prompt or a message; "" = the key hint
-	hint2                string // a line above the footer: a prompt's choices, clickable
+	footer, footerColour string // the last command's word; "" = how to get in, or the keys
+	promptTitle          string // a prompt's question: "new agent in kelsier"
+	promptColour         string // its colour; "" = the accent
+	input                string // what is being typed, with its cursor
+	hint2                string // a prompt's choices, clickable: "enter ok · esc cancel"
 	focused              bool
 	hover                int
+	hoverX               int
 	prefix               string
 	restore              bool
 	quota                *fleet.Quota // the account's, for the last line; nil = none reported
@@ -96,6 +104,19 @@ type sbView struct {
 type lineRef struct {
 	id   string // "" for labels, blanks and the footer
 	kind string // space | pane | agent
+	// a line of two actions side by side: from column split on, a click
+	// is id2's (the actions grid)
+	id2   string
+	split int
+	right string // that action, drawn — kept here so the hover can mark it
+}
+
+// at is the entry a click at column x hits.
+func (r lineRef) at(x int) string {
+	if r.id2 != "" && x >= r.split {
+		return r.id2
+	}
+	return r.id
 }
 
 func spaceID(key string) string { return "s:" + key }
@@ -150,7 +171,7 @@ func spaceKey(p fleet.Pane) (key, label string) {
 }
 
 func buildView(doc fleet.Doc, ui uiState) sbView {
-	v := sbView{sel: ui.sel, filter: ui.filter, focused: ui.focused, hover: ui.hover,
+	v := sbView{sel: ui.sel, filter: ui.filter, focused: ui.focused, hover: ui.hover, hoverX: ui.hoverX,
 		prefix: ui.prefix, restore: ui.restore, quota: doc.Quota}
 	for _, a := range doc.Agents {
 		if a.WindowID != nil && a.State != nil && *a.State == "waiting" {
@@ -207,7 +228,13 @@ func buildView(doc fleet.Doc, ui uiState) sbView {
 			}
 			agentPane[wid] = first.PaneID
 		}
-		v.agents = append(v.agents, sbAgent{wid: wid, pane: agentPane[wid], agent: a, current: wid == curWid})
+		repo := a.Group
+		for _, p := range byWin[wid] {
+			if p.PaneID == agentPane[wid] && p.Git != nil {
+				repo = repoLabel(doc, p.Git.Root)
+			}
+		}
+		v.agents = append(v.agents, sbAgent{wid: wid, pane: agentPane[wid], agent: a, current: wid == curWid, repo: repo})
 	}
 	// triage order: waiting first, longest-waiting first within a state
 	sort.SliceStable(v.agents, func(i, j int) bool {
@@ -835,7 +862,7 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 		name := weight(truncate(a.agent.Name, text), a.current)
 		// the repo, dim beside the name, when there is room: two repos can
 		// each have an agent called docs
-		if g := a.agent.Group; g != "" && g != a.agent.Name && len([]rune(a.agent.Name))+2+len([]rune(g)) <= text {
+		if g := a.repo; g != "" && g != a.agent.Name && len([]rune(a.agent.Name))+2+len([]rune(g)) <= text {
 			name += "  " + dim + g + reset
 		}
 		add(lead(id)+c+d+reset+" "+name, r)
@@ -843,6 +870,10 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 		word = truncate(word, text)
 		rest = truncate(rest, text-len([]rune(word)))
 		add("   "+wc+word+reset+rc+rest+reset, r)
+		// what it is doing now, from Claude Code's transcript (backlog #40)
+		if a.agent.Doing != nil && a.agent.State != nil && *a.agent.State == "working" {
+			add("   "+dim+italic+truncate(*a.agent.Doing, text)+reset, r)
+		}
 		// subagents: the Task-tool helpers this agent has running, under it
 		for _, sub := range a.agent.Subagents {
 			d, c := subLook(sub.Status)
@@ -866,44 +897,80 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 		add("   "+c+w2+reset+dim+truncate(" · "+b.Group, text-len([]rune(w2)))+reset, lineRef{id: bid, kind: "bg"})
 	}
 
-	// actions: what does not depend on the selection, as keys you can also
-	// click — the author found the lower half empty and keys hard to recall.
-	// Only when the height leaves room below the lists; the same keys as
-	// everywhere, so it is not a second surface (invariant 6).
-	var acts []line
+	// The bottom is what you can do, as keys you can also click: first to
+	// the selected entry, under its name, then kel's own. The author found a
+	// one-line hint cut short and a flat list of keys hard to organise in
+	// their head; this mirrors the screen — select a thing, its verbs show.
+	// The same keys as everywhere, shown where they apply (invariant 6).
+	// two to a line, each half its own button: seven rows of actions under
+	// a space were most of the sidebar
+	cell := func(a sbAct, cw int) string {
+		k := a.key
+		if k == "enter" {
+			k = "↵"
+		}
+		return " " + bold + k + reset + " " + dim + pad(truncate(a.label, cw-3), cw-3) + reset
+	}
+	grid := func(list []sbAct) []line {
+		cw := w / 2
+		var out []line
+		for i := 0; i < len(list); i += 2 {
+			l := line{s: cell(list[i], cw), ref: lineRef{id: "act:" + list[i].key, kind: "action"}}
+			if i+1 < len(list) {
+				l.ref.right = cell(list[i+1], w-cw)
+				l.ref.id2, l.ref.split = "act:"+list[i+1].key, cw
+			}
+			out = append(out, l)
+		}
+		return out
+	}
+	var selActs, kelActs []line
 	if h > 0 {
-		acts = append(acts, line{dim + truncate("actions", w) + reset, lineRef{}})
+		if what, name, list := selActions(v); len(list) > 0 {
+			selActs = append(selActs, line{dim + what + " " + reset + truncate(name, w-len(what)-1), lineRef{}})
+			selActs = append(selActs, grid(list)...)
+		}
+		kelActs = append(kelActs, line{dim + truncate("kel", w) + reset, lineRef{}})
 		list := sbActions
 		if v.restore {
 			// one line at startup was the only mention: until it is used, the
 			// previous workspace stays one click away
-			list = append([][2]string{{"R", "restore last workspace"}}, list...)
+			list = append([]sbAct{{"b", "restore"}}, list...)
 		}
-		for _, a := range list {
-			acts = append(acts, line{" " + bold + a[0] + reset + "  " + dim + truncate(a[1], w-4) + reset,
-				lineRef{id: "act:" + a[0], kind: "action"}})
-		}
+		kelActs = append(kelActs, grid(list)...)
 	}
 
-	// The footer teaches the keys by showing the ones that fit what is
-	// selected, so nothing has to be remembered and nothing is added: one
-	// line, as before. Without the keyboard it says only how to get it.
-	footer, fc := hint(v, w), dim
-	if v.filter != "" {
-		footer = "/" + v.filter + "  esc clears"
-	}
-	if v.footer != "" {
-		footer, fc = v.footer, v.footerColour
-	}
-	foot := line{fc + truncate(footer, w) + reset, lineRef{}}
-	// the waiting alarm, which tmux's bar carried until the sidebar took its
-	// place: while you are elsewhere, it is the footer, and a click jumps
-	if !v.focused && v.footer == "" && v.filter == "" && v.waiting > 0 {
+	// the tail: a prompt — what it asks, what you type, how to answer — or
+	// the last command's word, or how to get in. A prompt stands out (bold,
+	// the accent `›`) because the author could not tell one had opened
+	var tail []line
+	alarm := false
+	switch {
+	case v.promptTitle != "":
+		c := v.promptColour
+		if c == "" {
+			c = accent
+		}
+		tail = append(tail, line{c + bold + truncate(v.promptTitle, w) + reset, lineRef{}})
+		if v.input != "" {
+			tail = append(tail, line{accent + "› " + reset + bold + tail2(v.input, w-2) + reset, lineRef{}})
+		}
+		if v.hint2 != "" {
+			tail = append(tail, line{dim + truncate(v.hint2, w) + reset, lineRef{id: "hint2", kind: "hint2"}})
+		}
+	case v.footer != "":
+		tail = append(tail, line{v.footerColour + truncate(v.footer, w) + reset, lineRef{}})
+	case v.filter != "":
+		tail = append(tail, line{dim + truncate("/"+v.filter+"  esc clears", w) + reset, lineRef{}})
+	case !v.focused && v.waiting > 0:
+		// the waiting alarm, which tmux's bar carried until the sidebar
+		// took its place: while you are elsewhere, it is the footer
 		t := fmt.Sprintf("%d waiting", v.waiting)
 		if v.waitSince > 0 && now >= v.waitSince {
 			t += " " + humanizeSecs(now-v.waitSince)
 		}
-		foot = line{yellow + bold + truncate(t+" · click to jump", w) + reset, lineRef{id: "act:`", kind: "action"}}
+		tail = append(tail, line{yellow + bold + truncate(t+" · click to jump", w) + reset, lineRef{id: "act:`", kind: "action"}})
+		alarm = true
 	}
 	// the quota is the last line, where tmux's bar used to carry it: with
 	// the sidebar showing, kel turns that bar off (it repeated what the
@@ -912,14 +979,11 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 	if q := quotaLine(v.quota, w, now); q != "" && h > 3 {
 		qline = &line{q, lineRef{}}
 	}
-	var foot2 *line
-	if v.hint2 != "" {
-		foot2 = &line{dim + truncate(v.hint2, w) + reset, lineRef{id: "hint2", kind: "hint2"}}
-	}
+	_ = alarm
 
-	// scroll so the selected entry is on screen; the footer is pinned
+	// scroll so the selected entry is on screen; the bottom is pinned
 	if h > 0 {
-		room := h - 1
+		room := h - max(len(tail), 1)
 		if qline != nil {
 			room--
 		}
@@ -948,26 +1012,42 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 				body = body[:room]
 			}
 		}
-		// the actions sit at the bottom, above the footer, when they fit
-		// under everything else with a blank line between
-		// and a blank line under them, so the footer does not read as one
-		// more action
-		if len(body)+1+len(acts)+1 <= room {
+		// both groups when they fit under the lists, a blank line around
+		// each; else the selection's alone; else neither, and the footer
+		// names the keys instead
+		var acts []line
+		switch {
+		case len(selActs) > 0 && len(body)+1+len(selActs)+1+len(kelActs)+1 <= room:
+			acts = append(append(append(acts, selActs...), line{"", lineRef{}}), kelActs...)
+		case len(selActs) == 0 && len(body)+1+len(kelActs)+1 <= room:
+			acts = kelActs
+		case len(selActs) > 0 && len(body)+1+len(selActs)+1 <= room:
+			acts = selActs
+		}
+		if len(tail) == 0 {
+			switch {
+			case !v.focused:
+				tail = append(tail, line{dim + truncate("click, or "+v.prefix+" then space", w) + reset, lineRef{}})
+			case len(acts) > 0:
+				tail = append(tail, line{dim + truncate("esc back to your pane", w) + reset, lineRef{}})
+			default:
+				tail = append(tail, line{dim + truncate(hint(v, w), w) + reset, lineRef{}})
+			}
+		}
+		if len(acts) > 0 {
 			for len(body)+len(acts)+1 < room {
 				body = append(body, line{"", lineRef{}})
 			}
-			body = append(body, acts...)
+			body = append(append(body, acts...), line{"", lineRef{}})
 		}
 		for len(body) < room {
 			body = append(body, line{"", lineRef{}})
 		}
-	}
-	if foot2 != nil && h > 2 && len(body) > 0 {
-		// a prompt's choices take the last body line: `enter ok · esc cancel`
-		body[len(body)-1] = *foot2
+	} else if len(tail) == 0 {
+		tail = append(tail, line{dim + truncate(hint(v, w), w) + reset, lineRef{}})
 	}
 	if h != 1 || len(body) == 0 {
-		body = append(body, foot)
+		body = append(body, tail...)
 	}
 	if qline != nil {
 		body = append(body, *qline)
@@ -978,7 +1058,10 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 	// hover: the entry under the pointer gets a dim bar where the selection's
 	// would be, so what a click would hit is visible before the click
 	if v.hover > 0 && v.hover <= len(body) {
-		if id := body[v.hover-1].ref.id; id != "" && id != v.sel {
+		hl := body[v.hover-1]
+		if hl.ref.id2 != "" && v.hoverX >= hl.ref.split {
+			body[v.hover-1].ref.right = dim + "▏" + reset + hl.ref.right[1:]
+		} else if id := hl.ref.id; id != "" && id != v.sel {
 			for i, l := range body {
 				if l.ref.id == id && strings.HasPrefix(l.s, " ") {
 					body[i].s = dim + "▏" + reset + l.s[1:]
@@ -992,7 +1075,7 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 		if i > 0 {
 			b.WriteByte('\n')
 		}
-		b.WriteString(l.s)
+		b.WriteString(l.s + l.ref.right)
 		refs[i] = l.ref
 	}
 	return b.String(), refs
@@ -1046,17 +1129,101 @@ func hint(v sbView, w int) string {
 	return out
 }
 
-// sbActions are the keys that do not depend on the selection, shown at the
-// foot of the sidebar when there is room, and clickable.
-var sbActions = [][2]string{
+// sbAct is a key and what it does, shown at the foot and clickable.
+type sbAct struct{ key, label string }
+
+// sbActions are kel's own: they do not depend on the selection. No capital
+// letters — the author asked for none, shift is one key too many.
+var sbActions = []sbAct{
 	{"n", "new agent"},
-	{"w", "new worktree agent"},
-	{"t", "shell here"},
-	{"`", "jump to who waits"},
+	{"w", "worktree"},
+	{"`", "waiting"},
 	{"u", "usage"},
-	{";", "kel command"}, // not `:` — that needs shift
-	{"Q", "quit kel"},
-	{"?", "all keys"},
+	{";", "command"},
+	{"?", "keys"},
+	{"q", "quit"},
+}
+
+// selActions are the selected entry's verbs, under what it is and its name
+// — "agent kelsier", "space kelsier": the two often share a name.
+func selActions(v sbView) (string, string, []sbAct) {
+	switch {
+	case strings.HasPrefix(v.sel, "a:"):
+		for _, a := range v.agents {
+			if agentID(a.wid) == v.sel {
+				return "agent", a.agent.Name, []sbAct{
+					{"e", "edit file"}, {"p", "plan"}, {"r", "rename"}, {"x", "kill"},
+				}
+			}
+		}
+	case strings.HasPrefix(v.sel, "b:"):
+		for _, list := range append([][]fleet.Background{v.bgLoose}, mapValues(v.bgUnder)...) {
+			for _, b := range list {
+				if bgID(b.ID) == v.sel {
+					return "background", b.Name, []sbAct{{"enter", "open it"}}
+				}
+			}
+		}
+	case strings.HasPrefix(v.sel, "s:"):
+		for _, s := range v.spaces {
+			if spaceID(s.key) != v.sel {
+				continue
+			}
+			var acts []sbAct
+			if s.land != nil && s.land.Code == "merged" && s.closed {
+				acts = append(acts, sbAct{"s", "sweep"})
+			}
+			acts = append(acts, sbAct{"f", "files"}, sbAct{"g", "git"})
+			if s.git != nil {
+				acts = append(acts, sbAct{"d", "diff"})
+			}
+			acts = append(acts, sbAct{"e", "nvim"}, sbAct{"t", "shell"})
+			if s.ports != nil && len(*s.ports) > 0 {
+				acts = append(acts, sbAct{"o", "browser"})
+			}
+			acts = append(acts, sbAct{"c", "claude"})
+			if s.git != nil {
+				acts = append(acts, sbAct{"v", "PRs"})
+			}
+			what := "space"
+			if s.parent != "" {
+				what = "worktree"
+			}
+			return what, s.label, acts
+		}
+	default:
+		for _, s := range v.spaces {
+			for _, p := range s.panes {
+				if p.PaneID != v.sel {
+					continue
+				}
+				acts := []sbAct{{"enter", "go to it"}}
+				if p.Kind == "server" {
+					acts = append(acts, sbAct{"o", "browser"})
+				}
+				acts = append(acts, sbAct{"f", "files"}, sbAct{"g", "git"}, sbAct{"e", "nvim"})
+				return "pane", paneLabel(p), acts
+			}
+		}
+	}
+	return "", "", nil
+}
+
+func mapValues(m map[string][]fleet.Background) [][]fleet.Background {
+	var out [][]fleet.Background
+	for _, v := range m {
+		out = append(out, v)
+	}
+	return out
+}
+
+// tail2 keeps the end of what is typed, where the cursor is.
+func tail2(s string, w int) string {
+	r := []rune(s)
+	if w <= 1 || len(r) <= w {
+		return s
+	}
+	return "…" + string(r[len(r)-w+1:])
 }
 
 // quotaLine is the account's quota as one line: the 5-hour window as a bar,
@@ -1079,7 +1246,7 @@ func quotaLine(q *fleet.Quota, w int, now int64) string {
 	var five, reset5, week, spend *seg
 	if f := q.FiveHour; f != nil {
 		if f.Pct == nil {
-			five = &seg{"█████ ?", dim + "█████" + reset + " " + dim + "?" + reset}
+			five = &seg{"5h ?", dim + "5h ?" + reset}
 		} else {
 			p := int(*f.Pct)
 			n := (p + 19) / 20
@@ -1089,12 +1256,17 @@ func quotaLine(q *fleet.Quota, w int, now int64) string {
 			bar := strings.Repeat("█", n)
 			track := strings.Repeat("█", 5-n)
 			pct := fmt.Sprintf("%d%%", p)
-			five = &seg{bar + track + " " + pct, heat(p) + bar + reset + dim + track + reset + " " + heat(p) + pct + reset}
+			five = &seg{"5h " + bar + track + " " + pct, dim + "5h " + reset + heat(p) + bar + reset + dim + track + reset + " " + heat(p) + pct + reset}
 			if f.ResetsAt != nil && int64(*f.ResetsAt) > now {
 				d := humanizeSecs(int64(*f.ResetsAt) - now)
 				reset5 = &seg{" " + d, dim + " " + d + reset}
 			}
 		}
+	}
+	if five == nil {
+		// not reported, or no longer true: said, not left out — a line
+		// reading only "wk 24%" looked like the whole quota (2026-10-16)
+		five = &seg{"5h ?", dim + "5h ?" + reset}
 	}
 	if s := q.SevenDay; s != nil {
 		if s.Pct == nil {
@@ -1130,7 +1302,7 @@ func quotaLine(q *fleet.Quota, w int, now int64) string {
 			return "", 0
 		}
 		if label {
-			head = "claude "
+			head = ""
 		}
 		n := len([]rune(head + strings.Join(plain, " · ")))
 		return dim + head + reset + strings.Join(col, dim+" · "+reset), n
@@ -1154,3 +1326,21 @@ func quotaLine(q *fleet.Quota, w int, now int64) string {
 var ansiRE = regexp.MustCompile("\x1b\\[[0-9;]*m")
 
 func stripANSI(s string) string { return ansiRE.ReplaceAllString(s, "") }
+
+// repoLabel names the repo a checkout belongs to: the main checkout's folder,
+// also for a linked worktree (from doc.Repos), else the root's own folder.
+func repoLabel(doc fleet.Doc, root string) string {
+	if doc.Repos != nil {
+		for _, r := range *doc.Repos {
+			if r.Root == root {
+				return r.Name
+			}
+			for _, w := range r.Worktrees {
+				if w.Path == root {
+					return r.Name
+				}
+			}
+		}
+	}
+	return filepath.Base(root)
+}

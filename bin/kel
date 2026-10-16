@@ -1726,13 +1726,19 @@ cmd_prompt() { # 'args'
   local out rc
   out="$("$SELF" "${args[@]}" 2>&1)"; rc=$?
   out="$(printf '%s' "$out" | sed 's/\x1b\[[0-9;]*m//g')"
+  # KEL_PROMPT_PRINT: the sidebar asked (its `;`), and shows a one-line
+  # answer in its own footer — tmux's message line is where the author did
+  # not look. A longer one is a popup either way
   if [ "$(printf '%s\n' "$out" | grep -c .)" -le 1 ]; then
-    tmux display-message "kel ${args[*]}: ${out:-done}$( [ $rc = 0 ] || printf ' (failed)')"
+    if [ -n "${KEL_PROMPT_PRINT:-}" ]; then printf '%s\n' "${out:-done}"
+    else tmux display-message "kel ${args[*]}: ${out:-done}$( [ $rc = 0 ] || printf ' (failed)')"; fi
   else
     local f="$STATE_DIR/prompt.out"
     printf '%s\n' "$out" > "$f"
     popup "$PWD" "kel ${args[*]} · prefix q closes" less -R "$f"
+    [ -n "${KEL_PROMPT_PRINT:-}" ] && printf 'shown in a popup\n'
   fi
+  return "$rc"
 }
 
 # --------------------------------------------------------------------------

@@ -117,13 +117,37 @@ in two sections:
 - **`agents`** — who needs you, most urgent first: a dot per state (yellow
   waiting, cyan working, green finished-and-not-yet-looked-at, dim idle or
   seen, magenta throttled, red `✕` dead, dim `?` unknown), then how long, the
-  context % and the cost.
+  context % and the cost. A working agent adds a third line saying what it
+  is doing — `editing sbview.go`, `run the tests` — its last tool call, read
+  from the tail of Claude Code's own transcript. The repo beside an agent's
+  name is the one it works in.
 
-At the foot, when there is room, an `actions` group lists the keys that do
-not depend on the selection — `n` `w` `t`, `` ` `` jump to whoever waits, `;`
-a kel command (`:` works too, but needs shift), `Q` `?`, and `R` restore while a
-previous workspace waits — and each can be clicked. Every prompt says how to
-answer it on a line you can click (`enter ok · esc cancel`, `y yes · n no`).
+At the foot, when there is room, two groups of keys you can also click, two to
+a line:
+
+```
+agent kelsier                       space kelsier
+ e edit file     p plan              f files         g git
+ r rename        x kill              d diff          e nvim
+                                     t shell         c claude
+kel                                  v PRs
+ n new agent     w worktree
+ ` waiting       u usage
+ ; command       ? keys
+ q quit
+```
+
+The first is **what you can do to the selected thing** — an agent, a space or
+worktree, a pane — under what it is and its name; the second is **kel's own**
+(`b restore` joins it while a previous workspace waits). No key needs shift.
+Hovering shows which half a click would hit.
+
+**A prompt says what it asks, shows what you type, and how to answer**, on a
+line you can click: `new agent in kelsier` / `› fix▏` / `enter ok · esc
+cancel · tab dir`. **A click anywhere else, or leaving the sidebar, cancels
+it** as `esc` would — the click then does what it would have done. `;` opens
+one for a kel command (`url`, `sweep -n`, `restore --list`…): a one-line
+answer lands in the footer, a longer one in a popup.
 
 **`n` and `w` start an agent anywhere.** Type a name and it starts in the
 selected space; type a directory (`~/code/api`, `/srv/x`, `../other`) and it
@@ -161,10 +185,10 @@ jump` in yellow — then shows the keys for whatever is selected (`e edit · p p
 | `o` | the selected server in your browser — its lowest port; the footer names the others |
 | `e` on a space | nvim at that directory, kept between opens — your buffers are still there next time |
 | `t` | a plain shell window in the selected space — no agent |
-| `Q` | quit kel, after `y`: saves the workspace, then closes it all; refuses while a worktree holds unsaved work |
+| `q` | quit kel, after `y`: saves the workspace, then closes it all; refuses while a worktree holds unsaved work |
 | `p` | the selected agent's plan (from plan mode), then its task list — `✓` done, `▸` in progress, `·` pending, and what blocks what. Most sessions on newer models keep no task list; it says so. Rendered with glow when installed |
 | `c` | the Claude Code configuration that applies to the selected space, in yazi, a tab per place: the repo's `CLAUDE.md`, its `.claude/`, the global `~/.claude` and the project's memory. To read and open — kel writes none of it |
-| `G` | gh dash at the selected space: your PRs, reviews and issues for that repo; kept between opens |
+| `v` | gh dash at the selected space: your PRs, reviews and issues for that repo; kept between opens |
 | `u` | Claude Code usage from ccusage — the current 5-hour block, then the last two weeks by day. ccusage reads Claude Code's own transcripts, so kel stores no history |
 | `s` | sweep the selected worktree once it has landed (anywhere else: everything landed), after `y` |
 | `?` | every key |

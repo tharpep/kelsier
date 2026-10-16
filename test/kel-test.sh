@@ -1010,7 +1010,7 @@ ok "  ...naming the file at risk, in the sidebar" 'sbtext "$SW" | grep -q "scrat
 # n: a new agent in the selected entry's space, named in the footer
 f0=$fail
 tmux send-keys -t "$SW" n
-wait_until 'sbtext "$SW" | grep -q "^new in "'
+wait_until 'sbtext "$SW" | grep -q "^new agent in "'
 tmux send-keys -t "$SW" -l fresh
 tmux send-keys -t "$SW" Enter
 # kel new stamps the window's group before it writes the record, so wait for
@@ -1112,6 +1112,12 @@ echo more >> "$WT5/README.md"
 tmux send-keys -t "$S5" d
 wait_until 'grep -q "diff ·" "$KEL_POPUP_TRACE"'
 ok "d diffs the worktree against its base"      'grep -q "^$WT5	diff · api-gw/wt5 · main · prefix q closes	" "$KEL_POPUP_TRACE"'
+# ;: a kel command typed in the sidebar, answered in its footer
+tmux send-keys -t "$S5" '\;'   # escaped: a lone ; is tmux's command separator
+wait_until 'sbtext "$S5" | grep -q "^kel command"'
+tmux send-keys -t "$S5" -l "url $WORK/repos"; tmux send-keys -t "$S5" Enter
+wait_until 'sbtext "$S5" | grep -q "no server listening"' 50
+ok "; runs a kel command and answers in the footer" 'sbtext "$S5" | grep -q "no server listening"'
 git -C "$WT5" checkout -q -- README.md
 ok "  ...no changes is said, not an empty diff" '[[ "$("$KEL" _panel diff "$WT5" t main 2>&1)" == *"no changes against main"* ]]'
 ok "  ...and no base is said, not an empty diff" '[[ "$("$KEL" _panel diff "$WT5" t "" 2>&1)" == *"no base"* ]]'

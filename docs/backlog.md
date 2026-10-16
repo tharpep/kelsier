@@ -98,7 +98,12 @@ Full design at the `v0.9.0` tag. The sidebar's panel may make most of it moot.
 
 **Gate:** you type the same `kel new … && tmux split …` sequence twice.
 
-### 40. What each agent is doing now  ·  `[borderline]`
+### 40. What each agent is doing now  ·  **built 2026-10-16** (from the transcript, not a hook)
+
+*Built:* the author asked why it was held. The hook was never needed —
+Claude Code writes every tool call to the session's transcript, so the
+sidebar reads the tail of that file for working agents only (≈1 ms, nothing
+on the agent's side). What follows is the original entry.
 
 Orca shows a one-line activity per agent ("running checkout regression
 tests"). The source would be a `PreToolUse` hook on every tool — kel on the

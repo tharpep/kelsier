@@ -7,7 +7,7 @@
 [2magents[0m
 [34m▌[0m[36m●[0m [1mkelsier[0m
    [36mworking 1m[0m[2m · 30% · $2.00[0m
- [32m●[0m finished  [2mkelsier[0m
+ [32m●[0m finished  [2mkelsier-fix-auth[0m
    [32mdone 7m[0m[2m · 52% · $3.30[0m
 
 
@@ -17,14 +17,14 @@
 
 
 
-[2mactions[0m
- [1mn[0m  [2mnew agent[0m
- [1mw[0m  [2mnew worktree agent[0m
- [1mt[0m  [2mshell here[0m
- [1m`[0m  [2mjump to who waits[0m
- [1mu[0m  [2musage[0m
- [1m;[0m  [2mkel command[0m
- [1mQ[0m  [2mquit kel[0m
- [1m?[0m  [2mall keys[0m
+[2magent [0mkelsier
+ [1me[0m [2medit file    [0m [1mp[0m [2mplan         [0m
+ [1mr[0m [2mrename       [0m [1mx[0m [2mkill         [0m
 
-[2me edit · p plan · x kill · ?[0m
+[2mkel[0m
+ [1mn[0m [2mnew agent    [0m [1mw[0m [2mworktree     [0m
+ [1m`[0m [2mwaiting      [0m [1mu[0m [2musage        [0m
+ [1m;[0m [2mcommand      [0m [1m?[0m [2mkeys         [0m
+ [1mq[0m [2mquit         [0m
+
+[2mesc back to your pane[0m
