@@ -567,7 +567,7 @@ func TestWorktreesNest(t *testing.T) {
 		order = append(order, s.label)
 	}
 	got := strings.Join(order, " ")
-	if !strings.Contains(got, "kelsier docs fix-auth gone old-ui worktree-agent-af1a") {
+	if !strings.Contains(got, "kelsier agent-af1a1567ab46ddb66 docs fix-auth gone old-ui") {
 		t.Errorf("kelsier's worktrees do not follow it: %s", got)
 	}
 	for _, s := range v.spaces {
@@ -600,6 +600,25 @@ func TestHelpHover(t *testing.T) {
 		line := strings.Split(plain(m.render()), "\n")[i+1]
 		if bar := strings.HasPrefix(line, "▏"); bar != (helpKey(h[0]) != "") {
 			t.Errorf("row %q hovered: %q", h[0], line)
+		}
+	}
+}
+
+// A long worktree name gives way to its state, at any width.
+func TestWorktreeRowKeepsState(t *testing.T) {
+	for _, w := range []int{28, 32, 40} {
+		out, _ := renderView(buildView(loadFixture(t, "worktrees"), uiState{}), w, 0, 0)
+		found := false
+		for _, l := range strings.Split(plain(out), "\n") {
+			if strings.Contains(l, "agent-af1a") {
+				found = true
+				if !strings.HasSuffix(l, "●3") || len([]rune(l)) > w {
+					t.Errorf("at %d: %q", w, l)
+				}
+			}
+		}
+		if !found {
+			t.Errorf("at %d: no Claude worktree row", w)
 		}
 	}
 }

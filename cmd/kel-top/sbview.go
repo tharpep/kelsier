@@ -17,6 +17,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -297,7 +298,8 @@ func buildView(doc fleet.Doc, ui uiState) sbView {
 				s := &v.spaces[i]
 				s.parent, s.land, s.missing, s.repo = r.Root, w.Land, w.Missing, r.Name
 				s.label = filepath.Base(w.Path)
-				if w.Branch != nil {
+				// Claude Code's branch is the folder with "worktree-" before it
+				if w.Branch != nil && !strings.Contains(w.Path, "/.claude/worktrees/") {
 					s.label = *w.Branch
 				}
 			}
@@ -770,13 +772,22 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 		if s.parent != "" {
 			// a worktree: one line under its repo, the branch and what
 			// landing it needs — `└ ● fix-auth  ↑2 · review`
-			label := truncate(s.label, text-2)
+			// the state is what the row is for, so a long name gives way to
+			// it (Claude Code names worktrees agent-af1a1567ab46ddb66)
+			d := worktreeDetail(s)
+			dw := len([]rune(stripANSI(d)))
+			avail := w - 4 // after the bar, └, the dot and a space
+			lw := avail
+			if d != "" && len([]rune(s.label))+2+dw > avail {
+				lw = max(avail-2-dw, 8)
+			}
+			label := truncate(s.label, lw)
 			if s.closed {
 				label = dim + label + reset
 			}
 			row := lead(id) + dim + "└" + reset + dot + " " + weight(label, s.current)
-			if d := worktreeDetail(s); d != "" {
-				if room := text - 2 - len([]rune(s.label)) - 2; room > 2 {
+			if d != "" {
+				if room := avail - len([]rune(stripANSI(label))) - 2; room > 0 {
 					row += "  " + truncateStyled(d, room)
 				}
 			}
@@ -1138,3 +1149,7 @@ func quotaLine(q *fleet.Quota, w int, now int64) string {
 	}
 	return ""
 }
+
+var ansiRE = regexp.MustCompile("\x1b\\[[0-9;]*m")
+
+func stripANSI(s string) string { return ansiRE.ReplaceAllString(s, "") }

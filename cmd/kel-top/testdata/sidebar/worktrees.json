@@ -688,7 +688,7 @@
       "branch": "main",
       "worktrees": [
         {
-          "path": "/home/me/code/.claude-x/kelsier/.claude/worktrees/agent-af1a",
+          "path": "/home/me/code/.claude-x/kelsier/.claude/worktrees/agent-af1a1567ab46ddb66",
           "branch": "worktree-agent-af1a",
           "land": {
             "code": "dirty",
