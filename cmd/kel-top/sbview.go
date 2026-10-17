@@ -1139,6 +1139,7 @@ var sbActions = []sbAct{
 	{"w", "worktree"},
 	{"`", "waiting"},
 	{"u", "usage"},
+	{"v", "PRs"},
 	{";", "command"},
 	{"?", "keys"},
 	{"q", "quit"},
@@ -1182,9 +1183,6 @@ func selActions(v sbView) (string, string, []sbAct) {
 				acts = append(acts, sbAct{"o", "browser"})
 			}
 			acts = append(acts, sbAct{"c", "claude"})
-			if s.git != nil {
-				acts = append(acts, sbAct{"v", "PRs"})
-			}
 			what := "space"
 			if s.parent != "" {
 				what = "worktree"

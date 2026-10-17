@@ -43,6 +43,7 @@ import (
 type sbTick struct{}
 type sbWake struct{}
 type sbLoaded struct{ doc fleet.Doc }
+type sbBase struct{ ref string } // d's default base, worked out off the key path
 
 // sbDone is a kel command finishing: its output becomes the footer message.
 type sbDone struct {
@@ -64,6 +65,7 @@ const (
 	modeQuit
 	modeSweep
 	modeCommand
+	modeDiff
 )
 
 type sbModel struct {
@@ -77,6 +79,7 @@ type sbModel struct {
 	mode   sbMode
 	input  string // the name being typed
 	cands  string // tab's choices when a typed directory is ambiguous
+	hist   int    // how far back ;'s history is, 0 = what is being typed
 	target string // the entry a pending kill or rename acts on
 	msg    string // the last command's result, shown until the next key
 	msgBad bool
@@ -301,7 +304,17 @@ func (m sbModel) view() sbView {
 		ask("rename "+m.entryName(m.target), "", "enter ok · esc cancel")
 		v.input = typed
 	case modeCommand:
-		ask("kel command", "", "enter run · esc cancel")
+		ask("kel command", "", "enter run · esc cancel · ↑ last")
+		v.input = typed
+	case modeDiff:
+		what := "diff"
+		if sp, ok := m.selSpace(m.target); ok {
+			what = "diff " + sp.label + " against"
+		}
+		ask(what, "", "enter ok · esc cancel · tab branch")
+		if m.cands != "" {
+			v.hint2 = m.cands
+		}
 		v.input = typed
 	case modeKill:
 		ask("kill "+m.entryName(m.target)+"?", yellow, "y yes · n no")
@@ -483,8 +496,12 @@ func (m sbModel) panel(what string) (sbModel, tea.Cmd) {
 	dir, title := sp.dir(), sp.title()
 	switch what {
 	case "diff":
-		// the base is a few git calls: worked out off the key path
-		return m, func() tea.Msg { return kelDone("", dir, nil, "_panel", "diff", dir, title, fleet.BaseRef(dir)) }
+		// against what: the base it lands on, offered and editable — the
+		// author could not diff against anything else. The base is a few
+		// git calls, so it is asked for off the key path
+		_ = title
+		m.mode, m.target, m.input = modeDiff, spaceID(sp.key), ""
+		return m, func() tea.Msg { return sbBase{fleet.BaseRef(dir)} }
 	case "edit", "plan":
 		a, ok := m.agentOf(m.view().sel)
 		if !ok && what == "edit" {
@@ -567,6 +584,12 @@ func (m sbModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, m.loadCmd()
 
+	case sbBase:
+		// d's default, filled in unless something was typed meanwhile
+		if m.mode == modeDiff && m.input == "" {
+			m.input = msg.ref
+		}
+		return m, nil
 	case sbLoaded:
 		m.loading = false
 		m.doc = msg.doc
@@ -716,7 +739,7 @@ func (m sbModel) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
-	case modeFilter, modeNew, modeNewWorktree, modeRename, modeCommand:
+	case modeFilter, modeNew, modeNewWorktree, modeRename, modeCommand, modeDiff:
 		switch k {
 		case "esc":
 			if m.mode == modeFilter {
@@ -734,6 +757,7 @@ func (m sbModel) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 				// kel's own prompt, answered here: one line in the footer,
 				// more in a popup (cmd_prompt)
 				m.msg = "kel " + name + "…"
+				saveHistory(name)
 				return m, runKel("", []string{"KEL_PROMPT_PRINT=1"}, "_prompt", name)
 			case modeRename:
 				a, ok := m.agentOf(m.target)
@@ -744,7 +768,10 @@ func (m sbModel) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 				return m, runKel("", []string{"TMUX_PANE=" + a.pane}, "rename", name)
 			default:
 				dir, group := m.spaceFor(m.ui.sel)
-				nm, typed, err := parseNew(name, os.Getenv("HOME"))
+				// after " -- ": flags for the agent itself, as `kel new` takes
+				// them (`fix -- --model sonnet`)
+				name, extra, _ := strings.Cut(name, " -- ")
+				nm, typed, err := parseNew(strings.TrimSpace(name), os.Getenv("HOME"))
 				if err != "" {
 					m.msg, m.msgBad = err, true
 					return m, nil
@@ -760,9 +787,41 @@ func (m sbModel) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 				} else if group != "" && group != "misc" {
 					args = append(args, "--group", group)
 				}
-				return m, runKel(dir, nil, append(args, nm)...)
+				args = append(args, nm)
+				if f := strings.Fields(extra); len(f) > 0 {
+					args = append(append(args, "--"), f...)
+				}
+				return m, runKel(dir, nil, args...)
+			case modeDiff:
+				sp, ok := m.selSpace(m.target)
+				if !ok {
+					return m, nil
+				}
+				d, t := sp.dir(), sp.title()
+				return m, runKel(d, nil, "_panel", "diff", d, t, name)
 			}
+		case "up", "down":
+			// ;'s history, newest first: the last twenty commands
+			if m.mode == modeCommand {
+				h := loadHistory()
+				if k == "up" && m.hist < len(h) {
+					m.hist++
+				} else if k == "down" && m.hist > 0 {
+					m.hist--
+				}
+				m.input = ""
+				if m.hist > 0 {
+					m.input = h[len(h)-m.hist]
+				}
+			}
+			return m, nil
 		case "tab":
+			if m.mode == modeDiff {
+				if sp, ok := m.selSpace(m.target); ok {
+					m.input, m.cands = completeBranch(m.input, sp.dir())
+				}
+				return m, nil
+			}
 			if m.mode == modeNew || m.mode == modeNewWorktree {
 				m.input, m.cands = completeDir(m.input, os.Getenv("HOME"))
 				return m, nil
@@ -842,7 +901,12 @@ func (m sbModel) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "c":
 		return m.panel("claude")
 	case "v", "G", "shift+g":
-		return m.panel("dash")
+		// every open space's PRs, the selected one's repo first
+		dir := os.Getenv("HOME")
+		if sp, ok := m.selSpace(m.view().sel); ok {
+			dir = sp.dir()
+		}
+		return m, runKel(dir, nil, "_panel", "dash", dir)
 	case "u":
 		// the account's usage, not the selection's: from wherever is selected,
 		// or home when nothing is
@@ -873,7 +937,7 @@ func (m sbModel) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		// typed here, like a name — tmux's own prompt opened at the foot of
 		// the window, where the author did not see it had (2026-10-16). `;`
 		// because `:` needs shift; `:` still works for the hands that try it
-		m.mode, m.input = modeCommand, ""
+		m.mode, m.input, m.hist = modeCommand, "", 0
 	case "?":
 		m.help = true
 	case "esc":
@@ -911,19 +975,20 @@ var sbHelp = [][2]string{
 	{"#", "a space"},
 	{"f", "files (yazi)"},
 	{"g", "git (lazygit)"},
-	{"d", "diff against base"},
+	{"d", "diff (pick a base)"},
 	{"e", "nvim here"},
 	{"t", "shell here"},
 	{"o", "open in browser"},
 	{"c", "claude config"},
-	{"v", "PRs (gh dash)"},
 	{"s", "sweep if landed"},
 	{"#", "kel"},
 	{"n", "new agent (tab: dir)"},
+	{"n x -- …", "…with claude flags"},
 	{"w", "new worktree agent"},
 	{"`", "next waiting agent"},
 	{"u", "usage (ccusage)"},
-	{";", "kel command"},
+	{"v", "PRs, every space"},
+	{";", "kel command (↑)"},
 	{"q", "quit kel"},
 	{"P", ""},
 	{"  space", "the sidebar"},
@@ -1278,4 +1343,65 @@ func helpKey(row string) string {
 		}
 	}
 	return ""
+}
+
+// ;'s history: the last twenty commands, in the state dir — small, local,
+// and only what you typed to kel.
+func histFile() string { return sbStatePath("prompt-history") }
+
+func loadHistory() []string {
+	b, err := os.ReadFile(histFile())
+	if err != nil {
+		return nil
+	}
+	var out []string
+	for _, l := range strings.Split(string(b), "\n") {
+		if l != "" {
+			out = append(out, l)
+		}
+	}
+	return out
+}
+
+func saveHistory(cmd string) {
+	h := loadHistory()
+	if len(h) > 0 && h[len(h)-1] == cmd {
+		return
+	}
+	h = append(h, cmd)
+	if len(h) > 20 {
+		h = h[len(h)-20:]
+	}
+	atomicWrite(histFile(), []byte(strings.Join(h, "\n")+"\n"))
+}
+
+// completeBranch completes a branch name from the repo's local and remote
+// branches, as completeDir does a directory.
+func completeBranch(in, dir string) (string, string) {
+	out, err := exec.Command("git", "-C", dir, "for-each-ref", "--format=%(refname:short)", "refs/heads", "refs/remotes").Output()
+	if err != nil {
+		return in, ""
+	}
+	var names []string
+	for _, n := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		if strings.HasPrefix(n, in) && !strings.HasSuffix(n, "/HEAD") && n != "origin" {
+			names = append(names, n)
+		}
+	}
+	switch len(names) {
+	case 0:
+		return in, "no branch matches"
+	case 1:
+		return names[0], ""
+	}
+	common := names[0]
+	for _, n := range names[1:] {
+		for !strings.HasPrefix(n, common) {
+			common = common[:len(common)-1]
+		}
+	}
+	if len(names) > 6 {
+		names = append(names[:6], "…")
+	}
+	return common, strings.Join(names, " ")
 }

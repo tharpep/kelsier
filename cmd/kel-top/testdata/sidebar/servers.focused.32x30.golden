@@ -19,12 +19,12 @@
  [1mf[0m [2mfiles        [0m [1mg[0m [2mgit          [0m
  [1md[0m [2mdiff         [0m [1me[0m [2mnvim         [0m
  [1mt[0m [2mshell        [0m [1mo[0m [2mbrowser      [0m
- [1mc[0m [2mclaude       [0m [1mv[0m [2mPRs          [0m
+ [1mc[0m [2mclaude       [0m
 
 [2mkel[0m
  [1mn[0m [2mnew agent    [0m [1mw[0m [2mworktree     [0m
  [1m`[0m [2mwaiting      [0m [1mu[0m [2musage        [0m
- [1m;[0m [2mcommand      [0m [1m?[0m [2mkeys         [0m
- [1mq[0m [2mquit         [0m
+ [1mv[0m [2mPRs          [0m [1m;[0m [2mcommand      [0m
+ [1m?[0m [2mkeys         [0m [1mq[0m [2mquit         [0m
 
 [2mesc back to your pane[0m

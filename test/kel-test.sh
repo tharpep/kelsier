@@ -124,7 +124,7 @@ grps() { tmux list-sessions -F '#{session_name}' 2>/dev/null | grep -c '^keltest
 # feed a Claude Code hook payload for pane $1, event $2, notification_type $3, text $4
 hook() {
   printf '%s' "{\"session_id\":\"s\",\"cwd\":\"$WORK\",\"hook_event_name\":\"$2\"\
-${3:+,\"notification_type\":\"$3\"}${4:+,\"notification_text\":\"$4\"}}" \
+${3:+,\"notification_type\":\"$3\"}${4:+,\"message\":\"$4\"}}" \
     | TMUX_PANE="$1" "$KEL" hook "$2"
 }
 state_of() { "$KEL" ls 2>/dev/null | awk -v n="$1" '$2==n {print $3}'; }
@@ -183,6 +183,12 @@ ok "kel new <name> <dir> starts in dir, grouped by its repo" '[ "$(cd "$(jq -r .
 ok "kel new <dir> names the agent after its folder" '[ -f "$SESSIONS/api-gw/api-gw.json" ]'
 ok "kel new with a missing dir says so"  '[[ "$( cd "$WORK" && "$KEL" new x "$WORK/nope" 2>&1 )" == *"no such directory"* ]]'
 "$KEL" kill -f coppermind/far >/dev/null 2>&1; "$KEL" kill -f api-gw/api-gw >/dev/null 2>&1
+( cd "$WORK/repos/api-gw" && "$KEL" new flags --agent 'sleep 9999' -- --model 'son net' ) >/dev/null 2>&1
+ok "kel new <name> -- <args> passes them to the agent, quoted" '[ "$(jq -r .agent "$SESSIONS/api-gw/flags.json")" = "sleep 9999 --model son\\ net" ]'
+"$KEL" kill -f api-gw/flags >/dev/null 2>&1
+( cd "$WORK/repos/api-gw" && KEL_PROMPT_PRINT=1 "$KEL" _prompt "new quoted --agent \"sleep 9999\"" ) >/dev/null 2>&1
+ok "; keeps quoted words together"       '[ "$(jq -r .agent "$SESSIONS/api-gw/quoted.json" 2>/dev/null)" = "sleep 9999" ]'
+"$KEL" kill -f api-gw/quoted >/dev/null 2>&1
 
 section "ambiguity is reported, never guessed"
 out="$("$KEL" kill docs 2>&1)"
@@ -1092,10 +1098,10 @@ S5="$(sbpane "$W5")"
 wait_until 'sbtext "$S5" | grep -q wt5'
 tmux send-keys -t "$S5" f
 wait_until 'grep -q yazi "$KEL_POPUP_TRACE"'
-ok "f opens yazi, titled, at the worktree"       'grep -q "^$WT5	yazi · api-gw/wt5 · prefix q closes	yazi$" "$KEL_POPUP_TRACE"'
+ok "f opens yazi, titled, at the worktree"       'grep -q "^$WT5	yazi · api-gw/wt5 · ? its keys · prefix q closes	yazi$" "$KEL_POPUP_TRACE"'
 tmux send-keys -t "$S5" g
 wait_until 'grep -q lazygit "$KEL_POPUP_TRACE"'
-ok "g opens lazygit there"                      'grep -q "^$WT5	lazygit · api-gw/wt5 · prefix q closes	lazygit --use-config-file .*lazygit-overlay.yml$" "$KEL_POPUP_TRACE"'
+ok "g opens lazygit there"                      'grep -q "^$WT5	lazygit · api-gw/wt5 · ? its keys · prefix q closes	lazygit --use-config-file .*lazygit-overlay.yml$" "$KEL_POPUP_TRACE"'
 ok "  ...where esc closes it, as everywhere in kel" 'grep -qx "quitOnTopLevelReturn: true" "$STATE/lazygit-overlay.yml"'
 
 # o: the lowest port, the rest named in the footer
@@ -1110,6 +1116,9 @@ sbdiag "$S5" "$f0"
 # d: committed and uncommitted work against the land base
 echo more >> "$WT5/README.md"
 tmux send-keys -t "$S5" d
+wait_until 'sbtext "$S5" | grep -q "^› main"'
+ok "d asks against what, offering the base it lands on" 'sbtext "$S5" | grep -q "^diff wt5 against" && sbtext "$S5" | grep -q "^› main"'
+tmux send-keys -t "$S5" Enter
 wait_until 'grep -q "diff ·" "$KEL_POPUP_TRACE"'
 ok "d diffs the worktree against its base"      'grep -q "^$WT5	diff · api-gw/wt5 · main · prefix q closes	" "$KEL_POPUP_TRACE"'
 # ;: a kel command typed in the sidebar, answered in its footer
@@ -1262,10 +1271,13 @@ ok "  ...and the agent's subagents are in the fleet" '[ "$("$KEL" _fleet | jq -r
 # ---- phase 3: usage, PRs, the claude config, a pane as a picture
 printf '#!/bin/sh\necho ccusage "$@"\n' > "$WORK/shim/ccusage"; chmod +x "$WORK/shim/ccusage"
 "$KEL" _panel usage "$WT5" >/dev/null 2>&1
-ok "u shows ccusage: this block, then two weeks by day" 'grep -q "usage · ccusage.*ccusage blocks --active --color.*ccusage daily --since [0-9]\{8\} --color" "$KEL_POPUP_TRACE"'
+ok "u shows ccusage: this block, two weeks, then any report" 'grep -q "usage · ccusage · q, then another report" "$KEL_POPUP_TRACE" && grep -q "ccusage blocks --active --color" "$KEL_POPUP_TRACE" && grep -q "ccusage \$r --color" "$KEL_POPUP_TRACE"'
 mkdir -p "$WORK/ghshim"; printf '#!/bin/sh\n[ "$1 $2" = "extension list" ] && printf "gh dash\\tdlvhdr/gh-dash\\tv4\\n"\nexit 0\n' > "$WORK/ghshim/gh"; chmod +x "$WORK/ghshim/gh"
-PATH="$WORK/ghshim:$PATH" "$KEL" _panel dash "$WT5" api-gw/wt5 >/dev/null 2>&1
-ok "G opens gh dash at the space"                'grep -q "^$WT5	gh dash · api-gw/wt5 · prefix q closes	gh dash$" "$KEL_POPUP_TRACE"'
+( cd "$WT5" && git remote add origin https://github.com/me/api-gw.git )
+PATH="$WORK/ghshim:$PATH" "$KEL" _panel dash "$WT5" >/dev/null 2>&1
+ok "v opens gh dash on every open space's repos" 'grep -q "PRs · every open space · / search · ? its keys.*gh dash --config $STATE/gh-dash.yml$" "$KEL_POPUP_TRACE"'
+ok "  ...the selected one's first, then all of them" 'grep -A1 "title: api-gw$" "$STATE/gh-dash.yml" | grep -q "repo:me/api-gw" && grep -q "title: mine, every space" "$STATE/gh-dash.yml"'
+( cd "$WT5" && git remote remove origin )
 printf '#!/bin/sh\n[ "$1 $2" = "extension list" ] && exit 0\nexit 0\n' > "$WORK/ghshim/gh"
 ok "  ...and says so when gh-dash is missing"    '[[ "$(PATH="$WORK/ghshim:$PATH" "$KEL" _panel dash "$WT5" t 2>&1)" == *"gh-dash is not installed"* ]]'
 CC="$WORK/ccfg"; MEM="$CC/projects/$(printf '%s' "$WT5" | sed 's/[^A-Za-z0-9]/-/g')/memory"
@@ -1481,6 +1493,25 @@ ok "does not notify for states not in \$KEL_NOTIFY" '[ "$(grep -c . "$NLOG")" = 
 : > "$NLOG"; KEL_NOTIFY="done" hook "$P" Stop
 wait_until '[ "$(grep -c . "$NLOG")" = 1 ]'
 ok "\$KEL_NOTIFY selects which states do"   '[ "$(grep -c . "$NLOG")" = 1 ]'
+# the banner: a line at the top while an agent waits, gone when it moves on
+: > "$NLOG"; hook "$P" UserPromptSubmit; hook "$P" Notification permission_prompt 'run #(touch pwned)?'
+AW="$(window_of api-gw a)"
+ok "a waiting agent puts up the banner, at the top" '[ "$(tmux show-options -v -t "=keltest:" status-position)" = top ] && [[ "$(tmux show-options -v -t "=keltest:" status-format[0])" == *"a#[nobold,fg=colour252] is waiting"* ]]'
+ok "  ...its text printed, never run as a format" '[[ "$(tmux show-options -v -t "=keltest:" status-format[0])" == *"##(touch pwned)"* ]]'
+hook "$P" UserPromptSubmit
+ok "  ...and takes it down when the agent moves on" '[ ! -s "$STATE/banner" ] && [ -z "$(tmux show-options -v -t "=keltest:" status-format[0] 2>/dev/null | grep "is waiting")" ]'
+NEW api-gw b
+hold_client 20
+tmux select-window -t "$(window_of api-gw b)"
+hook "$P" Notification permission_prompt "needs Bash"
+ok "  ...two lines: one per waiting agent" '[ "$(grep -c . "$STATE/banner")" = 1 ]'
+tmux select-window -t "$AW"; "$KEL" _banner seen
+ok "visiting the agent clears its line"   '[ ! -s "$STATE/banner" ]'
+tmux select-window -t "$(window_of api-gw b)"; hook "$P" UserPromptSubmit; hook "$P" Notification permission_prompt "again"
+"$KEL" _click bx '' ''
+ok "✕ dismisses it"                        '[ ! -s "$STATE/banner" ]'
+ok "kel.conf clears it when a window is visited" 'grep -q "session-window-changed.*kel _banner seen" "$HERE/../tmux/kel.conf"'
+release_client
 unset KEL_NOTIFY_CMD
 # The cases above already prove the detached path: this suite never attaches a
 # client, so every notification here took the "nobody is looking" branch.

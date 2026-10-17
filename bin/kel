@@ -347,7 +347,7 @@ sidebar_ensure() { # wid
   # Claude's own row already say, two status lines stacked (the author,
   # 2026-10-16). The quota it carried is the sidebar's last line now. A
   # session option, so kel's popups keep their bars and `✕ close`.
-  tmux set-option -t "$wid" status off 2>/dev/null || true
+  if [ -s "$BANNER" ]; then banner_apply; else tmux set-option -t "$wid" status off 2>/dev/null || true; fi
 }
 
 # per-pane styles are tmux 3.1+; below that the sidebar just wears the
@@ -599,9 +599,13 @@ worktree_unsafe() { # cwd
 # --------------------------------------------------------------------------
 cmd_new() {
   need tmux; need jq
-  local name='' dir='' worktree=0 agent="$KEL_AGENT" start_agent=1 group_override=''
+  local name='' dir='' worktree=0 agent="$KEL_AGENT" start_agent=1 group_override='' extra=''
   while [ $# -gt 0 ]; do
     case "$1" in
+      # everything after -- goes to the agent: `kel new fix -- --model sonnet`
+      # (the author could not pass Claude a flag from the sidebar). Quoted one
+      # by one, since the command is typed into the pane
+      --)            shift; while [ $# -gt 0 ]; do extra="$extra $(printf '%q' "$1")"; shift; done; break ;;
       -w|--worktree) worktree=1 ;;
       --group)       shift; group_override="${1:-}"; [ -n "$group_override" ] || die "--group needs a name" ;;
       --agent)       shift; agent="${1:-}"; [ -n "$agent" ] || die "--agent needs a command" ;;
@@ -613,7 +617,8 @@ cmd_new() {
     esac
     shift
   done
-  [ -n "$name" ] || die "usage: kel new <name> [dir] [-w] [--group G] [--agent CMD] [--no-agent]"
+  [ -n "$name" ] || die "usage: kel new <name> [dir] [-w] [--group G] [--agent CMD] [--no-agent] [-- agent args]"
+  agent="$agent$extra"
   # a directory instead of a name: the agent is named after its folder. So
   # an agent can start anywhere without a shell to cd in first (2026-10-16)
   if [ -z "$dir" ] && [ -d "$name" ] && { ! slug_ok "$name" || [ "$name" = . ] || [ "$name" = .. ]; }; then
@@ -1720,8 +1725,13 @@ cmd_quit() { # [-f]
 # rather than view-mode on the pane you are in, which would swallow your keys
 # (CLAUDE.md, traps). Words split on spaces; quoting is not supported.
 cmd_prompt() { # 'args'
+  # split as a shell would split words — quotes kept together, nothing
+  # expanded or run: xargs does exactly that, on GNU and BSD alike.
+  # `new x --agent "claude --model sonnet"` broke on `read -ra`
   local -a args=()
-  read -ra args <<< "${1:-}"
+  local a
+  while IFS= read -r -d '' a; do args+=( "$a" ); done \
+    < <(printf '%s' "${1:-}" | xargs printf '%s\0' 2>/dev/null)
   [ "${#args[@]}" -gt 0 ] || exit 0
   local out rc
   out="$("$SELF" "${args[@]}" 2>&1)"; rc=$?
@@ -1790,7 +1800,7 @@ cmd_panel() {
   local dir="${1:-}" title="${2:-}" arg="${3:-}"
   [ -d "$dir" ] || die "no such directory: $dir"
   case "$what" in
-    files) need_tool yazi;    KEL_POPUP_KEEP=1 popup "$dir" "yazi · $title · prefix q closes" yazi ;;
+    files) need_tool yazi;    KEL_POPUP_KEEP=1 popup "$dir" "yazi · $title · ? its keys · prefix q closes" yazi ;;
     git)   need_tool lazygit; panel_lazygit "$dir" "$title" ;;
     diff)  panel_diff "$dir" "$title" "$arg" ;;
     edit)  panel_edit "$dir" "$title" "$arg" ;;
@@ -1805,10 +1815,7 @@ cmd_panel() {
            # directory (oil, or netrw), so there is somewhere to start
            KEL_POPUP_KEEP=1 popup "$dir" "nvim · $title · prefix q closes" nvim . ;;
     usage) panel_usage "$dir" ;;
-    dash)  need_tool gh
-           gh extension list 2>/dev/null | grep -q 'gh-dash' || die "gh-dash is not installed (gh extension install dlvhdr/gh-dash)"
-           # kept like lazygit: its sections and filters are still there
-           KEL_POPUP_KEEP=1 popup "$dir" "gh dash · $title · prefix q closes" gh dash ;;
+    dash)  panel_prs "$dir" ;;
     claude) panel_claude "$dir" "$title" ;;
     *)     die "kel _panel: unknown panel '$what'" ;;
   esac
@@ -1824,8 +1831,51 @@ panel_usage() { # dir
   need_tool ccusage
   local since
   since="$(date -d '13 days ago' +%Y%m%d 2>/dev/null || date -v-13d +%Y%m%d)"
-  popup "$1" "usage · ccusage · prefix q closes" sh -c \
-    "{ ccusage blocks --active --color; echo; ccusage daily --since $since --color; } 2>&1 | less -R"
+  # then a prompt for any other report: the two weeks were all you could see
+  # (the author). Words only, split as words — nothing is run but ccusage
+  popup "$1" "usage · ccusage · q, then another report · prefix q closes" sh -c '
+    { ccusage blocks --active --color; echo; ccusage daily --since "$1" --color; } 2>&1 | less -R
+    while :; do
+      printf "\nanother report — monthly · weekly · session · blocks · daily --since 20261001\nenter on its own closes: "
+      read -r r || break
+      [ -n "$r" ] || break
+      # shellcheck disable=SC2086
+      set -f; ccusage $r --color 2>&1 | less -R; set +f
+    done' sh "$since"
+}
+
+# v: PRs and issues in gh dash, across every repo a space is open in — the
+# author wanted all of them, not one at a time — with the selected space's
+# repo first when there is one. kel writes the config into its state dir
+# each time (gh dash takes one --config, so the user's own is not merged);
+# within it, / edits a search and t drops the repo filter, as gh dash does.
+panel_prs() { # dir
+  need_tool gh
+  gh extension list 2>/dev/null | grep -q 'gh-dash' || die "gh-dash is not installed (gh extension install dlvhdr/gh-dash)"
+  local here='' slugs r cfg="$STATE_DIR/gh-dash.yml" q
+  slugs="$(fleet_json --panes | jq -r '.repos[]?.root' | while read -r r; do repo_slug "$r"; done | sort -u | tr '\n' ' ')"
+  [ -n "${1:-}" ] && here="$(repo_slug "$1")"
+  [ -n "$slugs$here" ] || die "no GitHub repo is open in a space"
+  q="$(for r in $slugs; do printf 'repo:%s ' "$r"; done)"
+  {
+    printf '# written by kel for its v popup, each time — not your gh-dash config\n'
+    printf 'smartFilteringAtLaunch: false\nprSections:\n'
+    [ -n "$here" ] && printf '  - title: %s\n    filters: is:open author:@me repo:%s\n' "${here#*/}" "$here"
+    printf '  - title: mine, every space\n    filters: is:open author:@me %s\n' "$q"
+    printf '  - title: needs my review\n    filters: is:open review-requested:@me %s\n' "$q"
+    printf '  - title: all open, every space\n    filters: is:open %s\n' "$q"
+    printf 'issuesSections:\n  - title: open, every space\n    filters: is:open %s\n' "$q"
+    printf '  - title: assigned to me\n    filters: is:open assignee:@me %s\n' "$q"
+  } > "$cfg"
+  popup "$HOME" "PRs · every open space · / search · ? its keys · prefix q closes" gh dash --config "$cfg"
+}
+
+# owner/repo of a GitHub remote, or nothing
+repo_slug() { # dir
+  local u; u="$(git -C "$1" remote get-url origin 2>/dev/null)" || return 0
+  case "$u" in *github.com*) ;; *) return 0 ;; esac
+  u="${u#*github.com}"; u="${u#[:/]}"; u="${u%.git}"
+  printf '%s\n' "$u"
 }
 
 # c: the Claude Code configuration that applies here, to look at and open —
@@ -1880,8 +1930,10 @@ panel_lazygit() { # dir title
   local own over="$STATE_DIR/lazygit-overlay.yml"
   own="$(lazygit --print-config-dir 2>/dev/null)/config.yml"
   [ -f "$over" ] || printf '# written by kel: esc at the top level closes its popup\nquitOnTopLevelReturn: true\n' > "$over"
-  if [ -f "$own" ]; then KEL_POPUP_KEEP=1 popup "$1" "lazygit · $2 · prefix q closes" lazygit --use-config-file "$own,$over"
-  else KEL_POPUP_KEEP=1 popup "$1" "lazygit · $2 · prefix q closes" lazygit --use-config-file "$over"; fi
+  # "? its keys": a tool's own keys are behind its own ?, which the author
+  # did not know — gh dash's search looked uneditable until it was named
+  if [ -f "$own" ]; then KEL_POPUP_KEEP=1 popup "$1" "lazygit · $2 · ? its keys · prefix q closes" lazygit --use-config-file "$own,$over"
+  else KEL_POPUP_KEEP=1 popup "$1" "lazygit · $2 · ? its keys · prefix q closes" lazygit --use-config-file "$over"; fi
 }
 
 # tmux_at_least MAJOR MINOR — compared arithmetically: BSD sort has no -V
@@ -1910,8 +1962,83 @@ cmd_click() { # range popup client
   case "${1:-}" in
     close) [ "${2:-}" = 1 ] && tmux detach-client -t "${3:-}" 2>/dev/null ;;
     jump)  KEL_CLIENT="${3:-}" "$SELF" jump ;;
+    bgo)   banner_go "${3:-}" ;;
+    bx)    banner_clear ;;
   esac
   return 0
+}
+
+# ---- the banner ------------------------------------------------------------
+# A one-line bar at the top of the window, there only while something needs
+# you: `● pr52 is waiting — allow Bash?   ↵ go  ✕`. The author liked how
+# Claude Code's desktop app says which agent is blocked, in the app. tmux's
+# bar is off while sidebars show (it repeated them), so the banner turns it
+# on at the top for as long as it has something to say, and off after. It
+# leaves when you visit that agent, when the agent stops waiting, or on ✕.
+# One line per agent in $BANNER: <wid> TAB <state> TAB <name> TAB <text>.
+BANNER="$STATE_DIR/banner"
+
+banner_add() { # wid state name text
+  local f; f="$(mktemp "$STATE_DIR/.banner.XXXXXX" 2>/dev/null)" || return 0
+  { [ -f "$BANNER" ] && awk -F'\t' -v w="$1" '$1 != w' "$BANNER"
+    printf '%s\t%s\t%s\t%s\n' "$1" "$2" "$3" "$4"; } > "$f"
+  mv -f "$f" "$BANNER"
+  banner_apply
+}
+
+banner_drop() { # wid...
+  [ -s "$BANNER" ] || return 0
+  local f w keep="$BANNER"
+  f="$(mktemp "$STATE_DIR/.banner.XXXXXX" 2>/dev/null)" || return 0
+  cp "$BANNER" "$f"
+  for w in "$@"; do awk -F'\t' -v w="$w" '$1 != w' "$f" > "$f.t" && mv -f "$f.t" "$f"; done
+  if cmp -s "$f" "$keep"; then rm -f "$f"; return 0; fi
+  mv -f "$f" "$BANNER"
+  banner_apply
+}
+
+banner_clear() { rm -f "$BANNER"; banner_apply; }
+
+# the windows any attached client is looking at: visiting one clears its line
+banner_seen() {
+  [ -s "$BANNER" ] || return 0
+  # shellcheck disable=SC2046
+  banner_drop $(tmux list-clients -F '#{window_id}' 2>/dev/null)
+}
+
+# ↵ go: to the newest line's agent, on the client that clicked
+banner_go() { # client
+  [ -s "$BANNER" ] || return 0
+  local wid; wid="$(tail -1 "$BANNER" | cut -f1)"
+  if [ -n "${1:-}" ]; then tmux switch-client -c "$1" -t "$wid" 2>/dev/null || tmux select-window -t "$wid" 2>/dev/null
+  else tmux select-window -t "$wid" 2>/dev/null; fi
+  banner_drop "$wid"
+}
+
+# draw it: the newest line, and how many more; or nothing, and tmux's bar
+# back to what the sidebar wants (off while sidebars show)
+banner_apply() {
+  tmux has-session -t "=$KEL_PREFIX" 2>/dev/null || return 0
+  local t="=$KEL_PREFIX:" n line wid st name text more='' word
+  n="$( [ -f "$BANNER" ] && grep -c . "$BANNER" || echo 0)"
+  if [ "${n:-0}" -eq 0 ]; then
+    tmux set-option -u -t "$t" status-position \; set-option -u -t "$t" status-format[0] 2>/dev/null
+    if sidebar_enabled && [ -n "$(kel_windows | head -1)" ]; then tmux set-option -t "$t" status off 2>/dev/null
+    else tmux set-option -u -t "$t" status 2>/dev/null; fi
+    return 0
+  fi
+  line="$(tail -1 "$BANNER")"
+  IFS=$'\t' read -r wid st name text <<< "$line"
+  case "$st" in waiting) word="is waiting" ;; done) word="finished" ;; *) word="is $st" ;; esac
+  [ "$n" -gt 1 ] && more="#[fg=colour245]  +$((n - 1)) more"
+  # the text is Claude Code's — the agent quoting a command back — so every
+  # # is doubled: tmux must print it, never read it as a format
+  name="${name//#/##}"; text="${text//#/##}"
+  [ "${#text}" -gt 80 ] && text="${text:0:79}…"
+  tmux set-option -t "$t" status on \; \
+       set-option -t "$t" status-position top \; \
+       set-option -t "$t" status-format[0] "#[align=left,bg=default]#[range=user|bgo]#[fg=colour214,bold] ● $name#[nobold,fg=colour252] $word${text:+#[fg=colour245] — $text}$more #[norange]#[align=right]#[range=user|bgo]#[fg=colour255,bold] ↵ go #[norange]#[range=user|bx]#[fg=colour245]  ✕ #[norange]" \
+       2>/dev/null
 }
 
 # popup DIR TITLE CMD... — a titled popup at DIR running CMD.
@@ -2803,7 +2930,11 @@ cmd_hook() {
     read -r evt; read -r sid; read -r cwd; read -r ntype; read -r ntext
   } < <(printf '%s' "$payload" | jq -r '[
       (.hook_event_name  // ""), (.session_id       // ""), (.cwd // ""),
-      (.notification_type // ""), (.notification_text // "")
+      (.notification_type // ""),
+      # Claude Code sends the words as .message (hooks docs, Notification);
+      # kel read .notification_text, which it never sends — so no real agent
+      # ever showed why it waited, only the test fixtures (2026-10-17)
+      (if .hook_event_name == "Notification" then (.message // .notification_text // "") else "" end)
     ] | .[] | tostring | gsub("[\n\t]"; " ")' 2>/dev/null)
   [ -n "$event" ] || event="$evt"
   [ "$event" = PostToolUse ] && { hook_edit "$payload" "$sid" "$cwd"; exit 0; }
@@ -2890,10 +3021,13 @@ cmd_hook() {
   # already looking at it.  Without the transition test every repeat hook of
   # the same state re-notifies, which is how people learn to ignore them.
   [ "$state" = "$prev" ] && exit 0
+  # an agent that moved on takes its banner line with it
+  banner_drop "$wid"
   case " $KEL_NOTIFY " in
     *" $state "*)
       window_focused "$wid" && exit 0
       local wn; wn="$(tmux display-message -p -t "$wid" '#{window_name}' 2>/dev/null || echo "$wid")"
+      case "${KEL_NOTIFY_BANNER:-on}" in off|0|no|false) ;; *) banner_add "$wid" "$state" "$wn" "$ntext" ;; esac
       notify "kel: $wn" "${ntext:-$state}" ;;
   esac
 }
@@ -3011,6 +3145,11 @@ main() {
     _click)       cmd_click "$@" ;;
     substatus)    cmd_substatus "$@" ;;
     _panel)       cmd_panel "$@" ;;
+    _banner)      case "${1:-}" in
+                    seen)  banner_seen ;;
+                    clear) banner_clear ;;
+                    *)     die "usage: kel _banner seen|clear" ;;
+                  esac ;;
     _sidebar)     case "${1:-}" in
                     ensure) sidebar_ensure "${2:-}" ;;
                     wake)   sidebar_wake ;;

@@ -370,6 +370,16 @@ the `TodoWrite` design was stale, and the plan turned out to need no new hook.
   from the transcript). An agent's tag is the repo it works in, not the
   group it was filed under. The quota line is `5h …`, and says `5h ?`
   rather than vanishing
+- *2026-10-17, from the author:* a banner at the top of the window while an
+  agent needs you (Claude Code's desktop app does this) — tmux's bar, off
+  while sidebars show, comes back at the top only while it has something
+  to say; ↵ go, ✕, and it clears when you visit the agent or it moves on.
+  `v` is every open space's PRs in one gh dash (kel writes its config);
+  popups name their tool's `?`; `n name -- flags` passes flags to Claude;
+  `;` keeps quoted words and has history; `u` takes any ccusage report; `d`
+  asks which base. *Found on the way:* the Notification hook read
+  `.notification_text`, which Claude Code never sends — the words are
+  `.message` — so no real agent had ever shown why it waited
 - *found on the way:* M5's `hook_edit` had real newlines inside its `printf`
   format — a quoting slip in its writing that happened to print the same
   thing; rewritten while the plan / edit split went in

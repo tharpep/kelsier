@@ -2,6 +2,8 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
+	"os/exec"
 	"flag"
 	"os"
 	"path/filepath"
@@ -349,16 +351,19 @@ func TestSidebarActions(t *testing.T) {
 	if !strings.Contains(plain(out), "\nkel\n") {
 		t.Fatalf("no kel actions at 32x30:\n%s", plain(out))
 	}
-	y := -1
+	y, x := -1, 2
 	for i, r := range refs {
 		if r.id == "act:q" {
 			y = i
+		}
+		if r.id2 == "act:q" {
+			y, x = i, r.split+2
 		}
 	}
 	if y < 0 {
 		t.Fatal("no q action line")
 	}
-	nm, _ := m.Update(tea.MouseClickMsg{X: 2, Y: y, Button: tea.MouseLeft})
+	nm, _ := m.Update(tea.MouseClickMsg{X: x, Y: y, Button: tea.MouseLeft})
 	if nm.(sbModel).mode != modeQuit {
 		t.Error("a click on Q did not ask to quit")
 	}
@@ -697,3 +702,41 @@ func TestAgentDoing(t *testing.T) {
 }
 
 func sp(s string) *string { return &s }
+
+// d asks which base; tab completes a branch.
+func TestCompleteBranch(t *testing.T) {
+	d := t.TempDir()
+	for _, a := range [][]string{{"init", "-q", "-b", "main"}, {"commit", "-q", "--allow-empty", "-m", "i"}, {"branch", "feat-a"}, {"branch", "feat-b"}} {
+		c := exec.Command("git", append([]string{"-c", "user.email=t@t", "-c", "user.name=t"}, a...)...)
+		c.Dir = d
+		if out, err := c.CombinedOutput(); err != nil {
+			t.Fatalf("%v %s", err, out)
+		}
+	}
+	if got, c := completeBranch("ma", d); got != "main" || c != "" {
+		t.Errorf("ma: %q %q", got, c)
+	}
+	if got, c := completeBranch("f", d); got != "feat-" || c != "feat-a feat-b" {
+		t.Errorf("f: %q %q", got, c)
+	}
+}
+
+// ;'s history keeps the last twenty, without repeats in a row.
+func TestPromptHistory(t *testing.T) {
+	sd := t.TempDir()
+	t.Setenv("XDG_STATE_HOME", sd)
+	_ = os.MkdirAll(filepath.Join(sd, "kel"), 0o700) // kel made it long before
+	for i := 0; i < 25; i++ {
+		saveHistory(fmt.Sprintf("cmd%d", i))
+	}
+	saveHistory("cmd24")
+	h := loadHistory()
+	if len(h) != 20 || h[0] != "cmd5" || h[19] != "cmd24" {
+		t.Errorf("history: %v", h)
+	}
+	m := sbModel{mode: modeCommand, width: 32, height: 30}
+	nm, _ := m.key(tea.KeyPressMsg{Code: tea.KeyUp})
+	if nm.(sbModel).input != "cmd24" {
+		t.Errorf("up: %q", nm.(sbModel).input)
+	}
+}

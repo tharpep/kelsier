@@ -180,7 +180,7 @@ jump` in yellow — then shows the keys for whatever is selected (`e edit · p p
 | `r` | rename the selected agent |
 | `x` | kill the selected agent, after `y` — a worktree with unsaved work is refused, and the footer names what is at risk |
 | `f` / `g` | yazi / lazygit in a popup, at the selected entry's worktree |
-| `d` | that worktree's changes — committed and uncommitted — against the branch it lands on (diffview.nvim if installed, else `delta`, else `git diff`) |
+| `d` | that worktree's changes — committed and uncommitted — against a base you are asked for: the branch it lands on, offered and editable, `tab` completes a branch (diffview.nvim if installed, else `delta`, else `git diff`) |
 | `e` | the file the selected agent last edited, at the line — in the nvim you have open in that worktree, else a popup |
 | `o` | the selected server in your browser — its lowest port; the footer names the others |
 | `e` on a space | nvim at that directory, kept between opens — your buffers are still there next time |
@@ -188,8 +188,10 @@ jump` in yellow — then shows the keys for whatever is selected (`e edit · p p
 | `q` | quit kel, after `y`: saves the workspace, then closes it all; refuses while a worktree holds unsaved work |
 | `p` | the selected agent's plan (from plan mode), then its task list — `✓` done, `▸` in progress, `·` pending, and what blocks what. Most sessions on newer models keep no task list; it says so. Rendered with glow when installed |
 | `c` | the Claude Code configuration that applies to the selected space, in yazi, a tab per place: the repo's `CLAUDE.md`, its `.claude/`, the global `~/.claude` and the project's memory. To read and open — kel writes none of it |
-| `v` | gh dash at the selected space: your PRs, reviews and issues for that repo; kept between opens |
-| `u` | Claude Code usage from ccusage — the current 5-hour block, then the last two weeks by day. ccusage reads Claude Code's own transcripts, so kel stores no history |
+| `v` | gh dash across **every repo a space is open in**: tabs for the selected space's repo, yours everywhere, review requests, all open; issues too. `/` edits a search, `t` drops the repo filter, `?` lists gh dash's keys |
+| `u` | Claude Code usage from ccusage — the current 5-hour block and two weeks by day; quit it (`q`) and type any other report (`monthly`, `session`, `daily --since 20261001`). ccusage reads Claude Code's own transcripts, so kel stores no history |
+| `n name -- flags` | after ` -- `, flags for Claude itself: `fix -- --model sonnet` (`kel new fix -- --model sonnet` from a shell) |
+| `;` | a kel command; quotes keep words together, `↑` / `↓` walk the last twenty |
 | `s` | sweep the selected worktree once it has landed (anywhere else: everything landed), after `y` |
 | `?` | every key |
 | `esc` | back to the pane you were in |
@@ -218,7 +220,12 @@ bg · blocked`); other background agents are listed on their own, marked `bg`.
 `enter` on one opens it (`claude attach`) in a popup. An agent's working or
 idle comes from Claude Code itself where it can say.
 
-When an agent starts waiting and you are looking elsewhere, kel rings your
+When an agent starts waiting and you are looking elsewhere, **a banner opens
+at the top of the window** — `● pr52 is waiting — Claude needs your
+permission to use Bash   ↵ go  ✕`, with `+1 more` when several are. Click it
+(or `↵ go`) to go there; `✕` dismisses it. It also leaves by itself when you
+visit that agent or the agent moves on; it is never shown for the agent you
+are looking at. `notify_banner = "off"` turns it off. kel also rings your
 terminal's bell and shows a desktop notification (a Windows toast on WSL) —
 see `setup.md` §5b to change either. Hidden sidebars do no work; the one you can see refreshes every two
 seconds and at once when an agent changes state. `kel sidebar off` removes it
@@ -324,6 +331,9 @@ Everything lives in `${XDG_STATE_HOME:-~/.local/state}/kel/`, mode `0700`:
 - `<window-id>.state` — state from the hooks, including Claude Code's
   notification text (the agent quoting a command back at you)
 - `<window-id>.ctx` — context, cost and model from `kel statusline`
+- `banner` — one line per agent the top banner is showing (window, state,
+  name, Claude Code's words), gone when it is; `prompt-history` — the last
+  twenty `;` commands; `gh-dash.yml` — the config `v` writes for gh dash
 - `quota` — the account's rate limits, from `kel statusline`
 - `<window-id>.seen`, `sidebar.json`, `sidebar-cache.json` — the sidebar's
 - `<window-id>.edit` — the file the agent last edited, and the line, from a

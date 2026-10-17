@@ -96,6 +96,9 @@ change; migrate old records in `migrate_meta`.
 | `restore-offer` | present while an archived workspace waits: set by a fresh `kel`, cleared by `kel restore`; the sidebar offers `R` |
 | `sidebar-off` | present after `kel sidebar off`; no new sidebars until `kel sidebar on` |
 | `worktrees.json` | `{at, repos:{<main root>: repo}, stamps:{<main root>: ns}}` — every repo's worktrees with land state, for the sidebar's `repos`; reused for 20 s unless `.git/worktrees` changed (its mtime is the stamp). `kel sweep` reads fresh |
+| `banner` | one line per agent the top banner shows: `<wid> TAB <state> TAB <name> TAB <text>`. Written by the state hook on a notifying transition, dropped when the agent moves on, when a client shows its window (`session-window-changed` → `kel _banner seen`) or on ✕ (`_click bx`); empty = tmux's bar back to what the sidebar wants |
+| `prompt-history` | the last twenty commands typed at the sidebar's `;`, one per line |
+| `gh-dash.yml` | the config `v` writes for gh dash each time — every open space's repos; not the user's own |
 | `ports.json` | `{at, panes:{<pane pid>: [ports]}}` — the listening-port scan behind `_fleet --panes`, reused for 10 s |
 
 **The directory is `0700`.** The records carry repo paths, branch names and
