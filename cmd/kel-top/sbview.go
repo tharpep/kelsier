@@ -964,12 +964,16 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 		tail = append(tail, line{dim + truncate("/"+v.filter+"  esc clears", w) + reset, lineRef{}})
 	case !v.focused && v.waiting > 0:
 		// the waiting alarm, which tmux's bar carried until the sidebar
-		// took its place: while you are elsewhere, it is the footer
+		// took its place: while you are elsewhere, it is the footer.
+		// It names the key as well as the click: ` is a prefix key, so two
+		// presses — "click to jump" taught neither that a key exists nor
+		// that the prefix comes first.
 		t := fmt.Sprintf("%d waiting", v.waiting)
 		if v.waitSince > 0 && now >= v.waitSince {
 			t += " " + humanizeSecs(now-v.waitSince)
 		}
-		tail = append(tail, line{yellow + bold + truncate(t+" · click to jump", w) + reset, lineRef{id: "act:`", kind: "action"}})
+		t += " · " + v.prefix + " then `"
+		tail = append(tail, line{yellow + bold + truncate(t, w) + reset, lineRef{id: "act:`", kind: "action"}})
 		alarm = true
 	}
 	// the quota is the last line, where tmux's bar used to carry it: with

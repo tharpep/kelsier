@@ -203,8 +203,9 @@ func TestSidebarHint(t *testing.T) {
 		l := strings.Split(plain(out), "\n")
 		return l[len(l)-1]
 	}
-	// someone waits: the unfocused footer is the alarm, and jumps on a click
-	if got := foot(uiState{}, 32); got != "1 waiting · click to jump" {
+	// someone waits: the unfocused footer is the alarm, which names its key
+	// and still jumps on a click
+	if got := foot(uiState{}, 32); got != "1 waiting · Ctrl-b then `" {
 		t.Errorf("unfocused footer with one waiting: %q", got)
 	}
 	out, refs := renderView(buildView(loadFixture(t, "one-agent"), uiState{}), 32, 30, 0)

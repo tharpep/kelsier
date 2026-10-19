@@ -330,7 +330,18 @@ agent_pane() { # wid
 # makes it the {top-left} pane whatever pane-base-index is.
 sidebar_ensure() { # wid
   local wid="$1" sn
-  sidebar_enabled || return 0
+  # Not enabled is usually a choice (KEL_SIDEBAR, `kel sidebar off`), but it is
+  # also what a missing or half-written $KEL_TOP_BIN looks like — `go build -o`
+  # truncates its target while writing, so an ensure firing during a rebuild
+  # sees no executable and returns here.  That case leaves a window with no
+  # sidebar and said nothing, so say it.  TEMPORARY, with the block below:
+  # delete both once a log explains a real failure.
+  if ! sidebar_enabled; then
+    [ -e "$SIDEBAR_OFF" ] || [ -x "$KEL_TOP_BIN" ] \
+      || printf '%s wid=%s kel-top not executable: %s\n' \
+           "$(date +%FT%T)" "$wid" "$KEL_TOP_BIN" >> "$STATE_DIR/sidebar-fail.log" 2>/dev/null
+    return 0
+  fi
   sn="$(tmux display-message -p -t "$wid" '#{session_name}' 2>/dev/null)" || return 0
   case "$sn" in "$KEL_PREFIX"|"$KEL_PREFIX"/*) ;; *) return 0 ;; esac   # not kel's window
   # The flag and the split below are one command list, so a split that fails
@@ -349,7 +360,31 @@ sidebar_ensure() { # wid
   # dead-agent check could not kill its agent.
   tmux if-shell -F -t "$wid" '#{?@kel-has-sidebar,,1}' \
     "set-option -w -t '$wid' @kel-has-sidebar 1 ; split-window -hbdf -l $KEL_SIDEBAR_WIDTH -t '$wid' -c '#{pane_current_path}' -e 'KEL_BIN=$SELF' \"exec '$KEL_TOP_BIN' --sidebar\" ; set-option -p -t '$wid.{top-left}' @kel-sidebar 1" \
-    2>/dev/null || true
+    2>"$STATE_DIR/.sidebar-err.$$" || true
+  # Why the split sometimes does not happen is not known: it has left a real
+  # window sidebar-less three times, and `wake` only heals on the next window
+  # switch.  So record the one case that matters — the flag claims a pane and
+  # none is there — with whatever tmux said.  Only on failure, so the common
+  # path writes nothing (invariant 5).
+  #
+  # TEMPORARY, and the whole point: this exists to catch a cause nobody has
+  # seen.  When sidebar-fail.log explains one, fix that and DELETE both this
+  # block and the one in sidebar_enabled above — kel does not keep diagnostics
+  # for bugs it has fixed.  Capped at 200 lines so an unattended machine
+  # cannot grow it without bound.
+  if [ "$(tmux list-panes -t "$wid" -F '#{@kel-sidebar}' 2>/dev/null | grep -cx 1)" = 0 ]; then
+    local log="$STATE_DIR/sidebar-fail.log"
+    { printf '%s wid=%s flag=%s panes=%s width=%s\n' "$(date +%FT%T)" "$wid" \
+        "$(tmux show-options -wv -t "$wid" @kel-has-sidebar 2>/dev/null)" \
+        "$(tmux list-panes -t "$wid" -F x 2>/dev/null | grep -c .)" \
+        "$(tmux display-message -p -t "$wid" '#{window_width}x#{window_height}' 2>/dev/null)"
+      sed 's/^/  tmux: /' "$STATE_DIR/.sidebar-err.$$" 2>/dev/null
+    } >> "$log" 2>/dev/null
+    if [ "$(grep -c . "$log" 2>/dev/null || echo 0)" -gt 200 ]; then
+      tail -100 "$log" > "$log.$$" 2>/dev/null && mv -f "$log.$$" "$log" 2>/dev/null
+    fi
+  fi
+  rm -f "$STATE_DIR/.sidebar-err.$$"
   sidebar_style "$wid"
   # tmux's bar goes while sidebars show: it repeated what the sidebar and
   # Claude's own row already say, two status lines stacked (the author,
@@ -370,11 +405,28 @@ sidebar_style() { # wid
 
 # nudge every sidebar to look again (SIGUSR1); each decides for itself, with
 # one cheap tmux call, whether it is the visible one
+#
+# It also heals: `ensure` runs on after-new-window and session-created, both
+# creation events, so a window that LOST its sidebar stayed broken until some
+# other window was made — a real window sat sidebar-less until ensure was run
+# by hand (2026-10-19). This hook fires on every window switch, which is when
+# you would notice, and the pane list it already reads says which windows have
+# none. ensure is called only for those, so the healthy path adds no tmux
+# calls beyond the one already made (invariant 5).
 sidebar_wake() {
-  local flag pid
+  local flag pid wid
   tmux list-panes -a -F '#{@kel-sidebar} #{pane_pid}' 2>/dev/null \
   | while read -r flag pid; do
       [ "$flag" = 1 ] && kill -USR1 "$pid" 2>/dev/null
+    done
+  sidebar_enabled || return 0
+  # two passes over one listing: a window is missing its sidebar when no pane
+  # of it carries the flag.  Counted per window, never `grep -v` — a user
+  # pane's @kel-sidebar is empty and would match (see the traps).
+  tmux list-panes -a -F '#{window_id} #{@kel-sidebar}' 2>/dev/null \
+  | awk '{ seen[$1]; if ($2 == 1) has[$1] } END { for (w in seen) if (!(w in has)) print w }' \
+  | while read -r wid; do
+      [ -n "$wid" ] && sidebar_ensure "$wid"
     done
   return 0
 }
@@ -2043,9 +2095,12 @@ banner_apply() {
   # # is doubled: tmux must print it, never read it as a format
   name="${name//#/##}"; text="${text//#/##}"
   [ "${#text}" -gt 80 ] && text="${text:0:79}…"
+  # `↵ go` is what a click does; the key is named beside it so the banner
+  # teaches it too (the sidebar's footer says the same).  ` is a prefix key:
+  # two presses, so "then" — `Ctrl-b \`` read as one chord (2026-10-16).
   tmux set-option -t "$t" status on \; \
        set-option -t "$t" status-position top \; \
-       set-option -t "$t" status-format[0] "#[align=left,bg=default]#[range=user|bgo]#[fg=colour214,bold] ● $name#[nobold,fg=colour252] $word${text:+#[fg=colour245] — $text}$more #[norange]#[align=right]#[range=user|bgo]#[fg=colour255,bold] ↵ go #[norange]#[range=user|bx]#[fg=colour245]  ✕ #[norange]" \
+       set-option -t "$t" status-format[0] "#[align=left,bg=default]#[range=user|bgo]#[fg=colour214,bold] ● $name#[nobold,fg=colour252] $word${text:+#[fg=colour245] — $text}$more #[norange]#[align=right]#[range=user|bgo]#[fg=colour255,bold] ↵ go #[nobold,fg=colour240]or $(prefix_words) then \` #[norange]#[range=user|bx]#[fg=colour245] ✕ #[norange]" \
        2>/dev/null
 }
 
@@ -2856,6 +2911,11 @@ cmd_statusline() {
     printf '\033[2mctx ?\033[0m'
   fi
   [ -n "$cost" ] && [ "$cost" != "0" ] && printf ' \033[2m·\033[0m $%.2f' "$cost" 2>/dev/null
+  # the time, because nothing else in kel tells it: tmux's bar carried a clock
+  # until the sidebar turned that bar off (spec.md §7).  This row is the only
+  # always-visible line kel writes, and it has room to the right.  date, not
+  # printf's %(...)T — bash 3.2 on macOS does not have it.
+  printf ' \033[2m·\033[0m \033[2m%s\033[0m' "$(date +%H:%M)"
   if [ -z "$label" ]; then
     # the 5-hour window always, when reported — the author needs the smallest
     # limit in view, and gating it at 50% showed only the week. The week from

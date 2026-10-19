@@ -166,8 +166,8 @@ A blue `▌` marks the selection; where you are is the name in bold. Only states
 that need you are coloured — waiting yellow, working cyan, finished-and-unseen
 green, dead red; idle, seen and unknown are grey, and a doubtful `working?` is
 grey italic. The footer reads `click, or Ctrl-b then space` until the sidebar
-has the keyboard — or, while an agent waits on you, `1 waiting 6m · click to
-jump` in yellow — then shows the keys for whatever is selected (`e edit · p plan · x kill · ?` on an agent) — `?` lists them all, and a click on a bold key there runs it.
+has the keyboard — or, while an agent waits on you, `1 waiting 6m · Ctrl-b
+then \`` in yellow, which a click also jumps — then shows the keys for whatever is selected (`e edit · p plan · x kill · ?` on an agent) — `?` lists them all, and a click on a bold key there runs it.
 
 | key | |
 |---|---|
@@ -222,8 +222,8 @@ idle comes from Claude Code itself where it can say.
 
 When an agent starts waiting and you are looking elsewhere, **a banner opens
 at the top of the window** — `● pr52 is waiting — Claude needs your
-permission to use Bash   ↵ go  ✕`, with `+1 more` when several are. Click it
-(or `↵ go`) to go there; `✕` dismisses it. It also leaves by itself when you
+permission to use Bash   ↵ go  or Ctrl-b then \`  ✕`, with `+1 more` when several are. Click it
+(or `↵ go`, or the key it names) to go there; `✕` dismisses it. It also leaves by itself when you
 visit that agent or the agent moves on; it is never shown for the agent you
 are looking at. `notify_banner = "off"` turns it off. kel also rings your
 terminal's bell and shows a desktop notification (a Windows toast on WSL) —
@@ -335,6 +335,10 @@ Everything lives in `${XDG_STATE_HOME:-~/.local/state}/kel/`, mode `0700`:
   name, Claude Code's words), gone when it is; `prompt-history` — the last
   twenty `;` commands; `gh-dash.yml` — the config `v` writes for gh dash
 - `quota` — the account's rate limits, from `kel statusline`
+- `sidebar-fail.log` — appended only when a window is left with no sidebar
+  pane, with whatever tmux said, newest 100 kept. Why that happens is not
+  known yet; a window switch heals it. **Temporary**: when a log explains a
+  real failure, that is fixed and this goes with it
 - `<window-id>.seen`, `sidebar.json`, `sidebar-cache.json` — the sidebar's
 - `<window-id>.edit` — the file the agent last edited, and the line, from a
   `PostToolUse` hook on Edit / Write; `<window-id>.plan` — the plan file a
@@ -359,13 +363,13 @@ it is the session only — where it stands is the sidebar's, the quota the
 bar's:
 
 ```
-Opus 5.5 fast xhigh · ███░░░░░░░ 25% ctx · $31.90
+Opus 5.5 fast xhigh · ███░░░░░░░ 25% ctx · $31.90 · 14:32
 ```
 
 Outside kel, where there is no sidebar or bar, it also carries those:
 
 ```
-tharpep/kelsier@auth-fix · Opus 5.5 · ███░░░░░░░ 25% ctx · $31.90 · 5h 74% (39m)
+tharpep/kelsier@auth-fix · Opus 5.5 · ███░░░░░░░ 25% ctx · $31.90 · 14:32 · 5h 74% (39m)
 ```
 
 | segment | appears when |
@@ -373,6 +377,7 @@ tharpep/kelsier@auth-fix · Opus 5.5 · ███░░░░░░░ 25% ctx �
 | `owner/name@worktree` | outside a kel window, and the payload names a repo |
 | `fast` `xhigh` `no-think` | those modes are not at their defaults |
 | `250k/1M` after the bar | context is at `KEL_CTX_WARN` or above |
+| `14:32` | always — the clock tmux's bar carried before the sidebar turned it off |
 | `$N.NN` | cost is non-zero |
 | `5h` + reset | outside a kel window, always when reported |
 | `7d` / `spend` + reset | outside a kel window, from 75% / 50% |

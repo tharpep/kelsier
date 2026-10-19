@@ -45,6 +45,22 @@ inherits them:
 
 ## Open
 
+### 41. A window is sometimes left with no sidebar pane  ·  `[defect]`
+
+`@kel-has-sidebar` is set in the same tmux command list as the `split-window`
+that adds the pane, so the two cannot interleave. Three times on the author's
+Mac the flag ended up set with no pane behind it — once on `kel shell`, which
+read as "my shells vanished" because the agent pane was simply full width.
+Why the split does not happen is **not known**. Two things went in instead of
+a guess: `sidebar_ensure` drops a flag no pane backs, and `_sidebar wake` (every
+window switch) heals any window missing one, so the state is recoverable
+rather than permanent. `sidebar-fail.log` records the next real occurrence.
+
+The gate: a log that names a cause. Fix that cause, then delete both capture
+blocks in `sidebar_ensure` — diagnostics for a fixed bug are dead code. If the
+log stays empty through daily use, the heal is the whole fix and the capture
+still goes.
+
 ### 22. `resolve_agent` silently drops a middle path segment  ·  `[defect]`
 
 `resolve_agent` splits on the first and last `/` (`${want%%/*}`,
