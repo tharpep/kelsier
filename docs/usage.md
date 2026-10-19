@@ -93,7 +93,8 @@ Keys below use `Ctrl-b`, tmux's default prefix; if you changed yours, kel's own 
 | `Ctrl-b ,` | rename this window (routes through `kel rename`) |
 | `Ctrl-b \|` / `-` | split, keeping the current directory |
 | `Ctrl-b [` | scroll mode for a shell pane (`q` to leave) |
-| mouse wheel | scroll an agent's conversation (mapped to PageUp/Down) |
+| mouse wheel | scroll an agent's conversation (one page per notch) |
+| drag, or `Ctrl-b [` then enter | copy to the system clipboard, through `pbcopy` / `wl-copy` / `xclip` / `clip.exe` (`KEL_COPY_CMD` overrides). Hold **shift** instead in a pane whose app grabs the mouse — Claude Code sometimes does, and tmux never sees the drag |
 | `Ctrl-b d` | detach — agents keep running; `kel` to return |
 
 `kel.conf` also turns on the mouse (to select text, hold Shift while you drag),

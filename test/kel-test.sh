@@ -1754,6 +1754,24 @@ ok "  ...and one without writes none"               '[ ! -f "$STATE/quota" ]'
 ok "non-default modes render"                       '[[ "$(sl "{\"session_id\":\"a\",\"fast_mode\":true,\"effort\":{\"level\":\"xhigh\"},\"context_window\":{\"context_window_size\":200000,\"used_percentage\":5}}")" == *"fast xhigh"* ]]'
 ok "  ...and default ones do not"                   '[[ "$(sl "{\"session_id\":\"a\",\"effort\":{\"level\":\"medium\"},\"thinking\":{\"enabled\":true},\"context_window\":{\"context_window_size\":200000,\"used_percentage\":5}}")" != *medium* ]]'
 
+section "a selection reaches the system clipboard, not just tmux's buffer"
+# tmux decides a terminal takes OSC 52 from TERM, and xterm-256color matches
+# its xterm*:clipboard feature — but Apple Terminal sets that TERM and does
+# not implement it, so `set-clipboard external` dropped every selection.
+# KEL_COPY_CMD is the seam: no real clipboard is touched here.
+CLIP="$WORK/clipboard"
+printf 'selected-text' | KEL_COPY_CMD="cat > '$CLIP'" "$KEL" _copy
+ok "_copy sends stdin to the clipboard command" '[ "$(cat "$CLIP" 2>/dev/null)" = selected-text ]'
+printf 'x' | KEL_COPY_CMD="exit 0" "$KEL" _copy
+ok "  ...and consumes stdin when it writes nowhere" "printf x | KEL_COPY_CMD='exit 0' '$KEL' _copy"
+# the binding, in both tables: mode-keys follows $EDITOR, so either may be live
+for t in copy-mode copy-mode-vi; do
+  ok "$t drag-end copies through kel" \
+     "grep -q 'bind -T $t *MouseDragEnd1Pane send -X copy-pipe-and-cancel' '$HERE/../tmux/kel.conf'"
+done
+ok "enter copies too (Ctrl-b [ , select, enter)" \
+   "grep -q 'bind -T copy-mode *Enter send -X copy-pipe-and-cancel' '$HERE/../tmux/kel.conf'"
+
 # ---------------------------------------------------------------- summary
 printf '\n'
 if [ "$fail" -eq 0 ]; then

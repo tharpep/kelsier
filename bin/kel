@@ -44,6 +44,7 @@
 #   kel _prompt '<args>'       prefix k: run `kel <args>`, answer in a message or a popup
 #   kel _notify [title] [body] fire kel's notification (bell + desktop) — to try it
 #   kel _click <range> ...     a click on a status line: close a popup, jump
+#   kel _copy                  stdin to the system clipboard (copy-mode pipes here)
 set -uo pipefail
 
 # --------------------------------------------------------------------------
@@ -2317,6 +2318,39 @@ open_url() { # url
   die "no browser found — set \$BROWSER"
 }
 
+# kel _copy — stdin to the system clipboard, wired to copy-mode's drag-end
+#
+# tmux's own `set-clipboard external` sends OSC 52 and trusts the terminal to
+# act on it, and it decides the terminal can from TERM: xterm-256color matches
+# its `xterm*:clipboard` feature list. Apple Terminal sets that TERM and does
+# NOT implement OSC 52, so a drag-selection went nowhere and the clipboard
+# stayed empty — measured, not assumed (2026-10-19). Piping to a real command
+# is the only mechanism that does not depend on the terminal.
+#
+# Same shape as open_url: an override, Darwin, then probe. KEL_COPY_CMD so a
+# terminal kel has not met can be told what to use.
+copy_stdin() {
+  if [ -n "${KEL_COPY_CMD:-}" ]; then sh -c "$KEL_COPY_CMD" >/dev/null 2>&1; return $?; fi
+  if [ "$(uname -s)" = Darwin ] && command -v pbcopy >/dev/null 2>&1; then
+    pbcopy >/dev/null 2>&1; return $?
+  fi
+  local c
+  # wl-copy before xclip/xsel: a Wayland session often still has an X one
+  for c in wl-copy xclip xsel clip.exe; do
+    command -v "$c" >/dev/null 2>&1 || continue
+    case "$c" in
+      xclip) xclip -selection clipboard >/dev/null 2>&1 ;;
+      xsel)  xsel --clipboard --input    >/dev/null 2>&1 ;;
+      *)     "$c"                        >/dev/null 2>&1 ;;
+    esac
+    return $?
+  done
+  # nothing to copy with: tmux still has the text in its own buffer, so this
+  # is a quiet no-op rather than an error on a hot path
+  cat >/dev/null 2>&1
+  return 0
+}
+
 # --------------------------------------------------------------------------
 # kel config   — edit config.toml, seeded from the shipped example
 # --------------------------------------------------------------------------
@@ -3231,6 +3265,7 @@ main() {
     update)       cmd_update "$@" ;;
     status-line)  cmd_status_line "$@" ;;
     _fleet)       fleet_json "$@" ;;
+    _copy)        copy_stdin ;;
     _cfgdump)     printf 'ctx_warn=%s notify=%s group=%s\n' "${KEL_CTX_WARN:-}" "${KEL_NOTIFY:-}" "${KEL_GROUP:-}" ;;
     statusline)   cmd_statusline ;;                # hot path — skip migrate
     jump)         cmd_jump ;;
