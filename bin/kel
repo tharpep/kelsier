@@ -333,6 +333,14 @@ sidebar_ensure() { # wid
   sidebar_enabled || return 0
   sn="$(tmux display-message -p -t "$wid" '#{session_name}' 2>/dev/null)" || return 0
   case "$sn" in "$KEL_PREFIX"|"$KEL_PREFIX"/*) ;; *) return 0 ;; esac   # not kel's window
+  # The flag and the split below are one command list, so a split that fails
+  # leaves the flag claiming a pane that is not there — and every later ensure
+  # reads the flag and skips.  Seen twice on a real machine: a first window
+  # with no sidebar, unrecoverable without clearing this by hand.  Drop a flag
+  # no pane backs, so the next tick adds one.  Counted, not grep -v: a user
+  # pane's @kel-sidebar is empty and `grep -vx 1` matches that (see the traps).
+  [ "$(tmux list-panes -t "$wid" -F '#{@kel-sidebar}' 2>/dev/null | grep -cx 1)" = 0 ] \
+    && tmux set-option -wu -t "$wid" @kel-has-sidebar 2>/dev/null
   # No else-branch, and the condition inverted, ON PURPOSE: the first version
   # was `if-shell -F '#{@kel-has-sidebar}' '' '<add it>'`, and tmux reports
   # that empty command as an error — which, with no client to print it to, it

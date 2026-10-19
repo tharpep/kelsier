@@ -878,6 +878,23 @@ HW="$(tmux new-window -d -P -F '#{window_id}' -t '=keltest:' -c "$WORK/repos/api
 ok "a hand-made window gets one (the hook's command)" '[ "$(sbcount "$HW")" = 1 ]'
 for i in 1 2 3 4 5 6 7 8 9 10; do "$KEL" _sidebar ensure "$HW" & done; wait
 ok "  ...and ten racing ensures still leave one"  '[ "$(sbcount "$HW")" = 1 ]'
+# @kel-has-sidebar is set in the same tmux command list as the split, so a
+# split that fails leaves the flag claiming a pane that is not there and no
+# later ensure would add one.  Seen twice on a real machine: a first window
+# whose sidebar never appeared and could not be recovered without clearing
+# the flag by hand.
+tmux kill-pane -t "$(tmux list-panes -t "$HW" -F '#{@kel-sidebar} #{pane_id}' | awk '$1==1 {print $2}')"
+ok "a flag with no sidebar pane is a lie"         '[ "$(sbcount "$HW")" = 0 ] && [ "$(tmux show-options -wv -t "$HW" @kel-has-sidebar)" = 1 ]'
+"$KEL" _sidebar ensure "$HW"
+wait_until '[ "$(sbcount "$HW")" = 1 ]'
+ok "  ...and ensure heals it"                     '[ "$(sbcount "$HW")" = 1 ]'
+wait_until "tmux list-panes -t $HW -F '#{@kel-sidebar} #{pane_current_command}' | grep -qx '1 kel-top'"
+# the heal must not re-open the double-add race: ten ensures at a window with
+# a stale flag and no pane must still agree on exactly one sidebar
+tmux kill-pane -t "$(tmux list-panes -t "$HW" -F '#{@kel-sidebar} #{pane_id}' | awk '$1==1 {print $2}')"
+for i in 1 2 3 4 5 6 7 8 9 10; do "$KEL" _sidebar ensure "$HW" & done; wait
+ok "  ...and healing ten at once still leaves one" '[ "$(sbcount "$HW")" = 1 ]'
+wait_until "tmux list-panes -t $HW -F '#{@kel-sidebar} #{pane_current_command}' | grep -qx '1 kel-top'"
 OW="$(tmux new-session -d -P -F '#{window_id}' -s notkel)"
 "$KEL" _sidebar ensure "$OW"
 ok "a window outside kel is left alone"           '[ "$(sbcount "$OW")" = 0 ]'
