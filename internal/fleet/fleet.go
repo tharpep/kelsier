@@ -235,7 +235,7 @@ func Load(o Options) Doc {
 			continue
 		}
 		// The sidebar pane (v0.10 M2) is kel's, not the user's: it runs
-		// kel-top, a non-shell, so counting it would read a crashed agent as
+		// kel-sidebar, a non-shell, so counting it would read a crashed agent as
 		// alive (invariant 3) and list the sidebar inside itself.
 		if p[6] == "1" {
 			continue

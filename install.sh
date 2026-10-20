@@ -43,7 +43,7 @@ if [ "${1:-}" = "--uninstall" ]; then
   purge=0; [ "${2:-}" = "--purge" ] && purge=1
   say "uninstalling kelsier"
 
-  for f in "$BIN_DIR/kel" "$BIN_DIR/kel-fleet" "$BIN_DIR/kel-top"; do
+  for f in "$BIN_DIR/kel" "$BIN_DIR/kel-fleet" "$BIN_DIR/kel-sidebar" "$BIN_DIR/kel-top"; do
     [ -e "$f" ] || [ -L "$f" ] || continue
     rm -f "$f" && echo "  removed $f"
   done
@@ -114,7 +114,7 @@ if [ "${1:-}" = "--uninstall" ]; then
 fi
 
 command -v go >/dev/null || {
-  echo "kel: Go is required (kel-fleet and kel-top are built from source)" >&2
+  echo "kel: Go is required (kel-fleet and kel-sidebar are built from source)" >&2
   echo "     install/20-user-tools.sh (Debian/Ubuntu) or install/macos-tools.sh" >&2
   exit 1
 }
@@ -165,15 +165,17 @@ else
   echo "  added source-file line to $TMUX_CONF"
 fi
 
-say "kel-fleet + kel-top (Go)"
+say "kel-fleet + kel-sidebar (Go)"
 # Required since v0.10: the bash fleet reader is gone, so a failed build is a
 # failed install.  The compiler's own output is left visible — hiding it is
 # how a broken build used to read as "fine, using bash".
-for b in kel-fleet kel-top; do
+for b in kel-fleet kel-sidebar; do
   (cd "$KEL_DIR" && go build -o "$BIN_DIR/$b" "./cmd/$b") \
     || { echo "kel: building $b failed" >&2; exit 1; }
   echo "  built $BIN_DIR/$b"
 done
+# kel-sidebar was kel-top until the cleanup after v0.9
+[ -e "$BIN_DIR/kel-top" ] && rm -f "$BIN_DIR/kel-top" && echo "  removed $BIN_DIR/kel-top"
 echo "  ($(go version | awk '{print $3}'))"
 
 say "Claude Code hooks -> $SETTINGS"

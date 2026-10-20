@@ -49,7 +49,7 @@ The tree is self-describing. These relationships are not.
 |---|---|
 | `bin/kel` | the hooks, the statusline adapter, and the mutating commands (`new`, `kill`, `restore`, `sweep`…) until they move to Go. No longer reads the fleet itself |
 | `cmd/kel-fleet` | **the only fleet reader** since v0.10. `bin/kel`'s `fleet_json` runs it and fails loudly without it — there is no bash fallback any more |
-| `cmd/kel-top` | the sidebar (`kel-top --sidebar`). It was also `kel top`, a dashboard, until the sidebar replaced it |
+| `cmd/kel-sidebar` | the sidebar: the pane on the left of every kel window |
 | `internal/fleet` | the fleet document, shared by both Go binaries |
 | `install.sh` | requires Go and builds both binaries. Merges into `~/.claude/settings.json` with jq, non-clobbering, keeping the newest three backups. Every line it writes outside this repo has an inverse in `--uninstall` |
 | `docs/rollout.md` | **start here.** The source of truth for what to work on next — `spec.md` section numbers are not a build order |
@@ -99,7 +99,7 @@ change; migrate old records in `migrate_meta`.
 | `banner` | one line per agent the top banner shows: `<wid> TAB <state> TAB <name> TAB <text>`. Written by the state hook on a notifying transition, dropped when the agent moves on, when a client shows its window (`session-window-changed` → `kel _banner seen`) or on ✕ (`_click bx`); empty = tmux's bar back to what the sidebar wants |
 | `prompt-history` | the last twenty commands typed at the sidebar's `;`, one per line |
 | `gh-dash.yml` | the config `v` writes for gh dash each time — every open space's repos; not the user's own |
-| `sidebar-fail.log` | a dying sidebar's own stderr (`kel-top --sidebar 2>>`), appended. Temporary: kept until it explains backlog #41, then deleted with the redirect |
+| `sidebar-fail.log` | a dying sidebar's own stderr (`kel-sidebar 2>>`), appended. Temporary: kept until it explains backlog #41, then deleted with the redirect |
 | `ports.json` | `{at, panes:{<pane pid>: [ports]}}` — the listening-port scan behind `_fleet --panes`, reused for 10 s |
 
 **The directory is `0700`.** The records carry repo paths, branch names and
@@ -123,7 +123,7 @@ its record (matched by window id + name), `@kel-group`, a legacy v0.9
 **The sidebar pane is kel's, not the user's.** Every kel window carries one
 (v0.10 M2), marked with the pane option `@kel-sidebar` — the only marker:
 "has a sidebar" is asked of the panes (a `#{P:…}` loop), never a window flag,
-which once claimed a sidebar that had died. It runs `kel-top --sidebar`, a
+which once claimed a sidebar that had died. It runs `kel-sidebar`, a
 live non-shell — so anything that asks "what is the user's pane" or "is
 anything alive in this window" must skip it: use `user_panes` / `agent_pane`
 / `agent_alive <wid>` in bash; `kel-fleet` drops it
@@ -177,8 +177,8 @@ go vet ./... && go build ./... && go test ./...
 test/kel-test.sh                            # ~1 min; it prints its own count
 ```
 
-Go is **required**. The suite builds `kel-fleet` and `kel-top` from this
-checkout into its own work dir and points `$KEL_FLEET_BIN` / `$KEL_TOP_BIN` at
+Go is **required**. The suite builds `kel-fleet` and `kel-sidebar` from this
+checkout into its own work dir and points `$KEL_FLEET_BIN` / `$KEL_SIDEBAR_BIN` at
 them, so a stale binary in `~/.local/bin` is never what gets tested. The bash
 ↔ Go differential that guarded the port went with the bash reader; Go unit
 tests (`internal/fleet/*_test.go`) cover what the suite cannot reach.
@@ -394,7 +394,7 @@ unreadable). Automations stay gated (`backlog.md` #38); `v0.10.0` is the
 author's call. After M6, a batch from daily use: `kel quit` / `kel shell`,
 the sidebar's actions group, `prefix k` for kel commands, `idle_prompt`
 ending a stuck `working`, spaces named by their repo. The
-sidebar's look is held by golden frames (`cmd/kel-top/testdata/sidebar`);
+sidebar's look is held by golden frames (`cmd/kel-sidebar/testdata/sidebar`);
 change one only after showing the author the frame. The layout
 is decided — a sidebar pane in every window, measured against `swap-pane` in
 `spec.md` §5b. A design pass after M2 settled the rest (`rollout.md`, "After

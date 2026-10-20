@@ -25,7 +25,7 @@ kel uses `MAJOR.MINOR.PATCH` with the usual meaning for a `0.x` project:
 - **A release is a tag plus notes.** `git tag -a v0.10.0 -m "…" && git push
   origin v0.10.0`, then `gh release create v0.10.0 --generate-notes`. Once
   someone other than the author installs kel, attach prebuilt `kel-fleet` /
-  `kel-top` binaries to the release (GoReleaser, or a CI job that
+  `kel-sidebar` binaries to the release (GoReleaser, or a CI job that
   cross-compiles `GOOS=linux,darwin` × `GOARCH=amd64,arm64`) — Go being
   required means a machine with no toolchain otherwise cannot install it.
 
@@ -163,7 +163,7 @@ before code.
 
 *M3a — frames first.*  ·  **done.** Nine fixtures, reviewed with
 `test/sidebar-frames.sh`, approved, and held as golden files (rewrite with
-`go test ./cmd/kel-top -run Golden -update` only after looking). Judged live
+`go test ./cmd/kel-sidebar -run Golden -update` only after looking). Judged live
 too: the first background, `colour234`, read as grey and became true black
 (`sidebar_style`).
 - fixture fleet documents (none, one agent, fifteen across three repos, a

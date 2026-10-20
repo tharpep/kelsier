@@ -59,7 +59,7 @@ unset TMUX TMUX_PANE      # don't inherit an outer tmux; we are not "inside" our
 # and that loads the developer's real ~/.tmux.conf — kel's own hooks included,
 # running the installed kel against this suite's state.  CI has no such file,
 # so this only ever bit a dev box: it put a test's agent pane into view-mode.
-# Every tmux call — the suite's, kel's, kel-top's — goes through this shim.
+# Every tmux call — the suite's, kel's, kel-sidebar's — goes through this shim.
 mkdir -p "$WORK/shim"
 printf '#!/bin/sh\nexec %s -f /dev/null "$@"\n' "$(command -v tmux)" > "$WORK/shim/tmux"
 chmod +x "$WORK/shim/tmux"
@@ -72,9 +72,9 @@ SESSIONS="$STATE/sessions"
 # Build the Go binaries from THIS checkout, not whatever an earlier install.sh
 # left in ~/.local/bin: bin/kel has no fallback reader any more (v0.10), so a
 # stale installed kel-fleet would be what the suite actually tested.
-command -v go >/dev/null 2>&1 || { echo "the suite needs Go (kel-fleet, kel-top)" >&2; exit 1; }
-export KEL_FLEET_BIN="$WORK/kel-fleet" KEL_TOP_BIN="$WORK/kel-top"
-( cd "$HERE/.." && go build -o "$KEL_FLEET_BIN" ./cmd/kel-fleet && go build -o "$KEL_TOP_BIN" ./cmd/kel-top ) \
+command -v go >/dev/null 2>&1 || { echo "the suite needs Go (kel-fleet, kel-sidebar)" >&2; exit 1; }
+export KEL_FLEET_BIN="$WORK/kel-fleet" KEL_SIDEBAR_BIN="$WORK/kel-sidebar"
+( cd "$HERE/.." && go build -o "$KEL_FLEET_BIN" ./cmd/kel-fleet && go build -o "$KEL_SIDEBAR_BIN" ./cmd/kel-sidebar ) \
   || { echo "go build failed" >&2; exit 1; }
 
 cleanup() { tmux kill-server 2>/dev/null; rm -rf "$WORK" "$TMUX_TMPDIR"; }
@@ -135,7 +135,7 @@ state_of() { "$KEL" ls 2>/dev/null | awk -v n="$1" '$2==n {print $3}'; }
 # a bare shell and effective_state correctly calls that `dead`.  Wait for the
 # process before asserting on state.  v0.6 made the fleet read 3x faster, which
 # is what first lost this race.
-# the sidebar runs kel-top, a non-shell, so it is excluded — else this would
+# the sidebar runs kel-sidebar, a non-shell, so it is excluded — else this would
 # report the agent up before it has started
 agent_up() { wait_until "tmux list-panes -t '$1' -F '#{@kel-sidebar}|#{pane_current_command}' 2>/dev/null | awk -F'|' '\$1==\"\"{print \$2}' | grep -qvxE 'bash|zsh|fish|sh|dash|tmux'"; }
 NEW() { K "$1" new "$2" --agent 'sleep 9999' >/dev/null 2>&1; agent_up "$(window_of "$1" "$2")"; }
@@ -507,7 +507,7 @@ ok "session end clears it"               '[ -z "$(border)" ]'
 ok "kel new -w still makes a worktree"   'NEW_W() { ( cd "$WORK/repos/api-gw" && "$KEL" new wt1 -w --agent "sleep 9999" ) >/dev/null 2>&1; }; NEW_W; [ "$(jq -r .isolation "$SESSIONS/api-gw/wt1.json")" = worktree ]'
 # doctor hints go to stderr only — the cached JSON schema must not gain a field
 "$KEL" doctor >/dev/null 2>&1
-ok "doctor caches the same schema"       '[ "$(jq -Sr "keys | join(\",\")" "$XDG_STATE_HOME/kel/doctor.json")" = "allow_passthrough,checked_at,claude,display_popup,gh_auth,git_worktree,go_fleet,go_top,hooks_permitted,hooks_wired,jq,kel_path,node,statusline_wired,tmux,tmux>=3.0,up_to_date" ]'
+ok "doctor caches the same schema"       '[ "$(jq -Sr "keys | join(\",\")" "$XDG_STATE_HOME/kel/doctor.json")" = "allow_passthrough,checked_at,claude,display_popup,gh_auth,git_worktree,go_fleet,go_sidebar,hooks_permitted,hooks_wired,jq,kel_path,node,statusline_wired,tmux,tmux>=3.0,up_to_date" ]'
 # capture, do not pipe: doctor exits non-zero when a required probe fails, and
 # `set -o pipefail` would then fail this test even though the hint was printed
 dout="$(PATH="$WORK/nogh:$PATH" "$KEL" doctor 2>&1 || true)"
@@ -764,7 +764,7 @@ ok "kel new gives the window exactly one sidebar" '[ "$(sbcount "$SBW")" = 1 ]'
 ok "  ...and tmux's own bar is off while sidebars show" '[ "$(tmux show-options -v -t "=keltest:" status 2>/dev/null)" = off ]'
 # no awk here: macOS's awk rejected the escaped program GNU awk accepted
 ok "  ...on the left, at the configured width"    'tmux list-panes -t "$SBW" -F "#{@kel-sidebar}:#{pane_left}:#{pane_width}" | grep -qx "1:0:32"'
-ok "  ...running kel-top"                         'wait_until "tmux list-panes -t $SBW -F \"#{@kel-sidebar} #{pane_current_command}\" | grep -qx \"1 kel-top\""'
+ok "  ...running kel-sidebar"                         'wait_until "tmux list-panes -t $SBW -F \"#{@kel-sidebar} #{pane_current_command}\" | grep -qx \"1 kel-sidebar\""'
 ok "  ...focus stayed on the user's pane"         '[ -z "$(tmux list-panes -t "$SBW" -F "#{pane_active}#{@kel-sidebar}" | grep -x 11)" ]'
 ok "  ...and the agent started there, not in it"  '[ "$(tmux display -p -t "$(userpane "$SBW")" "#{pane_current_command}")" = sleep ]'
 
@@ -778,20 +778,20 @@ ok "  ...and ten racing ensures still leave one"  '[ "$(sbcount "$HW")" = 1 ]'
 # for every kel window, and only once.
 tmux kill-pane -t "$(tmux list-panes -t "$HW" -F '#{@kel-sidebar} #{pane_id}' | awk '$1==1 {print $2}')"
 "$KEL" _sidebar ensure "$HW"
-wait_until "tmux list-panes -t $HW -F '#{@kel-sidebar} #{pane_current_command}' | grep -qx '1 kel-top'"
+wait_until "tmux list-panes -t $HW -F '#{@kel-sidebar} #{pane_current_command}' | grep -qx '1 kel-sidebar'"
 ok "a window whose sidebar died gets it back"     '[ "$(sbcount "$HW")" = 1 ]'
 for i in 1 2 3 4 5 6 7 8 9 10; do "$KEL" _sidebar ensure "$HW" & done; wait
 ok "  ...and ten racing ensures still leave one"  '[ "$(sbcount "$HW")" = 1 ]'
 tmux kill-pane -t "$(tmux list-panes -t "$HW" -F '#{@kel-sidebar} #{pane_id}' | awk '$1==1 {print $2}')"
 "$KEL" _sidebar heal; "$KEL" _sidebar heal
-wait_until "tmux list-panes -t $HW -F '#{@kel-sidebar} #{pane_current_command}' | grep -qx '1 kel-top'"
+wait_until "tmux list-panes -t $HW -F '#{@kel-sidebar} #{pane_current_command}' | grep -qx '1 kel-sidebar'"
 ok "  ...a window switch heals it, once"          '[ "$(sbcount "$HW")" = 1 ]'
 ok "  ...and kel.conf heals on a window switch"   'grep -q "session-window-changed.*kel _sidebar heal" "$HERE/../tmux/kel.conf"'
 # a sidebar that dies says why: tmux reports nothing about a pane whose
 # process exits, so its stderr is the only witness (backlog #41)
-printf '#!/bin/sh\necho "kel-top: probe crash" >&2\nexit 1\n' > "$WORK/kel-top-crash"; chmod +x "$WORK/kel-top-crash"
+printf '#!/bin/sh\necho "kel-sidebar: probe crash" >&2\nexit 1\n' > "$WORK/kel-sidebar-crash"; chmod +x "$WORK/kel-sidebar-crash"
 CW="$(tmux new-window -d -P -F '#{window_id}' -t '=keltest:' -c "$WORK/repos/api-gw" 'sleep 9999')"
-KEL_TOP_BIN="$WORK/kel-top-crash" "$KEL" _sidebar ensure "$CW"
+KEL_SIDEBAR_BIN="$WORK/kel-sidebar-crash" "$KEL" _sidebar ensure "$CW"
 wait_until 'grep -q "probe crash" "$STATE/sidebar-fail.log" 2>/dev/null'
 ok "a sidebar that dies leaves its error in sidebar-fail.log" 'grep -q "probe crash" "$STATE/sidebar-fail.log"'
 tmux kill-window -t "$CW" 2>/dev/null
@@ -800,10 +800,10 @@ OW="$(tmux new-session -d -P -F '#{window_id}' -s notkel)"
 ok "a window outside kel is left alone"           '[ "$(sbcount "$OW")" = 0 ]'
 tmux kill-session -t '=notkel'
 
-ok "_fleet --panes never lists a sidebar"         '[ "$("$KEL" _fleet --panes | jq "[.panes[] | select(.cmd == \"kel-top\")] | length")" = 0 ]'
+ok "_fleet --panes never lists a sidebar"         '[ "$("$KEL" _fleet --panes | jq "[.panes[] | select(.cmd == \"kel-sidebar\")] | length")" = 0 ]'
 ok "  ...nor counts it among a window's panes"    '[ "$("$KEL" _fleet | jq -r ".agents[] | select(.name == \"agent\") | .panes | length")" = 1 ]'
 
-# invariant 3: kel-top is a live non-shell; it must not keep a dead agent alive
+# invariant 3: kel-sidebar is a live non-shell; it must not keep a dead agent alive
 P="$(userpane "$SBW")"
 hook "$P" UserPromptSubmit
 tmux send-keys -t "$P" C-c

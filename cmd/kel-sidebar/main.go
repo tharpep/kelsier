@@ -1,13 +1,10 @@
-// kel-top is the sidebar: the pane on the left of every kel window
-// (sidebar.go, sbview.go).
+// kel-sidebar is the pane on the left of every kel window (sidebar.go,
+// sbview.go).
 //
-//	kel-top --sidebar                      the live pane
-//	kel-top --sidebar --once               render one frame to stdout and exit
-//	kel-top --sidebar --fixture FILE|DIR   render saved fleet documents, for
-//	        [--width N] [--height N]       the golden frames (spec.md §5e)
-//
-// It was a dashboard as well, `kel top`, until the sidebar replaced it: one
-// surface (invariant 6), so the board and its own key scheme went.
+//	kel-sidebar                      the live pane
+//	kel-sidebar --once               render one frame to stdout and exit
+//	kel-sidebar --fixture FILE|DIR   render saved fleet documents, for
+//	    [--width N] [--height N]     the golden frames (spec.md §5e)
 package main
 
 import (
@@ -97,7 +94,7 @@ func pad(s string, n int) string {
 }
 
 func main() {
-	once, sidebar := false, false
+	once := false
 	fixture, widths, height := "", []int{28, 32, 40}, 0
 	args := os.Args[1:]
 	for i := 0; i < len(args); i++ {
@@ -105,7 +102,7 @@ func main() {
 		switch a {
 		case "--fixture", "--width", "--height":
 			if i+1 >= len(args) {
-				fmt.Fprintf(os.Stderr, "kel-top: %s needs a value\n", a)
+				fmt.Fprintf(os.Stderr, "kel-sidebar: %s needs a value\n", a)
 				os.Exit(2)
 			}
 			i++
@@ -121,19 +118,13 @@ func main() {
 			}
 		case "--once":
 			once = true
-		case "--sidebar":
-			sidebar = true
 		case "-h", "--help":
-			fmt.Fprintln(os.Stderr, "usage: kel-top --sidebar [--once] [--fixture FILE|DIR [--width N] [--height N]]")
+			fmt.Fprintln(os.Stderr, "usage: kel-sidebar [--once] [--fixture FILE|DIR [--width N] [--height N]]")
 			return
 		default:
-			fmt.Fprintf(os.Stderr, "kel-top: unknown flag %s\n", a)
+			fmt.Fprintf(os.Stderr, "kel-sidebar: unknown flag %s\n", a)
 			os.Exit(2)
 		}
-	}
-	if !sidebar {
-		fmt.Fprintln(os.Stderr, "kel-top: --sidebar is the only mode; `kel top` was replaced by the sidebar")
-		os.Exit(2)
 	}
 	if fixture != "" {
 		runFixtures(fixture, widths, height)

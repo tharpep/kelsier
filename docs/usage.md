@@ -13,7 +13,7 @@ tmux source-file ~/.tmux.conf     # pick up kel.conf changes
 ```
 
 Needs `tmux` ≥ 3.0, `jq`, `git` and **Go** — `install.sh` builds `kel-fleet`
-and `kel-top` and fails if it cannot. It symlinks `bin/kel` into
+and `kel-sidebar` and fails if it cannot. It symlinks `bin/kel` into
 `~/.local/bin`, makes `~/.tmux.conf` source `tmux/kel.conf`, and merges the
 state hooks and the `statusLine` into `~/.claude/settings.json`, keeping the
 newest three backups of each file it edits.

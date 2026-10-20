@@ -21,8 +21,6 @@
                                 # ("off" here, or `kel sidebar off` for now)
 # sidebar_width = 32            # identical in every window
 # sidebar_style = "bg=colour16"  # its background; "default" for the terminal's
-# top_w        = "90%"          # the kel top popup
-# top_h        = "80%"
 
 [notify]
 # notify_bell    = "on"            # the terminal's bell: a flash on the Mac, a sound or
@@ -46,4 +44,4 @@
 
 [go]
 # fleet_bin    = ""             # override the kel-fleet binary (default ~/.local/bin/kel-fleet)
-# top_bin      = ""             # override the kel-top binary (default ~/.local/bin/kel-top)
+# sidebar_bin  = ""             # override the kel-sidebar binary (default ~/.local/bin/kel-sidebar)

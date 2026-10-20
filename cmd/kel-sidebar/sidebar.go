@@ -1,6 +1,6 @@
 package main
 
-// kel-top --sidebar: the pane on the left of every kel window (v0.10).
+// kel-sidebar: the pane on the left of every kel window (v0.10).
 //
 // This file is the live half — tmux, the clock, the state directory, the
 // keys. What it draws is sbview.go, which is pure so its frames can be held by
@@ -1069,7 +1069,7 @@ func runSidebar(once bool) {
 		}
 	}()
 	if _, err := p.Run(); err != nil {
-		fmt.Fprintf(os.Stderr, "kel-top --sidebar: %v\n", err)
+		fmt.Fprintf(os.Stderr, "kel-sidebar: %v\n", err)
 		os.Exit(1)
 	}
 }
@@ -1109,7 +1109,7 @@ func runFixtures(path string, widths []int, h int) {
 			for _, focused := range []bool{false, true} {
 				out, err := fixtureFrame(f, w, h, focused)
 				if err != nil {
-					fmt.Fprintf(os.Stderr, "kel-top: %v\n", err)
+					fmt.Fprintf(os.Stderr, "kel-sidebar: %v\n", err)
 					os.Exit(1)
 				}
 				name := strings.TrimSuffix(filepath.Base(f), ".json")

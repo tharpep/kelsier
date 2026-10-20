@@ -108,7 +108,7 @@ DOCTOR_CACHE="$STATE_DIR/doctor.json"
 SNAPSHOT="$STATE_DIR/snapshot.json"
 RESTORE_LOCK="$STATE_DIR/.restoring"
 KEL_FLEET_BIN="${KEL_FLEET_BIN:-$HOME/.local/bin/kel-fleet}"   # the Go seam (v0.6)
-KEL_TOP_BIN="${KEL_TOP_BIN:-$HOME/.local/bin/kel-top}"
+KEL_SIDEBAR_BIN="${KEL_SIDEBAR_BIN:-$HOME/.local/bin/kel-sidebar}"
 SNAPSHOT_ARCHIVE="$STATE_DIR/snapshots"           # workspaces kel started fresh over
 STATUSLINE_PREV="$HOME/.claude/statusline-prev"   # a statusLine kel displaced
 CLAUDE_HOME="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"   # plans/ and tasks/ live here
@@ -284,13 +284,13 @@ open_window() { # name cwd group [bare]
 
 # ---- the sidebar pane (v0.10 M2) -----------------------------------------
 # Every kel window carries a fixed-width pane on its left running
-# `kel-top --sidebar`, so the sidebar reads as one persistent thing
+# `kel-sidebar`, so the sidebar reads as one persistent thing
 # (spec.md §5).  The pane is marked @kel-sidebar; anything looking for "the
 # user's pane" must skip it — see agent_pane.
 
 sidebar_enabled() {
   case "${KEL_SIDEBAR:-on}" in 0|off|no|false) return 1 ;; esac
-  [ ! -e "$SIDEBAR_OFF" ] && [ -x "$KEL_TOP_BIN" ]
+  [ ! -e "$SIDEBAR_OFF" ] && [ -x "$KEL_SIDEBAR_BIN" ]
 }
 
 # A window's panes split by @kel-sidebar.  The flag is "1" on the sidebar and
@@ -315,7 +315,7 @@ agent_pane() { # wid
   user_panes "$1" | head -1 | cut -d'|' -f1
 }
 
-# does a user pane run anything but a shell?  The sidebar runs kel-top, a
+# does a user pane run anything but a shell?  The sidebar runs kel-sidebar, a
 # non-shell, so it must not count: it would keep a crashed agent alive forever
 # (invariant 3) and let relaunch type into a live one (invariant 4).
 agent_alive() { # wid
@@ -342,7 +342,7 @@ sidebar_ensure() { # wid
   # stderr goes to sidebar-fail.log: four sidebars split cleanly and then died
   # (2026-10-20), and tmux reports nothing about a pane whose process exits.
   tmux if-shell -F -t "$wid" '#{?#{P:#{?@kel-sidebar,1,}},,1}' \
-    "split-window -hbdf -l $KEL_SIDEBAR_WIDTH -t '$wid' -c '#{pane_current_path}' -e 'KEL_BIN=$SELF' \"exec '$KEL_TOP_BIN' --sidebar 2>>'$STATE_DIR/sidebar-fail.log'\" ; set-option -p -t '$wid.{top-left}' @kel-sidebar 1" \
+    "split-window -hbdf -l $KEL_SIDEBAR_WIDTH -t '$wid' -c '#{pane_current_path}' -e 'KEL_BIN=$SELF' \"exec '$KEL_SIDEBAR_BIN' 2>>'$STATE_DIR/sidebar-fail.log'\" ; set-option -p -t '$wid.{top-left}' @kel-sidebar 1" \
     2>/dev/null || true
   sidebar_style "$wid"
   # tmux's bar goes while sidebars show: it repeated what the sidebar and
@@ -1571,7 +1571,7 @@ cmd_doctor() {
     fi
   }
   echo "kel doctor" >&2
-  local r_tmux r_ver r_popup r_wt r_jq r_node r_claude r_hooks r_sl r_pass r_go r_top r_gh
+  local r_tmux r_ver r_popup r_wt r_jq r_node r_claude r_hooks r_sl r_pass r_go r_sb r_gh
   r_tmux=$(probe   "tmux present"                     "$pm tmux" command -v tmux)
   r_ver=$(probe    "tmux >= 3.0"                      "$pm tmux   (kel needs display-popup)" bash -c 'v=$(tmux -V | grep -oE "[0-9]+\.[0-9]+" | head -1); [ -n "$v" ] || exit 1; [ "${v%%.*}" -gt 3 ] || { [ "${v%%.*}" -eq 3 ] && [ "${v#*.}" -ge 0 ]; }')
   r_popup=$(probe  "display-popup available"          "needs tmux 3.0+ — $pm tmux" bash -c 'tmux list-commands 2>/dev/null | grep -q display-popup')
@@ -1579,11 +1579,11 @@ cmd_doctor() {
   r_jq=$(probe     "jq present"                       "$pm jq" command -v jq)
   r_node=$(probe   "node on PATH"                     "$h_node" command -v node)
   r_claude=$(probe "claude on PATH"                   "install Claude Code — docs/setup.md" command -v claude)
-  r_gh=$(probe     "gh authenticated (PR state for kel sweep / top)" "$h_gh" gh auth status)
+  r_gh=$(probe     "gh authenticated (PR state for sweep, the sidebar)" "$h_gh" gh auth status)
   r_hooks=$(probe  "kel hooks wired in settings.json" "./install.sh   (from the kelsier repo)" bash -c 'jq -e "[.hooks[]?[]?.hooks[]?.command // empty] | any(test(\"kel hook|kel-hook\"))" "$HOME/.claude/settings.json" >/dev/null')
   r_sl=$(probe     "kel statusLine wired (context %)" "./install.sh   (from the kelsier repo)" bash -c 'jq -e ".statusLine.command // \"\" | test(\"kel statusline\")" "$HOME/.claude/settings.json" >/dev/null')
   r_go=$(probe     "kel-fleet built (required)"       "./install.sh   (needs Go — install/20-user-tools.sh)" test -x "$KEL_FLEET_BIN")
-  r_top=$(probe    "kel-top built (required)"         "./install.sh   (needs Go — install/20-user-tools.sh)" test -x "$KEL_TOP_BIN")
+  r_sb=$(probe     "kel-sidebar built (required)"     "./install.sh   (needs Go — install/20-user-tools.sh)" test -x "$KEL_SIDEBAR_BIN")
   r_pass=$(probe   "tmux allow-passthrough on"        "tmux/kel.conf sets it — tmux source-file ~/.tmux.conf" bash -c 'tmux start-server \; show -gv allow-passthrough 2>/dev/null | grep -qx on')
 
   # optional: what the sidebar's popups open. Missing is not a failure — the
@@ -1639,11 +1639,11 @@ cmd_doctor() {
     --argjson tmux "$r_tmux" --argjson ver "$r_ver" --argjson popup "$r_popup" \
     --argjson wt "$r_wt" --argjson jq "$r_jq" --argjson node "$r_node" \
     --argjson claude "$r_claude" --argjson hooks "$r_hooks" --argjson sl "$r_sl" \
-    --argjson go "$r_go" --argjson top "$r_top" --argjson gh "$r_gh" --argjson pass "$r_pass" \
+    --argjson go "$r_go" --argjson sb "$r_sb" --argjson gh "$r_gh" --argjson pass "$r_pass" \
     --argjson path "$r_path" --argjson managed "$r_managed" --argjson behind "$r_behind" \
     '{checked_at:$d, tmux:$tmux, "tmux>=3.0":$ver, display_popup:$popup,
       git_worktree:$wt, jq:$jq, node:$node, claude:$claude,
-      hooks_wired:$hooks, statusline_wired:$sl, go_fleet:$go, go_top:$top, gh_auth:$gh,
+      hooks_wired:$hooks, statusline_wired:$sl, go_fleet:$go, go_sidebar:$sb, gh_auth:$gh,
       allow_passthrough:$pass, kel_path:$path, hooks_permitted:$managed,
       up_to_date:$behind}' \
     > "$DOCTOR_CACHE"
@@ -2316,7 +2316,7 @@ _real_self() {
 # kel update  —  pull the clone this kel runs from, then re-wire
 # ---------------------------------------------------------------------------
 # install.sh symlinks bin/kel, the completions and tmux/kel.conf out of the
-# clone, so a pull updates all three in place. Only kel-fleet and kel-top are
+# clone, so a pull updates all three in place. Only kel-fleet and kel-sidebar are
 # copies, and install.sh rebuilds them; re-running it is how they refresh. It is
 # idempotent by design, so there is nothing to undo first.
 #

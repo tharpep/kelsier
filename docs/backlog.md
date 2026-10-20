@@ -52,7 +52,7 @@ in the same tmux command list as the split that adds the pane, and a window
 was found with the flag set and no pane — read as a split that failed. The
 log the next fix added showed otherwise: four times on 2026-10-20 the split
 **succeeded**, tmux reported no error, and the pane was gone a moment later.
-`kel-top --sidebar` starts and exits. Two of the four were the moment the
+`kel-sidebar` starts and exits. Two of the four were the moment the
 author pressed `b` to restore. A restore of seven windows driven the same way
 on an isolated server, with kel.conf's hooks live, kept every sidebar, so the
 cause is still not known.

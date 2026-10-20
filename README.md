@@ -79,7 +79,7 @@ git clone https://github.com/tharpep/kelsier && cd kelsier && ./install.sh
 ```
 
 Needs `tmux` ≥ 3.0, `jq`, `git` and **Go** (it builds `kel-fleet` and
-`kel-top`, the sidebar). `./install.sh --uninstall` reverses every change and leaves your
+`kel-sidebar`, the sidebar). `./install.sh --uninstall` reverses every change and leaves your
 agent records alone. `kel doctor` tells you what you have. Linux, WSL2 and
 macOS; `install/` provisions a fresh machine.
 

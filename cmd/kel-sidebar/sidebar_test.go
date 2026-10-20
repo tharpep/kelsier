@@ -73,7 +73,7 @@ func TestSidebarGolden(t *testing.T) {
 			}
 			want, err := os.ReadFile(gold)
 			if err != nil {
-				t.Fatalf("%s: %v (run: go test ./cmd/kel-top -run Golden -update, after reviewing the frames)", gold, err)
+				t.Fatalf("%s: %v (run: go test ./cmd/kel-sidebar -run Golden -update, after reviewing the frames)", gold, err)
 			}
 			if got+"\n" != string(want) {
 				t.Errorf("%s at %d cols changed:\n--- got\n%s\n--- want\n%s", name, w, plain(got), plain(string(want)))

@@ -11,7 +11,7 @@ desktop.ini
 
 # built Go binaries (install.sh puts them in ~/.local/bin)
 /kel-fleet
-/kel-top
+/kel-sidebar
 
 # Claude Code agent worktrees (transient)
 .claude/worktrees/

@@ -51,7 +51,7 @@ fnm use default
 node --version
 npm --version
 
-say "Go (required — builds kel-fleet and kel-top)"
+say "Go (required — builds kel-fleet and kel-sidebar)"
 # Deliberately the go.dev tarball, not apt: Ubuntu ships a Go too old to build
 # recent modules. Into ~/.local/go so this needs no sudo.
 # Required since v0.10: install.sh fails without it.

@@ -28,7 +28,7 @@ brew install \
   gh neovim lazygit yazi git-delta tealdeer \
   zoxide fnm
 
-say "Go (required — builds kel-fleet and kel-top)"
+say "Go (required — builds kel-fleet and kel-sidebar)"
 # Required since v0.10: there is no bash fleet reader any more.
 if command -v go >/dev/null 2>&1; then
   echo "  already installed: $(go version)"

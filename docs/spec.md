@@ -175,7 +175,7 @@ or resized.**
 
 **What one sidebar per window costs, and how it is paid:**
 
-- **N processes.** One `kel-top` measured ~10–12 MB and ~2.5% CPU while
+- **N processes.** One sidebar measured ~10–12 MB and ~2.5% CPU while
   polling. Ten polling instances would be a quarter of a core for nothing, so
   **a sidebar whose window is not active idles** — no polling, no rendering —
   and is woken when its window becomes active. *Built in M2:* the visible
@@ -848,7 +848,7 @@ missing.
 | kel hooks wired in `settings.json` | state detection |
 | kel `statusLine` wired | context % and cost, per agent |
 | `kel-fleet` built | the only fleet reader since v0.10 |
-| `kel-top` built | the sidebar |
+| `kel-sidebar` built | the sidebar |
 | the wired kel path resolves | `install.sh` records an absolute path into the clone; moving it silences every hook |
 | hooks not disabled by managed settings | `allowManagedHooksOnly` / `disableAllHooks` stop hooks while the entries remain |
 | `allow-passthrough on` | Neovim OSC 52 clipboard through tmux |
@@ -861,14 +861,14 @@ people stop running.
 
 `install.sh` symlinks `bin/kel`, the completions and `tmux/kel.conf` out of the
 clone, so the working tree **is** the installed artifact; `kel-fleet` and
-`kel-top` are built into `~/.local/bin`. `kel update` fast-forwards the clone
+`kel-sidebar` are built into `~/.local/bin`. `kel update` fast-forwards the clone
 and re-runs `install.sh`. It refuses rather than merges — on a dirty tree, a
 detached HEAD, no upstream, or a non-fast-forward.
 
 Until v0.9 this section said releases and tags were "the wrong mechanism":
 there was no artifact the symlink did not already point at. **Go being required
 changes that.** A machine without a Go toolchain now cannot install kel from a
-clone, and prebuilt `kel-fleet` / `kel-top` binaries attached to a tagged
+clone, and prebuilt `kel-fleet` / `kel-sidebar` binaries attached to a tagged
 GitHub release are the fix. Versioning policy is in `rollout.md`.
 
 ---
@@ -876,7 +876,7 @@ GitHub release are the fix. Versioning policy is in `rollout.md`.
 ## 12. Stack
 
 - **Go** for everything that reads or renders: `kel-fleet` (the fleet
-  document), `kel-top` (becoming the sidebar). Bubble Tea **v2**
+  document), `kel-sidebar` (the sidebar). Bubble Tea **v2**
   (`charm.land/bubbletea/v2`) — almost every tutorial online is v1 and will
   not compile.
 - **Bash** for the hooks and the installer, permanently: a hook must start in
