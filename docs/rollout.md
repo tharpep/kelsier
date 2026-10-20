@@ -401,6 +401,13 @@ the `TodoWrite` design was stale, and the plan turned out to need no new hook.
   invariant 1 — was off. One git read per directory
   instead of up to three; one helper each for a window's panes, a worktree's
   report and its removal.
+- *2026-10-20, from the author:* a new agent no longer asks for a name —
+  "most of the time I won't care about the name, and when I do I can just
+  rename". `kel new`, bare `kel` and the sidebar's `n`, `enter` name it
+  `<repo>-<n>`, the first number free in the group, the way Claude Code
+  numbers its own sessions. It used to be the repo's bare name, so a second
+  agent there had to be named by hand. `kel-top` became `kel-sidebar`, the
+  one thing it still was.
 
 **Why this order:** M0–M1 are data and plumbing you can mostly ignore; M2 is
 where the tmux-hook risk lives, so it is proven before any UI depends on it;

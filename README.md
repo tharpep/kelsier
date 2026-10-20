@@ -62,7 +62,7 @@ context, cost — and the time.
 
 ```
 kel                  go to (or start) this repo's agent, like `claude`
-kel new <name> [-w]  new window + agent, optionally in a git worktree
+kel new [name] [-w]  new window + agent, optionally in a git worktree
 kel ls [--json]      every agent, grouped by repo
 kel relaunch [name]  relaunch one crashed agent in place
 kel sweep [-n]       close out every finished agent that landed

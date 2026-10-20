@@ -36,13 +36,14 @@ kel                    in a repo: go to (or start) that repo's agent, the way
                        `claude` keys off the directory. Never asks anything:
                        with no workspace running it starts fresh and, if there
                        was one before, says `kel restore` brings it back
-kel new <name>         new window + agent in the current repo   (inplace)
+kel new [name]         new window + agent in the current repo   (inplace);
+                       no name is <repo>-<n>, the first n free — rename later
 kel shot [agent]       the pane (yours, or the agent's) as an SVG in ~/Pictures/kel, with freeze
-kel new <name> <dir>   ...in <dir> instead — no cd first; `kel new <dir>` names it after the folder
-kel new <name> -w      ...in a fresh git worktree on a new branch <name>
-kel new <name> --group G       put it in group G instead of the repo's
-kel new <name> --no-agent      just make the window, don't start the agent
-kel new <name> --agent CMD     run CMD instead of `claude`
+kel new [name] <dir>   ...in <dir> instead — no cd first
+kel new [name] -w      ...in a fresh git worktree on a new branch of that name
+kel new [name] --group G       put it in group G instead of the repo's
+kel new [name] --no-agent      just make the window, don't start the agent
+kel new [name] --agent CMD     run CMD instead of `claude`
 kel kill <name>        close the window; remove the worktree if it was one
 kel kill <name> -f     ...even with uncommitted / unpushed work
 kel ls [--json]        every agent, grouped by repo (state, context %, cost);
@@ -147,9 +148,10 @@ it** as `esc` would — the click then does what it would have done. `;` opens
 one for a kel command (`url`, `sweep -n`, `restore --list`…): a one-line
 answer lands in the footer, a longer one in a popup.
 
-**`n` and `w` start an agent anywhere.** Type a name and it starts in the
-selected space; type a directory (`~/code/api`, `/srv/x`, `../other`) and it
-starts there, named after the folder; type both (`fix ~/code/api`) for both.
+**`n` and `w` start an agent anywhere.** `enter` alone starts one in the
+selected space, named `<repo>-<n>` (`r` renames it later). Type a name for
+that name; type a directory (`~/code/api`, `/srv/x`, `../other`) and it
+starts there; type both (`fix ~/code/api`) for both.
 `tab` completes the directory as a shell would, and the prompt says where the
 agent will start before you press `enter`.
 
@@ -174,7 +176,7 @@ then \`` in yellow, which a click also jumps — then shows the keys for whateve
 | `enter` | jump to an agent or pane · open or fold a space |
 | `space` / `l` / `h` | fold, open, close a space |
 | `/` | filter by name, live · `esc` clears |
-| `n` / `w` | new agent / new worktree agent in the selected entry's space — type the name in the footer |
+| `n` / `w` | new agent / new worktree agent in the selected entry's space — `enter` at once, or type a name first |
 | `r` | rename the selected agent |
 | `x` | kill the selected agent, after `y` — a worktree with unsaved work is refused, and the footer names what is at risk |
 | `f` / `g` | yazi / lazygit in a popup, at the selected entry's worktree |

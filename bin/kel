@@ -4,7 +4,8 @@
 #
 #   kel                        enter the workspace — in a repo, go to (or start)
 #                              that repo's agent, like `claude` for a directory
-#   kel new <name> [dir] [-w]  window + agent, inplace or in a git worktree
+#   kel new [name] [dir] [-w]  window + agent, inplace or in a git worktree
+#                              (no name: <repo>-<n>; kel rename later)
 #         [--group G] [--agent CMD] [--no-agent]
 #   kel kill <name> [-f]       close the window; remove the worktree; -f overrides
 #                              the uncommitted / unpushed check
@@ -178,6 +179,19 @@ group_for_cwd() {
   [ -n "$g" ] && { printf '%s' "$g"; return; }
   local gr; gr="$(git_root 2>/dev/null || true)"
   if [ -n "$gr" ]; then basename "$gr"; else printf 'misc'; fi
+}
+
+# The name a nameless agent gets: <group>-<n>, the first n no record or
+# window in the group holds — Claude Code numbers its own sessions alike.
+# Given a repo (-w), no branch either: `worktree add` would check out a
+# leftover branch of that name, old commits and all.
+next_name() { # group [repo]
+  local taken n=1
+  taken="$( { ls "$SESSIONS_DIR/$1" 2>/dev/null | sed 's/\.json$//'
+              kel_windows | awk -F'\t' -v g="$1" '$5 == g {print $4}'
+              [ -n "${2:-}" ] && git -C "$2" branch --format='%(refname:short)' 2>/dev/null; } )"
+  while printf '%s\n' "$taken" | grep -qxF "$1-$n"; do n=$((n + 1)); done
+  printf '%s-%s' "$1" "$n"
 }
 
 # A `.kel/group` file pins a directory (and everything under it) to a group,
@@ -682,23 +696,25 @@ cmd_new() {
     esac
     shift
   done
-  [ -n "$name" ] || die "usage: kel new <name> [dir] [-w] [--group G] [--agent CMD] [--no-agent] [-- agent args]"
   agent="$agent$extra"
-  # a directory instead of a name: the agent is named after its folder. So
-  # an agent can start anywhere without a shell to cd in first (2026-10-16)
+  # a directory instead of a name, so an agent can start anywhere without a
+  # shell to cd in first (2026-10-16)
   if [ -z "$dir" ] && [ -d "$name" ] && { ! slug_ok "$name" || [ "$name" = . ] || [ "$name" = .. ]; }; then
-    dir="$name"; name="$(basename "$(cd "$dir" && pwd -P)" | tr -c 'A-Za-z0-9._\n-' '-')"
+    dir="$name"; name=''
   fi
   if [ -n "$dir" ]; then
     [ -d "$dir" ] || die "no such directory: $dir"
     cd "$dir" || die "cannot enter $dir"
   fi
-  slug_ok "$name" || die "name must be a slug (A-Z a-z 0-9 . _ -)"
 
   local repo cwd branch='' isolation='inplace' group
   repo="$(git_root || true)"
   group="${group_override:-$(group_for_cwd)}"
   slug_ok "$group" || die "group '$group' is not a slug — pass --group"
+  if [ -z "$name" ]; then
+    if [ "$worktree" = 1 ]; then name="$(next_name "$group" "$repo")"; else name="$(next_name "$group")"; fi
+  fi
+  slug_ok "$name" || die "name must be a slug (A-Z a-z 0-9 . _ -)"
 
   # names only have to be unique within their group
   if [ -f "$(meta_path "$group" "$name")" ]; then
@@ -934,7 +950,7 @@ cmd_ls() {
   fi
 
   if [ "$(printf '%s' "$doc" | jq '.agents | length')" = 0 ]; then
-    echo "no agents yet — 'kel new <name>' to start one"
+    echo "no agents yet — 'kel new' to start one"
     return 0
   fi
 
@@ -3044,7 +3060,7 @@ cmd_hook() {
 quickstart() {
   cat <<'EOF'
 
-  kel new <name>     start an agent in the current repo
+  kel new [name]     start an agent in the current repo
   kel restore        bring back a previous workspace (--list to choose)
   prefix `           jump to whichever agent is waiting on you
   prefix Space       the sidebar — every agent, its state, context and cost
@@ -3087,7 +3103,7 @@ cmd_attach() {
     [ -n "$want" ] && wid="$(kel_windows | awk -F'\t' -v g="$want" '$5==g {print $3; exit}')"
     if [ -n "$want" ] && [ -z "$wid" ]; then
       say "no agent for '$want' yet — starting one"
-      exec "$SELF" new "$want"
+      exec "$SELF" new
     fi
     attach_workspace "$wid"
     return
@@ -3109,7 +3125,7 @@ cmd_attach() {
   # 3. fresh start — dir-aware if we're in a repo
   if [ -n "$want" ]; then
     say "starting an agent for '$want'"
-    exec "$SELF" new "$want"
+    exec "$SELF" new
   fi
   say "welcome to kel."
   quickstart

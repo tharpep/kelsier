@@ -279,7 +279,7 @@ func (m sbModel) view() sbView {
 		if m.mode == modeNewWorktree {
 			what = "new worktree agent"
 		}
-		ask(what+" in "+m.newWhere(), "", "enter ok · esc cancel · tab dir")
+		ask(what+" in "+m.newWhere(), "", "enter go · type a name · tab dir")
 		if m.cands != "" {
 			v.hint2 = m.cands
 		}
@@ -732,7 +732,7 @@ func (m sbModel) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		case "enter":
 			mode, name := m.mode, strings.TrimSpace(m.input)
 			m.mode, m.input, m.cands = modeNormal, "", ""
-			if name == "" || mode == modeFilter {
+			if mode == modeFilter || name == "" && mode != modeNew && mode != modeNewWorktree {
 				return m, nil
 			}
 			switch mode {
@@ -770,7 +770,9 @@ func (m sbModel) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 				} else if group != "" && group != "misc" {
 					args = append(args, "--group", group)
 				}
-				args = append(args, nm)
+				if nm != "" {
+					args = append(args, nm)
+				}
 				if f := strings.Fields(extra); len(f) > 0 {
 					args = append(append(args, "--"), f...)
 				}
@@ -1171,16 +1173,18 @@ func hintKey(hint string, x int) tea.KeyPressMsg {
 	return tea.KeyPressMsg{}
 }
 
-// parseNew reads what n / w typed: a name, a directory, or a name and then a
-// directory — so an agent can start anywhere without a shell to cd in first.
-// A word is a directory when it looks like a path (~, /, .); a directory
-// alone names the agent after its folder. err is what to say instead.
+// parseNew reads what n / w typed: nothing, a name, a directory, or a name
+// and then a directory — so an agent can start anywhere without a shell to cd
+// in first. A word is a directory when it looks like a path (~, /, .). No
+// name is kel new's to give. err is what to say instead.
 func parseNew(in, home string) (name, dir, err string) {
 	f := strings.Fields(in)
 	isPath := func(s string) bool {
 		return strings.HasPrefix(s, "~") || strings.HasPrefix(s, "/") || strings.HasPrefix(s, ".")
 	}
 	switch {
+	case len(f) == 0:
+		return "", "", ""
 	case len(f) == 1 && !isPath(f[0]):
 		return f[0], "", ""
 	case len(f) == 1:
@@ -1197,9 +1201,6 @@ func parseNew(in, home string) (name, dir, err string) {
 	if abs, e := filepath.Abs(dir); e == nil {
 		dir = abs
 	}
-	if name == "" {
-		name = slugify(filepath.Base(dir))
-	}
 	return name, dir, ""
 }
 
@@ -1211,23 +1212,6 @@ func expandHome(p, home string) string {
 		return filepath.Join(home, p[2:])
 	}
 	return p
-}
-
-// slugify makes a folder name a kel name (A-Z a-z 0-9 . _ -).
-func slugify(s string) string {
-	var b strings.Builder
-	for _, r := range s {
-		switch {
-		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '.', r == '_', r == '-':
-			b.WriteRune(r)
-		default:
-			b.WriteByte('-')
-		}
-	}
-	if out := strings.Trim(b.String(), "-."); out != "" {
-		return out
-	}
-	return "agent"
 }
 
 // completeDir completes the directory being typed — the last word, when it

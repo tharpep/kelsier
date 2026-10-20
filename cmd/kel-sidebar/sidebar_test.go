@@ -484,16 +484,18 @@ func TestQuotaLine(t *testing.T) {
 	}
 }
 
-// n / w take a name, a directory, or both: no shell needed to cd first.
+// n / w take nothing, a name, a directory, or both: no shell needed to cd
+// first, and no name needed at all.
 func TestParseNew(t *testing.T) {
 	home := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(home, "code", "My App"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	cases := []struct{ in, name, dir, err string }{
+		{"", "", "", ""},
 		{"fix", "fix", "", ""},
 		{"~/code/My App", "", "", "type a name, a directory, or both"},
-		{"~/code", "code", filepath.Join(home, "code"), ""},
+		{"~/code", "", filepath.Join(home, "code"), ""},
 		{"fix ~/code", "fix", filepath.Join(home, "code"), ""},
 		{"fix ~/nope", "", "", "no such directory: ~/nope"},
 		{"a b c", "", "", "type a name, a directory, or both"},
@@ -504,9 +506,6 @@ func TestParseNew(t *testing.T) {
 		if n != c.name || d != c.dir || e != c.err {
 			t.Errorf("parseNew(%q) = %q %q %q", c.in, n, d, e)
 		}
-	}
-	if slugify("My App") != "My-App" || slugify("...") != "agent" {
-		t.Error("slugify")
 	}
 }
 

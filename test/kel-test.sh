@@ -180,9 +180,18 @@ ok "  ...and piped output has no ANSI"   '! "$KEL" ls 2>/dev/null | grep -q "$(p
 ( cd "$WORK" && "$KEL" new far "$WORK/repos/coppermind" --agent 'sleep 9999' ) >/dev/null 2>&1
 ok "kel new <name> <dir> starts in dir, grouped by its repo" '[ "$(cd "$(jq -r .cwd "$SESSIONS/coppermind/far.json")" && pwd -P)" = "$(cd "$WORK/repos/coppermind" && pwd -P)" ]'
 ( cd "$WORK/repos" && "$KEL" new ./api-gw --agent 'sleep 9999' ) >/dev/null 2>&1
-ok "kel new <dir> names the agent after its folder" '[ -f "$SESSIONS/api-gw/api-gw.json" ]'
+ok "kel new <dir> needs no name: <repo>-1" '[ -f "$SESSIONS/api-gw/api-gw-1.json" ]'
+K api-gw new --agent 'sleep 9999' >/dev/null 2>&1
+ok "  ...and the next one is <repo>-2"   '[ -f "$SESSIONS/api-gw/api-gw-2.json" ] && [ -n "$(window_of api-gw api-gw-2)" ]'
+"$KEL" kill -f api-gw/api-gw-1 >/dev/null 2>&1
+K api-gw new --agent 'sleep 9999' >/dev/null 2>&1
+ok "  ...a freed number is taken again"  '[ -f "$SESSIONS/api-gw/api-gw-1.json" ]'
+git -C "$WORK/repos/api-gw" branch api-gw-3 2>/dev/null
+K api-gw new -w --agent 'sleep 9999' >/dev/null 2>&1
+ok "  ...and -w skips a number whose branch exists" '[ -f "$SESSIONS/api-gw/api-gw-4.json" ] && [ "$(jq -r .branch "$SESSIONS/api-gw/api-gw-4.json")" = api-gw-4 ]'
+"$KEL" kill -f api-gw/api-gw-4 >/dev/null 2>&1; git -C "$WORK/repos/api-gw" branch -D api-gw-3 api-gw-4 >/dev/null 2>&1
 ok "kel new with a missing dir says so"  '[[ "$( cd "$WORK" && "$KEL" new x "$WORK/nope" 2>&1 )" == *"no such directory"* ]]'
-"$KEL" kill -f coppermind/far >/dev/null 2>&1; "$KEL" kill -f api-gw/api-gw >/dev/null 2>&1
+"$KEL" kill -f coppermind/far >/dev/null 2>&1; "$KEL" kill -f api-gw/api-gw-1 >/dev/null 2>&1; "$KEL" kill -f api-gw/api-gw-2 >/dev/null 2>&1
 ( cd "$WORK/repos/api-gw" && "$KEL" new flags --agent 'sleep 9999' -- --model 'son net' ) >/dev/null 2>&1
 ok "kel new <name> -- <args> passes them to the agent, quoted" '[ "$(jq -r .agent "$SESSIONS/api-gw/flags.json")" = "sleep 9999 --model son\\ net" ]'
 "$KEL" kill -f api-gw/flags >/dev/null 2>&1
@@ -644,6 +653,10 @@ ok "  ...the agents running again"         'agent_up "$(window_of coppermind saz
 ok "  ...and the archive entry is used up" '[ -z "$(ls "$STATE/snapshots" 2>/dev/null)" ]'
 ok "  ...and the untouched fresh-start shell is closed" '[ "$(wins)" = 2 ]'
 ok "  ...and no stale lock is left"      '[ ! -e "$STATE/.restoring" ]'
+# a repo with no agent yet: bare kel starts one and names it, never asking
+"$KEL" kill -f api-gw/auth-fix >/dev/null 2>&1
+out="$( (cd "$WORK/repos/api-gw" && KEL_AGENT='sleep 9999' "$KEL" < /dev/null) 2>&1 )"
+ok "kel in a repo with no agent starts one, named for it" '[ -f "$SESSIONS/api-gw/api-gw-1.json" ] && [ -n "$(window_of api-gw api-gw-1)" ]'
 
 # What restore actually types.  The check above could not see it: `sleep 9999
 # --continue || sleep 9999` starts a fresh sleep whatever the flag does, so it
@@ -942,11 +955,21 @@ tmux send-keys -t "$SW" Enter
 wait_until '[ -n "$(window_of api-gw fresh)" ] && [ -f "$SESSIONS/api-gw/fresh.json" ]' 80
 ok "n names and starts an agent, in that space's repo" '[ -n "$(window_of api-gw fresh)" ] && [ -f "$SESSIONS/api-gw/fresh.json" ]'
 sbdiag "$SW" "$f0"
+wait_until '[ "$(active_win)" = "$(window_of api-gw fresh)" ]' 50
+tmux select-window -t "$WTW"; "$KEL" _sidebar wake
+wait_until 'sbtext "$SW" | grep -q agents'
+f0=$fail
+tmux send-keys -t "$SW" n
+wait_until 'sbtext "$SW" | grep -q "^new agent in "'
+tmux send-keys -t "$SW" Enter
+wait_until '[ -n "$(window_of api-gw api-gw-1)" ] && [ -f "$SESSIONS/api-gw/api-gw-1.json" ]' 80
+ok "  ...and n, enter needs no name"      '[ -n "$(window_of api-gw api-gw-1)" ] && [ -f "$SESSIONS/api-gw/api-gw-1.json" ]'
+sbdiag "$SW" "$f0"
 
 # prefix Space is `kel _sidebar focus`; esc goes back. kel new ends by
 # jumping to the window it made, just after the window exists — wait for that
 # jump, or it can land after the select below and take the client with it
-wait_until '[ "$(active_win)" = "$(window_of api-gw fresh)" ]' 50
+wait_until '[ "$(active_win)" = "$(window_of api-gw api-gw-1)" ]' 50
 tmux select-window -t "$MW"
 UP="$(userpane "$MW")"; tmux select-pane -t "$UP"
 "$KEL" _sidebar focus "$MW"   # what prefix Space passes: the window it was pressed in
