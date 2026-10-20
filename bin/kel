@@ -372,8 +372,11 @@ sidebar_ensure() { # wid
   # seen.  When sidebar-fail.log explains one, fix that and DELETE both this
   # block and the one in sidebar_enabled above — kel does not keep diagnostics
   # for bugs it has fixed.  Capped at 200 lines so an unattended machine
-  # cannot grow it without bound.
-  if [ "$(tmux list-panes -t "$wid" -F '#{@kel-sidebar}' 2>/dev/null | grep -cx 1)" = 0 ]; then
+  # cannot grow it without bound.  Both halves of the condition: without the
+  # flag it logged a window whose ensure had simply not run the split yet
+  # (`flag= panes=2`, 2026-10-20) — the failure is the flag set with no pane.
+  if [ "$(tmux show-options -wv -t "$wid" @kel-has-sidebar 2>/dev/null)" = 1 ] \
+     && [ "$(tmux list-panes -t "$wid" -F '#{@kel-sidebar}' 2>/dev/null | grep -cx 1)" = 0 ]; then
     local log="$STATE_DIR/sidebar-fail.log"
     { printf '%s wid=%s flag=%s panes=%s width=%s\n' "$(date +%FT%T)" "$wid" \
         "$(tmux show-options -wv -t "$wid" @kel-has-sidebar 2>/dev/null)" \
@@ -381,7 +384,7 @@ sidebar_ensure() { # wid
         "$(tmux display-message -p -t "$wid" '#{window_width}x#{window_height}' 2>/dev/null)"
       sed 's/^/  tmux: /' "$STATE_DIR/.sidebar-err.$$" 2>/dev/null
     } >> "$log" 2>/dev/null
-    if [ "$(grep -c . "$log" 2>/dev/null || echo 0)" -gt 200 ]; then
+    if [ "$(grep -c . "$log" 2>/dev/null || true)" -gt 200 ] 2>/dev/null; then
       tail -100 "$log" > "$log.$$" 2>/dev/null && mv -f "$log.$$" "$log" 2>/dev/null
     fi
   fi
@@ -2081,7 +2084,11 @@ banner_go() { # client
 banner_apply() {
   tmux has-session -t "=$KEL_PREFIX" 2>/dev/null || return 0
   local t="=$KEL_PREFIX:" n line wid st name text more='' word
-  n="$( [ -f "$BANNER" ] && grep -c . "$BANNER" || echo 0)"
+  # grep -c prints 0 AND exits 1 on an empty file, so `|| echo 0` made n
+  # "0\n0": the -eq test below errored, fell through, and drew "● is" from an
+  # empty line. `|| true` keeps grep's own 0. Pinned by "...and takes it down
+  # when the agent moves on".
+  n="$(grep -c . "$BANNER" 2>/dev/null || true)"
   if [ "${n:-0}" -eq 0 ]; then
     tmux set-option -u -t "$t" status-position \; set-option -u -t "$t" status-format[0] 2>/dev/null
     if sidebar_enabled && [ -n "$(kel_windows | head -1)" ]; then tmux set-option -t "$t" status off 2>/dev/null

@@ -1520,7 +1520,10 @@ AW="$(window_of api-gw a)"
 ok "a waiting agent puts up the banner, at the top" '[ "$(tmux show-options -v -t "=keltest:" status-position)" = top ] && [[ "$(tmux show-options -v -t "=keltest:" status-format[0])" == *"a#[nobold,fg=colour252] is waiting"* ]]'
 ok "  ...its text printed, never run as a format" '[[ "$(tmux show-options -v -t "=keltest:" status-format[0])" == *"##(touch pwned)"* ]]'
 hook "$P" UserPromptSubmit
-ok "  ...and takes it down when the agent moves on" '[ ! -s "$STATE/banner" ] && [ -z "$(tmux show-options -v -t "=keltest:" status-format[0] 2>/dev/null | grep "is waiting")" ]'
+# "is waiting" alone let a bug through: an emptied banner file once drew
+# "● is" from a blank line, which contains no "is waiting".  Check the bar
+# itself is gone, not just one phrase.
+ok "  ...and takes it down when the agent moves on" '[ ! -s "$STATE/banner" ] && [ -z "$(tmux show-options -v -t "=keltest:" status-format[0] 2>/dev/null)" ]'
 NEW api-gw b
 hold_client 20
 tmux select-window -t "$(window_of api-gw b)"
@@ -1771,6 +1774,14 @@ for t in copy-mode copy-mode-vi; do
 done
 ok "enter copies too (Ctrl-b [ , select, enter)" \
    "grep -q 'bind -T copy-mode *Enter send -X copy-pipe-and-cancel' '$HERE/../tmux/kel.conf'"
+ok "a double-click outside copy mode copies through kel" \
+   "grep -q '^bind -n DoubleClick1Pane.*kel. _copy' '$HERE/../tmux/kel.conf'"
+# the wheel down once ran `copy-mode -e` at the live view: it entered copy
+# mode without moving, so the pane stopped updating while looking unchanged
+ok "the wheel down never enters copy mode" \
+   "grep '^bind -n WheelDownPane' '$HERE/../tmux/kel.conf' | grep -vq copy-mode"
+ok "  ...and the wheel up scrolls as it enters" \
+   "grep '^bind -n WheelUpPane' '$HERE/../tmux/kel.conf' | grep -q 'copy-mode -e.*scroll-up'"
 
 # ---------------------------------------------------------------- summary
 printf '\n'
