@@ -32,7 +32,7 @@ func panePorts(panePids []int) map[int][]int {
 	if len(panePids) == 0 {
 		return map[int][]int{}
 	}
-	cacheFile := filepath.Join(stateDir(), "ports.json")
+	cacheFile := filepath.Join(StateDir(), "ports.json")
 	now := time.Now().Unix()
 	if b, err := os.ReadFile(cacheFile); err == nil {
 		var c portsCache
@@ -98,15 +98,7 @@ func panePorts(panePids []int) map[int][]int {
 		c.Panes[strconv.Itoa(k)] = v
 	}
 	if b, err := json.Marshal(c); err == nil {
-		if tmp, err := os.CreateTemp(stateDir(), ".ports.*"); err == nil {
-			_, werr := tmp.Write(b)
-			tmp.Close()
-			if werr == nil {
-				_ = os.Rename(tmp.Name(), cacheFile)
-			} else {
-				_ = os.Remove(tmp.Name())
-			}
-		}
+		WriteAtomic(cacheFile, b)
 	}
 	return out
 }

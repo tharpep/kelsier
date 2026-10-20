@@ -45,39 +45,25 @@ The reference is Orca's layout, in the terminal. Design in `docs/spec.md` §5.
 ## Status
 
 **Mid-pivot.** `v0.9.0` is the last release of the old design (an fzf board
-and menus over tmux sessions-per-repo). v0.10 removed those surfaces; the
-sidebar that replaces them is being designed. Today kel is the commands below,
-the status bar, `kel top` and jump-to-blocked. MIT. CI runs the suite on Linux
-and macOS on every push. `docs/rollout.md` is the source of truth for what is
-next.
+and menus over tmux sessions-per-repo). v0.10 replaced those surfaces with one
+sidebar, and it is in daily use; `v0.10.0` is tagged once it has been
+daily-driven. MIT. CI runs the suite on Linux and macOS on every push.
+`docs/rollout.md` is the source of truth for what is next.
 
 ## Today
 
-The status bar is the fleet — `?` waiting on you, `*` working, `!` done, `~`
-throttled, `x` dead, and context once it is worth worrying about:
-
-```
-[api-gw] 1:auth-fix? 2:rate-limit·91%* 3:docs   ⟨infra·1 web·2⟩
-```
-
-`` Ctrl-b ` `` jumps to whoever is blocked on you, across every repo.
-`Ctrl-b t` opens `kel top`:
-
-```
-  GROUP    AGENT       STATE       FOR   CTX     $        LAND        LAST OUTPUT
-› api-gw   auth-fix    waiting ?   6m    12%     $2.40    dirty 3     Allow Bash to run npm test?
-  api-gw   rate-limit  working *   1m    91%×3   $18.70   unpushed 2  Reading src/middleware…
-  coppermind sazed     done !      12m   31%     $0.90    merged      Done — 3 files changed
-```
-
-**LAND** names what each branch still needs — commit, push, rebase, open a PR,
-or sweep it.
+Every kel window carries a sidebar on its left: `spaces` (each repo and its
+worktrees, with the branch, ahead/behind, dirty state and what landing it
+needs) and `agents` (each one's state, context and cost, and what it waits
+for). Click a row, or `Ctrl-b space` to give it the keys; its footer shows
+the keys for whatever is selected. `` Ctrl-b ` `` jumps to whoever is blocked
+on you, across every repo. Claude Code's own row shows the session — model,
+context, cost — and the time.
 
 ```
 kel                  go to (or start) this repo's agent, like `claude`
 kel new <name> [-w]  new window + agent, optionally in a git worktree
 kel ls [--json]      every agent, grouped by repo
-kel top              every agent, the one needing you first   (Ctrl-b t)
 kel relaunch [name]  relaunch one crashed agent in place
 kel sweep [-n]       close out every finished agent that landed
 kel kill <name>      close one       ·  kel prune    discard dead records
@@ -93,7 +79,7 @@ git clone https://github.com/tharpep/kelsier && cd kelsier && ./install.sh
 ```
 
 Needs `tmux` ≥ 3.0, `jq`, `git` and **Go** (it builds `kel-fleet` and
-`kel-top`). `./install.sh --uninstall` reverses every change and leaves your
+`kel-top`, the sidebar). `./install.sh --uninstall` reverses every change and leaves your
 agent records alone. `kel doctor` tells you what you have. Linux, WSL2 and
 macOS; `install/` provisions a fresh machine.
 

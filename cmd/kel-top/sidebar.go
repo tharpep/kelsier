@@ -90,23 +90,9 @@ type sbModel struct {
 
 // ---------------------------------------------------------------- state dir
 
-func sbStatePath(name string) string {
-	d := os.Getenv("XDG_STATE_HOME")
-	if d == "" {
-		d = filepath.Join(os.Getenv("HOME"), ".local", "state")
-	}
-	return filepath.Join(d, "kel", name)
-}
+func sbStatePath(name string) string { return filepath.Join(fleet.StateDir(), name) }
 
 func sbStateFile() string { return sbStatePath("sidebar.json") }
-
-// atomicWrite: a sidebar in another window may be reading the same file
-func atomicWrite(f string, b []byte) {
-	tmp := f + ".tmp" + strconv.Itoa(os.Getpid())
-	if os.WriteFile(tmp, b, 0o600) == nil {
-		_ = os.Rename(tmp, f)
-	}
-}
 
 // sbShared is the view state every window's sidebar shares (spec.md §5):
 // the cursor and which spaces have been opened or closed by hand.
@@ -125,7 +111,7 @@ func sbLoadShared() sbShared {
 
 func (m *sbModel) saveShared() {
 	b, _ := json.Marshal(sbShared{Selected: m.ui.sel, Expanded: m.ui.expanded})
-	atomicWrite(sbStateFile(), b)
+	fleet.WriteAtomic(sbStateFile(), b)
 }
 
 func sbLoadCache() (fleet.Doc, bool) {
@@ -143,7 +129,7 @@ func (m *sbModel) markSeen() {
 	if m.ui.myWindow == "" {
 		return
 	}
-	atomicWrite(sbStatePath(m.ui.myWindow+".seen"), []byte(strconv.FormatInt(time.Now().Unix(), 10)+"\n"))
+	fleet.WriteAtomic(sbStatePath(m.ui.myWindow+".seen"), []byte(strconv.FormatInt(time.Now().Unix(), 10)+"\n"))
 }
 
 // ---------------------------------------------------------------- tmux
@@ -222,7 +208,7 @@ func kelDone(ok, dir string, env []string, args ...string) sbDone {
 func summarise(out string) string {
 	if strings.Contains(out, "refusing to kill") {
 		var risk []string
-		for _, l := range strings.Split(ansiSeq.Replace(out), "\n") {
+		for _, l := range strings.Split(stripANSI(out), "\n") {
 			if strings.HasPrefix(l, "    ") {
 				risk = append(risk, strings.TrimSpace(l))
 			}
@@ -235,10 +221,8 @@ func summarise(out string) string {
 	return lastLine(out)
 }
 
-var ansiSeq = strings.NewReplacer("\x1b[0m", "", "\x1b[1;32m", "", "\x1b[1;31m", "", "\x1b[1;33m", "", "\x1b[2m", "")
-
 func lastLine(s string) string {
-	s = strings.TrimRight(ansiSeq.Replace(s), "\n ")
+	s = strings.TrimRight(stripANSI(s), "\n ")
 	if i := strings.LastIndex(s, "\n"); i >= 0 {
 		s = s[i+1:]
 	}
@@ -499,7 +483,6 @@ func (m sbModel) panel(what string) (sbModel, tea.Cmd) {
 		// against what: the base it lands on, offered and editable — the
 		// author could not diff against anything else. The base is a few
 		// git calls, so it is asked for off the key path
-		_ = title
 		m.mode, m.target, m.input = modeDiff, spaceID(sp.key), ""
 		return m, func() tea.Msg { return sbBase{fleet.BaseRef(dir)} }
 	case "edit", "plan":
@@ -596,7 +579,7 @@ func (m sbModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.ui = m.withShared()
 		if m.visible {
 			if b, err := json.Marshal(m.doc); err == nil {
-				atomicWrite(sbStatePath("sidebar-cache.json"), b)
+				fleet.WriteAtomic(sbStatePath("sidebar-cache.json"), b)
 			}
 			// an agent here finished while you were looking at it: seen
 			for _, a := range m.doc.Agents {
@@ -1289,13 +1272,18 @@ func completeDir(in, home string) (string, string) {
 	case 1:
 		return head + parent + names[0] + "/", ""
 	}
+	return head + parent + commonPrefix(names), strings.Join(names, " ")
+}
+
+// commonPrefix is what every name starts with: what tab completes to
+func commonPrefix(names []string) string {
 	common := names[0]
 	for _, n := range names[1:] {
 		for !strings.HasPrefix(n, common) {
 			common = common[:len(common)-1]
 		}
 	}
-	return head + parent + common, strings.Join(names, " ")
+	return common
 }
 
 // newWhere says where n / w will start the agent, for the prompt.
@@ -1310,16 +1298,6 @@ func (m sbModel) newWhere() string {
 		return sp.label
 	}
 	return "~"
-}
-
-// tail keeps the end of what is being typed — where the cursor is — when it
-// is wider than the room: `…code/kelsier/▏`, not `fix ~/co…`.
-func tail(s string, w int) string {
-	r := []rune(s)
-	if w <= 1 || len(r) <= w {
-		return s
-	}
-	return "…" + string(r[len(r)-w+1:])
 }
 
 // helpKey is the key a click on a row of the keys list presses, or "" for a
@@ -1372,7 +1350,7 @@ func saveHistory(cmd string) {
 	if len(h) > 20 {
 		h = h[len(h)-20:]
 	}
-	atomicWrite(histFile(), []byte(strings.Join(h, "\n")+"\n"))
+	fleet.WriteAtomic(histFile(), []byte(strings.Join(h, "\n")+"\n"))
 }
 
 // completeBranch completes a branch name from the repo's local and remote
@@ -1394,12 +1372,7 @@ func completeBranch(in, dir string) (string, string) {
 	case 1:
 		return names[0], ""
 	}
-	common := names[0]
-	for _, n := range names[1:] {
-		for !strings.HasPrefix(n, common) {
-			common = common[:len(common)-1]
-		}
-	}
+	common := commonPrefix(names)
 	if len(names) > 6 {
 		names = append(names[:6], "…")
 	}

@@ -4,7 +4,7 @@
 // It began as a port of bin/kel's bash reader, checked against it by a
 // differential test.  v0.10 deleted the bash reader: this is now the only
 // implementation, and the document it emits is the contract every surface
-// (kel ls, the bar, kel top, the sidebar) reads.
+// (kel ls, the bar, the sidebar) reads.
 package fleet
 
 import (
@@ -149,11 +149,27 @@ func lines(s string) []string {
 	return out
 }
 
-func stateDir() string {
+// StateDir is kel's state directory (CLAUDE.md, the on-disk contract).
+func StateDir() string {
 	if d := os.Getenv("XDG_STATE_HOME"); d != "" {
 		return filepath.Join(d, "kel")
 	}
 	return filepath.Join(os.Getenv("HOME"), ".local", "state", "kel")
+}
+
+// WriteAtomic replaces path in one rename, so a reader in another process
+// sees the old file or the new one, never half of either. 0600: the state
+// directory holds repo paths and Claude Code's notification text.
+func WriteAtomic(path string, b []byte) {
+	tmp, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".*")
+	if err != nil {
+		return
+	}
+	_, werr := tmp.Write(b)
+	if cerr := tmp.Close(); werr == nil && cerr == nil && os.Chmod(tmp.Name(), 0o600) == nil && os.Rename(tmp.Name(), path) == nil {
+		return
+	}
+	_ = os.Remove(tmp.Name())
 }
 
 func prefix() string {
@@ -163,22 +179,8 @@ func prefix() string {
 	return "kel"
 }
 
-// groupOf says whether a tmux session is kel's, and for a legacy v0.9
-// per-repo session (`kel/<group>`) which group it named.  Since v0.10 every
-// kel window lives in the one session named exactly pfx, which carries no
-// group — that comes from the window (see windowGroup).
-func groupOf(session, pfx string) (string, bool) {
-	switch {
-	case session == pfx:
-		return pfx, true
-	case strings.HasPrefix(session, pfx+"/"):
-		return session[len(pfx)+1:], true
-	}
-	return "", false
-}
-
 // Options selects the expensive extras. The status bar asks for none of them;
-// `kel top` asks for Dirty+Land; only PR may touch the network.
+// only PR may touch the network.
 type Options struct {
 	Dirty bool
 	Land  bool
@@ -193,7 +195,7 @@ type Options struct {
 // Load assembles the fleet document.
 func Load(o Options) Doc {
 	withDirty := o.Dirty || o.Land || o.PR
-	sd := stateDir()
+	sd := StateDir()
 	sessionsDir := filepath.Join(sd, "sessions")
 	pfx := prefix()
 
@@ -331,21 +333,27 @@ func Load(o Options) Doc {
 	}
 
 	lands := map[string]*Land{}
+	locals := map[string]localState{}
 	if o.Land || o.PR {
-		lands = landMap(records, o.PR)
+		lands, locals = landMap(records, o.PR)
 	}
 
-	// dirty is a property of the directory, not the window
+	// dirty is a property of the directory, not the window: read from what
+	// landMap already asked git, or asked here when only dirty was wanted
 	dirtyMap := map[string]*float64{}
 	if withDirty {
-		seen := map[string]bool{}
 		for _, r := range records {
-			if r.Cwd == nil || *r.Cwd == "" || seen[*r.Cwd] {
+			if r.Cwd == nil || *r.Cwd == "" {
 				continue
 			}
-			seen[*r.Cwd] = true
-			if n, ok := gitDirty(*r.Cwd); ok {
-				dirtyMap[*r.Cwd] = n
+			ls, ok := locals[*r.Cwd]
+			if !ok {
+				ls = local(*r.Cwd)
+				locals[*r.Cwd] = ls
+			}
+			if ls.repo {
+				n := ls.dirty
+				dirtyMap[*r.Cwd] = &n
 			}
 		}
 	}
@@ -363,8 +371,9 @@ func Load(o Options) Doc {
 	var paneWins []winInfo
 	curGroup := ""
 	for _, w := range wins {
-		legacy, ok := groupOf(w.sess, pfx)
-		if !ok {
+		// every kel window is in the one session named pfx (v0.10); v0.9's
+		// per-repo `kel/<group>` sessions went once every machine upgraded
+		if w.sess != pfx {
 			continue
 		}
 		rec, managed := recByWid[w.wid]
@@ -372,16 +381,14 @@ func Load(o Options) Doc {
 			managed = false
 		}
 		// where a window's group comes from, most authoritative first: its
-		// record; the @kel-group window option kel new sets; a legacy v0.9
-		// kel/<group> session; the repo its first pane stands in
+		// record; the @kel-group window option kel new sets; the repo its
+		// first pane stands in
 		g := ""
 		switch {
 		case managed:
 			g = recGroup(rec)
 		case w.kelGroup != "":
 			g = w.kelGroup
-		case w.sess != pfx:
-			g = legacy
 		default:
 			g = repoGroup(firstPath[w.wid])
 		}
@@ -569,18 +576,6 @@ func globSorted(pattern string) []string {
 		return nil
 	}
 	return m // filepath.Glob already returns sorted results
-}
-
-func gitDirty(dir string) (*float64, bool) {
-	if err := exec.Command("git", "-C", dir, "rev-parse", "--git-dir").Run(); err != nil {
-		return nil, false
-	}
-	out, err := exec.Command("git", "-C", dir, "status", "--porcelain").Output()
-	if err != nil {
-		return nil, false
-	}
-	n := float64(len(lines(string(out))))
-	return &n, true
 }
 
 // unseen: the window's .seen epoch is older than the state's, or absent. A

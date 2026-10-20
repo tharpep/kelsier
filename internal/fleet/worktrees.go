@@ -5,7 +5,6 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -191,10 +190,7 @@ func loadRepos(sd string, roots []string, fresh bool) []Repo {
 	}
 	wg.Wait()
 	if b, err := json.Marshal(c); err == nil {
-		tmp := path + ".tmp" + strconv.Itoa(os.Getpid())
-		if os.WriteFile(tmp, b, 0o600) == nil {
-			_ = os.Rename(tmp, path)
-		}
+		WriteAtomic(path, b)
 	}
 	return pick(c.Repos, mains)
 }
@@ -223,8 +219,8 @@ func withRepos(doc *Doc, sd string, fresh bool) {
 	}
 	if doc.Background != nil {
 		for _, b := range *doc.Background {
-			if r, _, ok := repoRoot(b.Cwd); ok {
-				roots = append(roots, r)
+			if b.Git != nil { // withClaude already walked it to its repo
+				roots = append(roots, b.Git.Root)
 			}
 		}
 	}

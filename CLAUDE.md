@@ -23,7 +23,7 @@ to verify a change, and the traps that have already cost time.
 This is about **the agent's interface**, not kel's. kel must never wrap Claude
 Code, proxy its API calls, inject prompts, or manage its context — an agent in a
 kel window is byte-identical to one in a bare terminal. kel's *own* interface
-(the sidebar, the status bar, `kel top`) is explicitly in scope and is the whole
+(the sidebar and the status bar) is explicitly in scope and is the whole
 point of the pivot. Do not cite the line above as an argument against improving
 kel's own UX.
 
@@ -49,7 +49,7 @@ The tree is self-describing. These relationships are not.
 |---|---|
 | `bin/kel` | the hooks, the statusline adapter, and the mutating commands (`new`, `kill`, `restore`, `sweep`…) until they move to Go. No longer reads the fleet itself |
 | `cmd/kel-fleet` | **the only fleet reader** since v0.10. `bin/kel`'s `fleet_json` runs it and fails loudly without it — there is no bash fallback any more |
-| `cmd/kel-top` | `kel top`, and the seed of the sidebar |
+| `cmd/kel-top` | the sidebar (`kel-top --sidebar`). It was also `kel top`, a dashboard, until the sidebar replaced it |
 | `internal/fleet` | the fleet document, shared by both Go binaries |
 | `install.sh` | requires Go and builds both binaries. Merges into `~/.claude/settings.json` with jq, non-clobbering, keeping the newest three backups. Every line it writes outside this repo has an inverse in `--uninstall` |
 | `docs/rollout.md` | **start here.** The source of truth for what to work on next — `spec.md` section numbers are not a build order |
@@ -81,7 +81,7 @@ change; migrate old records in `migrate_meta`.
 | `.restoring` | lockfile held during a restore (see Invariants) |
 | `.stash/<claude-session-id>` | pane id from `SessionStart`, for hooks with no `$TMUX_PANE` |
 | `doctor.json` | cached probe results |
-| `pr-cache/<owner>__<repo>.json` | PR list from `gh`, plus `.at` with the fetch epoch |
+| `pr-cache/<owner>__<repo>.sha.json` | every PR's head commit, merged and state, from `gh` (paged), plus `.at` with the fetch epoch. Keyed by commit, not branch: a local branch need not be called what its PR's head is |
 | `sidebar.json` | `{selected: <entry id>, expanded: {<space key>: bool}}` — the sidebar's cursor (`s:<space>`, `a:<window id>` or a pane id) and the spaces opened or folded by hand, shared so every window's sidebar shows the same thing |
 | `sidebar-cache.json` | the last fleet document the visible sidebar loaded, so a sidebar just shown draws at once, before git is asked anything |
 | `quota` | `<5h%> <5h reset> <7d%> <7d reset> <spend%> <spend reset> <epoch seen>`, space-separated; `-1` = not reported, `0` reset = not given. Written by `kel statusline` only from a payload carrying rate limits; `kel-fleet` reads it as `quota`, nulling a figure whose window reset or that is older than its window |
@@ -93,12 +93,13 @@ change; migrate old records in `migrate_meta`.
 | `prompt.out` | the last multi-line answer `prefix k` showed in a popup |
 | `claude-agents.json` | `{at, bin, sessions, failed}` — `claude agents --json`, cached 10 s for the sidebar's path; `bin` remembers where claude is |
 | `<window-id>.subs` | two lines: the epoch, then the agent panel's subagent rows as JSON, from `kel substatus`; older than 30 s means none now |
-| `restore-offer` | present while an archived workspace waits: set by a fresh `kel`, cleared by `kel restore`; the sidebar offers `R` |
+| `restore-offer` | present while an archived workspace waits: set by a fresh `kel`, cleared by `kel restore`; the sidebar offers `b` |
 | `sidebar-off` | present after `kel sidebar off`; no new sidebars until `kel sidebar on` |
 | `worktrees.json` | `{at, repos:{<main root>: repo}, stamps:{<main root>: ns}}` — every repo's worktrees with land state, for the sidebar's `repos`; reused for 20 s unless `.git/worktrees` changed (its mtime is the stamp). `kel sweep` reads fresh |
 | `banner` | one line per agent the top banner shows: `<wid> TAB <state> TAB <name> TAB <text>`. Written by the state hook on a notifying transition, dropped when the agent moves on, when a client shows its window (`session-window-changed` → `kel _banner seen`) or on ✕ (`_click bx`); empty = tmux's bar back to what the sidebar wants |
 | `prompt-history` | the last twenty commands typed at the sidebar's `;`, one per line |
 | `gh-dash.yml` | the config `v` writes for gh dash each time — every open space's repos; not the user's own |
+| `sidebar-fail.log` | a dying sidebar's own stderr (`kel-top --sidebar 2>>`), appended. Temporary: kept until it explains backlog #41, then deleted with the redirect |
 | `ports.json` | `{at, panes:{<pane pid>: [ports]}}` — the listening-port scan behind `_fleet --panes`, reused for 10 s |
 
 **The directory is `0700`.** The records carry repo paths, branch names and
@@ -120,18 +121,20 @@ its record (matched by window id + name), `@kel-group`, a legacy v0.9
 "current window" is whichever was selected last.
 
 **The sidebar pane is kel's, not the user's.** Every kel window carries one
-(v0.10 M2), marked with the pane option `@kel-sidebar` (and the window with
-`@kel-has-sidebar`). It runs `kel-top --sidebar`, a live non-shell — so
-anything that asks "what is the user's pane" or "is anything alive in this
-window" must skip it: use `agent_pane <wid>` in bash; `kel-fleet` drops it
+(v0.10 M2), marked with the pane option `@kel-sidebar` — the only marker:
+"has a sidebar" is asked of the panes (a `#{P:…}` loop), never a window flag,
+which once claimed a sidebar that had died. It runs `kel-top --sidebar`, a
+live non-shell — so anything that asks "what is the user's pane" or "is
+anything alive in this window" must skip it: use `user_panes` / `agent_pane`
+/ `agent_alive <wid>` in bash; `kel-fleet` drops it
 before anything else sees the panes. Six lookups had to change for M2 (the
 dead check twice, `kel new`'s and relaunch's send-keys, restore's first pane,
 `resolve_pane`'s cwd match).
 
 **Read it through `fleet_json`, never by re-deriving.** `kel _fleet [--dirty]
 [--land] [--pr]` — that is, `kel-fleet` — turns all of the above into one JSON
-document, and `ls` / `--json` / `status-line` / the completions / `kel top` all
-read it. Adding a field means adding it there once, in Go. `--panes` (v0.10 M1)
+document, and `ls` / `--json` / `status-line` / the completions / the sidebar
+all read it. Adding a field means adding it there once, in Go. `--panes` (v0.10 M1)
 adds every pane in every kel window — kind (agent / server / shell / program),
 cwd, listening ports and git position — for the sidebar; it is opt-in because
 its git and port lookups do not fit the bar's redraw budget. `--here` (M4)
@@ -156,8 +159,8 @@ column exists rather than a trailing sentence.
 
 | # | invariant | kind | what actually proves it |
 |---|---|---|---|
-| 1 | **`kel kill` must never destroy the only copy of work.** Refuses on uncommitted or unpushed changes in a worktree, names what is at risk, `-f` overrides. The one unforgivable bug in this category of tool — treat any change near it with suspicion. When `kill` moves to Go, its tests move first. | guarded | `"a dirty worktree is refused"` checks the refusal, that the window survives, and `"...and names the file at risk"` that the path is in the message. |
-| 2 | **A restore must not be able to eat its own snapshot.** Rebuilding panes fires kel's own `after-split-window` / `pane-exited` hooks, which run `kel snapshot` in the background. `restore_from_snapshot` takes the `.restoring` lockfile and reads a private `mktemp` copy. The lock is a **file, not an env var** — the hooks spawn a fresh `kel` from the tmux server, which inherits nothing. The sidebar design adds a pane to every window and hooks to create them; the lock must cover those, so re-check this then. | guarded | three real restore cycles diff `snapshot.json` before and after; a fresh lock is proven to block a write and a stale or unparseable one is proven not to. |
+| 1 | **`kel kill` must never destroy the only copy of work.** Refuses on uncommitted or unpushed changes in a worktree, names what is at risk, `-f` overrides. The one unforgivable bug in this category of tool — treat any change near it with suspicion. When `kill` moves to Go, its tests move first. | guarded | `"a dirty worktree is refused"` checks the refusal, that the window survives, and `"...and names the file at risk"` that the path is in the message; `"a worktree whose commits are on no remote is refused"` the unpushed half, `"...naming the commit at risk"` its message. |
+| 2 | **A restore must not be able to eat its own snapshot.** Rebuilding panes fires kel's own `after-split-window` / `pane-exited` hooks, which run `kel snapshot` in the background. `restore_from_snapshot` takes the `.restoring` lockfile and reads a private `mktemp` copy. The lock is a **file, not an env var** — the hooks spawn a fresh `kel` from the tmux server, which inherits nothing. The sidebar design adds a pane to every window and hooks to create them; the lock must cover those, so re-check this then. | partial | a fresh lock is proven to block a write and a stale or unparseable one not to, and three restore cycles diff `snapshot.json` before and after. **Not** proven under kel's own hooks: the suite's servers run without `kel.conf`, so the `after-split-window` / `pane-exited` writes the lock exists for never fire there. |
 | 3 | **Never report a guess as a fact.** A dead agent must not read `working`; a failing `gh` must not render as "no PR"; a missing `kel-fleet` must not render as "no agents"; an unknown value gets its own distinct display, never a plausible-looking default. | guarded | dead-not-working, null-context-not-`0%`, `"a failing gh reads unknown"`, and `"a missing kel-fleet fails loudly"` (plus the bar saying so). |
 | 4 | **kel never types into an agent pane** except the initial launch command — and never into its own sidebar. kel adds its sidebar pane to every window (and `fit` re-pins *that pane's* width), but never moves, resizes or re-points the user's panes, and never alters what runs in one. **Changed in v0.10:** the old rule forbade kel splitting a window at all; the sidebar is the one exception. (Moving panes with `swap-pane` was considered and rejected — `spec.md` §5b.) | prohibition | nothing, deliberately — "never, across a codebase" holds by reviewing the `send-keys` call sites (launch, restore's pane replay, relaunch). |
 | 5 | **Hot paths stay cheap.** `kel statusline` runs on a 300 ms debounce and is cancelled if it overruns; `kel status-line` runs on every bar redraw. One `jq` pass, one atomic write, and only call `refresh-client -S` when the rendered value actually changed. | ⚠ unguarded | nothing. `refresh-client` appears nowhere in the suite. |
@@ -198,7 +201,7 @@ still says focus suppression is untestable — it no longer has to be.
 Run it before every commit. It covers: cross-group name collisions, ambiguous
 `kill` resolution, rename scoping, legacy record migration, three consecutive
 restore cycles with snapshot integrity, worktree kill-safety, land state, the
-one network call and its off switch, and `kel top`'s rendering.
+one network call and its off switch, and the sidebar's frames.
 
 For anything involving hooks or the status line, drive it with a real tmux
 server and a synthetic JSON payload rather than reasoning about it — several
@@ -250,12 +253,13 @@ with nothing in kel to assert against. Re-breaking an `unguarded` one is silent.
   every split, for releases. Every `set-hook … run-shell` in `kel.conf` now
   ends `>/dev/null 2>&1`, and the suite checks it. Same family: an
   `if-shell` with an empty branch (`''`) is an error tmux shows the same way.
-- `[guarded]` **The suite must not load your tmux config.** `reset()` starts
+- `[unguarded]` **The suite must not load your tmux config.** `reset()` starts
   tmux with `-f /dev/null`, but a test that kills the server lets *kel* start
   the next one, which read `~/.tmux.conf` — kel's own hooks, running the
   installed kel against the suite's state. CI has no such file, so it only
   bit a dev box. A `tmux` shim on the suite's `PATH` adds `-f /dev/null` to
-  every call.
+  every call. That shim is the mechanism; no assertion checks a server the
+  suite started is free of `~/.tmux.conf`.
 - `[guarded]` **`grep -vx 1` on a column of flags matches empty lines and
   prints nothing.** A user pane's `@kel-sidebar` is empty, so
   `[ -n "$(… | grep -vx 1)" ]` read "no user panes" for every window and

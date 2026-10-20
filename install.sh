@@ -221,7 +221,7 @@ fi
 
 say "Claude Code statusLine -> $SETTINGS"
 # kel's statusLine reports this agent's context window / cost, and records them
-# so the tmux bar, `kel ls` and `kel top` can show them without interrupting
+# so the tmux bar, `kel ls` and the sidebar can show them without interrupting
 # the agent.  If you already had a statusLine, keep it and chain it after ours.
 PREV="$(jq -r '.statusLine.command // ""' "$SETTINGS")"
 PREV_FILE="$HOME/.claude/statusline-prev"

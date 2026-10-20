@@ -383,6 +383,24 @@ the `TodoWrite` design was stale, and the plan turned out to need no new hook.
 - *found on the way:* M5's `hook_edit` had real newlines inside its `printf`
   format — a quoting slip in its writing that happened to print the same
   thing; rewritten while the plan / edit split went in
+- *a cleanup (2026-10-20), from a three-way review:* the history since
+  `v0.9.0` had grown by adding code for every problem, so this one changed
+  and deleted instead. `kel top` went — the sidebar showed all it did (one
+  surface, invariant 6) — and with it the v0.9 per-repo session readers, in
+  bash and in Go. The sidebar's "has one" is asked of the panes, not a window
+  flag that could claim a dead one, and a window switch heals any that died
+  (backlog #41). Five real bugs, each with a test that fails on the old code:
+  a squash-merged PR read `behind` when the local branch was named otherwise
+  (matched by head commit now, and paged past 100); a hook wrote a live
+  agent's session id into a dead record that shared its reused window id;
+  restore's `--continue` resumed one directory's newest conversation into
+  every agent there; and a new window showed full width before its sidebar
+  arrived. Also found: `${force:+--force}` expands for `force=0` too, so every
+  kill passed `--force` to `git worktree remove`. kel's own check refused dirty
+  work first, so nothing was lost, but git's refusal — the second guard behind
+  invariant 1 — was off. One git read per directory
+  instead of up to three; one helper each for a window's panes, a worktree's
+  report and its removal.
 
 **Why this order:** M0–M1 are data and plumbing you can mostly ignore; M2 is
 where the tmux-hook risk lives, so it is proven before any UI depends on it;

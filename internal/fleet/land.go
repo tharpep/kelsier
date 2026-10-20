@@ -88,20 +88,27 @@ func repoSlug(dir string) string {
 	return r
 }
 
+// A PR is matched by its head commit, not its branch name. The local branch
+// need not be called what the PR's head is: `gh pr checkout` and Claude Code's
+// worktrees name it `pr-147` or `worktree-*`, so a squash-merged PR read as
+// "behind its base" — the squash puts one commit on base the branch lacks
+// (2026-10-20). A commit made after the merge is new work, and stops matching.
 type prEntry struct {
-	Branch string `json:"branch"`
+	SHA    string `json:"sha"`
 	Merged bool   `json:"merged"`
 	State  string `json:"state"`
 }
 
-func prCacheDir() string { return filepath.Join(stateDir(), "pr-cache") }
+func prCacheDir() string { return filepath.Join(StateDir(), "pr-cache") }
 
 func prCacheFile(dir string) string {
 	slug := repoSlug(dir)
 	if slug == "" {
 		return ""
 	}
-	return filepath.Join(prCacheDir(), strings.ReplaceAll(slug, "/", "__")+".json")
+	// .sha.json: the head-commit cache. The branch-keyed one it replaced would
+	// parse with no sha, match nothing, and read "none" until it expired.
+	return filepath.Join(prCacheDir(), strings.ReplaceAll(slug, "/", "__")+".sha.json")
 }
 
 func prTTL() int64 {
@@ -140,11 +147,24 @@ func prRefresh(dir string) {
 	if _, err := exec.LookPath("gh"); err != nil {
 		return
 	}
-	out, err := exec.Command("gh", "api",
+	// --paginate: one page of 100 cut a real repo's 149 PRs short, so an older
+	// one read "none". The filter runs per page and --slurp refuses --jq, so
+	// it prints one PR per line and they are collected here.
+	out, err := exec.Command("gh", "api", "--paginate",
 		"repos/"+repoSlug(dir)+"/pulls?state=all&per_page=100",
-		"--jq", `[.[] | {branch: .head.ref, merged: (.merged_at != null), state: .state}]`,
+		"--jq", `.[] | {sha: .head.sha, merged: (.merged_at != null), state: .state}`,
 	).Output()
-	if err != nil || len(out) == 0 {
+	if err != nil {
+		return
+	}
+	prs := []prEntry{}
+	for _, l := range strings.Split(string(out), "\n") {
+		var p prEntry
+		if json.Unmarshal([]byte(l), &p) == nil && p.SHA != "" {
+			prs = append(prs, p)
+		}
+	}
+	if out, err = json.Marshal(prs); err != nil {
 		return
 	}
 	_ = os.MkdirAll(prCacheDir(), 0o755)
@@ -156,11 +176,12 @@ func prRefresh(dir string) {
 // prStateOf returns merged | open | none | unknown | na.
 // "na" is not "unknown": a repo with no GitHub remote has no PR question, so it
 // should read clean rather than as a failure to find out.
-func prStateOf(dir, branch string, wantPR bool) string {
+func prStateOf(dir string, wantPR bool) string {
 	if repoSlug(dir) == "" {
 		return "na"
 	}
-	if branch == "" || branch == "-" {
+	head, ok := git(dir, "rev-parse", "HEAD")
+	if !ok || head == "" {
 		return "unknown"
 	}
 	if wantPR {
@@ -177,7 +198,7 @@ func prStateOf(dir, branch string, wantPR bool) string {
 	}
 	found, merged, open := false, false, false
 	for _, p := range prs {
-		if p.Branch != branch {
+		if p.SHA != head {
 			continue
 		}
 		found = true
@@ -199,29 +220,52 @@ func prStateOf(dir, branch string, wantPR bool) string {
 	return "none"
 }
 
-func landOf(dir, branch string, wantPR bool) *Land {
-	num := func(n float64) *float64 { return &n }
+// localState is what the working tree alone can say: is it a repo, how many
+// files are uncommitted, how many commits are on no remote. One read serves
+// the dirty count, the two land codes that need no PR, and the privacy
+// check that keeps such work from ever reaching gh — three readers that each
+// ran their own `git status` before.
+type localState struct {
+	repo            bool
+	dirty, unpushed float64
+}
+
+func local(dir string) localState {
 	if dir == "" {
-		return &Land{Code: "clean"}
+		return localState{}
 	}
 	if _, ok := git(dir, "rev-parse", "--git-dir"); !ok {
+		return localState{}
+	}
+	ls := localState{repo: true}
+	if out, ok := git(dir, "status", "--porcelain"); ok {
+		ls.dirty = countLines(out)
+	}
+	if ls.dirty == 0 && hasRemote(dir) {
+		if out, ok := git(dir, "log", "--oneline", "HEAD", "--not", "--remotes"); ok {
+			ls.unpushed = countLines(out)
+		}
+	}
+	return ls
+}
+
+func landOf(dir, branch string, wantPR bool) *Land {
+	return landFrom(dir, branch, wantPR, local(dir))
+}
+
+func landFrom(dir, branch string, wantPR bool, ls localState) *Land {
+	num := func(n float64) *float64 { return &n }
+	if !ls.repo {
 		return &Land{Code: "clean"}
 	}
 	if branch == "" || branch == "-" {
 		branch, _ = git(dir, "rev-parse", "--abbrev-ref", "HEAD")
 	}
-
-	if out, ok := git(dir, "status", "--porcelain"); ok {
-		if n := countLines(out); n > 0 {
-			return &Land{Code: "dirty", N: num(n)}
-		}
+	if ls.dirty > 0 {
+		return &Land{Code: "dirty", N: num(ls.dirty)}
 	}
-	if hasRemote(dir) {
-		if out, ok := git(dir, "log", "--oneline", "HEAD", "--not", "--remotes"); ok {
-			if n := countLines(out); n > 0 {
-				return &Land{Code: "unpushed", N: num(n)}
-			}
-		}
+	if ls.unpushed > 0 {
+		return &Land{Code: "unpushed", N: num(ls.unpushed)}
 	}
 
 	base := baseRef(dir)
@@ -235,7 +279,7 @@ func landOf(dir, branch string, wantPR bool) *Land {
 		}
 	}
 
-	pr := prStateOf(dir, branch, wantPR)
+	pr := prStateOf(dir, wantPR)
 	switch pr {
 	case "merged":
 		return &Land{Code: "merged"}
@@ -272,22 +316,9 @@ func landOf(dir, branch string, wantPR bool) *Land {
 	return &Land{Code: "clean"}
 }
 
-// landMap classifies each distinct worktree once, concurrently.
-// localAnswer reports whether landOf will stop at dirty or unpushed — the two
-// codes that need no PR state — mirroring its first two checks.
-func localAnswer(dir string) bool {
-	if out, ok := git(dir, "status", "--porcelain"); ok && countLines(out) > 0 {
-		return true
-	}
-	if hasRemote(dir) {
-		if out, ok := git(dir, "log", "--oneline", "HEAD", "--not", "--remotes"); ok && countLines(out) > 0 {
-			return true
-		}
-	}
-	return false
-}
-
-func landMap(records []record, wantPR bool) map[string]*Land {
+// landMap classifies each distinct worktree once, concurrently, and returns
+// what the working tree said of each so the dirty count need not ask again.
+func landMap(records []record, wantPR bool) (map[string]*Land, map[string]localState) {
 	type job struct{ cwd, branch string }
 	seen := map[string]job{}
 	for _, r := range records {
@@ -310,10 +341,15 @@ func landMap(records []record, wantPR bool) map[string]*Land {
 	// alone (dirty / unpushed outrank every PR state), so it must not be the
 	// reason kel talks to github.com — spec.md promises that, and only the
 	// bash reader used to keep it.
+	locals := map[string]localState{}
+	for _, j := range seen {
+		locals[j.cwd] = local(j.cwd)
+	}
 	if wantPR {
 		done := map[string]bool{}
 		for _, j := range seen {
-			if s := repoSlug(j.cwd); s != "" && !done[s] && !localAnswer(j.cwd) {
+			ls := locals[j.cwd]
+			if s := repoSlug(j.cwd); s != "" && !done[s] && ls.dirty == 0 && ls.unpushed == 0 {
 				done[s] = true
 				prRefresh(j.cwd)
 			}
@@ -326,12 +362,12 @@ func landMap(records []record, wantPR bool) map[string]*Land {
 		wg.Add(1)
 		go func(j job) {
 			defer wg.Done()
-			l := landOf(j.cwd, j.branch, false) // cache is already warm
+			l := landFrom(j.cwd, j.branch, false, locals[j.cwd]) // cache is already warm
 			mu.Lock()
 			out[j.cwd] = l
 			mu.Unlock()
 		}(j)
 	}
 	wg.Wait()
-	return out
+	return out, locals
 }

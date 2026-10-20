@@ -104,10 +104,7 @@ func claudeSessions(sd string) (sessions []ClaudeSession, ok bool) {
 		}
 	}
 	if b, err := json.Marshal(c); err == nil {
-		tmp := path + ".tmp" + strconv.Itoa(os.Getpid())
-		if os.WriteFile(tmp, b, 0o600) == nil {
-			_ = os.Rename(tmp, path)
-		}
+		WriteAtomic(path, b)
 	}
 	return c.Sessions, !c.Failed
 }
@@ -197,16 +194,7 @@ func withClaude(doc *Doc, sd string, panes []Pane) {
 		if !ok {
 			continue
 		}
-		a := &doc.Agents[i]
-		a.Claude = &ClaudeView{Status: s.Status, SessionID: s.SessionID, Name: s.Name}
-		if a.State != nil {
-			switch {
-			case *a.State == "working" && s.Status == "idle":
-				a.State, a.Unseen = sp("idle"), false
-			case (*a.State == "idle" || *a.State == "done") && s.Status == "busy":
-				a.State, a.Unseen = sp("working"), false
-			}
-		}
+		correct(&doc.Agents[i], ClaudeView{Status: s.Status, SessionID: s.SessionID, Name: s.Name})
 	}
 	// A background session with a top agent's name is that agent: Claude Code
 	// can move a session to the background while its window goes on showing
@@ -226,16 +214,7 @@ func withClaude(doc *Doc, sd string, panes []Pane) {
 			kept = append(kept, b)
 			continue
 		}
-		a := &doc.Agents[i]
-		a.Claude = &ClaudeView{Status: b.Status, SessionID: b.SessionID, Name: b.Name}
-		if a.State != nil {
-			switch {
-			case *a.State == "working" && b.Status == "idle":
-				a.State, a.Unseen = sp("idle"), false
-			case (*a.State == "idle" || *a.State == "done") && b.Status == "busy":
-				a.State, a.Unseen = sp("working"), false
-			}
-		}
+		correct(&doc.Agents[i], ClaudeView{Status: b.Status, SessionID: b.SessionID, Name: b.Name})
 	}
 	bg = kept
 	pos := gitPositions(roots)
@@ -247,6 +226,22 @@ func withClaude(doc *Doc, sd string, panes []Pane) {
 		}
 	}
 	doc.Background = &bg
+}
+
+// correct gives an agent Claude Code's own account of it, which wins where the
+// hook state is stale: a turn that ended without a Stop, a resumed session
+// that never fired one.
+func correct(a *Agent, v ClaudeView) {
+	a.Claude = &v
+	if a.State == nil {
+		return
+	}
+	switch {
+	case *a.State == "working" && v.Status == "idle":
+		a.State, a.Unseen = sp("idle"), false
+	case (*a.State == "idle" || *a.State == "done") && v.Status == "busy":
+		a.State, a.Unseen = sp("working"), false
+	}
 }
 
 // Subagent is one row of an agent's subagent panel (Task-tool helpers).
@@ -293,13 +288,8 @@ func worktreeRepo(dir string) string {
 	if !ok || !linked {
 		return repoGroup(dir)
 	}
-	b, err := os.ReadFile(filepath.Join(root, ".git"))
-	if err != nil {
-		return repoGroup(dir)
-	}
-	gd := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(string(b)), "gitdir:"))
-	if i := strings.Index(gd, string(filepath.Separator)+".git"+string(filepath.Separator)+"worktrees"+string(filepath.Separator)); i > 0 {
-		return filepath.Base(gd[:i])
+	if m := mainRoot(root); m != root {
+		return filepath.Base(m)
 	}
 	return repoGroup(dir)
 }

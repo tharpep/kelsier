@@ -45,22 +45,27 @@ inherits them:
 
 ## Open
 
-### 41. A window is sometimes left with no sidebar pane  ·  `[defect]`
+### 41. A sidebar pane dies just after it is made  ·  `[defect]`
 
-`@kel-has-sidebar` is set in the same tmux command list as the `split-window`
-that adds the pane, so the two cannot interleave. Three times on the author's
-Mac the flag ended up set with no pane behind it — once on `kel shell`, which
-read as "my shells vanished" because the agent pane was simply full width.
-Why the split does not happen is **not known**. Two things went in instead of
-a guess: `sidebar_ensure` drops a flag no pane backs, and `_sidebar wake` (every
-window switch) heals any window missing one, so the state is recoverable
-rather than permanent. `sidebar-fail.log` records the next real occurrence.
+What was believed first was wrong. The window flag `@kel-has-sidebar` was set
+in the same tmux command list as the split that adds the pane, and a window
+was found with the flag set and no pane — read as a split that failed. The
+log the next fix added showed otherwise: four times on 2026-10-20 the split
+**succeeded**, tmux reported no error, and the pane was gone a moment later.
+`kel-top --sidebar` starts and exits. Two of the four were the moment the
+author pressed `b` to restore. A restore of seven windows driven the same way
+on an isolated server, with kel.conf's hooks live, kept every sidebar, so the
+cause is still not known.
 
-The gate: a log that names a cause. Fix that cause, then delete both capture
-blocks in `sidebar_ensure` — diagnostics for a fixed bug are dead code. If the
-log stays empty through daily use, the heal is the whole fix and the capture
-still goes.
+What went in, by changing code rather than adding to it: the flag is gone —
+"has a sidebar" is asked of the panes (`#{P:…}`, in tmux since 3.0), so
+nothing can claim one that died; `_sidebar heal` (every window switch) gives
+one back; and the pane's own stderr goes to `sidebar-fail.log`, the only
+witness a process that exits leaves.
 
+The gate: a line in `sidebar-fail.log` that names a cause. Fix that, then
+delete the `2>>` redirect. If the log stays empty through daily use, the heal
+is the whole fix and the redirect still goes.
 ### 22. `resolve_agent` silently drops a middle path segment  ·  `[defect]`
 
 `resolve_agent` splits on the first and last `/` (`${want%%/*}`,

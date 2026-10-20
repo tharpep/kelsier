@@ -15,15 +15,13 @@ import (
 // then was a PreToolUse hook on every tool, which would put kel on the
 // agent's hottest path (invariant 5). Claude Code already writes every call
 // to the session's transcript, so this reads the tail of that file instead —
-// one stat-and-read of at most doingTail bytes per working agent, on the
+// one stat and a read of a few tail sizes per working agent, on the
 // sidebar's path only, and nothing at all on the agent's side. Nothing of it
 // is kept: the words live in the fleet document and are gone with it.
 
 // Claude Code ends each turn with a request record of 100 KB or more, after
 // the assistant's own lines, so the tail widens until one is found.
 var doingTails = []int64{64 << 10, 512 << 10, 2 << 20}
-
-const doingTail = 64 << 10
 
 // transcriptOf finds a session's transcript: Claude Code keeps it as
 // projects/<slug of the directory it started in>/<session id>.jsonl, and the

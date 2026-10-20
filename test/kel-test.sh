@@ -338,151 +338,6 @@ ok "  ...as does a broken one"           '! KEL_FLEET_BIN="$WORK/stale" "$KEL" l
 ok "  ...and ls prints no empty table"   '[[ "$(KEL_FLEET_BIN=/nonexistent "$KEL" ls 2>/dev/null)" != *NAME* ]]'
 ok "the bar names the problem too"       '[[ "$(TMUX=x KEL_FLEET_BIN=/nonexistent "$KEL" status-line)" == *"kel-fleet missing"* ]]'
 
-section "kel top renders and sorts (#2)"
-GOBIN_TOP="$KEL_TOP_BIN"
-{
-  reset
-  NEW api-gw idler
-  NEW api-gw blocked
-  NEW coppermind busy
-  hook "$(pane_of api-gw blocked)"   Notification permission_prompt "needs Bash"
-  hook "$(pane_of coppermind busy)"  UserPromptSubmit
-  printf '%s' '{"context_window":{"used_percentage":93,"context_window_size":200000,"total_input_tokens":9},"cost":{"total_cost_usd":18.7}}' \
-    | TMUX_PANE="$(pane_of coppermind busy)" "$KEL" statusline >/dev/null
-  frame() { COLUMNS="${1:-120}" "$GOBIN_TOP" --once 2>/dev/null | sed 's/\x1b\[[0-9;]*m//g'; }
-  # Widest line in CHARACTERS. Not `wc -L`: GNU counts display columns, macOS
-  # counts bytes, so the multibyte › and … made every frame look too wide on
-  # the Mac runner. perl -CS decodes UTF-8 and is on both.
-  maxw() { perl -CS -ne 'chomp; $m = length if length > $m; END { print $m + 0 }'; }
-  ok "renders a header"                    '[[ "$(frame)" == *"GROUP"*"AGENT"*"STATE"* ]]'
-  ok "lists every agent"                   '[ "$(frame | grep -cE "^.? *(api-gw|coppermind) ")" = 3 ]'
-  ok "triage puts waiting first"           '[[ "$(frame | sed -n 2p)" == *blocked*waiting* ]]'
-  ok "  ...working above idle"             '[ "$(frame | grep -n busy | cut -d: -f1)" -lt "$(frame | grep -n idler | cut -d: -f1)" ]'
-  ok "shows context and cost"              '[[ "$(frame)" == *"93%"* && "$(frame)" == *"18.70"* ]]'
-  ok "draws the key hints"                 '[[ "$(frame)" == *"down"* && "$(frame)" == *"q/esc/ctrl+c quit"* ]]'
-  # Phase 2 / #27: these six were handled and appeared in no hint line.
-  # help.Model renders from keys.go's bindings now, so they come back for
-  # free -- checked individually rather than trusted on the strength of that
-  # claim.
-  ok "  ...g and G, previously undocumented"     '[[ "$(frame)" == *"g top"* && "$(frame)" == *"G bottom"* ]]'
-  ok "  ...r, previously undocumented"           '[[ "$(frame)" == *"r reload"* ]]'
-  ok "  ...esc and ctrl+c, previously undocumented" '[[ "$(frame)" == *"q/esc/ctrl+c quit"* ]]'
-  # backspace only has meaning in filter mode, which --once cannot reach (it
-  # renders one frame with no keys processed) -- checked below instead, in
-  # the interactive tmux pane already needed for the enter no-op test.
-  ok "80 cols still fits the table"        '[ "$(frame 80 | head -1 | maxw)" -le 80 ]'
-  ok "50 cols drops columns, not rows"     '[ "$(frame 50 | grep -cE "^.? *(api-gw|coppermind) ")" = 3 ]'
-  ok "  ...and stays within 50"            '[ "$(frame 50 | maxw)" -le 50 ]'
-  ok "no trailing whitespace on any row"   '! frame | grep -q " $"'
-
-  # #4/§4a: LAND outranks CTX and $, and the show/hide gates are derived from
-  # the column widths rather than hand-copied -- which is exactly how the
-  # previous numbers (58/66/74 against a 76-column budget) drifted. Proven by
-  # rendering, not by re-deriving the arithmetic a second time here.
-  widths_ok() {
-    local w got
-    for w in 50 55 58 59 60 64 65 66 67 68 74 75 76 77 80 85 90; do
-      got="$(frame "$w" | maxw)"
-      if [ "$got" -gt "$w" ]; then
-        echo "    overflow: w=$w rendered $got" >&2
-        return 1
-      fi
-    done
-    return 0
-  }
-  ok "width sweep 50-90 never overflows the table" 'widths_ok'
-  ok "  ...and LAND shows before CTX and \$ as it widens" \
-    '[[ "$(frame 60 | head -1)" == *LAND* && "$(frame 60 | head -1)" != *CTX* ]]'
-
-  # #6/#26: header and footer drop before the body is ever asked below one
-  # row. LINES drives this the same way COLUMNS already drives the width
-  # sweep above -- there is no real terminal in this suite either.
-  heights_ok() {
-    local h out n
-    for h in 1 2 3 4; do
-      out="$(COLUMNS=100 LINES="$h" "$GOBIN_TOP" --once 2>/dev/null)"
-      n="$(printf '%s\n' "$out" | awk 'END{print NR}')"
-      if [ "$n" -gt "$h" ]; then
-        echo "    overflow: h=$h rendered $n lines" >&2
-        return 1
-      fi
-    done
-    return 0
-  }
-  ok "height sweep 1-4 never overflows the terminal" 'heights_ok'
-
-  # #3/#27, the bidirectional guard: every key Update() matches is one of
-  # keys.go's bindings (dumped here), and every binding in the dump is one
-  # Update() actually matches -- checked by hand against this literal list
-  # rather than against keys.go itself, so a change to one side without the
-  # other is a real diff, not a tautology.
-  EXPECTED_HELP_KEYS="$(sort <<'EOF'
-normal	k
-normal	up
-normal	j
-normal	down
-normal	g
-normal	home
-normal	G
-normal	end
-normal	s
-normal	/
-normal	r
-normal	enter
-normal	?
-normal	q
-normal	esc
-normal	ctrl+c
-filter	enter
-filter	esc
-filter	backspace
-filter	ctrl+c
-EOF
-)"
-  ACTUAL_HELP_KEYS="$("$GOBIN_TOP" --dump-help-keys | awk -F'\t' '{print $1"\t"$2}' | sort)"
-  ok "the bidirectional help guard (every handled key <-> every documented one)" \
-    '[ "$EXPECTED_HELP_KEYS" = "$ACTUAL_HELP_KEYS" ]'
-  # prove it can fail: drop one binding from the actual side and confirm the
-  # comparison above would have caught it.
-  ACTUAL_MINUS_G="$(printf '%s\n' "$ACTUAL_HELP_KEYS" | grep -v '^normal	g$')"
-  ok "  ...and a missing key would be caught" '[ "$EXPECTED_HELP_KEYS" != "$ACTUAL_MINUS_G" ]'
-
-  # #3: enter now matches a case in normal mode -- an explicit no-op, not a
-  # keypress with no effect and no case to find it in (Phase 2's "must not:
-  # no actions yet" is the reason it stays a no-op). Driven through a real
-  # tmux pane rather than reasoned about, per CLAUDE.md's testing guidance.
-  TWIN="$(tmux new-window -d -P -F '#{window_id}' -t '=keltest:' -n kt "COLUMNS=100 LINES=24 $GOBIN_TOP")"
-  wait_until "tmux capture-pane -p -t '$TWIN' 2>/dev/null | grep -q GROUP"
-  # The cursor marker exists from the very first frame (on row 0), so waiting
-  # for it to merely be PRESENT races the keypress: it can be satisfied by
-  # the frame rendered before "j" was even processed. Wait for it to move
-  # OFF that first row instead -- a positive, unambiguous signal that "j" has
-  # actually been applied -- before capturing the position enter must not
-  # then change.
-  # Line NUMBER only: the cursor row also carries the FOR column, which ticks
-  # every second -- comparing the whole line made this fail whenever a second
-  # boundary fell between the two captures.
-  curline() { tmux capture-pane -p -t "$TWIN" 2>/dev/null | grep -n '›' | cut -d: -f1; }
-  CUR0="$(curline)"
-  tmux send-keys -t "$TWIN" j
-  wait_until '[ "$(curline)" != "$CUR0" ]'
-  CUR1="$(curline)"
-  tmux send-keys -t "$TWIN" Enter
-  sleep 0.3   # nothing to wait FOR: asserting silence, same idiom as #1's notify test
-  CUR2="$(curline)"
-  ok "enter is a genuine no-op in normal mode (#3)" '[ "$CUR1" = "$CUR2" ]'
-  ok "  ...and the program is still running, not crashed" \
-    '[ "$(tmux list-panes -t "$TWIN" -F "#{pane_current_command}" 2>/dev/null)" != bash ]'
-  # backspace was the sixth undocumented key (#27) and only means anything in
-  # filter mode, which --once cannot reach -- this is the one check in this
-  # section that needs the live pane rather than a rendered frame.
-  tmux send-keys -t "$TWIN" /
-  wait_until "tmux capture-pane -p -t '$TWIN' 2>/dev/null | grep -q backspace"
-  ok "backspace, previously undocumented, in filter mode's hints" \
-    '[[ "$(tmux capture-pane -p -t "$TWIN" 2>/dev/null)" == *backspace* ]]'
-  tmux kill-window -t "$TWIN" 2>/dev/null
-}
-
 section "land: one verb per row, degrading without gh (#6)"
 reset
 NEW api-gw solo
@@ -709,9 +564,10 @@ ok "_fleet reports both groups"          '[ "$("$KEL" _fleet | jq -r "[.agents[]
 tmux new-window -d -t '=keltest:' -n handmade -c "$WORK/repos/coppermind"
 wait_until '[ "$(wins)" = 3 ]'
 ok "a hand-made window gets its repo's group" '[ "$("$KEL" _fleet | jq -r ".agents[] | select(.name==\"handmade\") | .group")" = coppermind ]'
-# the upgrade path: a v0.9 server still holds a per-repo session
+# a session that is not kel's is not read: v0.9's `kel/<group>` ones included,
+# whose readers went once every machine ran v0.10
 tmux new-session -d -s 'keltest/legacy' -n old -c "$WORK"
-ok "a v0.9 per-repo session still reads, with its group" '[ "$("$KEL" _fleet | jq -r ".agents[] | select(.name==\"old\") | .group")" = legacy ]'
+ok "a session that is not kel's is not read" '[ -z "$("$KEL" _fleet | jq -r ".agents[] | select(.name==\"old\") | .name")" ]'
 tmux kill-session -t '=keltest/legacy'
 # the bar is the workspace footer (v0.10 M4, spec.md §7b): quota, the
 # waiting alarm, live cost — and where you stand only while the sidebar is off
@@ -723,6 +579,21 @@ DW="$(window_of api-gw docs)"
 printf 'waiting %s\n' "$(( $(date +%s) - 400 ))" > "$STATE/$DW.state"
 ok "one waiting agent, and for how long"        '[[ "$(bar)" == *"1 waiting 6m"* ]]'
 ok "  ...a click target that jumps there"        '[[ "$(TMUX="$TMUX_TMPDIR/tmux-$(id -u)/default,$(tmux display-message -p "#{pid}"),0" "$KEL" status-line)" == *"#[range=user|jump]"*"1 waiting"*"#[norange]"* ]]'
+# kel jump (prefix `): the next waiting agent after the window you are in,
+# wrapping round — read from the fleet document, so the same dead check and
+# state the sidebar shows
+CW="$(window_of coppermind docs)"
+printf 'waiting %s\n' "$(( $(date +%s) - 60 ))" > "$STATE/$CW.state"
+hold_client 20
+tmux select-window -t "$DW"
+TMUX="$TMUX_TMPDIR/tmux-$(id -u)/default,$(tmux display-message -p '#{pid}'),0" "$KEL" jump
+cur="$(tmux list-windows -t '=keltest' -F '#{window_active} #{window_id}' | awk '$1==1 {print $2}')"
+ok "kel jump goes to the next waiting agent"    '[ "$cur" = "$CW" ]'
+TMUX="$TMUX_TMPDIR/tmux-$(id -u)/default,$(tmux display-message -p '#{pid}'),0" "$KEL" jump
+cur="$(tmux list-windows -t '=keltest' -F '#{window_active} #{window_id}' | awk '$1==1 {print $2}')"
+ok "  ...and wraps round to the first"          '[ "$cur" = "$DW" ]'
+release_client
+rm -f "$STATE/$CW.state"
 now=$(date +%s)
 printf '58 %s 41 %s 12 0 %s\n' "$((now + 5400))" "$((now + 300000))" "$now" > "$STATE/quota"
 rawbar() { TMUX="$TMUX_TMPDIR/tmux-$(id -u)/default,$(tmux display-message -p '#{pid}'),0" "$KEL" status-line; }
@@ -756,7 +627,7 @@ out="$( (cd "$WORK" && "$KEL" < /dev/null) 2>&1 )"; rc=$?
 ok "kel opens without prompting"         '[ "$rc" = 0 ] && [[ "$out" != *"[Y/n"* ]] && [ "$(grps)" = 1 ]'
 ok "  ...and says how to get it back"    '[[ "$out" == *"previous workspace: 2 window"*"kel restore"* ]]'
 ok "  ...having moved the old snapshot to the archive" '[ "$(ls "$STATE/snapshots" | grep -c .)" = 1 ] && [ ! -e "$STATE/snapshot.json" ]'
-ok "  ...and the sidebar offers it (R) until used" '[ -f "$STATE/restore-offer" ]'
+ok "  ...and the sidebar offers it (b) until used" '[ -f "$STATE/restore-offer" ]'
 "$KEL" snapshot >/dev/null 2>&1          # what the tmux hooks do the moment anything changes
 ok "  ...where the fresh start's own snapshot cannot overwrite it" \
   '[ "$(jq -c "[.windows[] | [.group, .name, (.panes | length)]]" "$STATE/snapshots/"*.json)" = "$want" ]'
@@ -769,10 +640,34 @@ ok "kel restore brings it back"          '[ -n "$(window_of api-gw auth-fix)" ] 
 ok "  ...and the offer is gone"           '[ ! -f "$STATE/restore-offer" ]'
 ok "  ...splits included"                '[ "$(tmux list-panes -t "$(window_of api-gw auth-fix)" -F x | grep -c x)" = 2 ]'
 ok "  ...into the one session"           '[ "$(grps)" = 1 ]'
-ok "  ...conversations resumed by default" 'agent_up "$(window_of coppermind sazed)"'
+ok "  ...the agents running again"         'agent_up "$(window_of coppermind sazed)"'
 ok "  ...and the archive entry is used up" '[ -z "$(ls "$STATE/snapshots" 2>/dev/null)" ]'
 ok "  ...and the untouched fresh-start shell is closed" '[ "$(wins)" = 2 ]'
 ok "  ...and no stale lock is left"      '[ ! -e "$STATE/.restoring" ]'
+
+# What restore actually types.  The check above could not see it: `sleep 9999
+# --continue || sleep 9999` starts a fresh sleep whatever the flag does, so it
+# passed with nothing resumed.  An agent that records its arguments can.
+# Two agents in ONE directory: `--continue` resumed the same conversation in
+# both, so a record with no session id must resume by its name instead.
+printf '#!/bin/sh\necho "$*" >> "%s/argv.$KEL_ARGV"\nexec sleep 9999\n' "$WORK" > "$WORK/argv-agent"; chmod +x "$WORK/argv-agent"
+reset
+K api-gw new twin1 --agent "KEL_ARGV=twin1 $WORK/argv-agent --name twin1" >/dev/null 2>&1
+K api-gw new twin2 --agent "KEL_ARGV=twin2 $WORK/argv-agent --name twin2" >/dev/null 2>&1
+agent_up "$(window_of api-gw twin1)"; agent_up "$(window_of api-gw twin2)"
+hook "$(pane_of api-gw twin1)" SessionStart
+ok "SessionStart records the agent's Claude session" '[ "$(jq -r .claude_session "$SESSIONS/api-gw/twin1.json")" = s ]'
+ok "  ...on its own record only"         '[ "$(jq -r ".claude_session // empty" "$SESSIONS/api-gw/twin2.json")" = "" ]'
+"$KEL" snapshot >/dev/null 2>&1
+rm -f "$WORK"/argv.*
+tmux kill-server 2>/dev/null; sleep 0.6
+(cd "$WORK" && "$KEL" < /dev/null) >/dev/null 2>&1
+wait_until '[ -n "$(tmux capture-pane -p -t "$(tmux list-windows -t =keltest -F "#{window_id}" | head -1)" | grep .)" ]' 50
+"$KEL" restore >/dev/null 2>&1
+wait_until '[ -s "$WORK/argv.twin1" ] && [ -s "$WORK/argv.twin2" ]'
+ok "restore resumes a session it recorded, by id"   'grep -q -- "--resume s" "$WORK/argv.twin1"'
+ok "  ...and one it did not, by its name"           'grep -q -- "--resume twin2" "$WORK/argv.twin2"'
+ok "  ...never --continue, which takes the directory's newest" '! grep -q -- --continue "$WORK"/argv.*'
 
 # a fresh-start shell you actually used is yours — restore must leave it
 "$KEL" snapshot >/dev/null 2>&1
@@ -878,27 +773,28 @@ HW="$(tmux new-window -d -P -F '#{window_id}' -t '=keltest:' -c "$WORK/repos/api
 ok "a hand-made window gets one (the hook's command)" '[ "$(sbcount "$HW")" = 1 ]'
 for i in 1 2 3 4 5 6 7 8 9 10; do "$KEL" _sidebar ensure "$HW" & done; wait
 ok "  ...and ten racing ensures still leave one"  '[ "$(sbcount "$HW")" = 1 ]'
-# @kel-has-sidebar is set in the same tmux command list as the split, so a
-# split that fails leaves the flag claiming a pane that is not there and no
-# later ensure would add one.  Seen twice on a real machine: a first window
-# whose sidebar never appeared and could not be recovered without clearing
-# the flag by hand.
+# A sidebar that died: the test for "has one" is the pane itself, so nothing
+# is left claiming one.  ensure adds it back; heal (every window switch) does
+# for every kel window, and only once.
 tmux kill-pane -t "$(tmux list-panes -t "$HW" -F '#{@kel-sidebar} #{pane_id}' | awk '$1==1 {print $2}')"
-ok "a flag with no sidebar pane is a lie"         '[ "$(sbcount "$HW")" = 0 ] && [ "$(tmux show-options -wv -t "$HW" @kel-has-sidebar)" = 1 ]'
 "$KEL" _sidebar ensure "$HW"
-wait_until '[ "$(sbcount "$HW")" = 1 ]'
-ok "  ...and ensure heals it"                     '[ "$(sbcount "$HW")" = 1 ]'
 wait_until "tmux list-panes -t $HW -F '#{@kel-sidebar} #{pane_current_command}' | grep -qx '1 kel-top'"
-# the heal must not re-open the double-add race: ten ensures at one window
-# must still agree on exactly one sidebar
+ok "a window whose sidebar died gets it back"     '[ "$(sbcount "$HW")" = 1 ]'
 for i in 1 2 3 4 5 6 7 8 9 10; do "$KEL" _sidebar ensure "$HW" & done; wait
+ok "  ...and ten racing ensures still leave one"  '[ "$(sbcount "$HW")" = 1 ]'
+tmux kill-pane -t "$(tmux list-panes -t "$HW" -F '#{@kel-sidebar} #{pane_id}' | awk '$1==1 {print $2}')"
+"$KEL" _sidebar heal; "$KEL" _sidebar heal
 wait_until "tmux list-panes -t $HW -F '#{@kel-sidebar} #{pane_current_command}' | grep -qx '1 kel-top'"
-ok "  ...and ten more ensures still leave one"    '[ "$(sbcount "$HW")" = 1 ]'
-# Not asserted: the heal with no sidebar pane present, and `wake` healing one.
-# Both are verified by hand on a real workspace and neither could be driven
-# here without breaking a later test -- killing HW's sidebar empties the
-# window, the pane-exited hook reaps it, and every assertion after reads
-# "can't find pane".  backlog #41 holds this.
+ok "  ...a window switch heals it, once"          '[ "$(sbcount "$HW")" = 1 ]'
+ok "  ...and kel.conf heals on a window switch"   'grep -q "session-window-changed.*kel _sidebar heal" "$HERE/../tmux/kel.conf"'
+# a sidebar that dies says why: tmux reports nothing about a pane whose
+# process exits, so its stderr is the only witness (backlog #41)
+printf '#!/bin/sh\necho "kel-top: probe crash" >&2\nexit 1\n' > "$WORK/kel-top-crash"; chmod +x "$WORK/kel-top-crash"
+CW="$(tmux new-window -d -P -F '#{window_id}' -t '=keltest:' -c "$WORK/repos/api-gw" 'sleep 9999')"
+KEL_TOP_BIN="$WORK/kel-top-crash" "$KEL" _sidebar ensure "$CW"
+wait_until 'grep -q "probe crash" "$STATE/sidebar-fail.log" 2>/dev/null'
+ok "a sidebar that dies leaves its error in sidebar-fail.log" 'grep -q "probe crash" "$STATE/sidebar-fail.log"'
+tmux kill-window -t "$CW" 2>/dev/null
 OW="$(tmux new-session -d -P -F '#{window_id}' -s notkel)"
 "$KEL" _sidebar ensure "$OW"
 ok "a window outside kel is left alone"           '[ "$(sbcount "$OW")" = 0 ]'
@@ -1384,6 +1280,19 @@ ok "a dirty worktree is refused"        '[[ "$out" == *refusing* ]]'
 ok "  ...and names the file at risk"    '[[ "$out" == *scratch.txt* ]]'
 ok "  ...and the window survives"       '[ "$(wins)" = 1 ]'
 ok "  ...and --force gets through"      '"$KEL" kill api-gw/wt -f >/dev/null 2>&1; [ "$(wins)" = 0 ]'
+# the other half of invariant 1: committed but on no remote.  Only a repo with
+# a remote can say "unpushed" — without one every commit would read that way.
+UR="$WORK/unpushed"; UO="$WORK/unpushed-origin.git"
+git init -q --bare -b main "$UO"
+git init -q -b main "$UR" && git -C "$UR" -c user.email=t@t -c user.name=t commit -q --allow-empty -m base
+git -C "$UR" remote add origin "$UO" && git -C "$UR" push -q origin main
+( cd "$UR" && "$KEL" new up -w --agent 'sleep 9999' >/dev/null 2>&1 )
+UWT="$(jq -r .cwd "$SESSIONS/unpushed/up.json" 2>/dev/null)"
+git -C "$UWT" -c user.email=t@t -c user.name=t commit -q --allow-empty -m "only here"
+out="$("$KEL" kill unpushed/up 2>&1)"
+ok "a worktree whose commits are on no remote is refused" '[[ "$out" == *refusing* ]] && [ -n "$(window_of unpushed up)" ]'
+ok "  ...naming the commit at risk"       '[[ "$out" == *"only here"* ]]'
+"$KEL" kill unpushed/up -f >/dev/null 2>&1
 
 # a worktree directory removed by hand (rm -rf, a file manager) BEFORE kill
 # used to leave git's own worktree record behind, permanently locking the
@@ -1628,10 +1537,10 @@ section "errors cannot be swallowed"
 # closes only on success, leaving a failure on screen. Counted, not matched
 # to line numbers.
 POPUP_EE=$(grep -c -- '-EE' "$HERE/../bin/kel")
-# three: kel top, kel config, and the sidebar's popup() (M5) — whose comment
+# two: kel config, and the sidebar's popup() (M5) — whose comment
 # names -EE again, so it is counted on the option line only
 POPUP_EE=$(grep -c -- '-EE -w\|-EE "' "$HERE/../bin/kel")
-ok "the top/config/sidebar popups use -EE" '[ "$POPUP_EE" = 3 ]'
+ok "the config/sidebar popups use -EE" '[ "$POPUP_EE" = 2 ]'
 POPUP_SINGLE_E=$(grep -cE '(^|[^E-])-E([^E]|$)' "$HERE/../bin/kel")
 ok "  ...and none uses a single -E"      '[ "$POPUP_SINGLE_E" = 0 ]'
 
@@ -1646,13 +1555,16 @@ ok "  ...and none uses a single -E"      '[ "$POPUP_SINGLE_E" = 0 ]'
 # (client-detached, after-split-window, pane-exited) stay fire-and-forget on
 # purpose either way — do not add this to them.
 CONF="$HERE/../tmux/kel.conf"
-# prefix k (`kel _prompt`) is excluded: it discards run-shell's output on
-# purpose and answers through its own message or popup, so view-mode never
-# opens on the pane you are in
-KELBINDS=$(grep -n '^bind.*run-shell -b .*local/bin/kel ' "$CONF" | grep -v -e '_prompt' -e '_click')
+# The bind this holds onto is prefix , (`kel rename`), which refuses a bad
+# name with die. prefix t (`kel top`) carried it until kel top went.
+KELBINDS=$(grep -n '^bind.*run-shell .*local/bin/kel rename' "$CONF")
 ok "kel.conf's foreground kel bind exists"             '[ "$(printf "%s\n" "$KELBINDS" | grep -c .)" = 1 ]'
 ok "  ...and surfaces run-shell's stderr"               '[ "$(printf "%s\n" "$KELBINDS" | grep -c "2>&1")" = 1 ]'
-ok "  ...while every hook discards its output"          '[ -z "$(grep "^set-hook" "$CONF" | grep "run-shell" | grep -v ">/dev/null 2>&1")" ]'
+# per kel COMMAND, not per line: a hook chains several (wake; heal; banner
+# seen), and a whole-line check passed as soon as any one was silenced
+HOOKCMDS="$(grep "^set-hook" "$CONF" | grep "run-shell" | sed "s/.*run-shell -b '//; s/'\"$//" | tr ';' '\n' | grep 'bin/kel')"
+ok "  ...while every hook discards its output"          '[ -n "$HOOKCMDS" ] && [ -z "$(printf "%s\n" "$HOOKCMDS" | grep -v ">/dev/null 2>&1")" ]'
+ok "  ...counted per command"                           'printf "%s\n" "$HOOKCMDS" | sed "1s/ >\/dev\/null 2>&1//" | grep -qv ">/dev/null 2>&1"'
 ok "  ...and this config actually sources under tmux"  \
   'tmux -S "$TMUX_TMPDIR/guard.sock" new-session -d -s guardtest 2>/dev/null
    rc=0; tmux -S "$TMUX_TMPDIR/guard.sock" source-file "$CONF" 2>/dev/null || rc=$?
@@ -1674,8 +1586,8 @@ else
   echo "  skip  (tmux $TV has run-shell -E; the guard only means something below 3.6)"
 fi
 # prove the stderr-redirect guard bites: drop one 2>&1 in a scratch copy.
-sed 's/kel top 2>&1"/kel top"/' "$CONF" > "$WORK/kel-conf-revert"
-REVERTED=$(grep -n '^bind.*run-shell -b .*local/bin/kel ' "$WORK/kel-conf-revert" | grep -v -e '_prompt' -e '_click')
+sed "s/kel rename '%%' 2>&1\"/kel rename '%%'\"/" "$CONF" > "$WORK/kel-conf-revert"
+REVERTED=$(grep -n '^bind.*run-shell .*local/bin/kel rename' "$WORK/kel-conf-revert")
 ok "  ...and dropping it is caught"       '[ "$(printf "%s\n" "$REVERTED" | grep -c "2>&1")" != 1 ]'
 
 section "statusline records context without a live agent"

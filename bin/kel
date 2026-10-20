@@ -14,7 +14,6 @@
 #         [--list] [--no-resume]  resumed (--list: choose among the last five)
 #   kel relaunch [name] [-f]   relaunch a crashed agent in its existing window
 #                              (one agent — `kel restore` rebuilds the workspace)
-#   kel top                    the fleet dashboard (prefix t)
 #   kel sidebar on|off         the sidebar pane in every window (default on)
 #   kel shell [dir]            a plain shell window, no agent (sidebar: t)
 #   kel quit [-f]              save the workspace, then close all of it; refuses
@@ -210,29 +209,19 @@ dir_group() {   # dir -> group name, or empty
 # navigation two-level.  A window's group therefore cannot come from its
 # session any more: kel stamps it on the window as the @kel-group option,
 # which the hot paths can read in the same format string they already run.
-#
-# v0.9 put each repo in its own `<prefix>/<group>` session.  A server started
-# before the upgrade still has those, so everything that READS recognises them
-# (their name still carries the group); nothing creates them, and they drain as
-# their windows close — the way v0.2 drained the flat session before them.
+# v0.9 put each repo in its own `<prefix>/<group>` session; the readers that
+# recognised a pre-upgrade server's sessions went once every machine ran v0.10.
 
-# kel's live sessions: the one session, plus any legacy per-repo ones
+# kel's live session, if it is up
 kel_sessions() {
-  tmux list-sessions -F '#{session_name}' 2>/dev/null \
-    | awk -v p="$KEL_PREFIX" '$0==p || index($0,p"/")==1'
+  tmux has-session -t "=$KEL_PREFIX" 2>/dev/null && printf '%s\n' "$KEL_PREFIX"
 }
 
 # every window kel owns:  session<TAB>index<TAB>wid<TAB>name<TAB>group
-# group is @kel-group, else the legacy session's name, else empty (a hand-made
-# window in the one session — kel-fleet derives its group from the pane's repo)
+# group is @kel-group, or empty (a hand-made window — kel-fleet derives its
+# group from the pane's repo)
 kel_windows() {
-  tmux list-windows -a -F '#{session_name}	#{window_index}	#{window_id}	#{window_name}	#{@kel-group}' 2>/dev/null \
-  | awk -F'\t' -v p="$KEL_PREFIX" '
-      $1==p || index($1,p"/")==1 {
-        g = $5
-        if (g == "" && index($1,p"/")==1) g = substr($1, length(p)+2)
-        print $1"\t"$2"\t"$3"\t"$4"\t"g
-      }'
+  tmux list-windows -t "=$KEL_PREFIX" -F '#{session_name}	#{window_index}	#{window_id}	#{window_name}	#{@kel-group}' 2>/dev/null
 }
 
 # the group of the window the client is looking at, or empty outside kel
@@ -244,18 +233,7 @@ current_group() {
   # disarmed `kel kill`'s ambiguity check.  #{client_session} used to be empty
   # there, which is what kept the old version honest.
   [ -n "${TMUX:-}" ] || return 0
-  local v g s
-  v="$(tmux display-message -p ${TMUX_PANE:+-t "$TMUX_PANE"} '#{@kel-group}|#{client_session}' 2>/dev/null || true)"
-  g="${v%%|*}"; s="${v#*|}"
-  if [ -n "$g" ]; then printf '%s' "$g"; return; fi
-  case "$s" in "$KEL_PREFIX"/*) printf '%s' "${s#"$KEL_PREFIX"/}" ;; esac
-}
-
-state_note() { # wid -> the notification text the hook recorded, if any
-  [ -f "$STATE_DIR/$1.state" ] || return 0
-  local st ep rest
-  read -r st ep rest < "$STATE_DIR/$1.state" 2>/dev/null || return 0
-  printf '%s' "${rest:-}"
+  tmux display-message -p ${TMUX_PANE:+-t "$TMUX_PANE"} '#{@kel-group}' 2>/dev/null || true
 }
 
 state_of() { # wid -> raw state from the hook, or empty
@@ -279,23 +257,22 @@ effective_state() { # wid
     # walking through the tool as a fresh user: an agent that crashes between
     # SessionStart and its first prompt used to sit reading "idle" forever,
     # with no glyph, no colour, nothing to tell you it was gone.
-    # the sidebar pane (v0.10) runs kel-top, a non-shell — counting it would
-    # read a crashed agent as alive forever (invariant 3), so it is skipped
     idle|working|waiting|throttled)
-      tmux list-panes -t "$1" -F '#{@kel-sidebar}|#{pane_current_command}' 2>/dev/null \
-        | awk -F'|' '$1 == ""' | cut -d'|' -f2- \
-        | grep -qvxE 'bash|zsh|fish|sh|dash|tmux' || { printf 'dead'; return; } ;;
+      agent_alive "$1" || { printf 'dead'; return; } ;;
   esac
   printf '%s' "$s"
 }
 
 # create the window in the one session (making it if needed); prints wid.
 # "bare" skips the sidebar — restore adds it itself, ordered against the saved
-# layout (see restore_from_snapshot)
+# layout (see restore_from_snapshot).  -d: made in the background, so the
+# sidebar is in before any client shows the window — without it you saw the
+# window full width, then the sidebar split in (the "flash").  Callers go to
+# the window themselves (goto_window).
 open_window() { # name cwd group [bare]
   local name="$1" cwd="$2" group="$3" bare="${4:-}" wid
   if tmux has-session -t "=$KEL_PREFIX" 2>/dev/null; then
-    wid="$(tmux new-window -t "=$KEL_PREFIX:" -n "$name" -c "$cwd" -P -F '#{window_id}')"
+    wid="$(tmux new-window -d -t "=$KEL_PREFIX:" -n "$name" -c "$cwd" -P -F '#{window_id}')"
   else
     wid="$(tmux new-session -d -s "$KEL_PREFIX" -n "$name" -c "$cwd" -x 220 -y 50 -P -F '#{window_id}')"
   fi
@@ -316,79 +293,57 @@ sidebar_enabled() {
   [ ! -e "$SIDEBAR_OFF" ] && [ -x "$KEL_TOP_BIN" ]
 }
 
+# A window's panes split by @kel-sidebar.  The flag is "1" on the sidebar and
+# EMPTY on the user's panes, so every filter keys on that empty field: never
+# `grep -v 1`, which matches the empty lines and prints nothing (CLAUDE.md).
+
+# the user's panes, in order, as  id|command
+user_panes() { # wid
+  tmux list-panes -t "$1" -F '#{@kel-sidebar}|#{pane_id}|#{pane_current_command}' 2>/dev/null \
+    | awk -F'|' '$1 == "" {print $2"|"$3}'
+}
+
+# the window's sidebar pane, or nothing
+sidebar_pane() { # wid
+  tmux list-panes -t "$1" -F '#{@kel-sidebar}|#{pane_id}' 2>/dev/null \
+    | awk -F'|' '$1 == "1" {print $2; exit}'
+}
+
 # the first pane of a window that is not the sidebar — where an agent runs,
 # where send-keys must go, what a restore replays into
 agent_pane() { # wid
-  tmux list-panes -t "$1" -F '#{@kel-sidebar}|#{pane_id}' 2>/dev/null \
-    | awk -F'|' '$1 == "" {print $2; exit}'
+  user_panes "$1" | head -1 | cut -d'|' -f1
 }
 
-# Add the sidebar to a window that has none.  Idempotent INSIDE one tmux
-# command list: the check (@kel-has-sidebar), the mark and the split run with
-# no other client's commands in between, so kel new and the after-new-window
-# hook cannot both add one — proven by racing ten of these at one window.
+# does a user pane run anything but a shell?  The sidebar runs kel-top, a
+# non-shell, so it must not count: it would keep a crashed agent alive forever
+# (invariant 3) and let relaunch type into a live one (invariant 4).
+agent_alive() { # wid
+  user_panes "$1" | cut -d'|' -f2 | grep -qvxE 'bash|zsh|fish|sh|dash|tmux'
+}
+
+# Add the sidebar to a window that has none.  The test and the add are ONE
+# tmux command list, so two callers cannot both add one — kel new and the
+# after-new-window hook ensure every new window, so they always overlap.  The
+# test is the pane itself (a pane loop, in tmux since 3.0), not a window flag:
+# a flag set beside a split that came to nothing claimed a sidebar that was not
+# there, and every later ensure believed it (backlog #41).
 # -b left, -d focus stays where it was, -f the window's full height, which also
 # makes it the {top-left} pane whatever pane-base-index is.
 sidebar_ensure() { # wid
-  local wid="$1" sn
-  # Not enabled is usually a choice (KEL_SIDEBAR, `kel sidebar off`), but it is
-  # also what a missing or half-written $KEL_TOP_BIN looks like — `go build -o`
-  # truncates its target while writing, so an ensure firing during a rebuild
-  # sees no executable and returns here.  That case leaves a window with no
-  # sidebar and said nothing, so say it.  TEMPORARY, with the block below:
-  # delete both once a log explains a real failure.
-  if ! sidebar_enabled; then
-    [ -e "$SIDEBAR_OFF" ] || [ -x "$KEL_TOP_BIN" ] \
-      || printf '%s wid=%s kel-top not executable: %s\n' \
-           "$(date +%FT%T)" "$wid" "$KEL_TOP_BIN" >> "$STATE_DIR/sidebar-fail.log" 2>/dev/null
-    return 0
-  fi
-  sn="$(tmux display-message -p -t "$wid" '#{session_name}' 2>/dev/null)" || return 0
-  case "$sn" in "$KEL_PREFIX"|"$KEL_PREFIX"/*) ;; *) return 0 ;; esac   # not kel's window
-  # The flag and the split below are one command list, so a split that fails
-  # leaves the flag claiming a pane that is not there — and every later ensure
-  # reads the flag and skips.  Seen twice on a real machine: a first window
-  # with no sidebar, unrecoverable without clearing this by hand.  Drop a flag
-  # no pane backs, so the next tick adds one.  Counted, not grep -v: a user
-  # pane's @kel-sidebar is empty and `grep -vx 1` matches that (see the traps).
-  [ "$(tmux list-panes -t "$wid" -F '#{@kel-sidebar}' 2>/dev/null | grep -cx 1)" = 0 ] \
-    && tmux set-option -wu -t "$wid" @kel-has-sidebar 2>/dev/null
-  # No else-branch, and the condition inverted, ON PURPOSE: the first version
-  # was `if-shell -F '#{@kel-has-sidebar}' '' '<add it>'`, and tmux reports
-  # that empty command as an error — which, with no client to print it to, it
-  # shows in view-mode on the window's active pane: the agent's.  The pane
-  # then swallowed every key, C-c included.  Found because the suite's
-  # dead-agent check could not kill its agent.
-  tmux if-shell -F -t "$wid" '#{?@kel-has-sidebar,,1}' \
-    "set-option -w -t '$wid' @kel-has-sidebar 1 ; split-window -hbdf -l $KEL_SIDEBAR_WIDTH -t '$wid' -c '#{pane_current_path}' -e 'KEL_BIN=$SELF' \"exec '$KEL_TOP_BIN' --sidebar\" ; set-option -p -t '$wid.{top-left}' @kel-sidebar 1" \
-    2>"$STATE_DIR/.sidebar-err.$$" || true
-  # Why the split sometimes does not happen is not known: it has left a real
-  # window sidebar-less three times, and `wake` only heals on the next window
-  # switch.  So record the one case that matters — the flag claims a pane and
-  # none is there — with whatever tmux said.  Only on failure, so the common
-  # path writes nothing (invariant 5).
-  #
-  # TEMPORARY, and the whole point: this exists to catch a cause nobody has
-  # seen.  When sidebar-fail.log explains one, fix that and DELETE both this
-  # block and the one in sidebar_enabled above — kel does not keep diagnostics
-  # for bugs it has fixed.  Capped at 200 lines so an unattended machine
-  # cannot grow it without bound.  Both halves of the condition: without the
-  # flag it logged a window whose ensure had simply not run the split yet
-  # (`flag= panes=2`, 2026-10-20) — the failure is the flag set with no pane.
-  if [ "$(tmux show-options -wv -t "$wid" @kel-has-sidebar 2>/dev/null)" = 1 ] \
-     && [ "$(tmux list-panes -t "$wid" -F '#{@kel-sidebar}' 2>/dev/null | grep -cx 1)" = 0 ]; then
-    local log="$STATE_DIR/sidebar-fail.log"
-    { printf '%s wid=%s flag=%s panes=%s width=%s\n' "$(date +%FT%T)" "$wid" \
-        "$(tmux show-options -wv -t "$wid" @kel-has-sidebar 2>/dev/null)" \
-        "$(tmux list-panes -t "$wid" -F x 2>/dev/null | grep -c .)" \
-        "$(tmux display-message -p -t "$wid" '#{window_width}x#{window_height}' 2>/dev/null)"
-      sed 's/^/  tmux: /' "$STATE_DIR/.sidebar-err.$$" 2>/dev/null
-    } >> "$log" 2>/dev/null
-    if [ "$(grep -c . "$log" 2>/dev/null || true)" -gt 200 ] 2>/dev/null; then
-      tail -100 "$log" > "$log.$$" 2>/dev/null && mv -f "$log.$$" "$log" 2>/dev/null
-    fi
-  fi
-  rm -f "$STATE_DIR/.sidebar-err.$$"
+  local wid="$1"
+  sidebar_enabled || return 0
+  [ "$(tmux display-message -p -t "$wid" '#{session_name}' 2>/dev/null)" = "$KEL_PREFIX" ] || return 0
+  [ -n "$(sidebar_pane "$wid")" ] && return 0
+  # No else-branch, and the condition inverted, ON PURPOSE: an empty branch
+  # ('') is an error tmux shows in view-mode on the window's active pane — the
+  # agent's — which then swallowed every key, C-c included.  Found because the
+  # suite's dead-agent check could not kill its agent.
+  # stderr goes to sidebar-fail.log: four sidebars split cleanly and then died
+  # (2026-10-20), and tmux reports nothing about a pane whose process exits.
+  tmux if-shell -F -t "$wid" '#{?#{P:#{?@kel-sidebar,1,}},,1}' \
+    "split-window -hbdf -l $KEL_SIDEBAR_WIDTH -t '$wid' -c '#{pane_current_path}' -e 'KEL_BIN=$SELF' \"exec '$KEL_TOP_BIN' --sidebar 2>>'$STATE_DIR/sidebar-fail.log'\" ; set-option -p -t '$wid.{top-left}' @kel-sidebar 1" \
+    2>/dev/null || true
   sidebar_style "$wid"
   # tmux's bar goes while sidebars show: it repeated what the sidebar and
   # Claude's own row already say, two status lines stacked (the author,
@@ -401,33 +356,35 @@ sidebar_ensure() { # wid
 # terminal's background, so a failure here is ignored, not reported
 sidebar_style() { # wid
   local id
-  id="$(tmux list-panes -t "$1" -F '#{@kel-sidebar} #{pane_id}' 2>/dev/null | awk '$1==1 {print $2; exit}')"
+  id="$(sidebar_pane "$1")"
   [ -n "$id" ] || return 0
   tmux set-option -p -t "$id" window-style "$KEL_SIDEBAR_STYLE" \; \
        set-option -p -t "$id" window-active-style "$KEL_SIDEBAR_STYLE" 2>/dev/null || true
 }
 
 # nudge every sidebar to look again (SIGUSR1); each decides for itself, with
-# one cheap tmux call, whether it is the visible one
-#
-# It also heals: `ensure` runs on after-new-window and session-created, both
-# creation events, so a window that LOST its sidebar stayed broken until some
-# other window was made — a real window sat sidebar-less until ensure was run
-# by hand (2026-10-19). This hook fires on every window switch, which is when
-# you would notice, and the pane list it already reads says which windows have
-# none. ensure is called only for those, so the healthy path adds no tmux
-# calls beyond the one already made (invariant 5).
+# one cheap tmux call, whether it is the visible one.  On every state hook too,
+# so it must stay one listing (invariant 5).
 sidebar_wake() {
-  local flag pid wid
+  local flag pid
   tmux list-panes -a -F '#{@kel-sidebar} #{pane_pid}' 2>/dev/null \
   | while read -r flag pid; do
       [ "$flag" = 1 ] && kill -USR1 "$pid" 2>/dev/null
     done
+  return 0
+}
+
+# Give back a sidebar any kel window has lost.  `ensure` runs on creation
+# events, for the window being created, so a window whose sidebar died stayed
+# without one until some other window was made — the user saw it as "my shells
+# vanished", their agent's pane just full width (2026-10-19).  Run on a window
+# switch, when you would notice, and not on the state hook, which would put
+# it on the agent's own path.  Only kel's session: a popup's _kelpop_* session
+# or a window of yours elsewhere is not missing anything.
+sidebar_heal() {
+  local wid
   sidebar_enabled || return 0
-  # two passes over one listing: a window is missing its sidebar when no pane
-  # of it carries the flag.  Counted per window, never `grep -v` — a user
-  # pane's @kel-sidebar is empty and would match (see the traps).
-  tmux list-panes -a -F '#{window_id} #{@kel-sidebar}' 2>/dev/null \
+  tmux list-panes -s -t "=$KEL_PREFIX" -F '#{window_id} #{@kel-sidebar}' 2>/dev/null \
   | awk '{ seen[$1]; if ($2 == 1) has[$1] } END { for (w in seen) if (!(w in has)) print w }' \
   | while read -r wid; do
       [ -n "$wid" ] && sidebar_ensure "$wid"
@@ -456,7 +413,7 @@ sidebar_focus() { # [wid]
   local wid="${1:-}" id
   [ -n "$wid" ] || wid="$(tmux display-message -p '#{window_id}' 2>/dev/null)" || return 0
   sidebar_ensure "$wid"
-  id="$(tmux list-panes -t "$wid" -F '#{@kel-sidebar} #{pane_id}' 2>/dev/null | awk '$1==1 {print $2; exit}')"
+  id="$(sidebar_pane "$wid")"
   [ -n "$id" ] && tmux select-pane -t "$id" 2>/dev/null
   return 0
 }
@@ -464,13 +421,10 @@ sidebar_focus() { # [wid]
 # a kel window left holding only its sidebar — the user's last pane exited —
 # is closed, not left as an orphan column
 sidebar_reap() {
-  # COUNT the user's panes.  The first version tested `[ -n "$(… | grep -vx 1)" ]`
-  # — but a user pane's flag is an empty line, which grep matches and prints
-  # as nothing, so every window looked sidebar-only and reap closed them all.
-  local wid n
+  local wid
   for wid in $(kel_windows | cut -f3); do
-    n="$(tmux list-panes -t "$wid" -F '#{@kel-sidebar}' 2>/dev/null | grep -cvx 1)"
-    [ "${n:-1}" = 0 ] || continue
+    [ -n "$(user_panes "$wid")" ] && continue
+    [ -n "$(sidebar_pane "$wid")" ] || continue   # a dying window has neither
     tmux kill-window -t "$wid" 2>/dev/null
   done
   return 0
@@ -484,7 +438,6 @@ cmd_sidebar() { # on | off
       : > "$SIDEBAR_OFF"
       tmux list-panes -a -F '#{@kel-sidebar} #{pane_id}' 2>/dev/null \
         | while read -r flag id; do [ "$flag" = 1 ] && tmux kill-pane -t "$id" 2>/dev/null; done
-      for wid in $(kel_windows | cut -f3); do tmux set-option -wu -t "$wid" @kel-has-sidebar 2>/dev/null; done
       # the bar comes back, with where the focused pane stands (--here)
       tmux set-option -u -t "=$KEL_PREFIX:" status 2>/dev/null
       say "sidebar off — kel sidebar on brings it back" ;;
@@ -532,13 +485,33 @@ all_metas() {
 }
 
 # the record owning a tmux window id, as  group<TAB>name<TAB>path
-meta_by_wid() { # wid
-  local g nm f
+# By window id AND name, as meta_is_live and kel-fleet match: tmux reuses
+# window ids after a server restart and dead records keep theirs, so the id
+# alone found whichever record sorted first.  The hook then wrote a live
+# agent's Claude session into a dead record, and restore resumed the wrong
+# conversation (2026-10-20).  "renamed": the window was renamed by hand, so
+# its name no longer says which record it is — the only callers that look a
+# record up for exactly that reason (kill, rename) pass it.
+meta_by_wid() { # wid [renamed]
+  local g nm f wn=''
+  if [ "${2:-}" != renamed ]; then
+    wn="$(tmux display-message -p -t "$1" '#{window_name}' 2>/dev/null)" || return 1
+  fi
   while IFS=$'\t' read -r g nm f; do
     [ "$(jq -r '.window_id // ""' "$f" 2>/dev/null)" = "$1" ] || continue
+    [ -z "$wn" ] || [ "$(jq -r '.name // ""' "$f" 2>/dev/null)" = "$wn" ] || continue
     printf '%s\t%s\t%s\n' "$g" "$nm" "$f"; return 0
   done < <(all_metas)
   return 1
+}
+
+# rewrite a record through jq, atomically.  A private temp file: two writers
+# sharing "$f.t" (the hook, PreCompact, restore) could each move the other's
+# half-written copy into place.
+meta_update() { # path jq-filter [jq args...]
+  local f="$1" filter="$2" tmp; shift 2
+  tmp="$(mktemp "$f.XXXXXX" 2>/dev/null)" || return 1
+  if jq "$@" "$filter" "$f" > "$tmp" 2>/dev/null; then mv -f "$tmp" "$f"; else rm -f "$tmp"; return 1; fi
 }
 
 # resolve a user-typed agent to  group<TAB>name<TAB>path.
@@ -656,6 +629,34 @@ worktree_unsafe() { # cwd
     [ -n "$(git -C "$1" log --oneline HEAD --not --remotes 2>/dev/null || true)" ] && return 0
   fi
   return 1
+}
+
+# what worktree_unsafe found, on stderr: the files, then the unpushed commits
+worktree_report() { # cwd
+  local d u=''
+  d="$(git -C "$1" status --short 2>/dev/null || true)"
+  [ -n "$d" ] && { echo "  uncommitted changes:" >&2; echo "$d" | sed 's/^/    /' >&2; }
+  has_remote "$1" && u="$(git -C "$1" log --oneline HEAD --not --remotes 2>/dev/null || true)"
+  [ -n "$u" ] && { echo "  commits not on any remote:" >&2; echo "$u" | sed 's/^/    /' >&2; }
+  return 0
+}
+
+# Remove a worktree after the caller has decided it is safe.  Deliberately NOT
+# gated on [ -d "$cwd" ]: that skipped a hand-deleted worktree, leaving git's
+# record behind and the branch locked ("used by worktree") until someone ran
+# `git worktree prune`.  `git worktree remove` handles a missing directory on
+# its own (exits 0, clears the entry — checked, not assumed).  `prune` is the
+# fallback when remove fails otherwise: it only touches entries whose directory
+# is already gone, so it can never be what deletes work.  Prints what it did.
+worktree_remove() { # repo cwd force(1|0)
+  local f=(); [ "${3:-0}" = 1 ] && f=(--force)
+  if git -C "$1" worktree remove ${f[@]+"${f[@]}"} "$2" 2>/dev/null; then
+    printf 'removed'
+  elif git -C "$1" worktree prune 2>/dev/null; then
+    printf 'pruned'
+  else
+    return 1
+  fi
 }
 
 # --------------------------------------------------------------------------
@@ -785,7 +786,7 @@ cmd_kill() {
     # `kel new`.  Find the record owning the window currently named $bare.
     local bw; bw="$(kel_windows | awk -F'\t' -v n="$bare" '$4==n {print $3; exit}')"
     if [ -n "$bw" ]; then
-      rr="$(meta_by_wid "$bw" || true)"
+      rr="$(meta_by_wid "$bw" renamed || true)"
       [ -n "$rr" ] && IFS=$'\t' read -r group name meta <<< "$rr"
     fi
   fi
@@ -805,37 +806,20 @@ cmd_kill() {
 
   if [ "$iso" = "worktree" ] && [ "$force" != 1 ] && worktree_unsafe "$cwd"; then
     warn "refusing to kill '$name' — the worktree has work that isn't safe to lose:"
-    local d; d="$(git -C "$cwd" status --short 2>/dev/null || true)"
-    [ -n "$d" ] && { echo "  uncommitted changes:" >&2; echo "$d" | sed 's/^/    /' >&2; }
-    local u; has_remote "$cwd" && u="$(git -C "$cwd" log --oneline HEAD --not --remotes 2>/dev/null || true)"
-    [ -n "${u:-}" ] && { echo "  commits not on any remote:" >&2; echo "$u" | sed 's/^/    /' >&2; }
+    worktree_report "$cwd"
     die "commit & push, or run: kel kill $name --force"
   fi
 
   [ -n "$wid" ] && tmux kill-window -t "$wid" 2>/dev/null || true
 
-  # deliberately NOT gated on [ -d "$cwd" ]: that used to skip this whole
-  # block whenever the worktree directory was gone (rm -rf'd by hand, or a
-  # file manager), which left git's own worktree record behind — pointing at
-  # a directory that no longer exists — permanently locking the branch
-  # ("used by worktree") until someone ran `git worktree prune` by hand.
-  # `git worktree remove` handles a missing directory fine on its own,
-  # confirmed directly rather than assumed: it exits 0 and cleans the
-  # phantom entry, force or not. `git worktree prune` is a fallback for
-  # remove failing for some other reason — it only touches entries whose
-  # directory is already gone, never a live one, so it cannot be the thing
-  # that deletes work.
   if [ "$iso" = "worktree" ] && [ -n "$repo" ] && [ -n "$cwd" ]; then
-    if git -C "$repo" worktree remove ${force:+--force} "$cwd" 2>/dev/null; then
-      say "removed worktree $cwd  (branch $branch kept)"
-    elif git -C "$repo" worktree prune 2>/dev/null; then
-      # prune is repo-wide, not targeted at $cwd -- it only removes entries
-      # whose directory is already gone, so this can undersell (nothing left
-      # to prune) but never overclaim removing something still live
-      say "ran git worktree prune on $repo  (branch $branch kept)"
-    else
-      warn "couldn't remove worktree — do it manually: git -C $repo worktree remove ${force:+--force} $cwd"
-    fi
+    # prune is repo-wide, so "pruned" can undersell (nothing left to prune)
+    # but never overclaim removing something still live
+    case "$(worktree_remove "$repo" "$cwd" "$force")" in
+      removed) say "removed worktree $cwd  (branch $branch kept)" ;;
+      pruned)  say "ran git worktree prune on $repo  (branch $branch kept)" ;;
+      *)       warn "couldn't remove worktree — do it manually: git -C $repo worktree remove $([ "$force" = 1 ] && printf -- '--force ')$cwd" ;;
+    esac
   fi
 
   rm -f "$meta" "$STATE_DIR/$wid.state" "$STATE_DIR/$wid.ctx"
@@ -848,15 +832,12 @@ cmd_kill() {
 # --------------------------------------------------------------------------
 # rename a specific window by id + move its metadata record along with it
 rename_agent() { # wid new
-  local wid="$1" new="$2" old grp='' sn v
+  local wid="$1" new="$2" old grp=''
   old="$(tmux display-message -p -t "$wid" '#{window_name}' 2>/dev/null)"
   [ -n "$old" ] || { warn "kel rename: window $wid is gone"; return 1; }
   [ "$old" = "$new" ] && return 0
-  # the group is the window's @kel-group since v0.10 (one session names none);
-  # a legacy v0.9 kel/<group> session still names it
-  v="$(tmux display-message -p -t "$wid" '#{@kel-group}|#{session_name}' 2>/dev/null || true)"
-  grp="${v%%|*}"; sn="${v#*|}"
-  [ -z "$grp" ] && case "$sn" in "$KEL_PREFIX"/*) grp="${sn#"$KEL_PREFIX"/}" ;; esac
+  # the group is the window's @kel-group (one session names none)
+  grp="$(tmux display-message -p -t "$wid" '#{@kel-group}' 2>/dev/null || true)"
   [ -n "$grp" ] && [ -f "$(meta_path "$grp" "$new")" ] && \
     { warn "an agent named '$new' already exists in [$grp]"; return 1; }
 
@@ -866,7 +847,7 @@ rename_agent() { # wid new
   local om='' rr
   [ -n "$grp" ] && [ -f "$(meta_path "$grp" "$old")" ] && om="$(meta_path "$grp" "$old")"
   if [ -z "$om" ]; then
-    rr="$(meta_by_wid "$wid" || true)"
+    rr="$(meta_by_wid "$wid" renamed || true)"
     [ -n "$rr" ] && { grp="${rr%%$'\t'*}"; om="${rr##*$'\t'}"; }
   fi
   if [ -n "$om" ] && [ -f "$om" ]; then
@@ -910,16 +891,8 @@ cmd_prune() {
       warn "kept '$g/$n' — worktree has unsaved work  (kel kill $g/$n -f)"
       kept=$((kept + 1)); continue
     fi
-    # same fix as cmd_kill, and the same reason: NOT gated on [ -d "$cwd" ].
-    # git worktree remove handles a missing directory fine on its own; the
-    # -d gate was what let a hand-deleted worktree directory leave git's own
-    # record behind, permanently locking the branch until someone ran
-    # git worktree prune by hand. prune here is the same belt-and-suspenders
-    # fallback — repo-wide, only ever touches entries already gone.
     if [ "$iso" = worktree ] && [ -n "$repo" ] && [ -n "$cwd" ]; then
-      git -C "$repo" worktree remove ${force:+--force} "$cwd" 2>/dev/null \
-        || git -C "$repo" worktree prune 2>/dev/null \
-        || warn "left worktree $cwd (remove by hand)"
+      worktree_remove "$repo" "$cwd" "$force" >/dev/null || warn "left worktree $cwd (remove by hand)"
     fi
     rm -f "$meta"
     removed=$((removed + 1))
@@ -1005,9 +978,23 @@ cmd_ls() {
 # --------------------------------------------------------------------------
 # kel restore
 # --------------------------------------------------------------------------
-agent_resume_cmd() { # agent cid  -> the shell string to resume/start an agent
-  if [ -n "$2" ]; then printf '%s --resume %s || %s --continue || %s' "$1" "$2" "$1" "$1"
-  else printf '%s --continue || %s' "$1" "$1"; fi
+# the shell string that resumes a record's agent, or starts it fresh.
+# By session id when a hook recorded one; else by the session's NAME, which
+# `kel new` gives it (`claude --name <name>`) and `--resume` also accepts.
+# Never `--continue`: it resumes "the most recent conversation in the current
+# directory", so two agents sharing one resumed the same conversation.
+agent_resume_cmd() { # record
+  local agent cid name
+  agent="$(jq -r '.agent // "claude"' "$1" 2>/dev/null)"; agent="${agent:-claude}"
+  cid="$(jq -r '.claude_session // ""' "$1" 2>/dev/null)"
+  name="$(jq -r '.name // ""' "$1" 2>/dev/null)"
+  case "$agent" in
+    *" --name $name"|*" --name $name "*) ;;   # named: --resume <name> finds it
+    *) name='' ;;                              # not ours to name: start fresh
+  esac
+  if [ -n "$cid" ]; then printf '%s --resume %s || %s' "$agent" "$cid" "$agent"
+  elif [ -n "$name" ]; then printf '%s --resume %s || %s' "$agent" "$name" "$agent"
+  else printf '%s' "$agent"; fi
 }
 
 # --------------------------------------------------------------------------
@@ -1040,8 +1027,7 @@ snapshot() {   # silent; called by hooks and state-changing commands
   # escapes control characters in format output, so it cannot emit \037
   # itself); awk splits on tabs, which keeps empty fields, and re-joins on
   # \037 for jq.  An empty group is why: it is exactly the field
-  # IFS=$'\t' read would silently drop (CLAUDE.md, traps).  The one session
-  # sorts before any legacy kel/<group> session.
+  # IFS=$'\t' read would silently drop (CLAUDE.md, traps).
   local US=$'\037' TAB=$'\t' cur lines
   cur="$(tmux display-message -p '#{window_id}' 2>/dev/null || true)"
   lines="$(awk -F'\t' -v US="$US" -v cur="$cur" '
@@ -1049,14 +1035,8 @@ snapshot() {   # silent; called by hooks and state-changing commands
       { print "W" US $5 US $6 US $7 US ($4 == cur ? "1" : "")
         for (i = 1; i <= n[$4]; i++) print "P" US pc[$4, i] US pm[$4, i] US ps[$4, i] }' \
     <(tmux list-panes -a -F '#{window_id}	#{pane_index}	#{pane_current_path}	#{pane_current_command}	#{@kel-sidebar}' 2>/dev/null) \
-    <(tmux list-windows -a -F '#{session_name}	#{window_index}	#{window_id}	#{window_name}	#{window_layout}	#{@kel-group}' 2>/dev/null \
-      | awk -F'\t' -v p="$KEL_PREFIX" '
-          $1 == p || index($1, p"/") == 1 {
-            g = $6
-            if (g == "" && index($1, p"/") == 1) g = substr($1, length(p) + 2)
-            print ($1 == p ? "0" : "1") "\t" $1 "\t" $2 "\t" $3 "\t" $4 "\t" $5 "\t" g
-          }' \
-      | sort -t"$TAB" -k1,1 -k2,2 -k3,3n))"
+    <(tmux list-windows -t "=$KEL_PREFIX" -F '0	#{session_name}	#{window_index}	#{window_id}	#{window_name}	#{window_layout}	#{@kel-group}' 2>/dev/null \
+      | sort -t"$TAB" -k3,3n))"
   [ -n "$lines" ] || return 0
 
   local snap
@@ -1160,15 +1140,13 @@ restore_list() {
 # Not window_activity, which the first version used: a visible sidebar
 # redraws every two seconds, so with the sidebar (M2) every window looks used.
 close_untouched_welcome() {
-  local wid born cmd p np lines prompt
+  local wid born cmd p lines prompt
   tmux list-windows -t "=$KEL_PREFIX" -F '#{window_id}|#{@kel-welcome}|#{pane_current_command}' 2>/dev/null \
   | while IFS='|' read -r wid born cmd; do
       case "$born" in ''|*[!0-9]*) continue ;; esac
-      np="$(tmux list-panes -t "$wid" -F '#{@kel-sidebar}' 2>/dev/null | grep -vxc 1)"
-      [ "$np" = 1 ] || continue
-      p="$(agent_pane "$wid")"
-      case "$(tmux display-message -p -t "$p" '#{pane_current_command}' 2>/dev/null)" in
-        bash|zsh|fish|sh|dash) ;; *) continue ;; esac
+      [ "$(user_panes "$wid" | grep -c .)" = 1 ] || continue
+      IFS='|' read -r p cmd <<< "$(user_panes "$wid")"
+      case "$cmd" in bash|zsh|fish|sh|dash) ;; *) continue ;; esac
       lines="$(tmux capture-pane -p -J -S - -t "$p" 2>/dev/null)"
       prompt="$(printf '%s\n' "$lines" | grep . | tail -1)"
       [ -n "$prompt" ] || continue
@@ -1244,11 +1222,11 @@ restore_from_snapshot() {   # file resume(1|0)
 
     meta=''; [ -n "$wg" ] && [ -f "$(meta_path "$wg" "$wname")" ] && meta="$(meta_path "$wg" "$wname")"
     if [ -n "$meta" ]; then
-      jq --arg w "$wid" '.window_id=$w' "$meta" > "$meta.t" && mv "$meta.t" "$meta"
+      meta_update "$meta" '.window_id=$w' --arg w "$wid"
       # resuming is why you restore, so it is the default (v0.10); invariant 4's
       # one sanctioned send-keys besides launch
       [ "$resume" = 1 ] && tmux send-keys -t "${pids[0]}" \
-        "$(agent_resume_cmd "$(jq -r '.agent // "claude"' "$meta")" "$(jq -r '.claude_session // ""' "$meta")")" Enter
+        "$(agent_resume_cmd "$meta")" Enter
     fi
     for ((j = 0; j < ${#cmds[@]}; j++)); do
       [ "$j" = 0 ] && [ -n "$meta" ] && continue
@@ -1310,16 +1288,14 @@ cmd_restore() {
   local names; names="$(dead_sessions)"
   [ -n "$names" ] || { say "nothing to restore"; return 0; }
 
-  local n meta cwd agent cid grp wid='' restored=0
+  local n meta cwd grp wid='' restored=0
   while IFS=$'\t' read -r grp n meta; do
     [ -z "$n" ] && continue
     cwd="$(jq -r '.cwd // ""' "$meta")"
-    agent="$(jq -r '.agent // "claude"' "$meta")"
-    cid="$(jq -r '.claude_session // ""' "$meta")"
     [ -d "$cwd" ] || { warn "skip $n — its directory is gone ($cwd)"; continue; }
     wid="$(open_window "$n" "$cwd" "$grp")" || { warn "skip $n — couldn't open a window"; continue; }
-    jq --arg w "$wid" '.window_id=$w' "$meta" > "$meta.tmp" && mv "$meta.tmp" "$meta"
-    [ "$resume" = 1 ] && tmux send-keys -t "$(agent_pane "$wid")" "$(agent_resume_cmd "$agent" "$cid")" Enter
+    meta_update "$meta" '.window_id=$w' --arg w "$wid"
+    [ "$resume" = 1 ] && tmux send-keys -t "$(agent_pane "$wid")" "$(agent_resume_cmd "$meta")" Enter
     restored=$((restored+1))
   done <<< "$names"
 
@@ -1373,68 +1349,49 @@ cmd_relaunch() {
 
   # Relaunching a live agent would leave two of them fighting over one pane.
   # Ask the pane, not the state file: a freshly-started agent has no .state
-  # yet, and trusting that would double-launch it.  Same shell list as
-  # effective_state's dead check.
-  local st alive=0
+  # yet, and trusting that would double-launch it.
+  local st
   st="$(effective_state "$wid")"
-  tmux list-panes -t "$wid" -F '#{@kel-sidebar}|#{pane_current_command}' 2>/dev/null \
-    | awk -F'|' '$1 == ""' | cut -d'|' -f2- \
-    | grep -qvxE 'bash|zsh|fish|sh|dash|tmux' && alive=1      # never the sidebar
-  if [ "$alive" = 1 ] && [ "$force" != 1 ]; then
+  if agent_alive "$wid" && [ "$force" != 1 ]; then
     die "'$group/$name' still has a live process (state: ${st:-unknown}) — kel relaunch $name -f to force it"
   fi
 
-  local agent cid pane
-  agent="$(jq -r '.agent // "claude"' "$meta")"
+  local cid pane
   cid="$(jq -r '.claude_session // ""' "$meta")"
   pane="$(agent_pane "$wid")"     # not head -1: that is the sidebar since v0.10
   [ -n "$pane" ] || die "'$group/$name' has no pane to relaunch in"
 
   # drop the stale reading; the relaunched agent's SessionStart sets it again
   rm -f "$STATE_DIR/$wid.state" "$STATE_DIR/$wid.ctx"
-  tmux send-keys -t "$pane" "$(agent_resume_cmd "$agent" "$cid")" Enter
+  tmux send-keys -t "$pane" "$(agent_resume_cmd "$meta")" Enter
   tmux refresh-client -S 2>/dev/null || true
   say "relaunching $group/$name${cid:+  (resuming $cid)}"
-}
-
-# --------------------------------------------------------------------------
-# kel top   (prefix t)  — the fleet dashboard
-# --------------------------------------------------------------------------
-# Go-only, unlike the fleet read: this is a new surface rather than a port, so
-# there is no bash version to fall back to.  Say so plainly instead of dying
-# with "command not found".
-cmd_top() {
-  if [ ! -x "$KEL_TOP_BIN" ]; then
-    warn "kel top needs the Go dashboard, which isn't built"
-    if command -v go >/dev/null 2>&1; then
-      die "run ./install.sh to build it"
-    else
-      die "install Go (install/20-user-tools.sh), then re-run ./install.sh"
-    fi
-  fi
-  # in tmux, open in a popup the way kel config does; outside, run inline
-  if [ -n "${TMUX:-}" ] && [ -z "${KEL_IN_POPUP:-}" ]; then
-    local -a penv=( -e KEL_IN_POPUP=1 ) v
-    for v in KEL_SESSION KEL_CTX_WARN KEL_TOP_BIN XDG_STATE_HOME; do
-      [ -n "${!v:-}" ] && penv+=( -e "$v=${!v}" )
-    done
-    exec tmux display-popup "${penv[@]}" \
-      -w "${KEL_TOP_W:-90%}" -h "${KEL_TOP_H:-80%}" -T ' kel top ' -EE "'$KEL_TOP_BIN'"
-  fi
-  exec "$KEL_TOP_BIN" "$@"
 }
 
 # --------------------------------------------------------------------------
 # kel sweep [-n] [-f]   — close out everything that has actually landed
 # --------------------------------------------------------------------------
 # kel kill and kel prune are one-at-a-time.  Finish five worktree agents and
-# kel top becomes a graveyard you clear one command at a time.
+# the sidebar becomes a graveyard you clear one command at a time.
 #
 # Sweeps an agent only when it is finished AND its work is somewhere other than
 # that worktree — `land` already computes exactly that, so `merged` IS the
 # predicate.  Everything else is REPORTED, never touched: the rule from kel
 # kill holds, and deleting an agent's only copy of real work is the one
 # unforgivable bug in this category of tool.
+# why a finished agent or worktree is kept, in words: one table for both
+land_why() { # land code
+  case "$1" in
+    dirty)    printf 'uncommitted work' ;;
+    unpushed) printf 'commits that are only here' ;;
+    review)   printf 'its PR is still open' ;;
+    no_pr)    printf 'no PR — nothing has merged it' ;;
+    behind)   printf 'behind its base, not merged' ;;
+    unknown)  printf 'gh could not say whether it merged' ;;
+    *)        printf 'not merged' ;;
+  esac
+}
+
 # real_dir PATH — the path with symlinks resolved (macOS's /var is
 # /private/var, and git prints the resolved one); as given when it is gone
 real_dir() { ( cd "$1" 2>/dev/null && pwd -P ) || printf '%s' "$1"; }
@@ -1467,16 +1424,7 @@ sweep_worktree() { # doc path dry
     return 0
   fi
   if [ "$code" != merged ]; then
-    local why
-    case "$code" in
-      dirty)    why="uncommitted work" ;;
-      unpushed) why="commits that are only here" ;;
-      review)   why="its PR is still open" ;;
-      no_pr)    why="no PR — nothing has merged it" ;;
-      behind)   why="behind its base, not merged" ;;
-      *)        why="not merged" ;;
-    esac
-    warn "kept  $label  — $why"
+    warn "kept  $label  — $(land_why "$code")"
     return 1
   fi
   # a kel agent there: finished, it is closed with its window by kel kill
@@ -1537,12 +1485,17 @@ cmd_sweep() {
     sweep_worktree "$doc" "$one" "$dry"
     return
   fi
-  local swept=0 kept=0 g nm code st
+  local swept=0 kept=0 ok g nm code st
 
-  # eligible: finished, and its branch is merged (or -f, which still refuses
-  # anything with uncommitted or unpushed work)
-  while IFS=$'\t' read -r g nm st code; do
+  # every finished agent, once: "1" to sweep — merged, or with -f any code
+  # but the ones that mean work is here (dirty, unpushed) or that cannot be
+  # told (unknown, behind) — else "0" and kept, with why.  kel kill still
+  # checks again before it closes anything (invariant 1).
+  while IFS=$'\t' read -r ok g nm st code; do
     [ -n "$nm" ] || continue
+    if [ "$ok" != 1 ]; then
+      warn "kept  $g/$nm  — $(land_why "$code")"; kept=$((kept+1)); continue
+    fi
     if [ "$dry" = 1 ]; then
       say "would sweep  $g/$nm  ($st, $code)"
     else
@@ -1555,32 +1508,9 @@ cmd_sweep() {
     .agents[]
     | select(.managed)
     | select(.state == "done" or .state == "dead")
-    | select((.land.code // "") as $c
-             | $c == "merged" or ($force and ($c == "clean" or $c == "no_pr" or $c == "review")))
-    | [.group, .name, (.state // "-"), (.land.code // "-")] | @tsv')
-
-  # everything finished that is NOT safe to sweep, and why
-  local why
-  while IFS=$'\t' read -r g nm st code; do
-    [ -n "$nm" ] || continue
-    case "$code" in
-      dirty)    why="uncommitted work" ;;
-      unpushed) why="commits that are only here" ;;
-      behind)   why="behind its base" ;;
-      no_pr)    why="no PR — nothing has merged it" ;;
-      review)   why="its PR is still open" ;;
-      unknown)  why="gh could not say whether it merged" ;;
-      *)        why="not merged" ;;
-    esac
-    warn "kept  $g/$nm  — $why"
-    kept=$((kept+1))
-  done < <(printf '%s' "$doc" | jq -r --argjson force "$([ "$force" = 1 ] && echo true || echo false)" '
-    .agents[]
-    | select(.managed)
-    | select(.state == "done" or .state == "dead")
-    | select((.land.code // "") as $c
-             | ($c != "merged") and (($force | not) or ($c == "dirty" or $c == "unpushed" or $c == "unknown" or $c == "behind")))
-    | [.group, .name, (.state // "-"), (.land.code // "-")] | @tsv')
+    | (.land.code // "") as $c
+    | (if $c == "merged" or ($force and ($c == "clean" or $c == "no_pr" or $c == "review")) then "1" else "0" end) as $ok
+    | [$ok, .group, .name, (.state // "-"), (.land.code // "-")] | @tsv')
 
   # then worktrees no window stands in — kel's, Claude Code's, or made by
   # hand — that have landed, or whose directory is gone. Anything else is
@@ -1766,8 +1696,7 @@ cmd_quit() { # [-f]
       [ "$iso" = worktree ] && [ -d "$cwd" ] && worktree_unsafe "$cwd" || continue
       risk="$risk $g/$n"
       warn "$g/$n has work that isn't safe to lose:"
-      git -C "$cwd" status --short 2>/dev/null | sed 's/^/    /' >&2
-      has_remote "$cwd" && git -C "$cwd" log --oneline HEAD --not --remotes 2>/dev/null | sed 's/^/    /' >&2
+      worktree_report "$cwd"
     done < <(all_metas)
     [ -z "$risk" ] || die "refusing to quit —${risk} — commit & push, or: kel quit -f"
   fi
@@ -2338,12 +2267,14 @@ open_url() { # url
 # terminal kel has not met can be told what to use.
 copy_stdin() {
   if [ -n "${KEL_COPY_CMD:-}" ]; then sh -c "$KEL_COPY_CMD" >/dev/null 2>&1; return $?; fi
-  if [ "$(uname -s)" = Darwin ] && command -v pbcopy >/dev/null 2>&1; then
-    pbcopy >/dev/null 2>&1; return $?
-  fi
+  [ "$(uname -s)" = Darwin ] && { pbcopy >/dev/null 2>&1; return $?; }
+  # WSL: one known path, not a PATH walk — each `command -v` miss costs ~76 ms
+  # there (CLAUDE.md), and three misses ran before reaching clip.exe
+  local clip=/mnt/c/Windows/System32/clip.exe
+  if [ -n "${WSL_DISTRO_NAME:-}" ] && [ -x "$clip" ]; then "$clip" >/dev/null 2>&1; return $?; fi
   local c
   # wl-copy before xclip/xsel: a Wayland session often still has an X one
-  for c in wl-copy xclip xsel clip.exe; do
+  for c in wl-copy xclip xsel; do
     command -v "$c" >/dev/null 2>&1 || continue
     case "$c" in
       xclip) xclip -selection clipboard >/dev/null 2>&1 ;;
@@ -2452,7 +2383,7 @@ cmd_config() {
   fi
   [ -n "$ed" ] || die "no editor found — set \$EDITOR, or open $cfg yourself"
 
-  # in tmux, open in a popup the way kel top does; outside, run inline.
+  # in tmux, open in a popup; outside, run inline.
   if [ -n "${TMUX:-}" ] && [ -z "${KEL_IN_POPUP:-}" ]; then
     exec tmux display-popup -e KEL_IN_POPUP=1 \
       -w "${KEL_CONFIG_W:-90%}" -h "${KEL_CONFIG_H:-85%}" -T ' kel config ' \
@@ -2536,60 +2467,33 @@ cmd_status_line() {
 # --------------------------------------------------------------------------
 cmd_jump() {
   [ -n "${TMUX:-}" ] || exit 0
-  local cs cw
+  local cw
   # a click on the bar runs this with no client of its own; KEL_CLIENT names it
   local -a c=(); [ -n "${KEL_CLIENT:-}" ] && c=(-c "$KEL_CLIENT")
-  cs="$(tmux display-message ${c[@]+"${c[@]}"} -p '#{client_session}' 2>/dev/null || true)"
   cw="$(tmux display-message ${c[@]+"${c[@]}"} -p '#{window_index}' 2>/dev/null || echo '')"
 
-  # session, then index: one session since v0.10, but a legacy v0.9 server
-  # can still hold kel/<group> sessions, and the cycle must cross them too
-  local -a w=()
-  while IFS=$'\t' read -r sname idx wid _; do
-    [ -z "${wid:-}" ] && continue
-    [ "$(effective_state "$wid")" = waiting ] || continue
-    w+=( "$sname"$'\t'"$idx"$'\t'"$wid" )
-  done < <(kel_windows | sort -t$'\t' -k1,1 -k2,2n)
+  # the waiting agents, by window index, from the fleet document — the same
+  # dead check and state the sidebar reads, not a second copy of them
+  local doc w
+  doc="$(fleet_json)" || exit 1
+  w="$(printf '%s' "$doc" | jq -r '
+    [ .agents[] | select(.state == "waiting" and .window_id != null and .index != null) ]
+    | sort_by(.index)[] | "\(.index)\t\(.window_id)\t\(.group)/\(.name)\t\(.state_since // "")"')"
+  [ -n "$w" ] || { tmux display-message "kel: nothing waiting"; exit 0; }
 
-  local n="${#w[@]}"
-  [ "$n" -eq 0 ] && { tmux display-message "kel: nothing waiting"; exit 0; }
-
-  local i pos=-1 es ei
-  for ((i=0; i<n; i++)); do
-    IFS=$'\t' read -r es ei _ <<< "${w[$i]}"
-    [ "$es" = "$cs" ] && [ "$ei" = "$cw" ] && { pos=$i; break; }
-  done
-
+  # the next one after the window you are in, wrapping round
   local tgt
-  if [ "$pos" -ge 0 ]; then
-    tgt="${w[$(( (pos + 1) % n ))]}"
-  else
-    tgt="${w[0]}"
-    for ((i=0; i<n; i++)); do
-      IFS=$'\t' read -r es ei _ <<< "${w[$i]}"
-      if [ "$es" \> "$cs" ] || { [ "$es" = "$cs" ] && [ -n "$cw" ] && [ "$ei" -gt "$cw" ]; }; then
-        tgt="${w[$i]}"; break
-      fi
-    done
-  fi
-  local ts ti tw
-  IFS=$'\t' read -r ts ti tw <<< "$tgt"
-  tmux switch-client ${c[@]+"${c[@]}"} -t "=$ts" \; select-window -t "$tw"
+  tgt="$(printf '%s\n' "$w" | awk -F'\t' -v cw="${cw:-0}" '
+    NR == 1 { first = $0 } $1 > cw && !found { print; found = 1 } END { if (!found) print first }')"
+  local ti tw label ep
+  IFS=$'\t' read -r ti tw label ep <<< "$tgt"
+  tmux switch-client ${c[@]+"${c[@]}"} -t "=$KEL_PREFIX" \; select-window -t "$tw"
 
   # say where you landed and how long it has been sitting — the jump is
   # otherwise silent, and "which one was that?" is the next question
-  local grp nm ep v
-  v="$(tmux display-message -p -t "$tw" '#{@kel-group}|#{window_name}' 2>/dev/null || true)"
-  grp="${v%%|*}"; nm="${v#*|}"; [ -n "$nm" ] || nm="$ti"
-  [ -z "$grp" ] && case "$ts" in "$KEL_PREFIX"/*) grp="${ts#"$KEL_PREFIX"/}" ;; esac
-  grp="${grp:-$KEL_PREFIX}"
-  ep=''; [ -f "$STATE_DIR/$tw.state" ] && read -r _ ep _ < "$STATE_DIR/$tw.state" 2>/dev/null
-  case "${ep:-}" in ''|*[!0-9]*) ep='' ;; esac
-  if [ -n "$ep" ]; then
-    tmux display-message "→ $grp/$nm  (waiting $(humanize_secs $(( $(date +%s) - ep ))))"
-  else
-    tmux display-message "→ $grp/$nm"
-  fi
+  case "${ep:-}" in ''|*[!0-9]*) tmux display-message "→ $label" ;;
+    *) tmux display-message "→ $label  (waiting $(humanize_secs $(( $(date +%s) - ${ep%.*} ))))" ;;
+  esac
 }
 
 # --------------------------------------------------------------------------
@@ -2740,7 +2644,7 @@ resolve_pane() { # session-id cwd
 # --------------------------------------------------------------------------
 # context / cost, per agent      $STATE_DIR/<wid>.ctx
 #   pct <T> cost_usd <T> in_tokens <T> ctx_size <T> rate5h <T> epoch <T> model
-# Written by `kel statusline`; read by the bar, ls, --json and kel top.
+# Written by `kel statusline`; read by the bar, ls, --json and the sidebar.
 # --------------------------------------------------------------------------
 ctx_field() { # wid n  -> field n of the .ctx line, or empty
   [ -f "$STATE_DIR/$1.ctx" ] || return 0
@@ -2850,7 +2754,7 @@ cmd_statusline() {
     [ -n "$pane" ] && wid="$(tmux display-message -p -t "$pane" '#{window_id}' 2>/dev/null || true)"
   fi
   # An unknown pct writes nothing. Overwriting a real 25% with a placeholder 0
-  # would make every other surface — the bar, `kel ls`, `kel top` —
+  # would make every other surface — the bar, `kel ls`, the sidebar —
   # report an empty context window for an agent that has a full one. The stale
   # record keeps its own epoch in field 6, so a reader can see its age.
   if [ -n "$wid" ] && [ "$ctxsz" -gt 0 ] && [ -n "$pct" ]; then
@@ -2890,11 +2794,7 @@ cmd_statusline() {
     v="$(tmux display-message -p -t "$wid" '#{@kel-group}|#{session_name}|#{window_name}' 2>/dev/null || true)"
     kg="${v%%|*}"; v="${v#*|}"; sn="${v%%|*}"; wn="${v#*|}"
     if [ -n "$kg" ]; then label="$kg/$wn"
-    else
-      case "$sn" in
-        "$KEL_PREFIX")   label="$wn" ;;
-        "$KEL_PREFIX"/*) label="${sn#"$KEL_PREFIX"/}/$wn" ;;
-      esac
+    elif [ "$sn" = "$KEL_PREFIX" ]; then label="$wn"
     fi
   fi
 
@@ -3059,14 +2959,12 @@ cmd_hook() {
   local prev; prev="$(state_of "$wid")"   # for the transition test below
 
   if [ -n "$sid" ] && [ "$event" != SessionEnd ]; then
-    local m
-    for m in "$SESSIONS_DIR"/*/*.json; do
-      [ -e "$m" ] || continue
-      [ "$(jq -r '.window_id' "$m" 2>/dev/null)" = "$wid" ] || continue
-      [ "$(jq -r '.claude_session // ""' "$m" 2>/dev/null)" = "$sid" ] && break
-      jq --arg s "$sid" '.claude_session=$s' "$m" > "$m.t" 2>/dev/null && mv "$m.t" "$m"
-      break
-    done
+    local mr m
+    if mr="$(meta_by_wid "$wid")"; then
+      m="${mr##*$'\t'}"
+      [ "$(jq -r '.claude_session // ""' "$m" 2>/dev/null)" = "$sid" ] \
+        || meta_update "$m" '.claude_session=$s' --arg s "$sid"
+    fi
   fi
 
   local state
@@ -3103,8 +3001,7 @@ cmd_hook() {
       rr="$(meta_by_wid "$wid" || true)"
       if [ -n "$rr" ]; then
         mp="${rr##*$'\t'}"
-        jq '.compactions = ((.compactions // 0) + 1)' "$mp" > "$mp.t" 2>/dev/null \
-          && mv -f "$mp.t" "$mp"
+        meta_update "$mp" '.compactions = ((.compactions // 0) + 1)'
       fi
       exit 0 ;;
     PostCompact)
@@ -3150,7 +3047,7 @@ quickstart() {
   kel new <name>     start an agent in the current repo
   kel restore        bring back a previous workspace (--list to choose)
   prefix `           jump to whichever agent is waiting on you
-  prefix t           kel top — every agent, its state, context and cost
+  prefix Space       the sidebar — every agent, its state, context and cost
 
 EOF
 }
@@ -3202,7 +3099,7 @@ cmd_attach() {
   #    say so in one line, and carry on.  `kel restore` brings it back.
   if [ -f "$SNAPSHOT" ]; then
     local n; n="$(snapshot_summary "$SNAPSHOT" | cut -f1)"
-    # the sidebar offers it too (`R restore last workspace`) until it is used
+    # the sidebar offers it too (`b`) until it is used
     archive_snapshot && say "previous workspace: ${n:-?} window(s) · kel restore" \
       && : > "$STATE_DIR/restore-offer"
   elif [ -n "$(dead_sessions)" ]; then
@@ -3240,7 +3137,6 @@ main() {
     rename)       migrate_meta; cmd_rename "$@" ;;
     restore)      migrate_meta; cmd_restore "$@" ;;
     relaunch)     migrate_meta; cmd_relaunch "$@" ;;
-    top)          cmd_top "$@" ;;
     sweep)        migrate_meta; cmd_sweep "$@" ;;
     prune)        migrate_meta; cmd_prune "$@" ;;
     snapshot)     cmd_snapshot ;;
@@ -3256,16 +3152,16 @@ main() {
     _panel)       cmd_panel "$@" ;;
     _banner)      case "${1:-}" in
                     seen)  banner_seen ;;
-                    clear) banner_clear ;;
                     *)     die "usage: kel _banner seen|clear" ;;
                   esac ;;
     _sidebar)     case "${1:-}" in
                     ensure) sidebar_ensure "${2:-}" ;;
                     wake)   sidebar_wake ;;
+                    heal)   sidebar_heal ;;
                     fit)    sidebar_fit ;;
                     reap)   sidebar_reap ;;
                     focus)  sidebar_focus "${2:-}" ;;
-                    *)      die "kel _sidebar ensure|wake|fit|reap|focus" ;;
+                    *)      die "kel _sidebar ensure|wake|heal|fit|reap|focus" ;;
                   esac ;;
     doctor)       cmd_doctor "$@" ;;
     config)       cmd_config ;;

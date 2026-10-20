@@ -343,7 +343,7 @@ make sure a frame the author approved stays approved.
   only then is the sidebar connected to live data.
 - **Golden frames.** Those approved frames are committed, and `View()` over
   each fixture is compared against them (`teatest`, or the same direct
-  rendering `kel top`'s tests use). An accidental visual change shows up as a
+  rendering the sidebar's tests use). An accidental visual change shows up as a
   diff to accept or reject.
 - **Real frames from real tmux.** `tmux capture-pane -e -p -t <sidebar>`
   inside the suite's isolated server is the pane as tmux actually drew it,
@@ -566,8 +566,9 @@ cwd            where the agent runs
 isolation      inplace | worktree   (kel ls renders inplace as "repo")
 branch         worktree only
 agent          command run in the window (default: claude)
-group          repo basename (or --group, or misc); tmux session is kel/<group>
-claude_session Claude Code's session id, recorded by the hook — for exact restore
+group          repo basename (or --group, or misc); stamped on the window as @kel-group
+claude_session Claude Code's session id, recorded by the hook on the record whose
+               window id AND name match — restore resumes by it, else by name
 compactions    PreCompact count
 created_at     timestamp
 ```
@@ -741,7 +742,7 @@ Mac. On WSL, the PowerShell path is stat'ed, never looked up on `PATH` (the
 
 `kel _fleet [--dirty] [--land] [--pr]` is the whole fleet, computed once, as
 one JSON object: `{generated_at, current:{group,window_id}, agents:[…]}`.
-`kel ls`, `ls --json`, the bar, the completions and `kel top` all read it.
+`kel ls`, `ls --json`, the bar, the completions and the sidebar all read it.
 Adding a field means adding it there once.
 
 Since v0.10 it is produced **only** by the Go `kel-fleet`; the bash reader it
@@ -838,16 +839,16 @@ missing.
 | Probe | Why |
 |---|---|
 | `tmux` present, `>= 3.0` | the substrate |
-| `display-popup` available | `kel top`, `kel config` |
+| `display-popup` available | the sidebar's popups, `kel config` |
 | `git worktree` available | `kel new -w` |
 | `jq` present | metadata, hooks, the installer's settings merge |
 | `node` on `PATH` | Claude Code needs it; catches a broken WSL PATH |
 | `claude` on `PATH` | the default agent |
-| `gh` authenticated | PR state for `kel sweep` and the LAND column |
+| `gh` authenticated | PR state for `kel sweep` and the sidebar's land words |
 | kel hooks wired in `settings.json` | state detection |
 | kel `statusLine` wired | context % and cost, per agent |
 | `kel-fleet` built | the only fleet reader since v0.10 |
-| `kel-top` built | `kel top`, and the sidebar after it |
+| `kel-top` built | the sidebar |
 | the wired kel path resolves | `install.sh` records an absolute path into the clone; moving it silences every hook |
 | hooks not disabled by managed settings | `allowManagedHooksOnly` / `disableAllHooks` stop hooks while the entries remain |
 | `allow-passthrough on` | Neovim OSC 52 clipboard through tmux |
@@ -893,8 +894,8 @@ GitHub release are the fix. Versioning policy is in `rollout.md`.
 
 ### 12b. What kel keeps, and what leaves the machine
 
-**kel makes exactly one network call**: `gh api repos/<slug>/pulls`, for the
-two land codes local git cannot answer. Three things narrow it:
+**kel's one automatic network call** is `gh api repos/<slug>/pulls`
+(paged), for the two land codes local git cannot answer. Three things narrow it:
 
 1. no slug unless `origin` is on `github.com`;
 2. local git answers first — a repo whose worktrees are dirty or unpushed is
@@ -903,7 +904,10 @@ two land codes local git cannot answer. Three things narrow it:
 3. `pr = "off"` disables it outright (likewise only honoured by bash until
    v0.10).
 
-Nothing else leaves the machine. kel does not wrap Claude Code, so your code
+The rest go online only when you ask: `v` opens gh dash (GitHub, for every
+open space's repo), `u` runs ccusage, `kel doctor` runs `gh auth status`,
+`kel update` fetches the clone. `pr = "off"` covers none of those — it is
+about the lookup kel makes on its own. Nothing else leaves the machine. kel does not wrap Claude Code, so your code
 reaches Anthropic by exactly the path it would from a bare terminal.
 
 **What it keeps** is in the `0700` state directory. The sensitive part is

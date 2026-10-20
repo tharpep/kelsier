@@ -944,7 +944,6 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 	// the last command's word, or how to get in. A prompt stands out (bold,
 	// the accent `›`) because the author could not tell one had opened
 	var tail []line
-	alarm := false
 	switch {
 	case v.promptTitle != "":
 		c := v.promptColour
@@ -974,7 +973,6 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 		}
 		t += " · " + v.prefix + " then `"
 		tail = append(tail, line{yellow + bold + truncate(t, w) + reset, lineRef{id: "act:`", kind: "action"}})
-		alarm = true
 	}
 	// the quota is the last line, where tmux's bar used to carry it: with
 	// the sidebar showing, kel turns that bar off (it repeated what the
@@ -983,7 +981,6 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 	if q := quotaLine(v.quota, w, now); q != "" && h > 3 {
 		qline = &line{q, lineRef{}}
 	}
-	_ = alarm
 
 	// scroll so the selected entry is on screen; the bottom is pinned
 	if h > 0 {
@@ -1284,9 +1281,8 @@ func quotaLine(q *fleet.Quota, w int, now int64) string {
 		t := fmt.Sprintf("spend %d%%", p)
 		spend = &seg{t, heat(p) + t + reset}
 	}
-	build := func(label bool, parts ...*seg) (string, int) {
+	build := func(parts ...*seg) (string, int) {
 		var plain, col []string
-		head := ""
 		for _, p := range parts {
 			if p == nil {
 				continue
@@ -1303,11 +1299,8 @@ func quotaLine(q *fleet.Quota, w int, now int64) string {
 		if len(plain) == 0 {
 			return "", 0
 		}
-		if label {
-			head = ""
-		}
-		n := len([]rune(head + strings.Join(plain, " · ")))
-		return dim + head + reset + strings.Join(col, dim+" · "+reset), n
+		n := len([]rune(strings.Join(plain, " · ")))
+		return dim + reset + strings.Join(col, dim+" · "+reset), n
 	}
 	for _, try := range [][]*seg{
 		{five, reset5, week, spend},
@@ -1316,10 +1309,8 @@ func quotaLine(q *fleet.Quota, w int, now int64) string {
 		{five, week},
 		{five},
 	} {
-		for _, label := range []bool{true, false} {
-			if s, n := build(label, try...); s != "" && n <= w {
-				return s
-			}
+		if s, n := build(try...); s != "" && n <= w {
+			return s
 		}
 	}
 	return ""

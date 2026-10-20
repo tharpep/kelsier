@@ -2,8 +2,7 @@
 
 The reference for what exists **today**. kel is mid-pivot (v0.10, see
 `rollout.md`): the old board and menus are gone, replaced by the sidebar; kel
-is the sidebar, the commands below, the status bar, `kel top` and
-jump-to-blocked.
+is the sidebar, the commands below, the status bar and jump-to-blocked.
 
 ## Install
 
@@ -26,9 +25,9 @@ able to lose work. `--uninstall --purge` removes that too, after asking.
 **Upgrading from v0.9:** a running tmux server keeps the old bindings
 (`Ctrl+Space`, `Ctrl-b b`, `Ctrl-b m`, `Ctrl-b k`) until it restarts —
 `source-file` adds bindings, it does not remove them. `tmux kill-server` (after
-`kel snapshot`) or unbind them by hand. Per-repo sessions from v0.9
-(`kel/<group>`) keep working until their windows close; new windows go into
-the one `kel` session, and `kel restore` brings a v0.9 snapshot back into it.
+`kel snapshot`) or unbind them by hand. v0.9's per-repo sessions
+(`kel/<group>`) are no longer read: restart the tmux server once, and `kel
+restore` brings a v0.9 snapshot back into the one `kel` session.
 
 ## Commands
 
@@ -57,9 +56,6 @@ kel quit [-f]          save the workspace, then close it all; refuses while a
                        `kel restore`, brings it back
 kel url [dir|agent]    a worktree's dev-server URLs, one per line; exit 1 for none
                        (for scripts — a Playwright skill can ask instead of guessing)
-kel top                every agent, sorted so the one needing you is first —
-                       state, time in state, LAND, context, cost, last output.
-                       j/k scroll, s sort, / filter, q quit   (Ctrl-b t)
 kel sweep [-n] [-f]    close out every finished agent whose branch has landed,
                        and every landed worktree no window or Claude session is
                        in (with its branch, if git agrees it merged); a gone
@@ -68,7 +64,9 @@ kel sweep [-n] [-f]    close out every finished agent whose branch has landed,
 kel sweep <path>       the same, for one worktree — says why when it won't
 kel relaunch [name]    relaunch ONE crashed agent in its existing window
 kel restore [<n>]      bring back a previous workspace — windows, splits,
-                       directories, conversations resumed (--no-resume: don't)
+                       directories, and each agent's conversation, by the
+                       session id kel recorded or else by its name
+                       (--no-resume: start each agent fresh)
 kel restore --list     the last five saved workspaces, newest first
 kel prune [-f]         discard dead agent records (and their worktrees)
 kel doctor             check the machine; every failure prints its fix
@@ -88,7 +86,6 @@ Keys below use `Ctrl-b`, tmux's default prefix; if you changed yours, kel's own 
 | | |
 |---|---|
 | `` Ctrl-b ` `` | jump to the next agent **waiting** on you — any group |
-| `Ctrl-b t` | `kel top` |
 | `Ctrl-b 1..9` / `n` / `p` / `w` | move between windows — every agent is in one session (native tmux) |
 | `Ctrl-b ,` | rename this window (routes through `kel rename`) |
 | `Ctrl-b \|` / `-` | split, keeping the current directory |
@@ -97,8 +94,8 @@ Keys below use `Ctrl-b`, tmux's default prefix; if you changed yours, kel's own 
 | drag, double-click (word), triple-click (line), or `Ctrl-b [` then enter | copy to the system clipboard, through `pbcopy` / `wl-copy` / `xclip` / `clip.exe` (`KEL_COPY_CMD` overrides). Hold **shift** instead in a pane whose app grabs the mouse — Claude Code sometimes does, and tmux never sees the drag |
 | `Ctrl-b d` | detach — agents keep running; `kel` to return |
 
-`kel.conf` also turns on the mouse (to select text, hold Shift while you drag),
-counts windows from 1, and labels each pane.
+`kel.conf` also turns on the mouse, counts windows from 1, and labels each
+pane.
 
 ## The sidebar
 
@@ -299,7 +296,9 @@ kel previous workspace: 9 window(s) · kel restore
 
 and keeps that workspace safe in `snapshots/` (the newest five are kept), so
 starting fresh cannot overwrite it. **`kel restore`** brings it back — every
-window, split and directory, with conversations resumed. **`kel restore
+window, split and directory, and each agent's conversation — by the session
+id a hook recorded, or by the name `kel new` gave it, never "the newest in this
+directory", which two agents sharing one would both have taken. **`kel restore
 --list`** shows the saved workspaces and **`kel restore 2`** picks an older
 one. Restoring into a running workspace only adds what is missing, and closes
 the empty shell a fresh `kel` opened if you never used it.
@@ -322,7 +321,7 @@ overridden by an exported `KEL_*` env var. `kel config` opens it, seeded from
 `examples/config.toml`, which lists every key with its default. The ones you
 are likely to want: `notify` (states worth interrupting you for), `notify_cmd`
 (a desktop-notification command — `setup.md` has recipes), `ctx_warn`, `pr =
-"off"` (no network call at all), `worktrees`, `restore_cmds`.
+"off"` (no PR lookups for land state), `worktrees`, `restore_cmds`.
 
 ## What kel writes, and what leaves the machine
 

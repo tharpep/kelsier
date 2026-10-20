@@ -30,7 +30,7 @@ func TestDoing(t *testing.T) {
 		t.Error("no assistant turn yet must say nothing")
 	}
 	// a tail that starts mid-line is read from the next whole line
-	long := strings.Repeat("x", doingTail)
+	long := strings.Repeat("x", int(doingTails[0]))
 	write(`{"type":"assistant","message":{"content":[{"type":"text","text":"`+long+`"}]}}`, tool)
 	if doingOf(f) != "editing sbview.go" {
 		t.Errorf("cut tail: %q", doingOf(f))

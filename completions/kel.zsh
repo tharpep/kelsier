@@ -18,7 +18,6 @@ _kel() {
     'kill:close a window, remove its worktree'
     'ls:list agents, grouped by repo'
     'rename:rename the current window (keeps metadata in sync)'
-    'top:fleet dashboard — sorted by who needs you'
     'sidebar:the sidebar pane in every window (on|off)'
     'url:the dev-server URLs of a worktree'
     'shot:the pane as an SVG, with freeze'
