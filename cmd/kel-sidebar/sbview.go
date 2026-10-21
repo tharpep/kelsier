@@ -69,6 +69,7 @@ type sbAgent struct {
 	// while it worked in ai-context
 	wid     string
 	pane    string // the pane to jump to; "" when the window lists none
+	key     string
 	agent   fleet.Agent
 	current bool
 }
@@ -198,11 +199,15 @@ func buildView(doc fleet.Doc, ui uiState) sbView {
 	// agent's window holds only a shell, which is still the agent's pane — it
 	// must not reappear under spaces as a stray shell
 	agentPane := map[string]string{}
+	isAgentPane := map[string]bool{}
 	byWin := map[string][]fleet.Pane{}
 	for _, p := range *doc.Panes {
 		byWin[p.WindowID] = append(byWin[p.WindowID], p)
 		if p.Agent {
-			agentPane[p.WindowID] = p.PaneID
+			if _, ok := agentPane[p.WindowID]; !ok {
+				agentPane[p.WindowID] = p.PaneID
+			}
+			isAgentPane[p.PaneID] = true
 		}
 	}
 	for _, a := range doc.Agents {
@@ -212,15 +217,22 @@ func buildView(doc fleet.Doc, ui uiState) sbView {
 			continue
 		}
 		wid := *a.WindowID
+		pane, key := "", wid
+		if a.PaneID != nil {
+			pane, key = *a.PaneID, *a.PaneID
+		}
 		// a window kel did not start is an agent only if something agent-
 		// like runs in it; a `kel shell` or a hand-made window holding a
 		// shell or a server belongs under its space, not here as "?"
-		if !a.Managed {
-			if _, ok := agentPane[wid]; !ok {
+		if !a.Managed && !isAgentPane[pane] {
+			if _, ok := agentPane[wid]; !ok || pane != "" {
 				continue
 			}
 		}
-		if _, ok := agentPane[wid]; !ok && len(byWin[wid]) > 0 {
+		if pane == "" {
+			pane = agentPane[wid]
+		}
+		if _, ok := agentPane[wid]; !ok && pane == "" && len(byWin[wid]) > 0 {
 			first := byWin[wid][0]
 			for _, p := range byWin[wid] {
 				if f(p.PaneIndex) < f(first.PaneIndex) {
@@ -228,14 +240,15 @@ func buildView(doc fleet.Doc, ui uiState) sbView {
 				}
 			}
 			agentPane[wid] = first.PaneID
+			pane = first.PaneID
 		}
 		repo := a.Group
 		for _, p := range byWin[wid] {
-			if p.PaneID == agentPane[wid] && p.Git != nil {
+			if p.PaneID == pane && p.Git != nil {
 				repo = repoLabel(doc, p.Git.Root)
 			}
 		}
-		v.agents = append(v.agents, sbAgent{wid: wid, pane: agentPane[wid], agent: a, current: wid == curWid, repo: repo})
+		v.agents = append(v.agents, sbAgent{wid: wid, pane: pane, key: key, agent: a, current: wid == curWid, repo: repo})
 	}
 	// triage order: waiting first, longest-waiting first within a state
 	sort.SliceStable(v.agents, func(i, j int) bool {
@@ -270,7 +283,7 @@ func buildView(doc fleet.Doc, ui uiState) sbView {
 			s.current = true
 		}
 		if p.Ports == nil {
-			if len(*s.ports) == 0 {
+			if s.ports != nil && len(*s.ports) == 0 {
 				s.ports = nil
 			}
 		} else {
@@ -279,15 +292,18 @@ func buildView(doc fleet.Doc, ui uiState) sbView {
 			}
 			*s.ports = append(*s.ports, *p.Ports...)
 		}
-		if agentPane[p.WindowID] == p.PaneID {
+		if isAgentPane[p.PaneID] || agentPane[p.WindowID] == p.PaneID {
 			for _, a := range v.agents {
-				if a.wid == p.WindowID && (a.agent.State == nil || *a.agent.State != "dead") {
+				if a.pane != p.PaneID {
+					continue
+				}
+				if a.agent.State == nil || *a.agent.State != "dead" {
 					s.agents++
 				}
-				if a.wid == p.WindowID && (s.state == nil || triageRank(a.agent.State) < triageRank(s.state)) {
+				if s.state == nil || triageRank(a.agent.State) < triageRank(s.state) {
 					s.state = a.agent.State
 				}
-				if a.wid == p.WindowID && a.agent.Unseen {
+				if a.agent.Unseen {
 					s.unseen = true
 				}
 			}
@@ -386,7 +402,7 @@ func buildView(doc fleet.Doc, ui uiState) sbView {
 	if doc.Background != nil {
 		names := map[string]string{}
 		for _, a := range v.agents {
-			names[a.agent.Name] = a.wid
+			names[a.agent.Name] = a.key
 		}
 		v.bgUnder = map[string][]fleet.Background{}
 		for _, b := range *doc.Background {
@@ -409,8 +425,8 @@ func buildView(doc fleet.Doc, ui uiState) sbView {
 		}
 	}
 	for _, a := range v.agents {
-		v.entryIDs = append(v.entryIDs, agentID(a.wid))
-		for _, b := range v.bgUnder[a.wid] {
+		v.entryIDs = append(v.entryIDs, agentID(a.key))
+		for _, b := range v.bgUnder[a.key] {
 			v.entryIDs = append(v.entryIDs, bgID(b.ID))
 		}
 	}
@@ -421,7 +437,7 @@ func buildView(doc fleet.Doc, ui uiState) sbView {
 		v.sel = ""
 		for _, a := range v.agents {
 			if a.current {
-				v.sel = agentID(a.wid)
+				v.sel = agentID(a.key)
 			}
 		}
 		if v.sel == "" && len(v.entryIDs) > 0 {
@@ -854,7 +870,7 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 		add("  "+dim+truncate("none", w-2)+reset, lineRef{})
 	}
 	for _, a := range v.agents {
-		id := agentID(a.wid)
+		id := agentID(a.key)
 		r := lineRef{id: id, kind: "agent"}
 		d, c := stateLook(a.agent.State, a.agent.Unseen)
 		if quietFor(a.agent, now) > 0 {
@@ -884,7 +900,7 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 			}
 			add("   "+dim+"└"+reset+" "+c+d+reset+" "+dim+truncate(label, w-7)+reset, r)
 		}
-		for _, b := range v.bgUnder[a.wid] {
+		for _, b := range v.bgUnder[a.key] {
 			d, c, w2 := bgLook(b)
 			bid := bgID(b.ID)
 			label := truncate(b.Name+" · bg · "+w2, w-7)
@@ -1154,7 +1170,7 @@ func selActions(v sbView) (string, string, []sbAct) {
 	switch {
 	case strings.HasPrefix(v.sel, "a:"):
 		for _, a := range v.agents {
-			if agentID(a.wid) == v.sel {
+			if agentID(a.key) == v.sel {
 				return "agent", a.agent.Name, []sbAct{
 					{"e", "edit file"}, {"p", "plan"}, {"r", "rename"}, {"x", "kill"}, {"z", "zoom"},
 				}

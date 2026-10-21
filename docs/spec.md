@@ -614,7 +614,7 @@ with the payload on stdin:
 | `PreCompact` | no change — increments `compactions` |
 | `PostCompact` | no change — redraws the bar |
 | `PostToolUse`, every tool | `working`, only from `waiting` (*2026-10-21*) — see below. On `Edit` / `Write` / `MultiEdit` also: |
-| | *built (M5).* no change — records the last file the agent touched and its first changed line (`tool_response.structuredPatch[0].newStart`), for `e` (§5f). *Built (M6):* a write under `~/.claude/plans/` is the session's plan, recorded as `<window-id>.plan` instead |
+| | *built (M5).* no change — records the last file the agent touched and its first changed line (`tool_response.structuredPatch[0].newStart`), for `e` (§5f). *Built (M6):* a write under `~/.claude/plans/` is the session's plan, recorded as `<pane-id>.plan` instead |
 
 The `PostToolUse` entry was wired with a **matcher limited to those tools**,
 because it fires after every tool call — the agent's hottest path (invariant
@@ -668,7 +668,7 @@ attach` in a popup. Unreadable (no claude, a timeout) is null: hooks alone.
 **Subagents** *(built 2026-10-16)*. `kel substatus` is Claude Code's
 `subagentStatusLine`: run every refresh tick while the agent panel shows
 subagent rows, all rows in one payload (measured: id, label, agentType,
-status). It records `<window-id>.subs` and prints nothing — which, per the
+status). It records `<pane-id>.subs` and prints nothing — which, per the
 docs, keeps Claude Code's own rows as they were. The sidebar nests them under
 their agent (`└ ● Reading parser.go · Explore`); a file older than 30 s is "no
 subagents now", since the panel stops calling once it is empty.
@@ -699,9 +699,10 @@ matches `waiting` only.
 stashed by this session's `SessionStart`, keyed by session id; the single pane
 whose current path equals the payload's `cwd`.
 
-**State file.** `~/.local/state/kel/<window-id>.state`, one line
-`<state> <epoch> <note>`, written atomically. Keyed by window id because tmux
-auto-names every `claude` window `claude`.
+**State file.** `~/.local/state/kel/<pane-id>.state`, one line
+`<state> <epoch> <note>`, written atomically. Keyed by pane id since M7 (an
+agent is a pane; by window id before, because tmux auto-names every `claude`
+window `claude`).
 
 **Dead agents.** A crash fires neither `Stop` nor `SessionEnd`, so the file
 keeps saying whatever it last said. kel catches this at *read* time: if the
@@ -715,7 +716,7 @@ in two places kept in sync by hand — `effective_state()` in `bin/kel` and
 Hook payloads carry no token, context or cost data. Claude Code's
 **`statusLine`** does — a documented, versioned interface, not a transcript
 scrape. `kel statusline` records one line per agent window to
-`<window-id>.ctx`:
+`<pane-id>.ctx`:
 
 ```
 <pct> <cost_usd> <in_tokens> <ctx_size> <rate_5h> <epoch> <model>
@@ -930,7 +931,7 @@ about the lookup kel makes on its own. Nothing else leaves the machine. kel does
 reaches Anthropic by exactly the path it would from a bare terminal.
 
 **What it keeps** is in the `0700` state directory. The sensitive part is
-`<window-id>.state`, which stores Claude Code's notification text — the agent
+`<pane-id>.state`, which stores Claude Code's notification text — the agent
 quoting a command back at you. **Agent output is read but never stored**: `kel
 top` shows the last line of each pane and drops it. `$KEL_NOTIFY_CMD` is the
 one place untrusted text crosses a boundary, so `setup.md`'s recipes escape it.

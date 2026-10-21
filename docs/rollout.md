@@ -450,13 +450,17 @@ an agent could not be a split. Decided with the author:
   gated on missing it
 - **a window keeps its first agent's name**; `r` renames the agent
 
-1. **Re-key, nothing visible changes.** State by pane id: `<pane-id>.state`,
+1. *Done 2026-10-21.* **Re-key, nothing visible changes.** State by pane id: `<pane-id>.state`,
    `.ctx`, `.edit`, `.plan`, `.seen`, `.subs`; records gain `pane_id`;
    `migrate_meta` moves each window's files to its agent pane once. The
    fleet document lists agents per pane (`pane_id` on each), `kel-fleet`
    matches records by pane; the hooks and `kel statusline` already know
    their pane. *Proof:* two fake agents in one window read as two agents,
    with their own states; every existing assertion still passes.
+   *Found on the way:* pane ids are reused after a server restart, like
+   window ids, so a record matches a pane only through the pane's
+   `@kel-agent` stamp; and two panes of unknown ports in one space crashed
+   the sidebar.
 2. **Gestures.** `n`'s placement choice; `x` on an agent closes its pane
    (the same kill-safety: a worktree with unsaved work is refused); "own
    window" (`break-pane`) for an agent sharing one; `kill`, `relaunch`,

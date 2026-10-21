@@ -722,3 +722,25 @@ func TestPromptHistory(t *testing.T) {
 		t.Errorf("up: %q", nm.(sbModel).input)
 	}
 }
+
+func TestTwoAgentsOneWindow(t *testing.T) {
+	sp := func(s string) *string { return &s }
+	st := "working"
+	doc := fleet.Doc{
+		Agents: []fleet.Agent{
+			{Group: "kelsier", Name: "a", WindowID: sp("@1"), PaneID: sp("%1"), Managed: true, State: &st},
+			{Group: "kelsier", Name: "a-3", WindowID: sp("@1"), PaneID: sp("%3"), State: &st},
+		},
+		Panes: &[]fleet.Pane{
+			{PaneID: "%1", WindowID: "@1", Cmd: "claude", Kind: "agent", Agent: true, Cwd: "/x"},
+			{PaneID: "%3", WindowID: "@1", Cmd: "claude", Kind: "agent", Agent: true, Cwd: "/x"},
+		},
+	}
+	v := buildView(doc, uiState{})
+	if len(v.agents) != 2 {
+		t.Fatalf("%d agents, want 2", len(v.agents))
+	}
+	if agentID(v.agents[0].key) == agentID(v.agents[1].key) || v.agents[0].pane == v.agents[1].pane {
+		t.Errorf("the two agents share an id or a pane: %+v", v.agents)
+	}
+}

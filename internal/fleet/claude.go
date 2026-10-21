@@ -170,9 +170,15 @@ func withClaude(doc *Doc, sd string, panes []Pane) {
 		paneWin[p.PaneID] = p.WindowID
 	}
 	byWin := map[string]int{}
+	byPane := map[string]int{}
 	for i, a := range doc.Agents {
 		if a.WindowID != nil {
-			byWin[*a.WindowID] = i
+			if _, ok := byWin[*a.WindowID]; !ok {
+				byWin[*a.WindowID] = i
+			}
+		}
+		if a.PaneID != nil {
+			byPane[*a.PaneID] = i
 		}
 	}
 	bg := []Background{}
@@ -190,7 +196,10 @@ func withClaude(doc *Doc, sd string, panes []Pane) {
 		if !ok {
 			continue // a claude in no kel pane: another terminal, not this workspace
 		}
-		i, ok := byWin[paneWin[pane]]
+		i, ok := byPane[pane]
+		if !ok {
+			i, ok = byWin[paneWin[pane]]
+		}
 		if !ok {
 			continue
 		}

@@ -433,7 +433,7 @@ func (m *sbModel) toggle(key string, open bool) {
 // which names the agent through here
 func (m sbModel) agentOf(id string) (sbAgent, bool) {
 	for _, a := range buildView(m.doc, m.ui).agents {
-		if agentID(a.wid) == id {
+		if agentID(a.key) == id {
 			return a, true
 		}
 	}
@@ -586,7 +586,11 @@ func (m sbModel) panel(what string) (sbModel, tea.Cmd) {
 			m.msg, m.msgBad = "select an agent first", true
 			return m, nil
 		}
-		return m, runKel(dir, nil, "_panel", what, dir, title, a.wid)
+		key := a.pane
+		if key == "" {
+			key = a.wid
+		}
+		return m, runKel(dir, nil, "_panel", what, dir, title, key)
 	}
 	return m, runKel(dir, nil, "_panel", what, dir, title)
 }

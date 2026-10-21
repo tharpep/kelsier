@@ -342,9 +342,9 @@ are likely to want: `notify` (states worth interrupting you for), `notify_cmd`
 Everything lives in `${XDG_STATE_HOME:-~/.local/state}/kel/`, mode `0700`:
 
 - `sessions/<group>/<name>.json` — one record per managed agent
-- `<window-id>.state` — state from the hooks, including Claude Code's
+- `<pane-id>.state` — state from the hooks, including Claude Code's
   notification text (the agent quoting a command back at you)
-- `<window-id>.ctx` — context, cost and model from `kel statusline`
+- `<pane-id>.ctx` — context, cost and model from `kel statusline`
 - `banner` — one line per agent the top banner is showing (window, state,
   name, Claude Code's words), gone when it is; `prompt-history` — the last
   twenty `;` commands; `gh-dash.yml` — the config `v` writes for gh dash
@@ -354,9 +354,9 @@ Everything lives in `${XDG_STATE_HOME:-~/.local/state}/kel/`, mode `0700`:
   known yet; a window switch heals it. **Temporary**: when a log explains a
   real failure, that is fixed and this goes with it
 - `<window-id>.seen`, `sidebar.json`, `sidebar-cache.json` — the sidebar's
-- `<window-id>.edit` — the file the agent last edited, and the line, from a
-  `PostToolUse` hook on Edit / Write; `<window-id>.plan` — the plan file a
-  plan-mode Write named; `<window-id>.view` — what `p` last showed
+- `<pane-id>.edit` — the file the agent last edited, and the line, from a
+  `PostToolUse` hook on Edit / Write; `<pane-id>.plan` — the plan file a
+  plan-mode Write named; `<pane-id>.view` — what `p` last showed
 - kel *reads*, never writes, Claude Code's own `~/.claude/tasks/<session>/`
 - `snapshot.json` (+ `.prev`), `snapshots/` (previous workspaces),
   `doctor.json`, `pr-cache/`,

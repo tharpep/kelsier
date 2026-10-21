@@ -254,9 +254,10 @@ current_group() {
   tmux display-message -p ${TMUX_PANE:+-t "$TMUX_PANE"} '#{@kel-group}' 2>/dev/null || true
 }
 
-state_of() { # wid -> raw state from the hook, or empty
-  [ -f "$STATE_DIR/$1.state" ] || return 0
-  local s; read -r s _ < "$STATE_DIR/$1.state" || return 0
+state_of() { # wid | pane -> raw state from the hook, or empty
+  local f; f="$(state_file "$1" state)"
+  [ -f "$f" ] || return 0
+  local s; read -r s _ < "$f" || return 0
   printf '%s' "$s"
 }
 
@@ -336,8 +337,43 @@ agent_pane() { # wid
 # does a user pane run anything but a shell?  The sidebar runs kel-sidebar, a
 # non-shell, so it must not count: it would keep a crashed agent alive forever
 # (invariant 3) and let relaunch type into a live one (invariant 4).
-agent_alive() { # wid
-  user_panes "$1" | cut -d'|' -f2 | grep -qvxE 'bash|zsh|fish|sh|dash|tmux'
+agent_alive() { # wid | pane
+  case "$1" in
+    %*) tmux display-message -p -t "$1" '#{pane_current_command}' 2>/dev/null | grep -qvxE 'bash|zsh|fish|sh|dash|tmux|' ;;
+    *)  user_panes "$1" | cut -d'|' -f2 | grep -qvxE 'bash|zsh|fish|sh|dash|tmux' ;;
+  esac
+}
+
+record_pane() { # wid meta
+  local p
+  p="$(jq -r '.pane_id // ""' "$2" 2>/dev/null)"
+  if [ -n "$p" ] && [ "$(tmux display-message -p -t "$p" '#{window_id}' 2>/dev/null)" = "$1" ]; then
+    printf '%s' "$p"
+  else
+    agent_pane "$1"
+  fi
+}
+
+rm_agent_state() { # key...
+  local k
+  for k in "$@"; do
+    [ -n "$k" ] && rm -f "$STATE_DIR/$k.state" "$STATE_DIR/$k.ctx" "$STATE_DIR/$k.edit" \
+      "$STATE_DIR/$k.plan" "$STATE_DIR/$k.view" "$STATE_DIR/$k.subs"
+  done
+  return 0
+}
+
+state_file() { # key ext
+  local f="$STATE_DIR/$1.$2" w
+  if [ ! -f "$f" ]; then
+    case "$1" in
+      %*) w="$(tmux display-message -p -t "$1" '#{window_id}' 2>/dev/null)"
+          [ -n "$w" ] && [ "$(agent_pane "$w")" = "$1" ] && f="$STATE_DIR/$w.$2" ;;
+      @*) w="$(agent_pane "$1")"
+          [ -n "$w" ] && f="$STATE_DIR/$w.$2" ;;
+    esac
+  fi
+  printf '%s' "$f"
 }
 
 # Add the sidebar to a window that has none.  The test and the add are ONE
@@ -521,6 +557,27 @@ all_metas() {
 # conversation (2026-10-20).  "renamed": the window was renamed by hand, so
 # its name no longer says which record it is — the only callers that look a
 # record up for exactly that reason (kill, rename) pass it.
+stamp_pane() { # pane group name
+  tmux set-option -p -t "$1" @kel-agent "$2/$3" 2>/dev/null || true
+}
+
+meta_by_pane() { # pane
+  local g nm f wid stamp
+  stamp="$(tmux display-message -p -t "$1" '#{@kel-agent}' 2>/dev/null)"
+  if [ -n "$stamp" ]; then
+    while IFS=$'\t' read -r g nm f; do
+      [ "$g/$nm" = "$stamp" ] || continue
+      [ "$(jq -r '.pane_id // ""' "$f" 2>/dev/null)" = "$1" ] || continue
+      printf '%s\t%s\t%s\n' "$g" "$nm" "$f"; return 0
+    done < <(all_metas)
+  fi
+  wid="$(tmux display-message -p -t "$1" '#{window_id}' 2>/dev/null)" || return 1
+  [ -n "$wid" ] && [ "$(agent_pane "$wid")" = "$1" ] || return 1
+  local rr; rr="$(meta_by_wid "$wid")" || return 1
+  [ -z "$(jq -r '.pane_id // ""' "${rr##*$'\t'}" 2>/dev/null)" ] || return 1
+  printf '%s\n' "$rr"
+}
+
 meta_by_wid() { # wid [renamed]
   local g nm f wn=''
   if [ "${2:-}" != renamed ]; then
@@ -566,13 +623,13 @@ resolve_agent() { # name [preferred-group]
   esac
 }
 
-meta_write() { # name wid repo cwd isolation branch agent group
+meta_write() { # name wid repo cwd isolation branch agent group pane
   mkdir -p "$SESSIONS_DIR/$8"
   jq -n \
     --arg name "$1" --arg wid "$2" --arg repo "$3" --arg cwd "$4" \
     --arg iso "$5" --arg branch "$6" --arg agent "$7" --arg group "$8" \
-    --arg created "$(date -u +%FT%TZ)" \
-    '{name:$name, window_id:$wid, repo:$repo, cwd:$cwd, isolation:$iso,
+    --arg pane "${9:-}" --arg created "$(date -u +%FT%TZ)" \
+    '{name:$name, window_id:$wid, pane_id:$pane, repo:$repo, cwd:$cwd, isolation:$iso,
       branch:(if $branch=="" then null else $branch end),
       agent:$agent, group:$group, created_at:$created}' \
     > "$(meta_path "$8" "$1")"
@@ -609,11 +666,35 @@ migrate_meta() {
       mv -f "$f" "$dest"
     fi
   done
+  migrate_state
+}
+
+migrate_state() {
+  tmux has-session -t "=$KEL_PREFIX" 2>/dev/null || return 0
+  local f base wid ext pane g nm m
+  for f in "$STATE_DIR"/@*.state "$STATE_DIR"/@*.ctx "$STATE_DIR"/@*.edit "$STATE_DIR"/@*.plan "$STATE_DIR"/@*.view "$STATE_DIR"/@*.subs; do
+    [ -e "$f" ] || continue
+    base="${f##*/}"; wid="${base%.*}"; ext="${base##*.}"
+    pane="$(agent_pane "$wid")"
+    [ -n "$pane" ] || continue
+    [ -e "$STATE_DIR/$pane.$ext" ] && rm -f "$f" || mv -f "$f" "$STATE_DIR/$pane.$ext"
+  done
+  while IFS=$'\t' read -r g nm m; do
+    [ -z "$(jq -r '.pane_id // ""' "$m" 2>/dev/null)" ] || continue
+    wid="$(jq -r '.window_id // ""' "$m" 2>/dev/null)"
+    meta_is_live "$m" "$nm" || continue
+    pane="$(agent_pane "$wid")"
+    [ -n "$pane" ] && meta_update "$m" '.pane_id=$p' --arg p "$pane" && stamp_pane "$pane" "$g" "$nm"
+  done < <(all_metas)
+  return 0
 }
 
 # is a metadata record backed by a live window (same id + name) in any kel session?
 meta_is_live() { # path name
-  local wid; [ -f "$1" ] || return 1
+  local wid pane; [ -f "$1" ] || return 1
+  pane="$(jq -r '.pane_id // ""' "$1")"
+  [ -n "$pane" ] && [ "$(tmux display-message -p -t "$pane" '#{session_name} #{@kel-agent}' 2>/dev/null)" \
+    = "$KEL_PREFIX $(jq -r '.group // ""' "$1")/$2" ] && return 0
   wid="$(jq -r '.window_id' "$1")"
   kel_windows | awk -F'\t' -v w="$wid" -v n="$2" '$3==w && $4==n {found=1} END{exit !found}'
 }
@@ -628,7 +709,7 @@ dead_sessions() {
 
 prune_state() {
   local live f wid panes pane
-  live="$(tmux list-windows -a -F '#{window_id}' 2>/dev/null || true)"
+  live="$(tmux list-windows -a -F '#{window_id}' 2>/dev/null; tmux list-panes -a -F '#{pane_id}' 2>/dev/null)"
   [ -n "$live" ] || return 0
   for f in "$STATE_DIR"/*.state "$STATE_DIR"/*.ctx "$STATE_DIR"/*.seen "$STATE_DIR"/*.edit "$STATE_DIR"/*.plan "$STATE_DIR"/*.view "$STATE_DIR"/*.subs; do
     [ -e "$f" ] || continue
@@ -781,7 +862,8 @@ cmd_new() {
   wid="$(open_window "$name" "$cwd" "$group")"
   [ -n "$wid" ] || die "failed to create tmux window"
 
-  meta_write "$name" "$wid" "$repo" "$cwd" "$isolation" "$branch" "$agent" "$group"
+  meta_write "$name" "$wid" "$repo" "$cwd" "$isolation" "$branch" "$agent" "$group" "$(agent_pane "$wid")"
+  stamp_pane "$(agent_pane "$wid")" "$group" "$name"
   [ "$start_agent" = 1 ] && tmux send-keys -t "$(agent_pane "$wid")" "$agent" Enter
 
   say "new agent  $name  [$group]  ($isolation${branch:+, branch $branch})"
@@ -841,6 +923,8 @@ cmd_kill() {
     die "commit & push, or run: kel kill $name --force"
   fi
 
+  local kpane=''
+  [ -n "$meta" ] && [ -n "$wid" ] && kpane="$(record_pane "$wid" "$meta")"
   [ -n "$wid" ] && tmux kill-window -t "$wid" 2>/dev/null || true
 
   if [ "$iso" = "worktree" ] && [ -n "$repo" ] && [ -n "$cwd" ]; then
@@ -853,7 +937,8 @@ cmd_kill() {
     esac
   fi
 
-  rm -f "$meta" "$STATE_DIR/$wid.state" "$STATE_DIR/$wid.ctx"
+  rm_agent_state "$kpane" "$wid"
+  rm -f "$meta"
   say "killed $name"
   snapshot
 }
@@ -883,7 +968,9 @@ rename_agent() { # wid new
   fi
   if [ -n "$om" ] && [ -f "$om" ]; then
     mkdir -p "$SESSIONS_DIR/$grp"
+    local rp; rp="$(jq -r '.pane_id // ""' "$om" 2>/dev/null)"
     jq --arg n "$new" '.name=$n' "$om" > "$(meta_path "$grp" "$new")" && rm -f "$om"
+    [ -n "$rp" ] && stamp_pane "$rp" "$grp" "$new"
   fi
   say "renamed '$old' -> '$new'"
   snapshot
@@ -1253,7 +1340,8 @@ restore_from_snapshot() {   # file resume(1|0)
 
     meta=''; [ -n "$wg" ] && [ -f "$(meta_path "$wg" "$wname")" ] && meta="$(meta_path "$wg" "$wname")"
     if [ -n "$meta" ]; then
-      meta_update "$meta" '.window_id=$w' --arg w "$wid"
+      meta_update "$meta" '.window_id=$w | .pane_id=$p' --arg w "$wid" --arg p "${pids[0]}"
+      stamp_pane "${pids[0]}" "$wg" "$wname"
       # resuming is why you restore, so it is the default (v0.10); invariant 4's
       # one sanctioned send-keys besides launch
       [ "$resume" = 1 ] && tmux send-keys -t "${pids[0]}" \
@@ -1325,7 +1413,8 @@ cmd_restore() {
     cwd="$(jq -r '.cwd // ""' "$meta")"
     [ -d "$cwd" ] || { warn "skip $n — its directory is gone ($cwd)"; continue; }
     wid="$(open_window "$n" "$cwd" "$grp")" || { warn "skip $n — couldn't open a window"; continue; }
-    meta_update "$meta" '.window_id=$w' --arg w "$wid"
+    meta_update "$meta" '.window_id=$w | .pane_id=$p' --arg w "$wid" --arg p "$(agent_pane "$wid")"
+    stamp_pane "$(agent_pane "$wid")" "$grp" "$n"
     [ "$resume" = 1 ] && tmux send-keys -t "$(agent_pane "$wid")" "$(agent_resume_cmd "$meta")" Enter
     restored=$((restored+1))
   done <<< "$names"
@@ -1381,19 +1470,19 @@ cmd_relaunch() {
   # Relaunching a live agent would leave two of them fighting over one pane.
   # Ask the pane, not the state file: a freshly-started agent has no .state
   # yet, and trusting that would double-launch it.
-  local st
-  st="$(effective_state "$wid")"
-  if agent_alive "$wid" && [ "$force" != 1 ]; then
+  local st pane
+  pane="$(record_pane "$wid" "$meta")"
+  [ -n "$pane" ] || die "'$group/$name' has no pane to relaunch in"
+  st="$(effective_state "$pane")"
+  if agent_alive "$pane" && [ "$force" != 1 ]; then
     die "'$group/$name' still has a live process (state: ${st:-unknown}) — kel relaunch $name -f to force it"
   fi
 
-  local cid pane
+  local cid
   cid="$(jq -r '.claude_session // ""' "$meta")"
-  pane="$(agent_pane "$wid")"     # not head -1: that is the sidebar since v0.10
-  [ -n "$pane" ] || die "'$group/$name' has no pane to relaunch in"
 
   # drop the stale reading; the relaunched agent's SessionStart sets it again
-  rm -f "$STATE_DIR/$wid.state" "$STATE_DIR/$wid.ctx"
+  rm -f "$STATE_DIR/$pane.state" "$STATE_DIR/$pane.ctx" "$STATE_DIR/$wid.state" "$STATE_DIR/$wid.ctx"
   tmux send-keys -t "$pane" "$(agent_resume_cmd "$meta")" Enter
   tmux refresh-client -S 2>/dev/null || true
   say "relaunching $group/$name${cid:+  (resuming $cid)}"
@@ -2157,7 +2246,8 @@ panel_diff() { # dir title base
 # its RPC, not keys typed into a pane (invariant 4) — else a popup.  kel owns
 # no editor, so nothing here ever closes one (spec.md §5f).
 panel_edit() { # dir title wid
-  local dir="$1" title="$2" wid="$3" f="$STATE_DIR/$3.edit" path line
+  local dir="$1" title="$2" wid="$3" f path line
+  f="$(state_file "$3" edit)"
   [ -n "$wid" ] && [ -f "$f" ] || die "nothing edited yet in this window"
   { read -r path; read -r line; } < "$f"
   case "${line:-}" in ''|*[!0-9]*) line=1 ;; esac
@@ -2184,13 +2274,14 @@ panel_edit() { # dir title wid
 # never a shorter list that looks complete (invariant 3).
 panel_plan() { # dir title wid
   local dir="$1" title="$2" wid="$3" plan='' sid tdir view have=0
-  [ -f "$STATE_DIR/$wid.plan" ] && read -r plan < "$STATE_DIR/$wid.plan"
+  local pf; pf="$(state_file "$wid" plan)"
+  [ -f "$pf" ] && read -r plan < "$pf"
   sid="$(session_of "$wid")"
   tdir="$CLAUDE_HOME/tasks/$sid"
   [ -n "$plan" ] && have=1
   [ -n "$sid" ] && [ -d "$tdir" ] && have=1
   [ "$have" = 1 ] || die "no plan or task list for this agent"
-  view="$STATE_DIR/$wid.view"
+  view="$(state_file "$wid" view)"
   {
     if [ -z "$plan" ]; then printf '# plan\n\nnone — this session has not written one\n'
     elif [ -f "$plan" ]; then cat "$plan"
@@ -2228,13 +2319,20 @@ plan_tasks() { # sid dir
 
 # the Claude session in window WID: its record's, else the one SessionStart
 # stashed for a pane there (an unmanaged window has no record)
-session_of() { # wid
+session_of() { # wid | pane
   local m sid f pane panes
-  if m="$(meta_by_wid "$1")"; then
+  case "$1" in
+    %*) m="$(meta_by_pane "$1")" || m='' ;;
+    *)  m="$(meta_by_wid "$1")" || m='' ;;
+  esac
+  if [ -n "$m" ]; then
     sid="$(jq -r '.claude_session // ""' "${m##*$'\t'}" 2>/dev/null)"
     [ -n "$sid" ] && { printf '%s' "$sid"; return; }
   fi
-  panes="$(tmux list-panes -t "$1" -F '#{pane_id}' 2>/dev/null)"
+  case "$1" in
+    %*) panes="$1" ;;
+    *)  panes="$(tmux list-panes -t "$1" -F '#{pane_id}' 2>/dev/null)" ;;
+  esac
   for f in "$STASH_DIR"/*; do
     [ -e "$f" ] || continue
     pane="$(cat "$f" 2>/dev/null)"
@@ -2782,8 +2880,7 @@ cmd_statusline() {
   # record it against this agent's window, if we are inside one
   local wid=''
   if command -v tmux >/dev/null 2>&1 && [ -n "${TMUX:-}${TMUX_PANE:-}" ]; then
-    local pane; pane="$(resolve_pane "$sid" "$cwd")"
-    [ -n "$pane" ] && wid="$(tmux display-message -p -t "$pane" '#{window_id}' 2>/dev/null || true)"
+    wid="$(resolve_pane "$sid" "$cwd")"
   fi
   # An unknown pct writes nothing. Overwriting a real 25% with a placeholder 0
   # would make every other surface — the bar, `kel ls`, the sidebar —
@@ -2791,7 +2888,7 @@ cmd_statusline() {
   # record keeps its own epoch in field 6, so a reader can see its age.
   if [ -n "$wid" ] && [ "$ctxsz" -gt 0 ] && [ -n "$pct" ]; then
     local old; old="$(ctx_field "$wid" 1)"
-    local tmp; tmp="$(mktemp "$STATE_DIR/.${wid#@}.ctx.XXXXXX" 2>/dev/null)"
+    local tmp; tmp="$(mktemp "$STATE_DIR/.${wid#%}.ctx.XXXXXX" 2>/dev/null)"
     if [ -n "${tmp:-}" ]; then
       printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
         "$pct" "$cost" "$intok" "$ctxsz" "$rl5" "$now" "$model" > "$tmp"
@@ -2920,8 +3017,7 @@ cmd_substatus() {
       ([.tasks[]? | {id, name, agentType, status, label: (.label // .description), startTime}] | tojson)' 2>/dev/null)
   [ -n "${tasks:-}" ] || exit 0
   pane="$(resolve_pane "$sid" "$cwd")"; [ -n "$pane" ] || exit 0
-  wid="$(tmux display-message -p -t "$pane" '#{window_id}' 2>/dev/null)"; [ -n "$wid" ] || exit 0
-  f="$STATE_DIR/$wid.subs"
+  f="$STATE_DIR/$pane.subs"
   # the epoch on its own line: the panel stops calling once it has no rows, so
   # a reader treats an old file as "no subagents now", not as still running
   old="$(sed -n 2p "$f" 2>/dev/null)"
@@ -2945,14 +3041,13 @@ hook_edit() { # payload sid cwd
       ((.tool_response.structuredPatch // [])[0].newStart // 1)' 2>/dev/null)
   [ -n "$path" ] || return 0
   pane="$(resolve_pane "$2" "$3")"; [ -n "$pane" ] || return 0
-  wid="$(tmux display-message -p -t "$pane" '#{window_id}' 2>/dev/null)"; [ -n "$wid" ] || return 0
   case "$path" in /*) ;; *) path="$3/$path" ;; esac
   # In plan mode Claude writes its plan with Write, under its plans directory
   # (measured on 2.1.300): that write is the session's plan, not "the file
   # the agent last touched" — `p` shows it, and `e` must not open it
   local kind=edit
   case "$path" in "$CLAUDE_HOME/plans/"*) kind=plan ;; esac
-  printf '%s\n%s\n' "$path" "$line" > "$STATE_DIR/$wid.$kind.$$" && mv -f "$STATE_DIR/$wid.$kind.$$" "$STATE_DIR/$wid.$kind"
+  printf '%s\n%s\n' "$path" "$line" > "$STATE_DIR/$pane.$kind.$$" && mv -f "$STATE_DIR/$pane.$kind.$$" "$STATE_DIR/$pane.$kind"
 }
 
 cmd_hook() {
@@ -2986,14 +3081,17 @@ cmd_hook() {
 
   local wid; wid="$(tmux display-message -p -t "$pane" '#{window_id}' 2>/dev/null || true)"
   [ -z "$wid" ] && exit 0
-  local prev; prev="$(state_of "$wid")"   # for the transition test below
+  local prev; prev="$(state_of "$pane")"   # for the transition test below
 
   if [ -n "$sid" ] && [ "$event" != SessionEnd ]; then
-    local mr m
-    if mr="$(meta_by_wid "$wid")"; then
+    local mr m mg mn
+    if mr="$(meta_by_pane "$pane")"; then
       m="${mr##*$'\t'}"
-      [ "$(jq -r '.claude_session // ""' "$m" 2>/dev/null)" = "$sid" ] \
-        || meta_update "$m" '.claude_session=$s' --arg s "$sid"
+      if [ "$(jq -r '(.claude_session // "") + " " + (.pane_id // "")' "$m" 2>/dev/null)" != "$sid $pane" ]; then
+        meta_update "$m" '.claude_session=$s | .pane_id=$p' --arg s "$sid" --arg p "$pane"
+        IFS=$'\t' read -r mg mn _ <<< "$mr"
+        stamp_pane "$pane" "$mg" "$mn"
+      fi
     fi
   fi
 
@@ -3029,7 +3127,7 @@ cmd_hook() {
       # times" is the signal context% cannot give you, because context% drops
       # back down after every compaction and looks healthy again.
       local rr mp
-      rr="$(meta_by_wid "$wid" || true)"
+      rr="$(meta_by_pane "$pane" || true)"
       if [ -n "$rr" ]; then
         mp="${rr##*$'\t'}"
         meta_update "$mp" '.compactions = ((.compactions // 0) + 1)'
@@ -3039,7 +3137,8 @@ cmd_hook() {
       tmux refresh-client -S 2>/dev/null || true
       exit 0 ;;
     SessionEnd)
-      rm -f "$STATE_DIR/$wid.state" "$STATE_DIR/$wid.ctx"
+      rm -f "$STATE_DIR/$pane.state" "$STATE_DIR/$pane.ctx"
+      [ "$(agent_pane "$wid")" = "$pane" ] && rm -f "$STATE_DIR/$wid.state" "$STATE_DIR/$wid.ctx"
       paint_state "$wid" ''
       [ -n "$sid" ] && rm -f "$STASH_DIR/$sid" "$WAITING_DIR/$sid"
       tmux refresh-client -S 2>/dev/null || true
@@ -3047,9 +3146,10 @@ cmd_hook() {
     *) exit 0 ;;
   esac
   local tmp
-  tmp="$(mktemp "$STATE_DIR/.${wid#@}.XXXXXX" 2>/dev/null)" || exit 0
+  tmp="$(mktemp "$STATE_DIR/.${pane#%}.XXXXXX" 2>/dev/null)" || exit 0
   printf '%s %s %s\n' "$state" "$(date +%s)" "$ntext" > "$tmp"
-  mv -f "$tmp" "$STATE_DIR/$wid.state"
+  mv -f "$tmp" "$STATE_DIR/$pane.state"
+  [ "$(agent_pane "$wid")" = "$pane" ] && rm -f "$STATE_DIR/$wid.state"
   if [ -n "$sid" ]; then
     if [ "$state" = waiting ]; then
       mkdir -p "$WAITING_DIR" 2>/dev/null && : > "$WAITING_DIR/$sid"
@@ -3057,7 +3157,7 @@ cmd_hook() {
       rm -f "$WAITING_DIR/$sid"
     fi
   fi
-  paint_state "$wid" "$(effective_state "$wid")"
+  paint_state "$wid" "$(effective_state "$pane")"
   tmux refresh-client -S 2>/dev/null || true
   sidebar_wake                 # the visible sidebar shows the change now, not in 2s
 

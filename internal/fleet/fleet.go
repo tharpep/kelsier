@@ -35,6 +35,7 @@ type Agent struct {
 	Group         string   `json:"group"`
 	Name          string   `json:"name"`
 	WindowID      *string  `json:"window_id"`
+	PaneID        *string  `json:"pane_id"`
 	Index         *float64 `json:"index"`
 	Current       bool     `json:"current"`
 	Managed       bool     `json:"managed"`
@@ -54,8 +55,8 @@ type Agent struct {
 	Activity      *float64 `json:"activity"`
 	// Doing: a working agent's last tool call in words, read from the tail
 	// of Claude Code's transcript (doing.go). Sidebar path only
-	Doing *string `json:"doing,omitempty"`
-	Context       *Context `json:"context"`
+	Doing   *string  `json:"doing,omitempty"`
+	Context *Context `json:"context"`
 	// Unseen marks a `done` the user has not looked at since it finished: the
 	// state is newer than the epoch in <window-id>.seen, which the sidebar
 	// writes when the window is shown (spec.md §9). No .seen file means never
@@ -98,6 +99,7 @@ type Doc struct {
 type record struct {
 	Name          string   `json:"name"`
 	WindowID      string   `json:"window_id"`
+	PaneID        string   `json:"pane_id"`
 	Repo          *string  `json:"repo"`
 	Cwd           *string  `json:"cwd"`
 	Isolation     *string  `json:"isolation"`
@@ -213,7 +215,7 @@ func Load(o Options) Doc {
 		defer wg.Done()
 		// path last: it is the one field that could hold anything
 		panesRaw = tmuxOut("list-panes", "-a", "-F",
-			"#{window_id}\t#{pane_current_command}\t#{pane_id}\t#{pane_index}\t#{pane_active}\t#{pane_pid}\t#{@kel-sidebar}\t#{pane_current_path}")
+			"#{window_id}\t#{pane_current_command}\t#{pane_id}\t#{pane_index}\t#{pane_active}\t#{pane_pid}\t#{@kel-sidebar}\t#{@kel-agent}\t#{pane_current_path}")
 	}()
 	go func() {
 		defer wg.Done()
@@ -230,8 +232,8 @@ func Load(o Options) Doc {
 	firstPath := map[string]string{} // window id -> its first pane's cwd
 	paneRows := map[string][]paneRow{}
 	for _, l := range lines(panesRaw) {
-		p := strings.SplitN(l, "\t", 8)
-		if len(p) != 8 {
+		p := strings.SplitN(l, "\t", 9)
+		if len(p) != 9 {
 			continue
 		}
 		// The sidebar pane (v0.10 M2) is kel's, not the user's: it runs
@@ -242,10 +244,10 @@ func Load(o Options) Doc {
 		}
 		paneMap[p[0]] = append(paneMap[p[0]], p[1])
 		if _, seen := firstPath[p[0]]; !seen {
-			firstPath[p[0]] = p[7]
+			firstPath[p[0]] = p[8]
 		}
 		paneRows[p[0]] = append(paneRows[p[0]], paneRow{
-			wid: p[0], cmd: p[1], id: p[2], idx: p[3], active: p[4], pid: p[5], path: p[7]})
+			wid: p[0], cmd: p[1], id: p[2], idx: p[3], active: p[4], pid: p[5], stamp: p[7], path: p[8]})
 	}
 
 	type stateEntry struct {
@@ -326,10 +328,22 @@ func Load(o Options) Doc {
 	// so a record is matched to its window the way liveness always was — the
 	// same id AND the same name (see the dead-record loop below).
 	recByWid := map[string]record{}
+	recByPane := map[string]record{}
 	for _, r := range records {
 		if r.WindowID != "" {
 			recByWid[r.WindowID] = r
 		}
+		if r.PaneID != "" {
+			recByPane[r.PaneID] = r
+		}
+	}
+
+	paneRec := func(p paneRow) (record, bool) {
+		r, ok := recByPane[p.id]
+		if !ok || p.stamp != recGroup(r)+"/"+r.Name {
+			return record{}, false
+		}
+		return r, true
 	}
 
 	lands := map[string]*Land{}
@@ -368,6 +382,7 @@ func Load(o Options) Doc {
 	}
 
 	agents := []Agent{}
+	agentPanes := map[string]bool{}
 	var paneWins []winInfo
 	curGroup := ""
 	for _, w := range wins {
@@ -406,61 +421,112 @@ func Load(o Options) Doc {
 		if panes == nil {
 			panes = []string{}
 		}
-		st, hasState := stateMap[w.wid]
 
-		// effective state: a hook said idle/working/waiting/throttled, but if
-		// the window holds nothing but a shell the process is gone. idle is a
-		// real signal (SessionStart already fired), not "no signal yet" — that
-		// case is hasState==false, handled below by leaving eff nil. An agent
-		// that crashed between SessionStart and its first prompt used to sit
-		// reading "idle" forever here, matching bin/kel's effective_state
-		// before it was fixed for the same reason: found by walking through
-		// the tool as a fresh user, not by inspection.
-		var eff *string
-		if hasState && st.state != "" {
-			eff = sp(st.state)
-			if st.state == "idle" || st.state == "working" || st.state == "waiting" || st.state == "throttled" {
-				alive := false
-				for _, c := range panes {
-					if !shells[c] {
-						alive = true
-						break
+		var aps []paneRow
+		for _, r := range paneRows[w.wid] {
+			_, st := stateMap[r.id]
+			_, cx := ctxMap[r.id]
+			_, rp := paneRec(r)
+			if st || cx || rp || r.cmd == "claude" {
+				aps = append(aps, r)
+			}
+		}
+		legacy := len(aps) == 0
+		if legacy {
+			if rows := paneRows[w.wid]; len(rows) > 0 {
+				aps = rows[:1]
+			} else {
+				aps = []paneRow{{wid: w.wid}}
+			}
+		}
+
+		for i, r := range aps {
+			arec, amanaged := paneRec(r)
+			if !amanaged && i == 0 && managed && (rec.PaneID == "" || rec.PaneID == r.id) {
+				arec, amanaged = rec, true
+			}
+			name := w.name
+			switch {
+			case amanaged:
+				name = arec.Name
+			case i > 0:
+				name = w.name + "-" + r.idx
+			}
+			ag := g
+			if amanaged && !(i == 0 && managed) {
+				ag = recGroup(arec)
+			}
+			st, hasState := stateMap[r.id]
+			if !hasState && i == 0 {
+				st, hasState = stateMap[w.wid]
+			}
+			cx := ctxMap[r.id]
+			if cx == nil && i == 0 {
+				cx = ctxMap[w.wid]
+			}
+
+			var eff *string
+			if hasState && st.state != "" {
+				eff = sp(st.state)
+				if st.state == "idle" || st.state == "working" || st.state == "waiting" || st.state == "throttled" {
+					alive := false
+					if legacy {
+						for _, c := range panes {
+							if !shells[c] {
+								alive = true
+								break
+							}
+						}
+					} else {
+						alive = !shells[r.cmd]
+					}
+					if !alive {
+						eff = sp("dead")
 					}
 				}
-				if !alive {
-					eff = sp("dead")
+			}
+
+			a := Agent{
+				Group: ag, Name: name, WindowID: sp(w.wid), PaneID: emptyToNil(r.id), Index: numPtr(w.idx),
+				Current: w.sess == curSess && w.wid == curWid, Managed: amanaged,
+				State: eff, Panes: panes, Activity: numPtr(w.activity),
+				Context: cx,
+			}
+			if hasState {
+				a.StateSince, a.Note = st.since, st.note
+			}
+			if eff != nil && *eff == "done" {
+				a.Unseen = unseen(sd, w.wid, a.StateSince)
+			}
+			a.Subagents = loadSubs(sd, r.id, time.Now().Unix())
+			if a.Subagents == nil && i == 0 {
+				a.Subagents = loadSubs(sd, w.wid, time.Now().Unix())
+			}
+			if amanaged {
+				a.Isolation, a.Branch, a.Repo, a.Cwd = arec.Isolation, arec.Branch, arec.Repo, arec.Cwd
+				a.AgentCmd, a.ClaudeSession, a.Compactions = arec.Agent, arec.ClaudeSession, arec.Compactions
+				if arec.Cwd != nil {
+					a.Dirty = dirtyMap[*arec.Cwd]
+					a.Land = lands[*arec.Cwd]
 				}
 			}
-		}
-
-		a := Agent{
-			Group: g, Name: w.name, WindowID: sp(w.wid), Index: numPtr(w.idx),
-			Current: w.sess == curSess && w.wid == curWid, Managed: managed,
-			State: eff, Panes: panes, Activity: numPtr(w.activity),
-			Context: ctxMap[w.wid],
-		}
-		if hasState {
-			a.StateSince, a.Note = st.since, st.note
-		}
-		if eff != nil && *eff == "done" {
-			a.Unseen = unseen(sd, w.wid, a.StateSince)
-		}
-		a.Subagents = loadSubs(sd, w.wid, time.Now().Unix())
-		if managed {
-			a.Isolation, a.Branch, a.Repo, a.Cwd = rec.Isolation, rec.Branch, rec.Repo, rec.Cwd
-			a.AgentCmd, a.ClaudeSession, a.Compactions = rec.Agent, rec.ClaudeSession, rec.Compactions
-			if rec.Cwd != nil {
-				a.Dirty = dirtyMap[*rec.Cwd]
-				a.Land = lands[*rec.Cwd]
+			if r.id != "" && (!legacy || amanaged || (agentCmd != "" && r.cmd == agentCmd)) {
+				agentPanes[r.id] = true
 			}
+			agents = append(agents, a)
 		}
-		agents = append(agents, a)
 	}
 
 	// records with no live window. Same liveness rule as meta_is_live: the
 	// window must match BOTH the recorded id and the recorded name.
+	stamps := map[string]string{}
+	for _, rows := range paneRows {
+		for _, r := range rows {
+			stamps[r.id] = r.stamp
+		}
+	}
 	for _, r := range records {
-		live := false
+		live := r.PaneID != "" && stamps[r.PaneID] == recGroup(r)+"/"+r.Name
 		for _, w := range wins {
 			if w.wid == r.WindowID && w.name == r.Name {
 				live = true
@@ -522,7 +588,7 @@ func Load(o Options) Doc {
 		}
 	}
 	if o.Panes || o.Worktrees {
-		ps := buildPanes(paneRows, paneWins, curPane)
+		ps := buildPanes(paneRows, paneWins, curPane, agentPanes)
 		doc.Panes = &ps
 		withClaude(&doc, sd, ps)
 		withDoing(&doc)

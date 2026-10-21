@@ -47,7 +47,7 @@ type Git struct {
 
 // paneRow is one line of `tmux list-panes -a`.
 type paneRow struct {
-	wid, cmd, id, idx, active, pid, path string
+	wid, cmd, id, idx, active, pid, stamp, path string
 }
 
 // repoRoot walks up from dir to the first directory holding `.git`. linked is
@@ -146,7 +146,7 @@ func classify(cmd, agentCmd string, ports *[]int) (kind string, agent bool) {
 }
 
 // buildPanes assembles the panes array for the windows kel owns.
-func buildPanes(rows map[string][]paneRow, wins []winInfo, curPane string) []Pane {
+func buildPanes(rows map[string][]paneRow, wins []winInfo, curPane string, agentPanes map[string]bool) []Pane {
 	// git: one status per distinct repo root
 	roots := map[string]bool{}
 	rootOf := map[string]string{}
@@ -189,7 +189,13 @@ func buildPanes(rows map[string][]paneRow, wins []winInfo, curPane string) []Pan
 				}
 				p.Ports = &pp
 			}
-			p.Kind, p.Agent = classify(r.cmd, w.agentCmd, p.Ports)
+			p.Kind, _ = classify(r.cmd, w.agentCmd, p.Ports)
+			p.Agent = agentPanes[r.id]
+			if p.Agent {
+				p.Kind = "agent"
+			} else if p.Kind == "agent" {
+				p.Kind = "program"
+			}
 			if root, ok := rootOf[r.path]; ok {
 				if g := gits[root]; g != nil {
 					gg := *g

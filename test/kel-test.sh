@@ -297,6 +297,25 @@ mv "$SESSIONS/api-gw/c.json" "$SESSIONS/api-gw/ghost.json"
 jq '.name="ghost"' "$SESSIONS/api-gw/ghost.json" > "$WORK/g" && mv "$WORK/g" "$SESSIONS/api-gw/ghost.json"
 ok "an orphaned record shows as dead"    '[ "$("$KEL" _fleet | jq -r ".agents[]|select(.name==\"ghost\")|.state")" = dead ]'
 ok "  ...with a null window_id"          '[ "$("$KEL" _fleet | jq -r ".agents[]|select(.name==\"ghost\")|.window_id")" = null ]'
+NEW api-gw duo
+DW2="$(window_of api-gw duo)"; DP1="$(pane_of api-gw duo)"
+ok "a new agent's record names its pane"  '[ "$(jq -r .pane_id "$SESSIONS/api-gw/duo.json")" = "$DP1" ]'
+ok "  ...and the pane names its agent"    '[ "$(tmux display -p -t "$DP1" "#{@kel-agent}")" = api-gw/duo ]'
+DP2="$(tmux split-window -d -P -F '#{pane_id}' -t "$DP1" -c "$WORK/repos/api-gw")"
+tmux send-keys -t "$DP2" 'sleep 9999' Enter
+wait_until '[ "$(tmux display -p -t "$DP2" "#{pane_current_command}")" = sleep ]'
+hook "$DP1" UserPromptSubmit
+hook "$DP2" Notification permission_prompt "needs Bash"
+duo() { "$KEL" _fleet | jq -r --arg w "$DW2" '[.agents[] | select(.window_id == $w)] | sort_by(.pane_id) | map("\(.pane_id) \(.state)") | join(",")'; }
+ok "two agents in one window are two agents" '[ "$("$KEL" _fleet | jq --arg w "$DW2" "[.agents[] | select(.window_id == \$w)] | length")" = 2 ]'
+ok "  ...each with its own state"          '[[ ",$(duo)," == *",$DP1 working,"* ]] && [[ ",$(duo)," == *",$DP2 waiting,"* ]]'
+ok "  ...kept in a file per pane"          '[ -f "$STATE/$DP2.state" ] && [ ! -f "$STATE/$DW2.state" ]'
+ok "  ...the second named after the window" '"$KEL" _fleet | jq -e --arg p "$DP2" ".agents[] | select(.pane_id == \$p) | .name | startswith(\"duo-\")" >/dev/null'
+tmux send-keys -t "$DP2" C-c
+wait_until '[[ ",$(duo)," == *",$DP2 dead,"* ]]'
+ok "one dying leaves the other alone"     '[[ ",$(duo)," == *",$DP2 dead,"* ]] && [[ ",$(duo)," == *",$DP1 working,"* ]]'
+tmux kill-pane -t "$DP2"
+"$KEL" kill api-gw/duo >/dev/null 2>&1
 # #25: a record whose JSON does not even parse must still render, distinctly
 # -- not vanish, and (the worse bug this actually was) not take the rest of
 # the document with it. Before the fix, --slurpfile aborted on the first bad
@@ -983,8 +1002,8 @@ ok "  ...the worktree as a space of its own"     '[ "$(sbtext "$SP" | grep -c "a
 ok "  ...and selects with a bar, not inverse video" '! tmux capture-pane -e -p -t "$SP" | grep -q "\[7m" && sbtext "$SP" | grep -q "▌"'
 
 tmux send-keys -t "$SP" j
-wait_until '[ "$(jq -r .selected "$STATE/sidebar.json" 2>/dev/null)" = "a:$WTW" ]'
-ok "j moves the shared cursor"                   '[ "$(jq -r .selected "$STATE/sidebar.json")" = "a:$WTW" ]'
+wait_until '[ "$(jq -r .selected "$STATE/sidebar.json" 2>/dev/null)" = "a:$(userpane "$WTW")" ]'
+ok "j moves the shared cursor"                   '[ "$(jq -r .selected "$STATE/sidebar.json")" = "a:$(userpane "$WTW")" ]'
 tmux send-keys -t "$SP" Enter
 wait_until '[ "$(active_win)" = "$WTW" ]'
 ok "enter jumps to the agent's window"          '[ "$(active_win)" = "$WTW" ]'
@@ -1130,14 +1149,15 @@ ok "  ...no changes is said, not an empty diff" '[[ "$("$KEL" _panel diff "$WT5"
 ok "  ...and no base is said, not an empty diff" '[[ "$("$KEL" _panel diff "$WT5" t "" 2>&1)" == *"no base"* ]]'
 
 # e: the edit hook, then the file — into a running nvim, else a popup
+K5="$(userpane "$W5")"
 ok "e with nothing edited says so"              '[[ "$("$KEL" _panel edit "$WT5" t "$W5" 2>&1)" == *"nothing edited yet"* ]]'
 printf '%s' "{\"session_id\":\"s\",\"cwd\":\"$WT5\",\"hook_event_name\":\"PostToolUse\",\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"ls\"}}" \
   | TMUX_PANE="$(userpane "$W5")" "$KEL" hook PostToolUse
-ok "a tool call that edits no file records nothing" '[ ! -f "$STATE/$W5.edit" ]'
+ok "a tool call that edits no file records nothing" '[ ! -f "$STATE/$K5.edit" ]'
 printf '%s' "{\"session_id\":\"s\",\"cwd\":\"$WT5\",\"hook_event_name\":\"PostToolUse\",\"tool_name\":\"Edit\",\"tool_input\":{\"file_path\":\"$WT5/README.md\"},\"tool_response\":{\"structuredPatch\":[{\"newStart\":12}]}}" \
   | TMUX_PANE="$(userpane "$W5")" "$KEL" hook PostToolUse
-ok "an Edit records the file and its first changed line" '[ "$(sed -n 1p "$STATE/$W5.edit")" = "$WT5/README.md" ] && [ "$(sed -n 2p "$STATE/$W5.edit")" = 12 ]'
-ok "  ...and leaves the agent's state alone"    '[ ! -f "$STATE/$W5.state" ]'
+ok "an Edit records the file and its first changed line" '[ "$(sed -n 1p "$STATE/$K5.edit")" = "$WT5/README.md" ] && [ "$(sed -n 2p "$STATE/$K5.edit")" = 12 ]'
+ok "  ...and leaves the agent's state alone"    '[ ! -f "$STATE/$K5.state" ]'
 "$KEL" _panel edit "$WT5" api-gw/wt5 "$W5" >/dev/null 2>&1
 ok "e with no nvim open there: a popup at the line" 'grep -q "^$WT5	nvim · api-gw/wt5 · prefix q closes	nvim +12 $WT5/README.md$" "$KEL_POPUP_TRACE"'
 # a pane whose process is called nvim (a renamed sleep), and a socket where
@@ -1159,13 +1179,13 @@ PLAN="$CLAUDE_CONFIG_DIR/plans/gentle-otter.md"
 printf '# Fix the parser\n\n1. read it\n2. fix it\n' > "$PLAN"
 printf '%s' "{\"session_id\":\"s\",\"cwd\":\"$WT5\",\"hook_event_name\":\"PostToolUse\",\"tool_name\":\"Write\",\"tool_input\":{\"file_path\":\"$PLAN\"}}" \
   | TMUX_PANE="$(userpane "$W5")" "$KEL" hook PostToolUse
-ok "a Write under the plans dir is the plan"     '[ "$(sed -n 1p "$STATE/$W5.plan")" = "$PLAN" ]'
-ok "  ...and not the last edit"                  '[ "$(sed -n 1p "$STATE/$W5.edit")" = "$WT5/README.md" ]'
+ok "a Write under the plans dir is the plan"     '[ "$(sed -n 1p "$STATE/$K5.plan")" = "$PLAN" ]'
+ok "  ...and not the last edit"                  '[ "$(sed -n 1p "$STATE/$K5.edit")" = "$WT5/README.md" ]'
 : > "$KEL_POPUP_TRACE"
 "$KEL" _panel plan "$WT5" api-gw/wt5 "$W5" >/dev/null 2>&1
 ok "p opens the plan in a popup"                 'grep -q "^$WT5	plan · api-gw/wt5 · prefix q closes	" "$KEL_POPUP_TRACE"'
-ok "  ...the plan's own text"                    'grep -q "Fix the parser" "$STATE/$W5.view"'
-ok "  ...and says when the session keeps no tasks" 'grep -q "no task list" "$STATE/$W5.view"'
+ok "  ...the plan's own text"                    'grep -q "Fix the parser" "$STATE/$K5.view"'
+ok "  ...and says when the session keeps no tasks" 'grep -q "no task list" "$STATE/$K5.view"'
 # tasks: Claude Code's own list, as it stands on disk for the agent's session
 jq '.claude_session = "sess5"' "$SESSIONS/api-gw/wt5.json" > "$WORK/r" && mv "$WORK/r" "$SESSIONS/api-gw/wt5.json"
 TD="$CLAUDE_CONFIG_DIR/tasks/sess5"; mkdir -p "$TD"
@@ -1174,14 +1194,14 @@ printf '{"id":"2","subject":"fix it","activeForm":"Fixing it","status":"in_progr
 printf '{"id":"3","subject":"ship it","status":"pending","blockedBy":["2"]}' > "$TD/3.json"
 printf '{"id":"4","subject":"dropped","status":"deleted","blockedBy":[]}'    > "$TD/4.json"
 "$KEL" _panel plan "$WT5" api-gw/wt5 "$W5" >/dev/null 2>&1
-V="$STATE/$W5.view"
+V="$STATE/$K5.view"
 ok "tasks: done, in progress (as it is phrased), pending" 'grep -q "^✓ read it" "$V" && grep -q "^▸ Fixing it" "$V" && grep -q "^· ship it" "$V"'
 ok "  ...with what blocks what"                  'grep -q "ship it.*blocked by 2" "$V"'
 ok "  ...the count, deleted ones gone"           'grep -q "1 of 3 done" "$V" && ! grep -q dropped "$V"'
 printf '{"id":"5", trunc' > "$TD/5.json"
 "$KEL" _panel plan "$WT5" api-gw/wt5 "$W5" >/dev/null 2>&1
 ok "a file that does not parse: unreadable, not a shorter list" 'grep -q "unreadable.*5.json" "$V" && ! grep -q "✓ read it" "$V"'
-rm -rf "$TD" "$STATE/$W5.plan"
+rm -rf "$TD" "$STATE/$K5.plan"
 ok "with neither again, p refuses"              '! "$KEL" _panel plan "$WT5" t "$W5" >/dev/null 2>&1'
 mkdir -p "$TD"; printf '{"id":"1","subject":"solo","status":"pending","blockedBy":[]}' > "$TD/1.json"
 ok "tasks alone are enough for p, the plan said missing" '"$KEL" _panel plan "$WT5" t "$W5" >/dev/null 2>&1 && grep -q "has not written one" "$V" && grep -q "solo" "$V"'
@@ -1220,10 +1240,10 @@ ok "kel.conf: prefix q closes a popup, and only a popup" \
 UP5="$(userpane "$W5")"
 hook "$UP5" UserPromptSubmit
 hook "$UP5" Notification idle_prompt
-ok "idle_prompt ends a working that no Stop ended" '[ "$(cut -d" " -f1 "$STATE/$W5.state")" = idle ]'
+ok "idle_prompt ends a working that no Stop ended" '[ "$(cut -d" " -f1 "$STATE/$K5.state")" = idle ]'
 hook "$UP5" Stop
 hook "$UP5" Notification idle_prompt
-ok "  ...and leaves any other state alone"      '[ "$(cut -d" " -f1 "$STATE/$W5.state")" = done ]'
+ok "  ...and leaves any other state alone"      '[ "$(cut -d" " -f1 "$STATE/$K5.state")" = done ]'
 # e on a space: your nvim at that directory, kept between opens
 : > "$KEL_POPUP_TRACE"
 "$KEL" _panel editor "$WT5" api-gw/wt5 >/dev/null 2>&1
@@ -1334,11 +1354,13 @@ reset
 NEW api-gw a
 W0="$(window_of api-gw a)"
 printf 'waiting 1\n' > "$STATE/@99.state"; printf 'x\n' > "$STATE/@99.ctx"
+K0="$(userpane "$W0")"
 printf 'idle 1\n'    > "$STATE/$W0.state"
 "$KEL" ls >/dev/null 2>&1
 ok "prune drops a stale .state"          '[ ! -e "$STATE/@99.state" ]'
 ok "prune drops a stale .ctx"            '[ ! -e "$STATE/@99.ctx" ]'
-ok "prune keeps a LIVE window's state"   '[ -e "$STATE/$W0.state" ]'
+ok "prune keeps a LIVE agent's state"     '[ -e "$STATE/$K0.state" ]'
+ok "  ...moved from its window to its pane" '[ ! -e "$STATE/$W0.state" ] && [ "$(cut -d" " -f1 "$STATE/$K0.state")" = idle ]'
 rm -f "$STATE/snapshot.json"
 date +%s > "$STATE/.restoring";                  "$KEL" snapshot >/dev/null 2>&1
 ok "a fresh lock stops snapshot writing" '[ ! -f "$STATE/snapshot.json" ]'
@@ -1686,18 +1708,18 @@ sl() { printf '%s' "$1" | TMUX_PANE="$P" "$KEL" statusline; }
 sl '{"session_id":"a","model":{"display_name":"Opus 5"},"workspace":{"current_dir":"/x"},
      "cost":{"total_cost_usd":1.5},"rate_limits":{"five_hour":{"used_percentage":12}},
      "context_window":{"total_input_tokens":15500,"context_window_size":200000,"used_percentage":42}}' >/dev/null
-ok "a .ctx file is written"                         '[ -f "$STATE/$W.ctx" ]'
-ok "  ...with the right percentage"                 '[ "$(cut -f1 "$STATE/$W.ctx")" = 42 ]'
-ok "  ...and the model in the last field"           '[ "$(cut -f7 "$STATE/$W.ctx")" = "Opus 5" ]'
+ok "a .ctx file is written"                         '[ -f "$STATE/$P.ctx" ]'
+ok "  ...with the right percentage"                 '[ "$(cut -f1 "$STATE/$P.ctx")" = 42 ]'
+ok "  ...and the model in the last field"           '[ "$(cut -f7 "$STATE/$P.ctx")" = "Opus 5" ]'
 ok "ls surfaces it"                                 '[[ "$("$KEL" ls 2>/dev/null)" == *42%* ]]'
 ok "--json surfaces it"                             '[ "$("$KEL" ls --json | jq -r ".agents[0].context.pct")" = 42 ]'
 # the IFS-tab-folding regression: an empty field must not shift every later value
 sl '{"session_id":"a","cost":{"total_cost_usd":9.25},
      "context_window":{"total_input_tokens":170000,"context_window_size":200000,"used_percentage":86}}' >/dev/null
-ok "an empty field does not shift the others"       '[ "$(cut -f1 "$STATE/$W.ctx")" = 86 ] && [ "$(cut -f2 "$STATE/$W.ctx")" = 9.25 ]'
+ok "an empty field does not shift the others"       '[ "$(cut -f1 "$STATE/$P.ctx")" = 86 ] && [ "$(cut -f2 "$STATE/$P.ctx")" = 9.25 ]'
 # a malformed payload must never blank a good record
 for bad in '' 'not json' '{}' '{"context_window":null}'; do sl "$bad" >/dev/null 2>&1; done
-ok "garbage payloads cannot blank a good record"    '[ "$(cut -f1 "$STATE/$W.ctx")" = 86 ]'
+ok "garbage payloads cannot blank a good record"    '[ "$(cut -f1 "$STATE/$P.ctx")" = 86 ]'
 
 # used_percentage is null before the first API call and again right after
 # /compact. That is "not measured", not "empty", and the two must render
@@ -1706,7 +1728,7 @@ NULLPCT='{"session_id":"a","model":{"display_name":"Opus 5"},
           "context_window":{"total_input_tokens":170000,"context_window_size":200000,"used_percentage":null}}'
 ok "an unmeasured context renders as unknown"       '[[ "$(sl "$NULLPCT")" == *"ctx ?"* ]]'
 ok "  ...and not as 0%"                             '[[ "$(sl "$NULLPCT")" != *"0%"* ]]'
-ok "  ...and does not overwrite a real record"      '[ "$(cut -f1 "$STATE/$W.ctx")" = 86 ]'
+ok "  ...and does not overwrite a real record"      '[ "$(cut -f1 "$STATE/$P.ctx")" = 86 ]'
 ok "a real 0% still renders as a figure"            '[[ "$(sl "{\"session_id\":\"a\",\"context_window\":{\"context_window_size\":200000,\"used_percentage\":0}}")" == *"0%"* ]]'
 
 # `agent.name` marks a session started with `claude --agent`, NOT a Task-tool
@@ -1715,7 +1737,7 @@ ok "a real 0% still renders as a figure"            '[[ "$(sl "{\"session_id\":\
 AGENTPL='{"session_id":"a","agent":{"name":"Explore"},
           "context_window":{"total_input_tokens":8000,"context_window_size":200000,"used_percentage":4}}'
 AGENTROW="$(sl "$AGENTPL")"
-ok "an --agent session still records context"       '[ "$(cut -f1 "$STATE/$W.ctx")" = 4 ]'
+ok "an --agent session still records context"       '[ "$(cut -f1 "$STATE/$P.ctx")" = 4 ]'
 ok "  ...and names the agent in the row"            '[[ "$AGENTROW" == *Explore* ]]'
 sl '{"session_id":"a","context_window":{"total_input_tokens":170000,"context_window_size":200000,"used_percentage":86}}' >/dev/null
 

@@ -73,9 +73,9 @@ change; migrate old records in `migrate_meta`.
 
 | path | contents |
 |---|---|
-| `sessions/<group>/<name>.json` | one record per managed agent. Keyed by group **and** name — two repos can each have a `docs`. |
-| `<window-id>.state` | `<state> <epoch> <note>` — one line, atomic write |
-| `<window-id>.ctx` | `<pct> <cost> <in_tokens> <ctx_size> <rate_5h> <epoch> <model>`, tab-separated |
+| `sessions/<group>/<name>.json` | one record per managed agent. Keyed by group **and** name — two repos can each have a `docs`. Carries `window_id` and, since M7, `pane_id` |
+| `<pane-id>.state` | `<state> <epoch> <note>` — one line, atomic write |
+| `<pane-id>.ctx` | `<pct> <cost> <in_tokens> <ctx_size> <rate_5h> <epoch> <model>`, tab-separated |
 | `snapshot.json` | full workspace shape, format v2 since v0.10: `{version:2, saved_at, saved_epoch, last, windows:[{name, group, layout, panes:[{cwd,cmd}]}]}`. `.prev` keeps one generation. Restore still reads v1 (`groups` keyed by group) |
 | `snapshots/<epoch>.json` | previous workspaces, archived by `kel` before a fresh start so the hooks cannot overwrite them; newest five kept |
 | `.restoring` | lockfile held during a restore (see Invariants) |
@@ -87,13 +87,13 @@ change; migrate old records in `migrate_meta`.
 | `sidebar-cache.json` | the last fleet document the visible sidebar loaded, so a sidebar just shown draws at once, before git is asked anything |
 | `quota` | `<5h%> <5h reset> <7d%> <7d reset> <spend%> <spend reset> <epoch seen>`, space-separated; `-1` = not reported, `0` reset = not given. Written by `kel statusline` only from a payload carrying rate limits; `kel-fleet` reads it as `quota`, nulling a figure whose window reset or that is older than its window |
 | `<window-id>.seen` | one epoch: when the window was last shown. `kel-fleet` reads it for `unseen` on a `done` agent (no file = unseen); the shown sidebar writes it for its own window |
-| `<window-id>.edit` | two lines: the path the window's agent last edited, then its first changed line. Written by the `PostToolUse` hook (on every tool since 2026-10-21; only edits write this), read by `kel _panel edit` |
-| `<window-id>.plan` | two lines like `.edit`: the plan file a plan-mode `Write` under `$CLAUDE_CONFIG_DIR/plans/` named. The same hook, sorted by path |
-| `<window-id>.view` | what `p` last composed (plan, then tasks) for its popup; overwritten each time |
+| `<pane-id>.edit` | two lines: the path the window's agent last edited, then its first changed line. Written by the `PostToolUse` hook (on every tool since 2026-10-21; only edits write this), read by `kel _panel edit` |
+| `<pane-id>.plan` | two lines like `.edit`: the plan file a plan-mode `Write` under `$CLAUDE_CONFIG_DIR/plans/` named. The same hook, sorted by path |
+| `<pane-id>.view` | what `p` last composed (plan, then tasks) for its popup; overwritten each time |
 | `lazygit-overlay.yml` | `quitOnTopLevelReturn: true`, laid over the user's lazygit config (never written into it) so `esc` closes kel's lazygit popup |
 | `prompt.out` | the last multi-line answer `prefix k` showed in a popup |
 | `claude-agents.json` | `{at, bin, sessions, failed}` — `claude agents --json`, cached 10 s for the sidebar's path; `bin` remembers where claude is |
-| `<window-id>.subs` | two lines: the epoch, then the agent panel's subagent rows as JSON, from `kel substatus`; older than 30 s means none now |
+| `<pane-id>.subs` | two lines: the epoch, then the agent panel's subagent rows as JSON, from `kel substatus`; older than 30 s means none now |
 | `restore-offer` | present while an archived workspace waits: set by a fresh `kel`, cleared by `kel restore`; the sidebar offers `b` |
 | `sidebar-off` | present after `kel sidebar off`; no new sidebars until `kel sidebar on` |
 | `worktrees.json` | `{at, repos:{<main root>: repo}, stamps:{<main root>: ns}}` — every repo's worktrees with land state, for the sidebar's `repos`; reused for 20 s unless `.git/worktrees` changed (its mtime is the stamp). `kel sweep` reads fresh |
@@ -104,14 +104,20 @@ change; migrate old records in `migrate_meta`.
 | `ports.json` | `{at, panes:{<pane pid>: [ports]}}` — the listening-port scan behind `_fleet --panes`, reused for 10 s |
 
 **The directory is `0700`.** The records carry repo paths, branch names and
-Claude session ids, and `<window-id>.state` carries Claude Code's notification
+Claude session ids, and `<pane-id>.state` carries Claude Code's notification
 text — the agent quoting a command back at you, greps and file paths included.
 `migrate_meta` re-applies the mode so pre-0.9 installs get fixed. Deliberately
 **not** a global `umask 077`: that would also apply to the files
 `git worktree add` creates, and kel has no business writing your source at 0600.
 
-State is keyed by **window id**, metadata by **group + name**. tmux auto-names
-every `claude` window `claude`, so name-keyed state would collide.
+State is keyed by **pane id** (since v0.10 M7: an agent is a pane, and two
+can share a window), metadata by **group + name**; `.seen` alone stays per
+window, because "seen" is a window being shown. tmux auto-names every
+`claude` window `claude`, so name-keyed state would collide. A pane id is
+reused after a server restart, as a window id is, so a record matches its
+pane only when the pane's `@kel-agent` option says `<group>/<name>` — pane
+options die with the server. `migrate_state` moves a window-keyed file to its
+agent's pane once, and the readers fall back to the window file meanwhile.
 
 **One session, so the group lives on the window.** Since v0.10 every kel window
 is in the single `$KEL_PREFIX` session, and kel stamps its group on the window
