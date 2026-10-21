@@ -1065,6 +1065,12 @@ func runSidebar(once bool) {
 	p := tea.NewProgram(m)
 	ch := make(chan os.Signal, 4)
 	signal.Notify(ch, syscall.SIGUSR1)
+	if m.myPane != "" {
+		// only now can it take a wake: SIGUSR1 kills a process that has not
+		// asked for it, as a new binary does through macOS's first-launch
+		// check (backlog #41). sidebar_wake signals marked panes only
+		_ = exec.Command("tmux", "set-option", "-p", "-t", m.myPane, "@kel-ready", "1").Run()
+	}
 	go func() {
 		for range ch {
 			p.Send(sbWake{})

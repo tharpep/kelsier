@@ -408,6 +408,11 @@ the `TodoWrite` design was stale, and the plan turned out to need no new hook.
   numbers its own sessions. It used to be the repo's bare name, so a second
   agent there had to be named by hand. `kel-top` became `kel-sidebar`, the
   one thing it still was.
+- *backlog #41's cause:* the wake SIGUSR1 reached a sidebar before it could
+  take one, and the signal's default is to exit. It showed after
+  `./install.sh` because a new binary's first macOS launch is slow, and the
+  cleanup's background `new-window` moved the switch, and its wake, to just
+  after the split. Wake now signals only panes marked `@kel-ready`.
 
 **Why this order:** M0–M1 are data and plumbing you can mostly ignore; M2 is
 where the tmux-hook risk lives, so it is proven before any UI depends on it;

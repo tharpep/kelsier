@@ -99,7 +99,7 @@ change; migrate old records in `migrate_meta`.
 | `banner` | one line per agent the top banner shows: `<wid> TAB <state> TAB <name> TAB <text>`. Written by the state hook on a notifying transition, dropped when the agent moves on, when a client shows its window (`session-window-changed` → `kel _banner seen`) or on ✕ (`_click bx`); empty = tmux's bar back to what the sidebar wants |
 | `prompt-history` | the last twenty commands typed at the sidebar's `;`, one per line |
 | `gh-dash.yml` | the config `v` writes for gh dash each time — every open space's repos; not the user's own |
-| `sidebar-fail.log` | a dying sidebar's own stderr (`kel-sidebar 2>>`), appended. Temporary: kept until it explains backlog #41, then deleted with the redirect |
+| `sidebar-fail.log` | a dying sidebar's own stderr (`kel-sidebar 2>>`), appended. Temporary: backlog #41 is fixed, and it goes once daily use stays quiet |
 | `ports.json` | `{at, panes:{<pane pid>: [ports]}}` — the listening-port scan behind `_fleet --panes`, reused for 10 s |
 
 **The directory is `0700`.** The records carry repo paths, branch names and
@@ -129,7 +129,9 @@ anything alive in this window" must skip it: use `user_panes` / `agent_pane`
 / `agent_alive <wid>` in bash; `kel-fleet` drops it
 before anything else sees the panes. Six lookups had to change for M2 (the
 dead check twice, `kel new`'s and relaunch's send-keys, restore's first pane,
-`resolve_pane`'s cwd match).
+`resolve_pane`'s cwd match). A sidebar sets a second pane option,
+`@kel-ready`, once it can take `wake`'s SIGUSR1 — whose default is to exit,
+and a new binary's first macOS launch is slow — and wake signals only those.
 
 **Read it through `fleet_json`, never by re-deriving.** `kel _fleet [--dirty]
 [--land] [--pr]` — that is, `kel-fleet` — turns all of the above into one JSON

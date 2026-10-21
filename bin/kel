@@ -378,12 +378,13 @@ sidebar_style() { # wid
 
 # nudge every sidebar to look again (SIGUSR1); each decides for itself, with
 # one cheap tmux call, whether it is the visible one.  On every state hook too,
-# so it must stay one listing (invariant 5).
+# so it must stay one listing (invariant 5).  Only a sidebar marked @kel-ready:
+# the signal kills one still starting (backlog #41).
 sidebar_wake() {
-  local flag pid
-  tmux list-panes -a -F '#{@kel-sidebar} #{pane_pid}' 2>/dev/null \
-  | while read -r flag pid; do
-      [ "$flag" = 1 ] && kill -USR1 "$pid" 2>/dev/null
+  local ready pid
+  tmux list-panes -a -F '#{@kel-ready} #{pane_pid}' 2>/dev/null \
+  | while read -r ready pid; do
+      [ "$ready" = 1 ] && kill -USR1 "$pid" 2>/dev/null
     done
   return 0
 }

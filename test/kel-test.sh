@@ -808,6 +808,19 @@ KEL_SIDEBAR_BIN="$WORK/kel-sidebar-crash" "$KEL" _sidebar ensure "$CW"
 wait_until 'grep -q "probe crash" "$STATE/sidebar-fail.log" 2>/dev/null'
 ok "a sidebar that dies leaves its error in sidebar-fail.log" 'grep -q "probe crash" "$STATE/sidebar-fail.log"'
 tmux kill-window -t "$CW" 2>/dev/null
+# SIGUSR1 kills a process that has not asked for it yet, and a new binary's
+# first launch on macOS takes up to 700 ms before its Go runtime does: the
+# wake a window switch sends killed that sidebar (backlog #41). A shell that
+# sleeps before it becomes the sidebar is that window, held open
+printf '#!/bin/sh\nsleep 1\nexec "%s"\n' "$KEL_SIDEBAR_BIN" > "$WORK/kel-sidebar-slow"; chmod +x "$WORK/kel-sidebar-slow"
+SLW="$(tmux new-window -d -P -F '#{window_id}' -t '=keltest:' -c "$WORK/repos/api-gw" 'sleep 9999')"
+KEL_SIDEBAR_BIN="$WORK/kel-sidebar-slow" "$KEL" _sidebar ensure "$SLW"
+"$KEL" _sidebar wake
+wait_until "tmux list-panes -t $SLW -F '#{@kel-sidebar} #{pane_current_command}' | grep -qx '1 kel-sidebar'" 30
+ok "a wake while a sidebar starts does not kill it" "tmux list-panes -t $SLW -F '#{@kel-sidebar} #{pane_current_command}' | grep -qx '1 kel-sidebar'"
+wait_until "[ \"\$(tmux list-panes -t $SLW -F '#{@kel-ready}' | grep -cx 1)\" = 1 ]" 30
+ok "  ...which marks itself ready for the next" "[ \"\$(tmux list-panes -t $SLW -F '#{@kel-ready}' | grep -cx 1)\" = 1 ]"
+tmux kill-window -t "$SLW" 2>/dev/null
 OW="$(tmux new-session -d -P -F '#{window_id}' -s notkel)"
 "$KEL" _sidebar ensure "$OW"
 ok "a window outside kel is left alone"           '[ "$(sbcount "$OW")" = 0 ]'

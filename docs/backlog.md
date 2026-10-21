@@ -45,7 +45,19 @@ inherits them:
 
 ## Open
 
-### 41. A sidebar pane dies just after it is made  ·  `[defect]`
+### 41. A sidebar pane dies just after it is made  ·  **fixed 2026-10-20**
+
+*Cause, found by measurement:* `kel _sidebar wake` sends SIGUSR1 to every
+sidebar on a window switch or attach, and SIGUSR1 kills a process that has
+not asked for it. A Go binary asks within milliseconds, except on its first
+launch after a build, when macOS checks it first: 260–730 ms measured. A
+fresh install, a `b` restore and `kel` after `./install.sh` all switch
+windows in that time. A signal leaves no stderr, which is why the log stayed
+empty. The fix: a sidebar marks its pane `@kel-ready` once it can take the
+signal, and wake signals marked panes only. The redirect and the log go in
+a later release, once daily use has stayed quiet. What follows is the entry
+as it stood.
+
 
 What was believed first was wrong. The window flag `@kel-has-sidebar` was set
 in the same tmux command list as the split that adds the pane, and a window
