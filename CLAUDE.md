@@ -116,7 +116,7 @@ window, because "seen" is a window being shown. tmux auto-names every
 `claude` window `claude`, so name-keyed state would collide. A pane id is
 reused after a server restart, as a window id is, so a record matches its
 pane only when the pane's `@kel-agent` option says `<group>/<name>` — pane
-options die with the server. `migrate_state` moves a window-keyed file to its
+options die with the server. Beside it the hook keeps `@kel-state` and `@kel-name` on the pane, which is all the pane title (`@kel-pane-title` in kel.conf) reads. `migrate_state` moves a window-keyed file to its
 agent's pane once, and the readers fall back to the window file meanwhile.
 
 **One session, so the group lives on the window.** Since v0.10 every kel window

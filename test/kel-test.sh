@@ -329,6 +329,11 @@ hook "$HP" UserPromptSubmit
 hook "$GP" Notification permission_prompt "needs Bash"
 ok "the window's border shows the agent that waits" '[ "$(tmux show-options -wv -t "$HW2" pane-border-style)" = fg=colour214 ]'
 ok "  ...and the banner names that pane"        '[ "$(cut -f1 "$STATE/banner" | tail -1)" = "$GP" ]'
+grep -E '^set -g (@kel-pane-|pane-border-format )' "$HERE/../tmux/kel.conf" > "$WORK/titles.conf"
+tmux source-file "$WORK/titles.conf"
+title() { tmux display -p -t "$1" '#{T:pane-border-format}' | sed 's/#\[[^]]*\]//g'; }
+ok "each agent pane's title says who and how"   '[ "$(title "$HP")" = " ● $(tmux display -p -t "$HP" "#{pane_index}") · host working " ] && [ "$(title "$GP")" = " ● $(tmux display -p -t "$GP" "#{pane_index}") · guest waiting " ]'
+ok "  ...in the state's colour"                  'tmux display -p -t "$GP" "#{T:pane-border-format}" | grep -q "fg=yellow"'
 hold_client 20
 tmux select-window -t "$(window_of api-gw a)"
 TMUX="$TMUX_TMPDIR/tmux-$(id -u)/default,$(tmux display-message -p '#{pid}'),0" "$KEL" jump

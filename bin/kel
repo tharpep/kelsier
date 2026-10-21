@@ -598,7 +598,7 @@ all_metas() {
 # its name no longer says which record it is — the only callers that look a
 # record up for exactly that reason (kill, rename) pass it.
 stamp_pane() { # pane group name
-  tmux set-option -p -t "$1" @kel-agent "$2/$3" 2>/dev/null || true
+  tmux set-option -p -t "$1" @kel-agent "$2/$3" \; set-option -p -t "$1" @kel-name "$3" 2>/dev/null || true
 }
 
 meta_by_pane() { # pane
@@ -719,8 +719,20 @@ migrate_state() {
     [ -n "$pane" ] || continue
     [ -e "$STATE_DIR/$pane.$ext" ] && rm -f "$f" || mv -f "$f" "$STATE_DIR/$pane.$ext"
   done
+  local st
+  for f in "$STATE_DIR"/%*.state; do
+    [ -e "$f" ] || continue
+    pane="${f##*/}"; pane="${pane%.state}"
+    [ -n "$(tmux display-message -p -t "$pane" '#{pane_id}' 2>/dev/null)" ] || continue
+    [ -n "$(tmux display-message -p -t "$pane" '#{@kel-state}' 2>/dev/null)" ] && continue
+    read -r st _ < "$f" && [ -n "$st" ] && tmux set-option -p -t "$pane" @kel-state "$st" 2>/dev/null
+  done
   while IFS=$'\t' read -r g nm m; do
-    [ -z "$(jq -r '.pane_id // ""' "$m" 2>/dev/null)" ] || continue
+    pane="$(jq -r '.pane_id // ""' "$m" 2>/dev/null)"
+    if [ -n "$pane" ]; then
+      [ "$(tmux display-message -p -t "$pane" '#{@kel-agent}' 2>/dev/null)" = "$g/$nm" ] && stamp_pane "$pane" "$g" "$nm"
+      continue
+    fi
     wid="$(jq -r '.window_id // ""' "$m" 2>/dev/null)"
     meta_is_live "$m" "$nm" || continue
     pane="$(agent_pane "$wid")"
@@ -1552,6 +1564,7 @@ cmd_relaunch() {
 
   # drop the stale reading; the relaunched agent's SessionStart sets it again
   rm -f "$STATE_DIR/$pane.state" "$STATE_DIR/$pane.ctx" "$STATE_DIR/$wid.state" "$STATE_DIR/$wid.ctx"
+  tmux set-option -pu -t "$pane" @kel-state 2>/dev/null
   tmux send-keys -t "$pane" "$(agent_resume_cmd "$meta")" Enter
   tmux refresh-client -S 2>/dev/null || true
   say "relaunching $group/$name${cid:+  (resuming $cid)}"
@@ -3223,6 +3236,7 @@ cmd_hook() {
     SessionEnd)
       rm -f "$STATE_DIR/$pane.state" "$STATE_DIR/$pane.ctx"
       [ "$(agent_pane "$wid")" = "$pane" ] && rm -f "$STATE_DIR/$wid.state" "$STATE_DIR/$wid.ctx"
+      tmux set-option -pu -t "$pane" @kel-state 2>/dev/null
       paint_state "$wid" ''
       [ -n "$sid" ] && rm -f "$STASH_DIR/$sid" "$WAITING_DIR/$sid"
       tmux refresh-client -S 2>/dev/null || true
@@ -3233,6 +3247,7 @@ cmd_hook() {
   tmp="$(mktemp "$STATE_DIR/.${pane#%}.XXXXXX" 2>/dev/null)" || exit 0
   printf '%s %s %s\n' "$state" "$(date +%s)" "$ntext" > "$tmp"
   mv -f "$tmp" "$STATE_DIR/$pane.state"
+  tmux set-option -p -t "$pane" @kel-state "$state" 2>/dev/null
   [ "$(agent_pane "$wid")" = "$pane" ] && rm -f "$STATE_DIR/$wid.state"
   if [ -n "$sid" ]; then
     if [ "$state" = waiting ]; then

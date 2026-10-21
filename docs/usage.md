@@ -270,7 +270,9 @@ shell or tests. kel tracks state per window, so a second agent belongs in its
 own window. A pane selected in the sidebar has `x close` (a shell at once,
 anything else asks) and `z zoom`; while a window is zoomed the bar says
 `⤢ zoomed · click to restore`. Dragging a divider turns it blue and heavy
-until you let go.
+until you let go. Once a window has more than one pane, each pane's title
+names it — an agent pane by its name and state, `● 3 · guest waiting`, in
+the sidebar's colours.
 
 ## The quota line, and tmux's bar
 

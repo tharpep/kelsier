@@ -469,9 +469,14 @@ an agent could not be a split. Decided with the author:
    most urgent of its agents; a snapshot names the agent in each pane, so a
    split agent is resumed in its split; `x` closes the pane only when
    another agent shares the window, otherwise the window as before.
-3. **Looks.** A pane's state on its own title line (tmux colours a window's
+3. *Done 2026-10-21.* **Looks.** A pane's state on its own title line (tmux colours a window's
    borders, not one pane's): `● 2 · kelsier-2 waiting` in the state's colour.
-   Golden frames shown to the author first.
+   Golden frames shown to the author first. *As built:* the hook sets the
+   pane options `@kel-state` and (with `@kel-agent`) `@kel-name`; the title
+   is tmux's own format (`@kel-pane-title` in kel.conf), so a redraw runs no
+   kel, and it reads `dead` itself — a live state over a shell. Waiting
+   yellow, working cyan, throttled magenta, dead red, the rest grey: the
+   sidebar's colours (§5d), where the window border keeps its orange.
 
 **Why this order:** M0–M1 are data and plumbing you can mostly ignore; M2 is
 where the tmux-hook risk lives, so it is proven before any UI depends on it;
