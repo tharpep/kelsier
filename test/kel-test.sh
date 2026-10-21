@@ -1183,9 +1183,12 @@ hold_client 40
 tmux select-window -t "$W5"; "$KEL" _sidebar wake
 S5="$(sbpane "$W5")"
 wait_until 'sbtext "$S5" | grep -q wt5'
+wait_until 'jq -e --arg d "$WT5" "[.panes[] | select(.cwd == \$d and .git.branch == \"wt5\")] | length > 0" "$STATE/sidebar-cache.json" >/dev/null 2>&1' 100
+f0=$fail
 tmux send-keys -t "$S5" f
-wait_until 'grep -q yazi "$KEL_POPUP_TRACE"'
+wait_until 'grep -q yazi "$KEL_POPUP_TRACE"' 150
 ok "f opens yazi, titled, at the worktree"       'grep -q "^$WT5	yazi · api-gw/wt5 · ? its keys · prefix q closes	yazi$" "$KEL_POPUP_TRACE"'
+[ "$fail" -gt "$f0" ] && sed 's/^/       popup trace: /' "$KEL_POPUP_TRACE"
 tmux send-keys -t "$S5" g
 wait_until 'grep -q lazygit "$KEL_POPUP_TRACE"'
 ok "g opens lazygit there"                      'grep -q "^$WT5	lazygit · api-gw/wt5 · ? its keys · prefix q closes	lazygit --use-config-file .*lazygit-overlay.yml$" "$KEL_POPUP_TRACE"'
