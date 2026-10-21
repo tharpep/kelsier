@@ -435,6 +435,36 @@ the `TodoWrite` design was stale, and the plan turned out to need no new hook.
   taking it over at the top. Next, planned with the author: agents tracked per
   pane, so an agent can be a split.
 
+**M7 — agents as panes**  ·  *planned 2026-10-21 with the author*
+
+An agent is a pane, not a window, as in herdr, Orca and cmux: kel keyed
+everything by window id, so two agents in one window shared one state file and
+an agent could not be a split. Decided with the author:
+
+- **any pane running Claude is an agent** — whatever pane its hooks fire in,
+  kel-started or typed into a split
+- **`n` asks where**: `enter` a new window as today, `|` split right, `-`
+  split down of the pane you were in — the split buttons' keys
+- **no "bring a running agent here"** yet (`join-pane`): moving a running
+  Claude resizes it, which leaves stale lines in its scrollback (§5b). Backlog,
+  gated on missing it
+- **a window keeps its first agent's name**; `r` renames the agent
+
+1. **Re-key, nothing visible changes.** State by pane id: `<pane-id>.state`,
+   `.ctx`, `.edit`, `.plan`, `.seen`, `.subs`; records gain `pane_id`;
+   `migrate_meta` moves each window's files to its agent pane once. The
+   fleet document lists agents per pane (`pane_id` on each), `kel-fleet`
+   matches records by pane; the hooks and `kel statusline` already know
+   their pane. *Proof:* two fake agents in one window read as two agents,
+   with their own states; every existing assertion still passes.
+2. **Gestures.** `n`'s placement choice; `x` on an agent closes its pane
+   (the same kill-safety: a worktree with unsaved work is refused); "own
+   window" (`break-pane`) for an agent sharing one; `kill`, `relaunch`,
+   `restore`, `jump`, the banner and "seen" by pane.
+3. **Looks.** A pane's state on its own title line (tmux colours a window's
+   borders, not one pane's): `● 2 · kelsier-2 waiting` in the state's colour.
+   Golden frames shown to the author first.
+
 **Why this order:** M0–M1 are data and plumbing you can mostly ignore; M2 is
 where the tmux-hook risk lives, so it is proven before any UI depends on it;
 M3 is the first thing that feels different.

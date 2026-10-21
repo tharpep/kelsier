@@ -159,6 +159,18 @@ is the first of these and is designed already.
 **Gate:** the first time you want one agent to wait on another and end up
 watching both yourself.
 
+### 42. Bring a running agent into the window you are in
+
+tmux's `join-pane` moves a live pane between windows without restarting it,
+so an agent could join the split you are working in, as Orca drags a tab to a
+pane's edge. Left out of M7 (`rollout.md`): Claude Code is not an
+alternate-screen program, and every resize pushed stale lines into its
+scrollback when measured (`spec.md` §5b); a move is a resize. Starting an
+agent as a split (`n`, then `|` or `-`) avoids it.
+
+**Gate:** wanting an agent beside you that is already running elsewhere, and
+starting a fresh one being the worse choice.
+
 ### 38. Automations view  ·  `[borderline]`
 
 The author's sixth want (`spec.md` §3): see and organise scheduled or looping
