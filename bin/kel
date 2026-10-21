@@ -125,10 +125,13 @@ SELF="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)/$(basename "${BA
 KEL_RESTORE_CMDS="${KEL_RESTORE_CMDS:-nvim vim hx nano lazygit lazydocker htop btop k9s}"
 KEL_SIDEBAR_WIDTH="${KEL_SIDEBAR_WIDTH:-32}"      # identical in every window (spec.md §5c)
 # the sidebar's own background, so it reads as chrome rather than a pane in a
-# box (spec.md §5a, §5d) — true black (colour16, not ANSI black, which themes
-# often lighten to a grey; the author found colour234 too grey). "default"
-# gives it the terminal's background like any other pane.
-KEL_SIDEBAR_STYLE="${KEL_SIDEBAR_STYLE:-bg=colour16}"
+# box (spec.md §5a, §5d) — true black, by RGB. Not ANSI black, which themes
+# often lighten to a grey; not colour234, which the author found too grey; and
+# not colour16, which base16-style schemes repurpose as an accent (WezTerm's
+# Catppuccin Mocha makes it peach, and the sidebar came out orange on WSL).
+# tmux maps #000000 to the nearest palette entry on a terminal without RGB.
+# "default" gives it the terminal's background like any other pane.
+KEL_SIDEBAR_STYLE="${KEL_SIDEBAR_STYLE:-bg=#000000}"
 SIDEBAR_OFF="$STATE_DIR/sidebar-off"              # `kel sidebar off`, persisted
 
 # guarded: an unconditional mkdir -p of three existing dirs measured ~10ms,
