@@ -874,7 +874,9 @@ ok "  ...prefix Space gets in, and stays"         '[ "$(tmux display -p -t "$LW"
 n0="$(tmux list-panes -t "$LW" | grep -c .)"
 tmux send-keys -t "$(sidebar_of "$LW")" '|'
 ok "| in the sidebar splits your pane"            "wait_until '[ \"\$(tmux list-panes -t $LW | grep -c .)\" = $((n0 + 1)) ]'"
-ok "  ...at its directory, with the keyboard there" '[ "$(tmux display -p -t "$LW" "#{@kel-sidebar}|#{pane_current_path}")" = "|$WORK/repos/api-gw" ]'
+# pwd -P: macOS's $TMPDIR is under /var, a link to /private/var, and tmux
+# reports the resolved path.
+ok "  ...at its directory, with the keyboard there" '[ "$(tmux display -p -t "$LW" "#{@kel-sidebar}|#{pane_current_path}")" = "|$(cd "$WORK/repos/api-gw" && pwd -P)" ]'
 ok "  ...and focusing your pane cleared the way in" '[ -z "$(tmux show-options -wv -t "$LW" @kel-via 2>/dev/null)" ]'
 release_client
 tmux set-hook -gwu window-layout-changed; tmux set-hook -gwu pane-focus-in; tmux set-option -gu focus-events
