@@ -63,6 +63,7 @@ const (
 	modeRename
 	modeKill
 	modeClose
+	modeWhere
 	modeQuit
 	modeSweep
 	modeCommand
@@ -74,6 +75,8 @@ type sbModel struct {
 	ui            uiState
 	width, height int
 	myPane        string
+	pendArgs      []string
+	pendDir       string
 	visible       bool
 	loading       bool
 
@@ -236,6 +239,17 @@ func zoomCmd(win, pane string) tea.Cmd {
 	}
 }
 
+func newSplitCmd(win, dir, side string, args []string) tea.Cmd {
+	return func() tea.Msg {
+		at, _ := splitTarget(win)
+		if at == "" {
+			return sbDone{ok: false, msg: "no pane of yours here to split"}
+		}
+		a := append([]string{args[0], "--split", side, "--at", at}, args[1:]...)
+		return kelDone("", dir, nil, a...)
+	}
+}
+
 func closePaneCmd(pane string) tea.Cmd {
 	return func() tea.Msg {
 		if out, err := exec.Command("tmux", "kill-pane", "-t", pane).CombinedOutput(); err != nil {
@@ -379,6 +393,8 @@ func (m sbModel) view() sbView {
 		ask("kill "+m.entryName(m.target)+"?", yellow, "y yes · n no")
 	case modeClose:
 		ask("close "+m.entryName(m.target)+"?", yellow, "y yes · n no")
+	case modeWhere:
+		ask("new agent where?", "", "enter window · | right · - down · esc")
 	case modeQuit:
 		ask("quit kel?", yellow, "y yes · n no")
 	case modeSweep:
@@ -822,6 +838,23 @@ func (m sbModel) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			return m, closePaneCmd(m.target)
 		}
 		return m, nil
+	case modeWhere:
+		args, dir := m.pendArgs, m.pendDir
+		switch k {
+		case "enter":
+			m.mode = modeNormal
+			return m, runKel(dir, nil, args...)
+		case "|", "-":
+			m.mode = modeNormal
+			side := "right"
+			if k == "-" {
+				side = "down"
+			}
+			return m, newSplitCmd(m.ui.myWindow, dir, side, args)
+		case "esc":
+			m.mode = modeNormal
+		}
+		return m, nil
 
 	case modeFilter, modeNew, modeNewWorktree, modeRename, modeCommand, modeDiff:
 		switch k {
@@ -876,6 +909,10 @@ func (m sbModel) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 				}
 				if f := strings.Fields(extra); len(f) > 0 {
 					args = append(append(args, "--"), f...)
+				}
+				if mode == modeNew {
+					m.mode, m.pendArgs, m.pendDir = modeWhere, args, dir
+					return m, nil
 				}
 				return m, runKel(dir, nil, args...)
 			case modeDiff:
@@ -962,6 +999,10 @@ func (m sbModel) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.mode = modeNewWorktree
 	case "z":
 		return m, zoomCmd(m.ui.myWindow, m.zoomTarget())
+	case "m":
+		if a, ok := m.agentOf(m.view().sel); ok && a.shared {
+			return m, runKel("", nil, "_own", a.pane)
+		}
 	case "r", "x":
 		v := m.view()
 		if p, ok := m.paneOf(v.sel); ok && k == "x" {
@@ -976,6 +1017,10 @@ func (m sbModel) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.target = v.sel
+		if a, ok := m.agentOf(v.sel); ok && k == "x" && !a.agent.Managed && a.shared {
+			m.mode, m.target = modeClose, a.pane
+			return m, nil
+		}
 		if k == "x" {
 			m.mode = modeKill
 		} else {
@@ -1070,6 +1115,7 @@ var sbHelp = [][2]string{
 	{"r", "rename"},
 	{"x", "kill"},
 	{"z", "zoom"},
+	{"m", "own window"},
 	{"#", "a pane"},
 	{"x", "close"},
 	{"z", "zoom"},
@@ -1425,7 +1471,7 @@ func helpKey(row string) string {
 		return ""
 	default:
 		switch f[0] {
-		case "/", "n", "w", "r", "x", "t", ";", "`", "s", "q", "f", "g", "d", "e", "o", "p", "c", "v", "u", "|", "-", "z":
+		case "/", "n", "w", "r", "x", "t", ";", "`", "s", "q", "f", "g", "d", "e", "o", "p", "c", "v", "u", "|", "-", "z", "m":
 			return f[0]
 		}
 	}

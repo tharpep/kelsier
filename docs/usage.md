@@ -43,6 +43,8 @@ kel new [name] <dir>   ...in <dir> instead — no cd first
 kel new [name] -w      ...in a fresh git worktree on a new branch of that name
 kel new [name] --group G       put it in group G instead of the repo's
 kel new [name] --no-agent      just make the window, don't start the agent
+kel new [name] --split right|down [--at PANE]
+                               as a split of PANE (default: the pane you are in)
 kel new [name] --agent CMD     run CMD instead of `claude`
 kel kill <name>        close the window; remove the worktree if it was one
 kel kill <name> -f     ...even with uncommitted / unpushed work
@@ -164,7 +166,12 @@ selected space, named `<repo>-<n>` (`r` renames it later). Type a name for
 that name; type a directory (`~/code/api`, `/srv/x`, `../other`) and it
 starts there; type both (`fix ~/code/api`) for both.
 `tab` completes the directory as a shell would, and the prompt says where the
-agent will start before you press `enter`.
+agent will start before you press `enter`. Then `n` asks **where**: `enter`
+a window of its own, `|` a split right of the pane you were in, `-` a split
+below it — two agents can share a window. An agent sharing one has `m own
+window`, which moves it into a window named after it. `x` on an agent that
+shares its window closes just its pane; the window keeps the rest, and takes
+the next agent's name if it was named after this one.
 
 **`Ctrl-b k` means: press Ctrl-b, let go, then press k** — tmux's prefix, then
 the key. kel writes every one of these the same way, using your real prefix.

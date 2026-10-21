@@ -355,6 +355,45 @@ record_pane() { # wid meta
   fi
 }
 
+other_agents() { # wid pane -> the names of the window's other agents, one a line
+  tmux list-panes -t "$1" -F '#{pane_id}|#{@kel-sidebar}|#{@kel-agent}|#{pane_current_command}' 2>/dev/null \
+    | awk -F'|' -v p="$2" '$1 != p && $2 == "" && ($3 != "" || $4 == "claude") { n = $3; sub(/.*\//, "", n); print (n == "" ? $1 : n) }'
+}
+
+own_window() { # pane
+  local pane="$1" wid stamp name g nw m
+  wid="$(tmux display-message -p -t "$pane" '#{window_id}' 2>/dev/null)" || die "no pane $pane"
+  [ -n "$(other_agents "$wid" "$pane")" ] || [ "$(user_panes "$wid" | grep -c .)" -gt 1 ] \
+    || die "it has its window to itself already"
+  stamp="$(tmux display-message -p -t "$pane" '#{@kel-agent}' 2>/dev/null)"
+  name="${stamp##*/}"; g="${stamp%/*}"
+  [ -n "$name" ] || name="$(tmux display-message -p -t "$wid" '#{window_name}')-$(tmux display-message -p -t "$pane" '#{pane_index}')"
+  [ -n "$stamp" ] || g="$(tmux display-message -p -t "$wid" '#{@kel-group}' 2>/dev/null)"
+  nw="$(tmux break-pane -d -s "$pane" -n "$name" -P -F '#{window_id}')" || die "could not move it"
+  tmux set-option -w -t "$nw" @kel-group "$g" 2>/dev/null || true
+  sidebar_ensure "$nw"
+  m="$(meta_path "$g" "$name")"
+  [ -n "$stamp" ] && [ -f "$m" ] && meta_update "$m" '.window_id=$w' --arg w "$nw"
+  if [ "$(tmux display-message -p -t "$wid" '#{window_name}' 2>/dev/null)" = "$name" ]; then
+    local next; next="$(other_agents "$wid" "")"
+    [ -n "$next" ] && tmux rename-window -t "$wid" "${next%%$'\n'*}" 2>/dev/null
+  fi
+  goto_window "$nw"
+  snapshot
+  say "$name has a window of its own"
+}
+
+window_state() { # wid -> the most urgent state among its agents
+  local p best='' r br=9 st
+  for p in $(tmux list-panes -t "$1" -F '#{@kel-sidebar}|#{pane_id}' 2>/dev/null | awk -F'|' '$1 == "" {print $2}') "$1"; do
+    [ -f "$(state_file "$p" state)" ] || continue
+    st="$(effective_state "$p")"
+    case "$st" in waiting) r=0 ;; dead) r=1 ;; throttled) r=2 ;; *) r=3 ;; esac
+    [ "$r" -lt "$br" ] && { br="$r"; best="$st"; }
+  done
+  printf '%s' "$best"
+}
+
 rm_agent_state() { # key...
   local k
   for k in "$@"; do
@@ -775,7 +814,7 @@ worktree_remove() { # repo cwd force(1|0)
 # --------------------------------------------------------------------------
 cmd_new() {
   need tmux; need jq
-  local name='' dir='' worktree=0 agent="$KEL_AGENT" start_agent=1 group_override='' extra=''
+  local name='' dir='' worktree=0 agent="$KEL_AGENT" start_agent=1 group_override='' extra='' split='' at=''
   while [ $# -gt 0 ]; do
     case "$1" in
       # everything after -- goes to the agent: `kel new fix -- --model sonnet`
@@ -786,6 +825,9 @@ cmd_new() {
       --group)       shift; group_override="${1:-}"; [ -n "$group_override" ] || die "--group needs a name" ;;
       --agent)       shift; agent="${1:-}"; [ -n "$agent" ] || die "--agent needs a command" ;;
       --no-agent)    start_agent=0 ;;
+      --split)       shift; split="${1:-}"
+                     case "$split" in right|down) ;; *) die "--split takes right or down" ;; esac ;;
+      --at)          shift; at="${1:-}"; [ -n "$at" ] || die "--at needs a pane" ;;
       -*)            die "kel new: unknown flag $1" ;;
       *)             if [ -z "$name" ]; then name="$1"
                      elif [ -z "$dir" ]; then dir="$1"
@@ -859,16 +901,28 @@ cmd_new() {
     claude|*/claude) agent="$agent --name $name" ;;
   esac
 
-  local wid
-  wid="$(open_window "$name" "$cwd" "$group")"
-  [ -n "$wid" ] || die "failed to create tmux window"
+  local wid pane
+  if [ -n "$split" ]; then
+    at="${at:-${TMUX_PANE:-}}"
+    [ -n "$at" ] || die "--split needs --at <pane>, or run it inside the window"
+    [ "$(tmux display-message -p -t "$at" '#{session_name} #{@kel-sidebar}' 2>/dev/null)" = "$KEL_PREFIX " ] \
+      || die "can only split a pane of yours in kel's session"
+    wid="$(tmux display-message -p -t "$at" '#{window_id}')"
+    pane="$(tmux split-window "$([ "$split" = right ] && echo -h || echo -v)" -t "$at" -c "$cwd" -P -F '#{pane_id}')"
+    [ -n "$pane" ] || die "failed to split $at"
+  else
+    wid="$(open_window "$name" "$cwd" "$group")"
+    [ -n "$wid" ] || die "failed to create tmux window"
+    pane="$(agent_pane "$wid")"
+  fi
 
-  meta_write "$name" "$wid" "$repo" "$cwd" "$isolation" "$branch" "$agent" "$group" "$(agent_pane "$wid")"
-  stamp_pane "$(agent_pane "$wid")" "$group" "$name"
-  [ "$start_agent" = 1 ] && tmux send-keys -t "$(agent_pane "$wid")" "$agent" Enter
+  meta_write "$name" "$wid" "$repo" "$cwd" "$isolation" "$branch" "$agent" "$group" "$pane"
+  stamp_pane "$pane" "$group" "$name"
+  [ "$start_agent" = 1 ] && tmux send-keys -t "$pane" "$agent" Enter
 
-  say "new agent  $name  [$group]  ($isolation${branch:+, branch $branch})"
+  say "new agent  $name  [$group]  ($isolation${branch:+, branch $branch}${split:+, split $split})"
   goto_window "$wid"
+  [ -n "$split" ] && tmux select-pane -t "$pane" 2>/dev/null
   snapshot
 }
 
@@ -924,9 +978,16 @@ cmd_kill() {
     die "commit & push, or run: kel kill $name --force"
   fi
 
-  local kpane=''
+  local kpane='' others=''
   [ -n "$meta" ] && [ -n "$wid" ] && kpane="$(record_pane "$wid" "$meta")"
-  [ -n "$wid" ] && tmux kill-window -t "$wid" 2>/dev/null || true
+  [ -n "$kpane" ] && others="$(other_agents "$wid" "$kpane")"
+  if [ -n "$others" ]; then
+    tmux kill-pane -t "$kpane" 2>/dev/null || true
+    [ "$(tmux display-message -p -t "$wid" '#{window_name}' 2>/dev/null)" = "$name" ] \
+      && tmux rename-window -t "$wid" "${others%%$'\n'*}" 2>/dev/null
+  else
+    [ -n "$wid" ] && tmux kill-window -t "$wid" 2>/dev/null || true
+  fi
 
   if [ "$iso" = "worktree" ] && [ -n "$repo" ] && [ -n "$cwd" ]; then
     # prune is repo-wide, so "pruned" can undersell (nothing left to prune)
@@ -1150,10 +1211,10 @@ snapshot() {   # silent; called by hooks and state-changing commands
   local US=$'\037' TAB=$'\t' cur lines
   cur="$(tmux display-message -p '#{window_id}' 2>/dev/null || true)"
   lines="$(awk -F'\t' -v US="$US" -v cur="$cur" '
-      NR == FNR { n[$1]++; pc[$1, n[$1]] = $3; pm[$1, n[$1]] = $4; ps[$1, n[$1]] = $5; next }
+      NR == FNR { n[$1]++; pc[$1, n[$1]] = $3; pm[$1, n[$1]] = $4; ps[$1, n[$1]] = $5; pa[$1, n[$1]] = $6; next }
       { print "W" US $5 US $6 US $7 US ($4 == cur ? "1" : "")
-        for (i = 1; i <= n[$4]; i++) print "P" US pc[$4, i] US pm[$4, i] US ps[$4, i] }' \
-    <(tmux list-panes -a -F '#{window_id}	#{pane_index}	#{pane_current_path}	#{pane_current_command}	#{@kel-sidebar}' 2>/dev/null) \
+        for (i = 1; i <= n[$4]; i++) print "P" US pc[$4, i] US pm[$4, i] US ps[$4, i] US pa[$4, i] }' \
+    <(tmux list-panes -a -F '#{window_id}	#{pane_index}	#{pane_current_path}	#{pane_current_command}	#{@kel-sidebar}	#{@kel-agent}' 2>/dev/null) \
     <(tmux list-windows -t "=$KEL_PREFIX" -F '0	#{session_name}	#{window_index}	#{window_id}	#{window_name}	#{window_layout}	#{@kel-group}' 2>/dev/null \
       | sort -t"$TAB" -k3,3n))"
   [ -n "$lines" ] || return 0
@@ -1166,7 +1227,8 @@ snapshot() {   # silent; called by hooks and state-changing commands
             (if $r[4] == "1" then .last = (.windows | length) else . end)
             | .windows += [{name: $r[1], layout: $r[2], group: $r[3], panes: []}]
           else .windows[-1].panes += [{cwd: $r[1], cmd: $r[2]}
-                                     + (if $r[3] == "1" then {sidebar: true} else {} end)] end)
+                                     + (if $r[3] == "1" then {sidebar: true} else {} end)
+                                     + (if ($r[4] // "") != "" then {agent: $r[4]} else {} end)] end)
         | {version: 2, saved_at: $t, saved_epoch: $e, last: .last, windows: .windows}')" || return 0
   [ "$(printf '%s' "$snap" | jq '.windows | length' 2>/dev/null)" -gt 0 ] 2>/dev/null || return 0
 
@@ -1307,10 +1369,10 @@ restore_from_snapshot() {   # file resume(1|0)
                      last: ($g == ($s.last_group // "") and .name == ($s.last_window // ""))} ]
           end )[]
       | (["W", .name, (.group // ""), (.layout // ""), (if .last then "1" else "" end)] | join($us)),
-        (.panes[] | ["P", (.cwd // ""), (.cmd // ""), (if .sidebar then "1" else "" end)] | join($us))' "$snap" 2>/dev/null)"
+        (.panes[] | ["P", (.cwd // ""), (.cmd // ""), (if .sidebar then "1" else "" end), (.agent // "")] | join($us))' "$snap" 2>/dev/null)"
 
   local first_wid='' dest_wid='' wid='' wname='' wg='' wlayout='' wlast='' meta='' wsb=''
-  local -a cwds=() cmds=()
+  local -a cwds=() cmds=() ags=()
   # build one window from what has been collected for it
   _restore_window() {
     [ -n "$wname" ] || return 0
@@ -1339,17 +1401,23 @@ restore_from_snapshot() {   # file resume(1|0)
     [ -n "$wlayout" ] && tmux select-layout -t "$wid" "$wlayout" 2>/dev/null || true
     [ "$wsb" = 1 ] || sidebar_ensure "$wid"
 
-    meta=''; [ -n "$wg" ] && [ -f "$(meta_path "$wg" "$wname")" ] && meta="$(meta_path "$wg" "$wname")"
-    if [ -n "$meta" ]; then
-      meta_update "$meta" '.window_id=$w | .pane_id=$p' --arg w "$wid" --arg p "${pids[0]}"
-      stamp_pane "${pids[0]}" "$wg" "$wname"
-      # resuming is why you restore, so it is the default (v0.10); invariant 4's
-      # one sanctioned send-keys besides launch
-      [ "$resume" = 1 ] && tmux send-keys -t "${pids[0]}" \
-        "$(agent_resume_cmd "$meta")" Enter
-    fi
+    local ag ag_g ag_n
     for ((j = 0; j < ${#cmds[@]}; j++)); do
-      [ "$j" = 0 ] && [ -n "$meta" ] && continue
+      ag="${ags[$j]:-}"
+      [ -z "$ag" ] && [ "$j" = 0 ] && [ -n "$wg" ] && ag="$wg/$wname"
+      meta=''
+      if [ -n "$ag" ]; then
+        ag_g="${ag%/*}"; ag_n="${ag##*/}"
+        [ -f "$(meta_path "$ag_g" "$ag_n")" ] && meta="$(meta_path "$ag_g" "$ag_n")"
+      fi
+      if [ -n "$meta" ]; then
+        meta_update "$meta" '.window_id=$w | .pane_id=$p' --arg w "$wid" --arg p "${pids[$j]}"
+        stamp_pane "${pids[$j]}" "$ag_g" "$ag_n"
+        # resuming is why you restore, so it is the default (v0.10); invariant 4's
+        # one sanctioned send-keys besides launch
+        [ "$resume" = 1 ] && tmux send-keys -t "${pids[$j]}" "$(agent_resume_cmd "$meta")" Enter
+        continue
+      fi
       case " $KEL_RESTORE_CMDS " in *" ${cmds[$j]} "*) tmux send-keys -t "${pids[$j]}" "${cmds[$j]}" Enter ;; esac
     done
   }
@@ -1358,9 +1426,9 @@ restore_from_snapshot() {   # file resume(1|0)
   while IFS="$US" read -r kind a b c d; do
     case "$kind" in
       W) _restore_window
-         wname="$a"; wg="$b"; wlayout="$c"; wlast="$d"; wsb=''; cwds=(); cmds=() ;;
+         wname="$a"; wg="$b"; wlayout="$c"; wlast="$d"; wsb=''; cwds=(); cmds=(); ags=() ;;
       P) if [ "$c" = 1 ]; then wsb=1        # the sidebar: relaunched, never replayed
-         else cwds+=( "$a" ); cmds+=( "$b" ); fi ;;
+         else cwds+=( "$a" ); cmds+=( "$b" ); ags+=( "$d" ); fi ;;
     esac
   done <<< "$plan"
   _restore_window
@@ -2091,7 +2159,7 @@ cmd_click() { # range popup client
 # One line per agent in $BANNER: <wid> TAB <state> TAB <name> TAB <text>.
 BANNER="$STATE_DIR/banner"
 
-banner_add() { # wid state name text
+banner_add() { # pane state name text
   local f; f="$(mktemp "$STATE_DIR/.banner.XXXXXX" 2>/dev/null)" || return 0
   { [ -f "$BANNER" ] && awk -F'\t' -v w="$1" '$1 != w' "$BANNER"
     printf '%s\t%s\t%s\t%s\n' "$1" "$2" "$3" "$4"; } > "$f"
@@ -2099,12 +2167,22 @@ banner_add() { # wid state name text
   banner_apply
 }
 
-banner_drop() { # wid...
+banner_drop() { # pane | wid ...
   [ -s "$BANNER" ] || return 0
   local f w keep="$BANNER"
   f="$(mktemp "$STATE_DIR/.banner.XXXXXX" 2>/dev/null)" || return 0
   cp "$BANNER" "$f"
-  for w in "$@"; do awk -F'\t' -v w="$w" '$1 != w' "$f" > "$f.t" && mv -f "$f.t" "$f"; done
+  local k wins
+  wins="$(tmux list-panes -a -F '#{pane_id} #{window_id}' 2>/dev/null)"
+  for w in "$@"; do
+    while IFS=$'\t' read -r k _; do
+      [ "$k" = "$w" ] && continue
+      [ "$(printf '%s\n' "$wins" | awk -v k="$k" '$1 == k {print $2}')" = "$w" ] && continue
+      printf '%s\n' "$k"
+    done < "$f" > "$f.k"
+    awk -F'\t' 'NR == FNR {keep[$0]; next} $1 in keep' "$f.k" "$f" > "$f.t" && mv -f "$f.t" "$f"
+    rm -f "$f.k"
+  done
   if cmp -s "$f" "$keep"; then rm -f "$f"; return 0; fi
   mv -f "$f" "$BANNER"
   banner_apply
@@ -2122,10 +2200,12 @@ banner_seen() {
 # ↵ go: to the newest line's agent, on the client that clicked
 banner_go() { # client
   [ -s "$BANNER" ] || return 0
-  local wid; wid="$(tail -1 "$BANNER" | cut -f1)"
+  local key wid; key="$(tail -1 "$BANNER" | cut -f1)"
+  wid="$(tmux display-message -p -t "$key" '#{window_id}' 2>/dev/null)"; [ -n "$wid" ] || wid="$key"
   if [ -n "${1:-}" ]; then tmux switch-client -c "$1" -t "$wid" 2>/dev/null || tmux select-window -t "$wid" 2>/dev/null
   else tmux select-window -t "$wid" 2>/dev/null; fi
-  banner_drop "$wid"
+  case "$key" in %*) tmux select-pane -t "$key" 2>/dev/null ;; esac
+  banner_drop "$key"
 }
 
 # draw it: the newest line, and how many more; or nothing, and tmux's bar
@@ -2609,16 +2689,17 @@ cmd_jump() {
   doc="$(fleet_json)" || exit 1
   w="$(printf '%s' "$doc" | jq -r '
     [ .agents[] | select(.state == "waiting" and .window_id != null and .index != null) ]
-    | sort_by(.index)[] | "\(.index)\t\(.window_id)\t\(.group)/\(.name)\t\(.state_since // "")"')"
+    | sort_by(.index)[] | "\(.index)\t\(.window_id)\t\(.group)/\(.name)\t\(.state_since // "")\t\(.pane_id // "")"')"
   [ -n "$w" ] || { tmux display-message "kel: nothing waiting"; exit 0; }
 
   # the next one after the window you are in, wrapping round
   local tgt
   tgt="$(printf '%s\n' "$w" | awk -F'\t' -v cw="${cw:-0}" '
     NR == 1 { first = $0 } $1 > cw && !found { print; found = 1 } END { if (!found) print first }')"
-  local ti tw label ep
-  IFS=$'\t' read -r ti tw label ep <<< "$tgt"
+  local ti tw label ep tp
+  IFS=$'\t' read -r ti tw label ep tp <<< "$tgt"
   tmux switch-client ${c[@]+"${c[@]}"} -t "=$KEL_PREFIX" \; select-window -t "$tw"
+  [ -n "$tp" ] && tmux select-pane -t "$tp" 2>/dev/null
 
   # say where you landed and how long it has been sitting — the jump is
   # otherwise silent, and "which one was that?" is the next question
@@ -2662,7 +2743,9 @@ repaint_all() {   # fleet-json
   local wid st
   while IFS=$'\t' read -r wid st; do
     [ -n "$wid" ] && paint_state "$wid" "$st"
-  done < <(printf '%s' "$1" | jq -r '.agents[] | select(.window_id != null)
+  done < <(printf '%s' "$1" | jq -r '[.agents[] | select(.window_id != null)]
+      | group_by(.window_id)[]
+      | min_by({waiting: 0, dead: 1, throttled: 2}[.state // ""] // 3)
                                       | [.window_id, (.state // "")] | @tsv')
 }
 
@@ -3158,7 +3241,7 @@ cmd_hook() {
       rm -f "$WAITING_DIR/$sid"
     fi
   fi
-  paint_state "$wid" "$(effective_state "$pane")"
+  paint_state "$wid" "$(window_state "$wid")"
   tmux refresh-client -S 2>/dev/null || true
   sidebar_wake                 # the visible sidebar shows the change now, not in 2s
 
@@ -3167,12 +3250,13 @@ cmd_hook() {
   # the same state re-notifies, which is how people learn to ignore them.
   [ "$state" = "$prev" ] && exit 0
   # an agent that moved on takes its banner line with it
-  banner_drop "$wid"
+  banner_drop "$pane"
   case " $KEL_NOTIFY " in
     *" $state "*)
       window_focused "$wid" && exit 0
-      local wn; wn="$(tmux display-message -p -t "$wid" '#{window_name}' 2>/dev/null || echo "$wid")"
-      case "${KEL_NOTIFY_BANNER:-on}" in off|0|no|false) ;; *) banner_add "$wid" "$state" "$wn" "$ntext" ;; esac
+      local wn; wn="$(tmux display-message -p -t "$pane" '#{@kel-agent}' 2>/dev/null)"; wn="${wn##*/}"
+      [ -n "$wn" ] || wn="$(tmux display-message -p -t "$wid" '#{window_name}' 2>/dev/null || echo "$wid")"
+      case "${KEL_NOTIFY_BANNER:-on}" in off|0|no|false) ;; *) banner_add "$pane" "$state" "$wn" "$ntext" ;; esac
       notify "kel: $wn" "${ntext:-$state}" ;;
   esac
 }
@@ -3293,6 +3377,7 @@ main() {
                     seen)  banner_seen ;;
                     *)     die "usage: kel _banner seen|clear" ;;
                   esac ;;
+    _own)         own_window "${1:-}" ;;
     _sidebar)     case "${1:-}" in
                     ensure) sidebar_ensure "${2:-}" ;;
                     wake)   sidebar_wake ;;

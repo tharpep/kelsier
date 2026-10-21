@@ -461,10 +461,14 @@ an agent could not be a split. Decided with the author:
    window ids, so a record matches a pane only through the pane's
    `@kel-agent` stamp; and two panes of unknown ports in one space crashed
    the sidebar.
-2. **Gestures.** `n`'s placement choice; `x` on an agent closes its pane
+2. *Done 2026-10-21.* **Gestures.** `n`'s placement choice; `x` on an agent closes its pane
    (the same kill-safety: a worktree with unsaved work is refused); "own
    window" (`break-pane`) for an agent sharing one; `kill`, `relaunch`,
-   `restore`, `jump`, the banner and "seen" by pane.
+   `restore`, `jump`, the banner and "seen" by pane. *As built:* "seen"
+   stayed per window (seen is a window shown); a window's border shows the
+   most urgent of its agents; a snapshot names the agent in each pane, so a
+   split agent is resumed in its split; `x` closes the pane only when
+   another agent shares the window, otherwise the window as before.
 3. **Looks.** A pane's state on its own title line (tmux colours a window's
    borders, not one pane's): `● 2 · kelsier-2 waiting` in the state's colour.
    Golden frames shown to the author first.

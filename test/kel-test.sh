@@ -316,6 +316,37 @@ wait_until '[[ ",$(duo)," == *",$DP2 dead,"* ]]'
 ok "one dying leaves the other alone"     '[[ ",$(duo)," == *",$DP2 dead,"* ]] && [[ ",$(duo)," == *",$DP1 working,"* ]]'
 tmux kill-pane -t "$DP2"
 "$KEL" kill api-gw/duo >/dev/null 2>&1
+NEW api-gw host
+HW2="$(window_of api-gw host)"; HP="$(pane_of api-gw host)"
+K api-gw new guest --split right --at "$HP" --agent 'sleep 9999' >/dev/null 2>&1
+GP="$(jq -r .pane_id "$SESSIONS/api-gw/guest.json")"
+wait_until '[ "$(tmux display -p -t "$GP" "#{pane_current_command}" 2>/dev/null)" = sleep ]'
+ok "kel new --split starts an agent beside another" '[ "$(tmux display -p -t "$GP" "#{window_id}")" = "$HW2" ] && [ "$(jq -r .window_id "$SESSIONS/api-gw/guest.json")" = "$HW2" ]'
+ok "  ...right of it, running its own agent"     '[ "$(tmux display -p -t "$GP" "#{pane_left}")" -gt "$(tmux display -p -t "$HP" "#{pane_left}")" ] && [ "$(tmux display -p -t "$GP" "#{pane_current_command}")" = sleep ]'
+ok "  ...the window keeping its first agent's name" '[ "$(tmux display -p -t "$HW2" "#{window_name}")" = host ]'
+ok "  ...and the fleet lists both, by name"     '[ "$("$KEL" _fleet | jq -r --arg w "$HW2" "[.agents[] | select(.window_id == \$w) | .name] | sort | join(\",\")")" = guest,host ]'
+hook "$HP" UserPromptSubmit
+hook "$GP" Notification permission_prompt "needs Bash"
+ok "the window's border shows the agent that waits" '[ "$(tmux show-options -wv -t "$HW2" pane-border-style)" = fg=colour214 ]'
+ok "  ...and the banner names that pane"        '[ "$(cut -f1 "$STATE/banner" | tail -1)" = "$GP" ]'
+hold_client 20
+tmux select-window -t "$(window_of api-gw a)"
+TMUX="$TMUX_TMPDIR/tmux-$(id -u)/default,$(tmux display-message -p '#{pid}'),0" "$KEL" jump
+ok "kel jump goes to the waiting pane"         '[ "$(tmux display -p -t "$HW2" "#{pane_id}")" = "$GP" ]'
+release_client
+"$KEL" _own "$GP" >/dev/null 2>&1
+OW2="$(jq -r .window_id "$SESSIONS/api-gw/guest.json")"
+ok "_own moves an agent to a window of its own" '[ "$OW2" != "$HW2" ] && [ "$(tmux display -p -t "$GP" "#{window_id}")" = "$OW2" ]'
+ok "  ...named after it, still running"         '[ "$(tmux display -p -t "$OW2" "#{window_name}")" = guest ] && [ "$(tmux display -p -t "$GP" "#{pane_current_command}")" = sleep ]'
+tmux join-pane -h -s "$GP" -t "$HP"
+jq --arg w "$HW2" '.window_id = $w' "$SESSIONS/api-gw/guest.json" > "$WORK/g" && mv "$WORK/g" "$SESSIONS/api-gw/guest.json"
+"$KEL" kill api-gw/guest >/dev/null 2>&1
+ok "kel kill closes a sharing agent's pane, not its window" '! tmux list-panes -a -F "#{pane_id}" | grep -qxF "$GP" && [ "$(tmux display -p -t "$HP" "#{pane_current_command}")" = sleep ]'
+K api-gw new guest --split down --at "$HP" --agent 'sleep 9999' >/dev/null 2>&1
+"$KEL" kill api-gw/host >/dev/null 2>&1
+ok "  ...and a window that loses its named agent takes the next one's name" '[ "$(tmux display -p -t "$HW2" "#{window_name}")" = guest ]'
+"$KEL" kill api-gw/guest >/dev/null 2>&1
+ok "the last agent's kill closes the window"     '! tmux list-windows -a -F "#{window_id}" | grep -qxF "$HW2"'
 # #25: a record whose JSON does not even parse must still render, distinctly
 # -- not vanish, and (the worse bug this actually was) not take the rest of
 # the document with it. Before the fix, --slurpfile aborted on the first bad
@@ -701,6 +732,23 @@ ok "restore resumes a session it recorded, by id"   'grep -q -- "--resume s" "$W
 ok "  ...and one it did not, by its name"           'grep -q -- "--resume twin2" "$WORK/argv.twin2"'
 ok "  ...never --continue, which takes the directory's newest" '! grep -q -- --continue "$WORK"/argv.*'
 
+reset
+K api-gw new left --agent "KEL_ARGV=left $WORK/argv-agent --name left" >/dev/null 2>&1
+agent_up "$(window_of api-gw left)"
+K api-gw new right --split right --at "$(pane_of api-gw left)" --agent "KEL_ARGV=right $WORK/argv-agent --name right" >/dev/null 2>&1
+wait_until '[ "$(tmux list-panes -t "$(window_of api-gw left)" -F x | grep -c x)" = 2 ]'
+"$KEL" snapshot >/dev/null 2>&1
+ok "a snapshot names the agent in each pane"       '[ "$(jq -r "[.windows[].panes[].agent // empty] | sort | join(\",\")" "$STATE/snapshot.json")" = api-gw/left,api-gw/right ]'
+rm -f "$WORK"/argv.*
+tmux kill-server 2>/dev/null; sleep 0.6
+(cd "$WORK" && "$KEL" < /dev/null) >/dev/null 2>&1
+wait_until '[ -n "$(tmux capture-pane -p -t "$(tmux list-windows -t =keltest -F "#{window_id}" | head -1)" | grep .)" ]' 50
+"$KEL" restore >/dev/null 2>&1
+wait_until '[ -s "$WORK/argv.right" ]'
+RP="$(jq -r .pane_id "$SESSIONS/api-gw/right.json")"
+ok "restore resumes the split agent in its split"  '[ -s "$WORK/argv.right" ] && [ "$(tmux display -p -t "$RP" "#{window_id}")" = "$(window_of api-gw left)" ]'
+ok "  ...stamped with its name"                    '[ "$(tmux display -p -t "$RP" "#{@kel-agent}")" = api-gw/right ]'
+
 # a fresh-start shell you actually used is yours — restore must leave it
 "$KEL" snapshot >/dev/null 2>&1
 tmux kill-server 2>/dev/null; sleep 0.6
@@ -1026,6 +1074,9 @@ tmux send-keys -t "$SW" n
 wait_until 'sbtext "$SW" | grep -q "^new agent in "'
 tmux send-keys -t "$SW" -l fresh
 tmux send-keys -t "$SW" Enter
+wait_until 'sbtext "$SW" | grep -q "^new agent where?"'
+ok "n asks where, after the name"         'sbtext "$SW" | grep -q "enter window · | right · - down"'
+tmux send-keys -t "$SW" Enter
 # kel new stamps the window's group before it writes the record, so wait for
 # both — waiting on the window alone raced the record on CI's macOS runner,
 # as the sbdiag dump below showed (the window there, active, the record not)
@@ -1039,8 +1090,22 @@ f0=$fail
 tmux send-keys -t "$SW" n
 wait_until 'sbtext "$SW" | grep -q "^new agent in "'
 tmux send-keys -t "$SW" Enter
+wait_until 'sbtext "$SW" | grep -q "^new agent where?"'
+tmux send-keys -t "$SW" Enter
 wait_until '[ -n "$(window_of api-gw api-gw-1)" ] && [ -f "$SESSIONS/api-gw/api-gw-1.json" ]' 80
 ok "  ...and n, enter needs no name"      '[ -n "$(window_of api-gw api-gw-1)" ] && [ -f "$SESSIONS/api-gw/api-gw-1.json" ]'
+SPW="$(window_of api-gw api-gw-1)"
+tmux select-window -t "$SPW"; "$KEL" _sidebar wake
+SW2="$(sbpane "$SPW")"
+wait_until 'sbtext "$SW2" | grep -q agents'
+tmux select-pane -t "$(userpane "$SPW")"; tmux select-pane -t "$SW2"
+tmux send-keys -t "$SW2" n
+wait_until 'sbtext "$SW2" | grep -q "^new agent in "'
+tmux send-keys -t "$SW2" Enter
+wait_until 'sbtext "$SW2" | grep -q "^new agent where?"'
+tmux send-keys -t "$SW2" '|'
+wait_until '[ -f "$SESSIONS/api-gw/api-gw-2.json" ]' 80
+ok "  ...and n, enter, | splits the pane you were in" '[ "$(jq -r .window_id "$SESSIONS/api-gw/api-gw-2.json")" = "$SPW" ] && [ "$(tmux list-panes -t "$SPW" -F "#{@kel-agent}" | grep -cx "api-gw/api-gw-[12]")" = 2 ]'
 sbdiag "$SW" "$f0"
 
 # prefix Space is `kel _sidebar focus`; esc goes back. kel new ends by

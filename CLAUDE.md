@@ -76,7 +76,7 @@ change; migrate old records in `migrate_meta`.
 | `sessions/<group>/<name>.json` | one record per managed agent. Keyed by group **and** name — two repos can each have a `docs`. Carries `window_id` and, since M7, `pane_id` |
 | `<pane-id>.state` | `<state> <epoch> <note>` — one line, atomic write |
 | `<pane-id>.ctx` | `<pct> <cost> <in_tokens> <ctx_size> <rate_5h> <epoch> <model>`, tab-separated |
-| `snapshot.json` | full workspace shape, format v2 since v0.10: `{version:2, saved_at, saved_epoch, last, windows:[{name, group, layout, panes:[{cwd,cmd}]}]}`. `.prev` keeps one generation. Restore still reads v1 (`groups` keyed by group) |
+| `snapshot.json` | full workspace shape, format v2 since v0.10: `{version:2, saved_at, saved_epoch, last, windows:[{name, group, layout, panes:[{cwd,cmd,agent?}]}]}` (`agent` is the pane's `@kel-agent`, M7). `.prev` keeps one generation. Restore still reads v1 (`groups` keyed by group) |
 | `snapshots/<epoch>.json` | previous workspaces, archived by `kel` before a fresh start so the hooks cannot overwrite them; newest five kept |
 | `.restoring` | lockfile held during a restore (see Invariants) |
 | `.stash/<claude-session-id>` | pane id from `SessionStart`, for hooks with no `$TMUX_PANE` |
@@ -97,7 +97,7 @@ change; migrate old records in `migrate_meta`.
 | `restore-offer` | present while an archived workspace waits: set by a fresh `kel`, cleared by `kel restore`; the sidebar offers `b` |
 | `sidebar-off` | present after `kel sidebar off`; no new sidebars until `kel sidebar on` |
 | `worktrees.json` | `{at, repos:{<main root>: repo}, stamps:{<main root>: ns}}` — every repo's worktrees with land state, for the sidebar's `repos`; reused for 20 s unless `.git/worktrees` changed (its mtime is the stamp). `kel sweep` reads fresh |
-| `banner` | one line per agent the banner above tmux's bar shows: `<wid> TAB <state> TAB <name> TAB <text>`. Written by the state hook on a notifying transition, dropped when the agent moves on, when a client shows its window (`session-window-changed` → `kel _banner seen`) or on ✕ (`_click bx`); empty = tmux's bar back to its one line |
+| `banner` | one line per agent the banner above tmux's bar shows: `<pane-id> TAB <state> TAB <name> TAB <text>`. Written by the state hook on a notifying transition, dropped when the agent moves on, when a client shows its window (`session-window-changed` → `kel _banner seen`) or on ✕ (`_click bx`); empty = tmux's bar back to its one line |
 | `prompt-history` | the last twenty commands typed at the sidebar's `;`, one per line |
 | `gh-dash.yml` | the config `v` writes for gh dash each time — every open space's repos; not the user's own |
 | `sidebar-fail.log` | a dying sidebar's own stderr (`kel-sidebar 2>>`), appended. Temporary: backlog #41 is fixed, and it goes once daily use stays quiet |

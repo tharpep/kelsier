@@ -70,6 +70,7 @@ type sbAgent struct {
 	wid     string
 	pane    string // the pane to jump to; "" when the window lists none
 	key     string
+	shared  bool
 	agent   fleet.Agent
 	current bool
 }
@@ -248,7 +249,7 @@ func buildView(doc fleet.Doc, ui uiState) sbView {
 				repo = repoLabel(doc, p.Git.Root)
 			}
 		}
-		v.agents = append(v.agents, sbAgent{wid: wid, pane: pane, key: key, agent: a, current: wid == curWid, repo: repo})
+		v.agents = append(v.agents, sbAgent{wid: wid, pane: pane, key: key, agent: a, current: wid == curWid, repo: repo, shared: len(byWin[wid]) > 1})
 	}
 	// triage order: waiting first, longest-waiting first within a state
 	sort.SliceStable(v.agents, func(i, j int) bool {
@@ -1171,9 +1172,11 @@ func selActions(v sbView) (string, string, []sbAct) {
 	case strings.HasPrefix(v.sel, "a:"):
 		for _, a := range v.agents {
 			if agentID(a.key) == v.sel {
-				return "agent", a.agent.Name, []sbAct{
-					{"e", "edit file"}, {"p", "plan"}, {"r", "rename"}, {"x", "kill"}, {"z", "zoom"},
+				acts := []sbAct{{"e", "edit file"}, {"p", "plan"}, {"r", "rename"}, {"x", "kill"}, {"z", "zoom"}}
+				if a.shared {
+					acts = append(acts, sbAct{"m", "own window"})
 				}
+				return "agent", a.agent.Name, acts
 			}
 		}
 	case strings.HasPrefix(v.sel, "b:"):
