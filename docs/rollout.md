@@ -426,6 +426,14 @@ the `TodoWrite` design was stale, and the plan turned out to need no new hook.
   bar's fill is green with a grey track (17% read as full), the repo is not
   repeated beside a `<repo>-<n>` agent, and a waiting agent you answered goes
   back to `working` on its next tool call — `PostToolUse` on every tool now.
+- *panes and the bar (2026-10-21), from the author:* a pane selected in the
+  sidebar has `x close` and `z zoom`; a dragged divider turns blue and heavy
+  until released. tmux's bar is back along the bottom of every window — quota
+  and total cost left, the clock alone on the right, `⤢ zoomed · click to
+  restore` while zoomed — so the quota left the sidebar and the clock left
+  Claude's row. The banner now stacks above the bar (`status 2`) instead of
+  taking it over at the top. Next, planned with the author: agents tracked per
+  pane, so an agent can be a split.
 
 **Why this order:** M0–M1 are data and plumbing you can mostly ignore; M2 is
 where the tmux-hook risk lives, so it is proven before any UI depends on it;

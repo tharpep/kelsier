@@ -315,6 +315,18 @@ func TestSidebarKeys(t *testing.T) {
 		t.Error("n did not cancel the kill")
 	}
 
+	m.ui.sel = spaceID("/home/me/code/kelsier")
+	press("l")
+	m.ui.sel = "%2"
+	press("x")
+	if m.mode != modeClose || !strings.Contains(plain(m.render()), "close nvim?") {
+		t.Errorf("x on a program pane did not ask:\n%s", plain(m.render()))
+	}
+	press("n")
+	if m.mode != modeNormal {
+		t.Error("n did not cancel the close")
+	}
+
 	// r and x need an agent
 	m.ui.sel = spaceID("/home/me/code/api-gw")
 	press("r")
@@ -451,36 +463,6 @@ func TestHintKey(t *testing.T) {
 	}
 	if keyWords("C-b") != "Ctrl-b" || keyWords("M-a") != "Alt-a" {
 		t.Error("the prefix must read in words")
-	}
-}
-
-// The quota line gives up what does not fit, least needed first, and says
-// nothing when nothing was reported — never a made-up 0%.
-func TestQuotaLine(t *testing.T) {
-	f := func(v float64) *float64 { return &v }
-	q := &fleet.Quota{
-		FiveHour: &fleet.Window{Pct: f(27), ResetsAt: f(1000 + 12480)},
-		SevenDay: &fleet.Window{Pct: f(51)},
-		Spend:    &fleet.Window{Pct: f(20)},
-	}
-	if got := plain(quotaLine(q, 32, 1000)); got != "5h █████ 27% 3h28m · wk 51%" {
-		t.Errorf("at 32: %q", got)
-	}
-	if got := plain(quotaLine(q, 24, 1000)); got != "5h █████ 27% · wk 51%" {
-		t.Errorf("at 24: %q", got)
-	}
-	if got := plain(quotaLine(q, 18, 1000)); got != "5h █████ 27%" {
-		t.Errorf("at 18: %q", got)
-	}
-	if quotaLine(nil, 32, 1000) != "" {
-		t.Error("no quota reported must be no line")
-	}
-	if got := plain(quotaLine(&fleet.Quota{FiveHour: &fleet.Window{}}, 32, 1000)); got != "5h ?" {
-		t.Errorf("unknown 5h: %q", got)
-	}
-	q.Spend.Pct = f(60)
-	if got := plain(quotaLine(q, 40, 1000)); !strings.HasSuffix(got, "· spend 60%") {
-		t.Errorf("spend from 50%%: %q", got)
 	}
 }
 

@@ -353,7 +353,7 @@ sidebar_ensure() { # wid
   sidebar_enabled || return 0
   [ "$(tmux display-message -p -t "$wid" '#{session_name}' 2>/dev/null)" = "$KEL_PREFIX" ] || return 0
   [ -n "$(sidebar_pane "$wid")" ] && return 0
-  tmux set-option -g @kel-sidebar-width "$KEL_SIDEBAR_WIDTH" 2>/dev/null
+  sidebar_width_opts
   # No else-branch, and the condition inverted, ON PURPOSE: an empty branch
   # ('') is an error tmux shows in view-mode on the window's active pane — the
   # agent's — which then swallowed every key, C-c included.  Found because the
@@ -364,11 +364,14 @@ sidebar_ensure() { # wid
     "split-window -hbdf -l $KEL_SIDEBAR_WIDTH -t '$wid' -c '#{pane_current_path}' -e 'KEL_BIN=$SELF' \"exec '$KEL_SIDEBAR_BIN' 2>>'$STATE_DIR/sidebar-fail.log'\" ; set-option -p -t '$wid.{top-left}' @kel-sidebar 1" \
     2>/dev/null || true
   sidebar_style "$wid"
-  # tmux's bar goes while sidebars show: it repeated what the sidebar and
-  # Claude's own row already say, two status lines stacked (the author,
-  # 2026-10-16). The quota it carried is the sidebar's last line now. A
-  # session option, so kel's popups keep their bars and `✕ close`.
-  if [ -s "$BANNER" ]; then banner_apply; else tmux set-option -t "$wid" status off 2>/dev/null || true; fi
+  banner_apply
+}
+
+sidebar_width_opts() {
+  local w="$KEL_SIDEBAR_WIDTH"
+  tmux set-option -g @kel-sidebar-width "$w" \; \
+       set-option -g @kel-hint-out "$(printf '%-*.*s' "$w" "$w" "click, or $(prefix_words) then space")" \; \
+       set-option -g @kel-hint-in "$(printf '%-*.*s' "$w" "$w" "esc back to your pane")" 2>/dev/null
 }
 
 # per-pane styles are tmux 3.1+; below that the sidebar just wears the
@@ -404,6 +407,7 @@ sidebar_wake() {
 sidebar_heal() {
   local wid
   sidebar_enabled || return 0
+  sidebar_width_opts
   sidebar_reap
   tmux list-panes -s -t "=$KEL_PREFIX" -F '#{window_id} #{@kel-sidebar}' 2>/dev/null \
   | awk '{ seen[$1]; if ($2 == 1) has[$1] } END { for (w in seen) if (!(w in has)) print w }' \
@@ -415,7 +419,7 @@ sidebar_heal() {
 
 sidebar_fit() {
   local flag id w wid pos
-  tmux set-option -g @kel-sidebar-width "$KEL_SIDEBAR_WIDTH" 2>/dev/null
+  sidebar_width_opts
   tmux list-panes -a -F '#{@kel-sidebar} #{pane_id} #{pane_width} #{window_id} #{?window_zoomed_flag,zoomed,#{?#{&&:#{pane_at_left},#{&&:#{pane_at_top},#{pane_at_bottom}}},docked,moved}}' 2>/dev/null \
   | while read -r flag id w wid pos; do
       [ "$flag" = 1 ] || continue
@@ -1984,16 +1988,15 @@ cmd_click() { # range popup client
     jump)  KEL_CLIENT="${3:-}" "$SELF" jump ;;
     bgo)   banner_go "${3:-}" ;;
     bx)    banner_clear ;;
+    unzoom) tmux resize-pane -Z -t "$(tmux display-message -c "${3:-}" -p '#{pane_id}' 2>/dev/null)" 2>/dev/null ;;
   esac
   return 0
 }
 
 # ---- the banner ------------------------------------------------------------
-# A one-line bar at the top of the window, there only while something needs
+# A line above tmux's bar, there only while something needs
 # you: `● pr52 is waiting — allow Bash?   ↵ go  ✕`. The author liked how
-# Claude Code's desktop app says which agent is blocked, in the app. tmux's
-# bar is off while sidebars show (it repeated them), so the banner turns it
-# on at the top for as long as it has something to say, and off after. It
+# Claude Code's desktop app says which agent is blocked, in the app. It
 # leaves when you visit that agent, when the agent stops waiting, or on ✕.
 # One line per agent in $BANNER: <wid> TAB <state> TAB <name> TAB <text>.
 BANNER="$STATE_DIR/banner"
@@ -2036,7 +2039,7 @@ banner_go() { # client
 }
 
 # draw it: the newest line, and how many more; or nothing, and tmux's bar
-# back to what the sidebar wants (off while sidebars show)
+# back to its one line
 banner_apply() {
   tmux has-session -t "=$KEL_PREFIX" 2>/dev/null || return 0
   local t="=$KEL_PREFIX:" n line wid st name text more='' word
@@ -2046,9 +2049,8 @@ banner_apply() {
   # when the agent moves on".
   n="$(grep -c . "$BANNER" 2>/dev/null || true)"
   if [ "${n:-0}" -eq 0 ]; then
-    tmux set-option -u -t "$t" status-position \; set-option -u -t "$t" status-format[0] 2>/dev/null
-    if sidebar_enabled && [ -n "$(kel_windows | head -1)" ]; then tmux set-option -t "$t" status off 2>/dev/null
-    else tmux set-option -u -t "$t" status 2>/dev/null; fi
+    tmux set-option -u -t "$t" status-position \; set-option -u -t "$t" status-format[0] \; \
+         set-option -u -t "$t" status-format[1] \; set-option -u -t "$t" status 2>/dev/null
     return 0
   fi
   line="$(tail -1 "$BANNER")"
@@ -2062,9 +2064,11 @@ banner_apply() {
   # `↵ go` is what a click does; the key is named beside it so the banner
   # teaches it too (the sidebar's footer says the same).  ` is a prefix key:
   # two presses, so "then" — `Ctrl-b \`` read as one chord (2026-10-16).
-  tmux set-option -t "$t" status on \; \
-       set-option -t "$t" status-position top \; \
-       set-option -t "$t" status-format[0] "#[align=left,bg=default]#[range=user|bgo]#[fg=colour214,bold] ● $name#[nobold,fg=colour252] $word${text:+#[fg=colour245] — $text}$more #[norange]#[align=right]#[range=user|bgo]#[fg=colour255,bold] ↵ go #[nobold,fg=colour240]or $(prefix_words) then \` #[norange]#[range=user|bx]#[fg=colour245] ✕ #[norange]" \
+  local bar; bar="$(tmux show-options -gv 'status-format[0]' 2>/dev/null)"
+  tmux set-option -t "$t" status 2 \; \
+       set-option -u -t "$t" status-position \; \
+       set-option -t "$t" status-format[1] "$bar" \; \
+       set-option -t "$t" status-format[0] "#[align=left,bg=default]#{E:@kel-bar-lead}#[range=user|bgo]#[fg=colour214,bold] ● $name#[nobold,fg=colour252] $word${text:+#[fg=colour245] — $text}$more #[norange]#[align=right]#[range=user|bgo]#[fg=colour255,bold] ↵ go #[nobold,fg=colour240]or $(prefix_words) then \` #[norange]#[range=user|bx]#[fg=colour245] ✕ #[norange]" \
        2>/dev/null
 }
 
@@ -2433,9 +2437,10 @@ cmd_status_line() {
   # focused pane stands comes back here (--here: one `git status`, of one repo,
   # and only then).  One fleet_json, one jq.  --dirty is NOT passed: `git
   # status` per worktree is the expensive part and the bar never shows it.
-  local here=''
+  local here='' sb=1
   [ -e "$SIDEBAR_OFF" ] && here='--here'
-  fleet_json $here | jq -r '
+  sidebar_enabled || sb=0
+  fleet_json $here | jq -r --argjson sb "$sb" '
     def dur: floor | if . < 60 then "\(.)s"
                      elif . < 3600 then "\(. / 60 | floor)m"
                      else "\(. / 3600 | floor)h\((. % 3600) / 60 | floor | tostring | if length < 2 then "0" + . else . end)m" end;
@@ -2469,7 +2474,7 @@ cmd_status_line() {
     | ( [ $live[] | .context.cost_usd // empty ] | add // 0 ) as $cost
     | ( if ($live | length) == 0 then "#[fg=colour245]no agents#[default]"
         else
-          [ ( if ($wait | length) == 0 then empty
+          [ ( if ($wait | length) == 0 or $sb == 1 then empty
               else "#[range=user|jump]#[fg=colour214,bold]\($wait | length) waiting"
                    + ( [ $wait[] | .state_since // empty ] | min
                        | if . == null then "" else " \($now - . | dur)" end )
@@ -2477,7 +2482,7 @@ cmd_status_line() {
             ( if $cost > 0 then "$" + ($cost * 100 | round / 100 | tostring
                                        | if test("\\.") then (if test("\\.[0-9]$") then . + "0" else . end) else . + ".00" end)
               else empty end ) ]
-          | if length == 0 then "#[fg=colour245]nothing waiting#[default]" else join(dot) end
+          | if length == 0 then (if $sb == 1 then null else "#[fg=colour245]nothing waiting#[default]" end) else join(dot) end
         end ) as $fleet
     | ( .here // null | if . == null then null else
           .group + ( .git // null | if . == null then ""
@@ -2879,11 +2884,6 @@ cmd_statusline() {
     printf '\033[2mctx ?\033[0m'
   fi
   [ -n "$cost" ] && [ "$cost" != "0" ] && printf ' \033[2m·\033[0m $%.2f' "$cost" 2>/dev/null
-  # the time, because nothing else in kel tells it: tmux's bar carried a clock
-  # until the sidebar turned that bar off (spec.md §7).  This row is the only
-  # always-visible line kel writes, and it has room to the right.  date, not
-  # printf's %(...)T — bash 3.2 on macOS does not have it.
-  printf ' \033[2m·\033[0m \033[2m%s\033[0m' "$(date +%H:%M)"
   if [ -z "$label" ]; then
     # the 5-hour window always, when reported — the author needs the smallest
     # limit in view, and gating it at 50% showed only the week. The week from

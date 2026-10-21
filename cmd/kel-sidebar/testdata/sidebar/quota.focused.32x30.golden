@@ -18,6 +18,7 @@
 [2magent [0mkelsier
  [1me[0m [2medit file    [0m [1mp[0m [2mplan         [0m
  [1mr[0m [2mrename       [0m [1mx[0m [2mkill         [0m
+ [1mz[0m [2mzoom         [0m
 
 [2mkel[0m
  [1mn[0m [2mnew agent    [0m [1mw[0m [2mworktree     [0m
@@ -27,4 +28,3 @@
  [1m?[0m [2mkeys         [0m [1mq[0m [2mquit         [0m
 
 [2mesc back to your pane[0m
-[2m[0m[2m5h [0m[32m██[0m[90m███[0m 27%[0m[2m 3h28m[0m[2m · [0mwk 51%[0m

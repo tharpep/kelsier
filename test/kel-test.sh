@@ -775,7 +775,7 @@ NEW api-gw agent
 SBW="$(window_of api-gw agent)"
 wait_until '[ "$(sbcount "$SBW")" = 1 ]'
 ok "kel new gives the window exactly one sidebar" '[ "$(sbcount "$SBW")" = 1 ]'
-ok "  ...and tmux's own bar is off while sidebars show" '[ "$(tmux show-options -v -t "=keltest:" status 2>/dev/null)" = off ]'
+ok "  ...and tmux's own bar stays on beside it"   '[ "$(tmux show-options -v -t "=keltest:" status 2>/dev/null)" != off ]'
 # no awk here: macOS's awk rejected the escaped program GNU awk accepted
 ok "  ...on the left, at the configured width"    'tmux list-panes -t "$SBW" -F "#{@kel-sidebar}:#{pane_left}:#{pane_width}" | grep -qx "1:0:32"'
 ok "  ...running kel-sidebar"                         'wait_until "tmux list-panes -t $SBW -F \"#{@kel-sidebar} #{pane_current_command}\" | grep -qx \"1 kel-sidebar\""'
@@ -878,6 +878,9 @@ ok "| in the sidebar splits your pane"            "wait_until '[ \"\$(tmux list-
 # reports the resolved path.
 ok "  ...at its directory, with the keyboard there" '[ "$(tmux display -p -t "$LW" "#{@kel-sidebar}|#{pane_current_path}")" = "|$(cd "$WORK/repos/api-gw" && pwd -P)" ]'
 ok "  ...and focusing your pane cleared the way in" '[ -z "$(tmux show-options -wv -t "$LW" @kel-via 2>/dev/null)" ]'
+tmux resize-pane -Z -t "$LA"
+"$KEL" _click unzoom '' "$(tmux list-clients -F '#{client_name}' | head -1)"
+ok "a click on the bar's zoomed restores the layout" '[ "$(tmux display -p -t "$LW" "#{window_zoomed_flag}")" = 0 ]'
 release_client
 tmux set-hook -gwu window-layout-changed; tmux set-hook -gwu pane-focus-in; tmux set-option -gu focus-events
 tmux break-pane -d -s "$(sidebar_of "$LW")"
@@ -1510,13 +1513,13 @@ ok "\$KEL_NOTIFY selects which states do"   '[ "$(grep -c . "$NLOG")" = 1 ]'
 # the banner: a line at the top while an agent waits, gone when it moves on
 : > "$NLOG"; hook "$P" UserPromptSubmit; hook "$P" Notification permission_prompt 'run #(touch pwned)?'
 AW="$(window_of api-gw a)"
-ok "a waiting agent puts up the banner, at the top" '[ "$(tmux show-options -v -t "=keltest:" status-position)" = top ] && [[ "$(tmux show-options -v -t "=keltest:" status-format[0])" == *"a#[nobold,fg=colour252] is waiting"* ]]'
+ok "a waiting agent puts up the banner, above the bar" '[ "$(tmux show-options -v -t "=keltest:" status)" = 2 ] && [ -n "$(tmux show-options -v -t "=keltest:" status-format[1])" ] && [[ "$(tmux show-options -v -t "=keltest:" status-format[0])" == *"a#[nobold,fg=colour252] is waiting"* ]]'
 ok "  ...its text printed, never run as a format" '[[ "$(tmux show-options -v -t "=keltest:" status-format[0])" == *"##(touch pwned)"* ]]'
 hook "$P" UserPromptSubmit
 # "is waiting" alone let a bug through: an emptied banner file once drew
 # "● is" from a blank line, which contains no "is waiting".  Check the bar
 # itself is gone, not just one phrase.
-ok "  ...and takes it down when the agent moves on" '[ ! -s "$STATE/banner" ] && [ -z "$(tmux show-options -v -t "=keltest:" status-format[0] 2>/dev/null)" ]'
+ok "  ...and takes it down when the agent moves on" '[ ! -s "$STATE/banner" ] && [ -z "$(tmux show-options -v -t "=keltest:" status-format[0] 2>/dev/null)" ] && [ -z "$(tmux show-options -v -t "=keltest:" status 2>/dev/null)" ]'
 NEW api-gw b
 hold_client 20
 tmux select-window -t "$(window_of api-gw b)"

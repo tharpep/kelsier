@@ -41,6 +41,7 @@ type uiState struct {
 	hoverX   int    // and its column
 	prefix   string // the tmux prefix in words ("Ctrl-b"), for hints
 	restore  bool   // a previous workspace waits to be restored
+	barHint  bool
 }
 
 type sbSpace struct {
@@ -63,7 +64,7 @@ type sbSpace struct {
 }
 
 type sbAgent struct {
-	repo    string // the repo its pane stands in — not its record's group,
+	repo string // the repo its pane stands in — not its record's group,
 	// which says where it was filed: the author's `newer` read "kelsier"
 	// while it worked in ai-context
 	wid     string
@@ -95,8 +96,8 @@ type sbView struct {
 	hoverX               int
 	prefix               string
 	restore              bool
-	quota                *fleet.Quota // the account's, for the last line; nil = none reported
-	waiting              int          // agents blocked on you, and since when the oldest
+	barHint              bool
+	waiting              int // agents blocked on you, and since when the oldest
 	waitSince            int64
 }
 
@@ -172,7 +173,7 @@ func spaceKey(p fleet.Pane) (key, label string) {
 
 func buildView(doc fleet.Doc, ui uiState) sbView {
 	v := sbView{sel: ui.sel, filter: ui.filter, focused: ui.focused, hover: ui.hover, hoverX: ui.hoverX,
-		prefix: ui.prefix, restore: ui.restore, quota: doc.Quota}
+		prefix: ui.prefix, restore: ui.restore, barHint: ui.barHint}
 	for _, a := range doc.Agents {
 		if a.WindowID != nil && a.State != nil && *a.State == "waiting" {
 			v.waiting++
@@ -974,19 +975,11 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 		t += " · " + v.prefix + " then `"
 		tail = append(tail, line{yellow + bold + truncate(t, w) + reset, lineRef{id: "act:`", kind: "action"}})
 	}
-	// the quota is the last line, where tmux's bar used to carry it: with
-	// the sidebar showing, kel turns that bar off (it repeated what the
-	// sidebar and Claude's own row already said — the author, 2026-10-16)
-	var qline *line
-	if q := quotaLine(v.quota, w, now); q != "" && h > 3 {
-		qline = &line{q, lineRef{}}
-	}
-
 	// scroll so the selected entry is on screen; the bottom is pinned
 	if h > 0 {
 		room := h - max(len(tail), 1)
-		if qline != nil {
-			room--
+		if v.barHint && len(tail) == 0 {
+			room = h
 		}
 		if room < 0 {
 			room = 0
@@ -1025,7 +1018,7 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 		case len(selActs) > 0 && len(body)+1+len(selActs)+1 <= room:
 			acts = selActs
 		}
-		if len(tail) == 0 {
+		if len(tail) == 0 && !(v.barHint && (!v.focused || len(acts) > 0)) {
 			switch {
 			case !v.focused:
 				tail = append(tail, line{dim + truncate("click, or "+v.prefix+" then space", w) + reset, lineRef{}})
@@ -1035,11 +1028,21 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 				tail = append(tail, line{dim + truncate(hint(v, w), w) + reset, lineRef{}})
 			}
 		}
+		if len(tail) > 0 && room == h && len(body) >= room {
+			body = body[:room-1]
+		}
+		gap := 0
+		if len(tail) > 0 {
+			gap = 1
+		}
 		if len(acts) > 0 {
-			for len(body)+len(acts)+1 < room {
+			for len(body)+len(acts)+gap < room {
 				body = append(body, line{"", lineRef{}})
 			}
-			body = append(append(body, acts...), line{"", lineRef{}})
+			body = append(body, acts...)
+			if len(tail) > 0 {
+				body = append(body, line{"", lineRef{}})
+			}
 		}
 		for len(body) < room {
 			body = append(body, line{"", lineRef{}})
@@ -1049,9 +1052,6 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 	}
 	if h != 1 || len(body) == 0 {
 		body = append(body, tail...)
-	}
-	if qline != nil {
-		body = append(body, *qline)
 	}
 	if h > 0 && len(body) > h {
 		body = body[:h]
@@ -1156,7 +1156,7 @@ func selActions(v sbView) (string, string, []sbAct) {
 		for _, a := range v.agents {
 			if agentID(a.wid) == v.sel {
 				return "agent", a.agent.Name, []sbAct{
-					{"e", "edit file"}, {"p", "plan"}, {"r", "rename"}, {"x", "kill"},
+					{"e", "edit file"}, {"p", "plan"}, {"r", "rename"}, {"x", "kill"}, {"z", "zoom"},
 				}
 			}
 		}
@@ -1202,7 +1202,7 @@ func selActions(v sbView) (string, string, []sbAct) {
 				if p.Kind == "server" {
 					acts = append(acts, sbAct{"o", "browser"})
 				}
-				acts = append(acts, sbAct{"f", "files"}, sbAct{"g", "git"}, sbAct{"e", "nvim"})
+				acts = append(acts, sbAct{"f", "files"}, sbAct{"g", "git"}, sbAct{"e", "nvim"}, sbAct{"x", "close"}, sbAct{"z", "zoom"})
 				return "pane", paneLabel(p), acts
 			}
 		}
@@ -1225,103 +1225,6 @@ func tail2(s string, w int) string {
 		return s
 	}
 	return "…" + string(r[len(r)-w+1:])
-}
-
-// quotaLine is the account's quota as one line: the 5-hour window as a bar,
-// its reset, the week, and spend once it matters. What does not fit goes,
-// least needed first; nothing reported is no line (never a made-up 0%).
-func quotaLine(q *fleet.Quota, w int, now int64) string {
-	if q == nil || w <= 0 {
-		return ""
-	}
-	heat := func(p int) string {
-		switch {
-		case p >= 90:
-			return red + bold
-		case p >= 70:
-			return yellow
-		}
-		return ""
-	}
-	fill := func(p int) string {
-		if h := heat(p); h != "" {
-			return h
-		}
-		return green
-	}
-	type seg struct{ plain, col string }
-	var five, reset5, week, spend *seg
-	if f := q.FiveHour; f != nil {
-		if f.Pct == nil {
-			five = &seg{"5h ?", dim + "5h ?" + reset}
-		} else {
-			p := int(*f.Pct)
-			n := (p + 19) / 20
-			if n > 5 {
-				n = 5
-			}
-			bar := strings.Repeat("█", n)
-			track := strings.Repeat("█", 5-n)
-			pct := fmt.Sprintf("%d%%", p)
-			five = &seg{"5h " + bar + track + " " + pct, dim + "5h " + reset + fill(p) + bar + reset + grey + track + reset + " " + heat(p) + pct + reset}
-			if f.ResetsAt != nil && int64(*f.ResetsAt) > now {
-				d := humanizeSecs(int64(*f.ResetsAt) - now)
-				reset5 = &seg{" " + d, dim + " " + d + reset}
-			}
-		}
-	}
-	if five == nil {
-		// not reported, or no longer true: said, not left out — a line
-		// reading only "wk 24%" looked like the whole quota (2026-10-16)
-		five = &seg{"5h ?", dim + "5h ?" + reset}
-	}
-	if s := q.SevenDay; s != nil {
-		if s.Pct == nil {
-			week = &seg{"wk ?", dim + "wk ?" + reset}
-		} else {
-			p := int(*s.Pct)
-			t := fmt.Sprintf("wk %d%%", p)
-			week = &seg{t, heat(p) + t + reset}
-		}
-	}
-	if s := q.Spend; s != nil && s.Pct != nil && *s.Pct >= 50 {
-		p := int(*s.Pct)
-		t := fmt.Sprintf("spend %d%%", p)
-		spend = &seg{t, heat(p) + t + reset}
-	}
-	build := func(parts ...*seg) (string, int) {
-		var plain, col []string
-		for _, p := range parts {
-			if p == nil {
-				continue
-			}
-			if p == reset5 { // glued to the 5-hour figure
-				if len(plain) > 0 {
-					plain[len(plain)-1] += p.plain
-					col[len(col)-1] += p.col
-				}
-				continue
-			}
-			plain, col = append(plain, p.plain), append(col, p.col)
-		}
-		if len(plain) == 0 {
-			return "", 0
-		}
-		n := len([]rune(strings.Join(plain, " · ")))
-		return dim + reset + strings.Join(col, dim+" · "+reset), n
-	}
-	for _, try := range [][]*seg{
-		{five, reset5, week, spend},
-		{five, reset5, week},
-		{five, week, spend},
-		{five, week},
-		{five},
-	} {
-		if s, n := build(try...); s != "" && n <= w {
-			return s
-		}
-	}
-	return ""
 }
 
 var ansiRE = regexp.MustCompile("\x1b\\[[0-9;]*m")

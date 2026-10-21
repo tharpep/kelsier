@@ -62,6 +62,7 @@ const (
 	modeNewWorktree
 	modeRename
 	modeKill
+	modeClose
 	modeQuit
 	modeSweep
 	modeCommand
@@ -209,6 +210,41 @@ func splitTarget(win string) (pane, dir string) {
 	return pick(out)
 }
 
+func (m sbModel) zoomTarget() string {
+	sel := m.view().sel
+	if a, ok := m.agentOf(sel); ok {
+		return a.pane
+	}
+	if p, ok := m.paneOf(sel); ok {
+		return p.PaneID
+	}
+	return ""
+}
+
+func zoomCmd(win, pane string) tea.Cmd {
+	return func() tea.Msg {
+		if pane == "" {
+			pane, _ = splitTarget(win)
+		}
+		if pane == "" {
+			return sbDone{ok: false, msg: "no pane of yours here to zoom"}
+		}
+		if out, err := exec.Command("tmux", "select-window", "-t", pane, ";", "select-pane", "-t", pane, ";", "resize-pane", "-Z", "-t", pane).CombinedOutput(); err != nil {
+			return sbDone{ok: false, msg: summarise(string(out))}
+		}
+		return sbDone{ok: true}
+	}
+}
+
+func closePaneCmd(pane string) tea.Cmd {
+	return func() tea.Msg {
+		if out, err := exec.Command("tmux", "kill-pane", "-t", pane).CombinedOutput(); err != nil {
+			return sbDone{ok: false, msg: summarise(string(out))}
+		}
+		return sbDone{ok: true, msg: "closed"}
+	}
+}
+
 // kelBin is the kel that made this sidebar (sidebar_ensure passes it), so the
 // test suite's sidebars run the suite's kel, never an installed one.
 func kelBin() string {
@@ -341,6 +377,8 @@ func (m sbModel) view() sbView {
 		v.input = typed
 	case modeKill:
 		ask("kill "+m.entryName(m.target)+"?", yellow, "y yes · n no")
+	case modeClose:
+		ask("close "+m.entryName(m.target)+"?", yellow, "y yes · n no")
 	case modeQuit:
 		ask("quit kel?", yellow, "y yes · n no")
 	case modeSweep:
@@ -402,9 +440,23 @@ func (m sbModel) agentOf(id string) (sbAgent, bool) {
 	return sbAgent{}, false
 }
 
+func (m sbModel) paneOf(id string) (fleet.Pane, bool) {
+	for _, s := range buildView(m.doc, m.ui).spaces {
+		for _, p := range s.panes {
+			if p.PaneID == id {
+				return p, true
+			}
+		}
+	}
+	return fleet.Pane{}, false
+}
+
 func (m sbModel) entryName(id string) string {
 	if a, ok := m.agentOf(id); ok {
 		return a.agent.Name
+	}
+	if p, ok := m.paneOf(id); ok {
+		return paneLabel(p)
 	}
 	return id
 }
@@ -760,6 +812,12 @@ func (m sbModel) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			}
 		}
 		return m, nil
+	case modeClose:
+		m.mode = modeNormal
+		if k == "y" {
+			return m, closePaneCmd(m.target)
+		}
+		return m, nil
 
 	case modeFilter, modeNew, modeNewWorktree, modeRename, modeCommand, modeDiff:
 		switch k {
@@ -898,8 +956,17 @@ func (m sbModel) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.mode = modeNew
 	case "w":
 		m.mode = modeNewWorktree
+	case "z":
+		return m, zoomCmd(m.ui.myWindow, m.zoomTarget())
 	case "r", "x":
 		v := m.view()
+		if p, ok := m.paneOf(v.sel); ok && k == "x" {
+			if p.Kind == "shell" {
+				return m, closePaneCmd(p.PaneID)
+			}
+			m.mode, m.target = modeClose, p.PaneID
+			return m, nil
+		}
 		if !strings.HasPrefix(v.sel, "a:") {
 			m.msg, m.msgBad = "select an agent first", true
 			return m, nil
@@ -998,6 +1065,10 @@ var sbHelp = [][2]string{
 	{"p", "plan and tasks"},
 	{"r", "rename"},
 	{"x", "kill"},
+	{"z", "zoom"},
+	{"#", "a pane"},
+	{"x", "close"},
+	{"z", "zoom"},
 	{"#", "a space"},
 	{"f", "files (yazi)"},
 	{"g", "git (lazygit)"},
@@ -1084,6 +1155,7 @@ func runSidebar(once bool) {
 		if out, err := exec.Command("tmux", "display-message", "-p", "-t", m.myPane, "#{window_id}").Output(); err == nil {
 			m.ui.myWindow = strings.TrimSpace(string(out))
 		}
+		m.ui.barHint = true
 	}
 	m.ui.prefix = prefixWords()
 	m.checkVisible()
@@ -1349,7 +1421,7 @@ func helpKey(row string) string {
 		return ""
 	default:
 		switch f[0] {
-		case "/", "n", "w", "r", "x", "t", ";", "`", "s", "q", "f", "g", "d", "e", "o", "p", "c", "v", "u", "|", "-":
+		case "/", "n", "w", "r", "x", "t", ";", "`", "s", "q", "f", "g", "d", "e", "o", "p", "c", "v", "u", "|", "-", "z":
 			return f[0]
 		}
 	}

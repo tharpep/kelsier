@@ -232,7 +232,7 @@ bg · blocked`); other background agents are listed on their own, marked `bg`.
 idle comes from Claude Code itself where it can say.
 
 When an agent starts waiting and you are looking elsewhere, **a banner opens
-at the top of the window** — `● pr52 is waiting — Claude needs your
+above tmux's bar** — `● pr52 is waiting — Claude needs your
 permission to use Bash   ↵ go  or Ctrl-b then \`  ✕`, with `+1 more` when several are. Click it
 (or `↵ go`, or the key it names) to go there; `✕` dismisses it. It also leaves by itself when you
 visit that agent or the agent moves on; it is never shown for the agent you
@@ -258,27 +258,28 @@ The group is what `kel ls` sorts by, what `kel kill <group>/<name>` names, and
 the label each of the sidebar's spaces carries.
 
 **window vs pane:** `kel new` makes a **window** — one agent. `Ctrl-b | / -`
-makes a **pane** inside it, for your own editor, shell or tests. kel tracks
-state per window, so a second agent belongs in its own window.
+(or `|` / `-` in the sidebar) makes a **pane** inside it, for your own editor,
+shell or tests. kel tracks state per window, so a second agent belongs in its
+own window. A pane selected in the sidebar has `x close` (a shell at once,
+anything else asks) and `z zoom`; while a window is zoomed the bar says
+`⤢ zoomed · click to restore`. Dragging a divider turns it blue and heavy
+until you let go.
 
 ## The quota line, and tmux's bar
 
-While sidebars show, **tmux's own bar is off**: it repeated what the sidebar
-and Claude's row already say. The account's quota — the one thing that
-belongs to no pane — is the sidebar's last line:
+**tmux's bar runs along the bottom of the window, right of the sidebar** —
+its first columns are the sidebar's black and border, so the sidebar runs to
+the bottom: what belongs to no agent, with the clock alone on the right.
 
 ```
-claude █████ 58% 1h20m · wk 41%
+claude ███░░ 58% (1h20m) · wk 41%  │  $24.10                        14:32
 ```
 
-It drops the `claude` label, then the reset time, when the sidebar is narrow;
-no line until a session has reported a quota. The waiting alarm is the
-sidebar's footer (above).
-
-`kel sidebar off` brings tmux's bar back, carrying the same and more:
+With the sidebar off it also carries the waiting count and where the pane you
+are in stands:
 
 ```
-claude ███░░ 58% (1h20m) · wk 41%  │  1 waiting 6m · $24.10
+claude ███░░ 58% (1h20m) · wk 41%  │  1 waiting 6m · $24.10  │  kelsier · main
 ```
 
 | segment | |
@@ -286,7 +287,7 @@ claude ███░░ 58% (1h20m) · wk 41%  │  1 waiting 6m · $24.10
 | `claude ███`‹grey›`██ 58% (1h20m)` | the 5-hour quota and when it resets; `░░░░░ ?` once it has reset since it was last seen, never the old figure |
 | `wk 41%` | the weekly quota (`wk ?` when stale) |
 | `spend 61%` | the spend limit, from 50% only |
-| `1 waiting 6m` | agents blocked on you, and the longest wait; `nothing waiting` when none are |
+| `1 waiting 6m` | only while the sidebar is off: agents blocked on you, and the longest wait; `nothing waiting` when none are |
 | `$24.10` | the cost of the agents open right now |
 | `kelsier · fix-auth ↑2 ●3` | only while the sidebar is off: where the pane you are in stands |
 
@@ -382,7 +383,7 @@ Opus 5.5 fast xhigh · ███░░░░░░░ 25% ctx · $31.90 · 14:32
 Outside kel, where there is no sidebar or bar, it also carries those:
 
 ```
-tharpep/kelsier@auth-fix · Opus 5.5 · ███░░░░░░░ 25% ctx · $31.90 · 14:32 · 5h 74% (39m)
+tharpep/kelsier@auth-fix · Opus 5.5 · ███░░░░░░░ 25% ctx · $31.90 · 5h 74% (39m)
 ```
 
 | segment | appears when |
@@ -390,7 +391,6 @@ tharpep/kelsier@auth-fix · Opus 5.5 · ███░░░░░░░ 25% ctx �
 | `owner/name@worktree` | outside a kel window, and the payload names a repo |
 | `fast` `xhigh` `no-think` | those modes are not at their defaults |
 | `250k/1M` after the bar | context is at `KEL_CTX_WARN` or above |
-| `14:32` | always — the clock tmux's bar carried before the sidebar turned it off |
 | `$N.NN` | cost is non-zero |
 | `5h` + reset | outside a kel window, always when reported |
 | `7d` / `spend` + reset | outside a kel window, from 75% / 50% |

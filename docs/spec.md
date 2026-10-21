@@ -444,16 +444,27 @@ facts moved.
 | agent state, per-agent context % and cost | **sidebar**, per agent | — |
 | listening ports | **sidebar**, on the space whose server holds them | the bar's machine segment |
 | pane count | **sidebar** — it *is* the list | the bar |
-| quota: 5 h with reset, weekly | **the sidebar's last line** — per account, belongs to no pane (the bar's, while the sidebar is off) | Claude's row |
-| total cost of live sessions | the bar, while the sidebar is off — an aggregate has no row; with the sidebar, each agent's own cost | — |
+| quota: 5 h with reset, weekly | **tmux's bar**, left — per account, belongs to no pane *(2026-10-21; the sidebar's last line before)* | Claude's row; the sidebar |
+| total cost of live sessions | **tmux's bar** — an aggregate has no row | — |
 | waiting count, oldest wait | **the sidebar's footer** while it lacks the keyboard — the alarm, which names `prefix` `` ` `` and still jumps on a click (the bar's, while the sidebar is off) | (the sidebar shows each dot) |
 | keys, the restore hint | **the sidebar's footer** | startup text |
-| the time | **Claude's row**, after cost *(decided 2026-10-19)* — tmux's bar carried a clock in `status-right` until the sidebar turned that bar off, and nothing else in kel tells the time. That row is the only line kel writes that is always on screen, and it had room to the right | the bar's `status-right`, unreachable while the sidebar shows |
+| the time | **tmux's bar**, right, alone *(2026-10-21)* — the author did not want it bottom-left in an agent's row, where it went (2026-10-19) while the bar was off. tmux cannot float text over a pane; the bar's right edge is the nearest thing to a corner | Claude's row |
+| zoomed | **tmux's bar**, beside the clock: `⤢ zoomed · click to restore`, while the window is zoomed — the sidebar is hidden then, so the bar is the one place a click can undo it | — |
 
-**tmux's bar is off while sidebars show** (2026-10-16): two status lines
-stacked under every agent — the bar, and Claude's row — read as one repeated
-thing, so kel sets the session's `status off` with the first sidebar and
-`kel sidebar off` unsets it.
+**tmux's bar is back, full width, under everything** *(2026-10-21)*. It was
+off while sidebars showed (2026-10-16), because two status lines repeated
+each other. Once the quota left it for the sidebar and the clock for Claude's
+row, the author asked for the reverse: what is per agent stays in that
+agent's row, and what is not — quota, clock, total cost — goes on one line
+across the whole window that does not move with panes. With sidebars it drops
+the waiting count (the sidebar's footer and the banner say it). The banner
+shares the bar's position, since tmux has one: while something waits, the
+session gets `status 2`, the banner on the first line and tmux's own bar on
+the second (`status-format[1]`, copied from the global `status-format[0]`).
+tmux's bar always spans the client, so it cannot start right of the sidebar;
+it looks as if it does — both lines lead with `@kel-bar-lead`, the sidebar's
+width in its black (`@kel-sidebar-pad`) and the divider, while the window has
+a sidebar and is not zoomed (the author, 2026-10-21). The strip carries the sidebar's own hint — `click, or Ctrl-b then space`, or `esc back to your pane` while the sidebar is the active pane — so the sidebar gives that line to its lists.
 
 **When the sidebar is hidden, the bar takes location back.** Hiding is one
 global gesture (`kel sidebar off`, which leaves `sidebar-off` in the state
@@ -464,16 +475,14 @@ moves to where there is room.
 ### 7a. Claude's row  ·  *built (M4)*
 
 ```
-Opus 5.5 · ████░░ 36% ctx · $10.65 · 14:32
+Opus 5.5 · ████░░ 36% ctx · $10.65
 ```
 
 - **the session** — model, context bar, cost; `fast` / `xhigh` only when not
   default; `ctx ?` when unmeasured. That is all: this row is read while typing
   to one agent, and everything else on it was a copy.
-- **and the time**, last *(2026-10-19)*. Not the session's, but this is the
-  only line kel writes that is always on screen: the sidebar's footer belongs
-  to the selection and tmux's bar is off. It is one `date` call, after cost so
-  the figures stay together.
+- *The time was here from 2026-10-19 to 2026-10-21,* while tmux's bar was
+  off; it is the bar's again.
 - *Moved out:* location and land to the sidebar; quota to the bar. Both were
   in the first draft of this row. Dropping them also drops the cached git
   position this row needed — it runs on every update and could never run git.
