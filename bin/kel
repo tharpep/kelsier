@@ -339,7 +339,8 @@ agent_pane() { # wid
 # (invariant 3) and let relaunch type into a live one (invariant 4).
 agent_alive() { # wid | pane
   case "$1" in
-    %*) tmux display-message -p -t "$1" '#{pane_current_command}' 2>/dev/null | grep -qvxE 'bash|zsh|fish|sh|dash|tmux|' ;;
+    %*) local c; c="$(tmux display-message -p -t "$1" '#{pane_current_command}' 2>/dev/null)"
+        [ -n "$c" ] && ! printf '%s\n' "$c" | grep -qxE 'bash|zsh|fish|sh|dash|tmux' ;;
     *)  user_panes "$1" | cut -d'|' -f2 | grep -qvxE 'bash|zsh|fish|sh|dash|tmux' ;;
   esac
 }
