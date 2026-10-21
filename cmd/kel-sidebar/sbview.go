@@ -862,7 +862,7 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 		name := weight(truncate(a.agent.Name, text), a.current)
 		// the repo, dim beside the name, when there is room: two repos can
 		// each have an agent called docs
-		if g := a.repo; g != "" && g != a.agent.Name && len([]rune(a.agent.Name))+2+len([]rune(g)) <= text {
+		if g := a.repo; g != "" && g != a.agent.Name && !strings.HasPrefix(a.agent.Name, g+"-") && len([]rune(a.agent.Name))+2+len([]rune(g)) <= text {
 			name += "  " + dim + g + reset
 		}
 		add(lead(id)+c+d+reset+" "+name, r)
@@ -1138,6 +1138,8 @@ type sbAct struct{ key, label string }
 var sbActions = []sbAct{
 	{"n", "new agent"},
 	{"w", "worktree"},
+	{"|", "split right"},
+	{"-", "split down"},
 	{"`", "waiting"},
 	{"u", "usage"},
 	{"v", "PRs"},
@@ -1241,6 +1243,12 @@ func quotaLine(q *fleet.Quota, w int, now int64) string {
 		}
 		return ""
 	}
+	fill := func(p int) string {
+		if h := heat(p); h != "" {
+			return h
+		}
+		return green
+	}
 	type seg struct{ plain, col string }
 	var five, reset5, week, spend *seg
 	if f := q.FiveHour; f != nil {
@@ -1255,7 +1263,7 @@ func quotaLine(q *fleet.Quota, w int, now int64) string {
 			bar := strings.Repeat("█", n)
 			track := strings.Repeat("█", 5-n)
 			pct := fmt.Sprintf("%d%%", p)
-			five = &seg{"5h " + bar + track + " " + pct, dim + "5h " + reset + heat(p) + bar + reset + dim + track + reset + " " + heat(p) + pct + reset}
+			five = &seg{"5h " + bar + track + " " + pct, dim + "5h " + reset + fill(p) + bar + reset + grey + track + reset + " " + heat(p) + pct + reset}
 			if f.ResetsAt != nil && int64(*f.ResetsAt) > now {
 				d := humanizeSecs(int64(*f.ResetsAt) - now)
 				reset5 = &seg{" " + d, dim + " " + d + reset}

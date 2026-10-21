@@ -770,6 +770,7 @@ export KEL_SIDEBAR=on KEL_SIDEBAR_TRACE="$WORK/sidebar.trace"
 reset                                    # the server inherits both from here
 sbcount() { tmux list-panes -t "$1" -F '#{@kel-sidebar}' 2>/dev/null | grep -cx 1; }
 userpane() { tmux list-panes -t "$1" -F '#{@kel-sidebar}|#{pane_id}' | awk -F'|' '$1=="" {print $2; exit}'; }
+sidebar_of() { tmux list-panes -t "$1" -F '#{@kel-sidebar}|#{pane_id}' | awk -F'|' '$1=="1" {print $2; exit}'; }
 NEW api-gw agent
 SBW="$(window_of api-gw agent)"
 wait_until '[ "$(sbcount "$SBW")" = 1 ]'
@@ -843,6 +844,45 @@ tmux kill-pane -t "$(userpane "$HW")"
 "$KEL" _sidebar reap
 ok "a window left holding only its sidebar is closed" '! tmux list-windows -a -F "#{window_id}" | grep -qx "$HW"'
 ok "  ...and every other window is left alone"    '[ -n "$(window_of api-gw agent)" ] && [ "$(sbcount "$SBW")" = 1 ]'
+
+docked() { tmux list-panes -t "$1" -F '#{@kel-sidebar}:#{pane_at_left}#{pane_at_top}#{pane_at_bottom}:#{pane_width}' | grep -qx "1:111:32" && [ "$(sbcount "$1")" = 1 ]; }
+NEW api-gw layout
+LW="$(window_of api-gw layout)"; LA="$(userpane "$LW")"
+wait_until "docked $LW"
+tmux split-window -h -t "$LA" -c "$WORK/repos/api-gw"
+tmux select-layout -t "$LW" even-horizontal; "$KEL" _sidebar fit
+ok "fit pins a stretched sidebar back to its width"  "docked $LW"
+tmux select-layout -t "$LW" main-vertical; tmux rotate-window -t "$LW"; "$KEL" _sidebar fit
+ok "  ...re-docks one rotated off the left"       "docked $LW"
+tmux swap-pane -s "$LA" -t "$(sidebar_of "$LW")"; "$KEL" _sidebar fit
+ok "  ...and one swapped with the agent"          "docked $LW"
+ok "  ...whose agent is the same pane, still running" '[ "$(tmux display -p -t "$LA" "#{window_id} #{pane_current_command}")" = "$LW sleep" ]'
+grep -E '^set-hook -g (window-layout-changed|pane-focus-in) ' "$HERE/../tmux/kel.conf" \
+  | sed "s#\$HOME/.local/bin/kel#$KEL#g" > "$WORK/hooks.conf"
+tmux source-file "$WORK/hooks.conf"
+tmux set-option -g focus-events on
+ok "kel.conf wires the layout and focus hooks"    '[ "$(grep -c . "$WORK/hooks.conf")" = 2 ]'
+tmux select-layout -t "$LW" main-vertical
+ok "  ...a layout change re-docks by itself"      "wait_until 'docked $LW'"
+ok "  ...rotate's keys re-dock too (it fires no layout hook)" '[ "$(grep -c "rotate-window.*_sidebar fit" "$HERE/../tmux/kel.conf")" = 2 ]'
+hold_client 20
+tmux select-window -t "$LW"; tmux select-pane -t "$LA"
+tmux select-pane -t "$(sidebar_of "$LW")"
+ok "selecting the sidebar by hand moves on to your pane" "wait_until '[ -z \"\$(tmux display -p -t $LW \"#{@kel-sidebar}\")\" ]'"
+"$KEL" _sidebar focus "$LW"; sleep 0.3
+ok "  ...prefix Space gets in, and stays"         '[ "$(tmux display -p -t "$LW" "#{@kel-sidebar}")" = 1 ]'
+n0="$(tmux list-panes -t "$LW" | grep -c .)"
+tmux send-keys -t "$(sidebar_of "$LW")" '|'
+ok "| in the sidebar splits your pane"            "wait_until '[ \"\$(tmux list-panes -t $LW | grep -c .)\" = $((n0 + 1)) ]'"
+ok "  ...at its directory, with the keyboard there" '[ "$(tmux display -p -t "$LW" "#{@kel-sidebar}|#{pane_current_path}")" = "|$WORK/repos/api-gw" ]'
+ok "  ...and focusing your pane cleared the way in" '[ -z "$(tmux show-options -wv -t "$LW" @kel-via 2>/dev/null)" ]'
+release_client
+tmux set-hook -gwu window-layout-changed; tmux set-hook -gwu pane-focus-in; tmux set-option -gu focus-events
+tmux break-pane -d -s "$(sidebar_of "$LW")"
+"$KEL" _sidebar heal
+ok "a window holding only a sidebar is closed on heal" '! tmux list-panes -s -t =keltest -F "#{window_panes} #{@kel-sidebar}" | grep -qx "1 1"'
+ok "  ...and the window it left gets one back"    "wait_until 'docked $LW'"
+tmux kill-window -t "$LW"
 
 # sleep/wake: no client attached, so nothing is visible — every sidebar drew
 # once at startup and must not reload again
@@ -1386,6 +1426,12 @@ hook "$P" Notification agent_needs_input "which?"
 ok "agent_needs_input -> waiting"                   '[ "$(state_of a)" = waiting ]'
 hook "$P" Notification some_type_from_the_future "?"
 ok "an unknown type falls back to waiting"          '[ "$(state_of a)" = waiting ]'
+tooluse() { printf '%s' "{\"session_id\":\"s\",\"cwd\":\"$WORK\",\"hook_event_name\":\"PostToolUse\",\"tool_name\":\"$2\",\"tool_input\":{\"command\":\"ls\"}}" | TMUX_PANE="$1" "$KEL" hook PostToolUse; }
+tooluse "$P" Bash
+ok "a tool run after a wait -> working"             '[ "$(state_of a)" = working ]'
+hook "$P" Stop
+tooluse "$P" Bash
+ok "  ...but a tool never wakes a finished agent"   '[ "$(state_of a)" = done ]'
 
 section "dead agents are detected at read time"
 reset

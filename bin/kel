@@ -105,6 +105,7 @@ KEL_AGENT="${KEL_AGENT:-claude}"
 STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/kel"
 SESSIONS_DIR="$STATE_DIR/sessions"
 STASH_DIR="$STATE_DIR/.stash"
+WAITING_DIR="$STATE_DIR/.waiting"
 DOCTOR_CACHE="$STATE_DIR/doctor.json"
 SNAPSHOT="$STATE_DIR/snapshot.json"
 RESTORE_LOCK="$STATE_DIR/.restoring"
@@ -352,6 +353,7 @@ sidebar_ensure() { # wid
   sidebar_enabled || return 0
   [ "$(tmux display-message -p -t "$wid" '#{session_name}' 2>/dev/null)" = "$KEL_PREFIX" ] || return 0
   [ -n "$(sidebar_pane "$wid")" ] && return 0
+  tmux set-option -g @kel-sidebar-width "$KEL_SIDEBAR_WIDTH" 2>/dev/null
   # No else-branch, and the condition inverted, ON PURPOSE: an empty branch
   # ('') is an error tmux shows in view-mode on the window's active pane — the
   # agent's — which then swallowed every key, C-c included.  Found because the
@@ -402,6 +404,7 @@ sidebar_wake() {
 sidebar_heal() {
   local wid
   sidebar_enabled || return 0
+  sidebar_reap
   tmux list-panes -s -t "=$KEL_PREFIX" -F '#{window_id} #{@kel-sidebar}' 2>/dev/null \
   | awk '{ seen[$1]; if ($2 == 1) has[$1] } END { for (w in seen) if (!(w in has)) print w }' \
   | while read -r wid; do
@@ -410,13 +413,17 @@ sidebar_heal() {
   return 0
 }
 
-# re-pin every sidebar's width after tmux's proportional resize
 sidebar_fit() {
-  local flag id w
-  tmux list-panes -a -F '#{@kel-sidebar} #{pane_id} #{pane_width}' 2>/dev/null \
-  | while read -r flag id w; do
-      [ "$flag" = 1 ] && [ "$w" != "$KEL_SIDEBAR_WIDTH" ] \
-        && tmux resize-pane -t "$id" -x "$KEL_SIDEBAR_WIDTH" 2>/dev/null
+  local flag id w wid pos
+  tmux set-option -g @kel-sidebar-width "$KEL_SIDEBAR_WIDTH" 2>/dev/null
+  tmux list-panes -a -F '#{@kel-sidebar} #{pane_id} #{pane_width} #{window_id} #{?window_zoomed_flag,zoomed,#{?#{&&:#{pane_at_left},#{&&:#{pane_at_top},#{pane_at_bottom}}},docked,moved}}' 2>/dev/null \
+  | while read -r flag id w wid pos; do
+      [ "$flag" = 1 ] || continue
+      case "$pos" in
+        moved)  tmux kill-pane -t "$id" 2>/dev/null; sidebar_ensure "$wid" ;;
+        docked) [ "$w" != "$KEL_SIDEBAR_WIDTH" ] \
+                  && tmux resize-pane -t "$id" -x "$KEL_SIDEBAR_WIDTH" 2>/dev/null ;;
+      esac
     done
   return 0
 }
@@ -432,7 +439,7 @@ sidebar_focus() { # [wid]
   [ -n "$wid" ] || wid="$(tmux display-message -p '#{window_id}' 2>/dev/null)" || return 0
   sidebar_ensure "$wid"
   id="$(sidebar_pane "$wid")"
-  [ -n "$id" ] && tmux select-pane -t "$id" 2>/dev/null
+  [ -n "$id" ] && tmux set-option -w -t "$wid" @kel-via 1 \; select-pane -t "$id" 2>/dev/null
   return 0
 }
 
@@ -2953,20 +2960,23 @@ cmd_hook() {
   command -v tmux >/dev/null 2>&1 || exit 0
   # one jq pass, one field per line — never `IFS=$'\t' read`, which folds runs
   # of tab into a single delimiter and shifts everything after an empty field
-  local payload evt sid cwd ntype ntext
+  local payload evt sid cwd tool ntype ntext
   payload="$(cat 2>/dev/null || true)"
   {
-    read -r evt; read -r sid; read -r cwd; read -r ntype; read -r ntext
+    read -r evt; read -r sid; read -r cwd; read -r tool; read -r ntype; read -r ntext
   } < <(printf '%s' "$payload" | jq -r '[
       (.hook_event_name  // ""), (.session_id       // ""), (.cwd // ""),
-      (.notification_type // ""),
+      (.tool_name // ""), (.notification_type // ""),
       # Claude Code sends the words as .message (hooks docs, Notification);
       # kel read .notification_text, which it never sends — so no real agent
       # ever showed why it waited, only the test fixtures (2026-10-17)
       (if .hook_event_name == "Notification" then (.message // .notification_text // "") else "" end)
     ] | .[] | tostring | gsub("[\n\t]"; " ")' 2>/dev/null)
   [ -n "$event" ] || event="$evt"
-  [ "$event" = PostToolUse ] && { hook_edit "$payload" "$sid" "$cwd"; exit 0; }
+  if [ "$event" = PostToolUse ]; then
+    case "$tool" in Edit|Write|MultiEdit) hook_edit "$payload" "$sid" "$cwd" ;; esac
+    [ -n "$sid" ] && [ -e "$WAITING_DIR/$sid" ] || exit 0
+  fi
 
   local pane; pane="$(resolve_pane "$sid" "$cwd")"
   if [ "$event" = "SessionStart" ] && [ -n "$pane" ] && [ -n "$sid" ]; then
@@ -3012,6 +3022,7 @@ cmd_hook() {
         *)                    state=waiting ;;
       esac ;;
     Stop)             state=done ;;
+    PostToolUse)      state=working ;;
     PreCompact)
       # Compaction happens mid-turn: the agent is still working, so do NOT
       # touch .state.  Just count it.  "This one has been squeezed three
@@ -3030,7 +3041,7 @@ cmd_hook() {
     SessionEnd)
       rm -f "$STATE_DIR/$wid.state" "$STATE_DIR/$wid.ctx"
       paint_state "$wid" ''
-      [ -n "$sid" ] && rm -f "$STASH_DIR/$sid"
+      [ -n "$sid" ] && rm -f "$STASH_DIR/$sid" "$WAITING_DIR/$sid"
       tmux refresh-client -S 2>/dev/null || true
       exit 0 ;;
     *) exit 0 ;;
@@ -3039,6 +3050,13 @@ cmd_hook() {
   tmp="$(mktemp "$STATE_DIR/.${wid#@}.XXXXXX" 2>/dev/null)" || exit 0
   printf '%s %s %s\n' "$state" "$(date +%s)" "$ntext" > "$tmp"
   mv -f "$tmp" "$STATE_DIR/$wid.state"
+  if [ -n "$sid" ]; then
+    if [ "$state" = waiting ]; then
+      mkdir -p "$WAITING_DIR" 2>/dev/null && : > "$WAITING_DIR/$sid"
+    else
+      rm -f "$WAITING_DIR/$sid"
+    fi
+  fi
   paint_state "$wid" "$(effective_state "$wid")"
   tmux refresh-client -S 2>/dev/null || true
   sidebar_wake                 # the visible sidebar shows the change now, not in 2s

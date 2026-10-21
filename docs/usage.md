@@ -131,15 +131,26 @@ agent kelsier                       space kelsier
                                      t shell         c claude
 kel                                  v PRs
  n new agent     w worktree
+ | split right   - split down
  ` waiting       u usage
- ; command       ? keys
- q quit
+ v PRs           ; command
+ ? keys          q quit
 ```
 
 The first is **what you can do to the selected thing** — an agent, a space or
 worktree, a pane — under what it is and its name; the second is **kel's own**
 (`b restore` joins it while a previous workspace waits). No key needs shift.
-Hovering shows which half a click would hit.
+Hovering shows which half a click would hit. `|` and `-` split the pane you
+were in — right or below, at its directory — and put you in the new shell.
+
+**The keyboard gets into the sidebar only on purpose:** `Ctrl-b then space`, or
+a click. Moving between panes (`Ctrl-b o`, `Ctrl-b ←`, vim-tmux-navigator's
+Ctrl-h) passes over it, so typing meant for an agent never lands there.
+
+**The sidebar stays where it is.** tmux's layout keys (`Ctrl-b M-1..5`,
+`Ctrl-b Ctrl-o`, `Ctrl-b {` / `}`) rearrange your panes as usual and the
+sidebar goes back to the left at its width; drag the dividers between your own
+panes freely — the sidebar's edge springs back.
 
 **A prompt says what it asks, shows what you type, and how to answer**, on a
 line you can click: `new agent in kelsier` / `› fix▏` / `enter ok · esc

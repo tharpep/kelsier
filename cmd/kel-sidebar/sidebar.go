@@ -170,6 +170,45 @@ func jump(wid, pane string) {
 	_ = exec.Command("tmux", args...).Run()
 }
 
+func splitCmd(win string, right bool) tea.Cmd {
+	return func() tea.Msg {
+		pane, dir := splitTarget(win)
+		if pane == "" {
+			return sbDone{ok: false, msg: "no pane of yours here to split"}
+		}
+		flag := "-v"
+		if right {
+			flag = "-h"
+		}
+		if out, err := exec.Command("tmux", "split-window", flag, "-t", pane, "-c", dir).CombinedOutput(); err != nil {
+			return sbDone{ok: false, msg: summarise(string(out))}
+		}
+		return sbDone{ok: true}
+	}
+}
+
+func splitTarget(win string) (pane, dir string) {
+	if win == "" {
+		return "", ""
+	}
+	const f = "#{@kel-sidebar}|#{pane_id}|#{pane_current_path}"
+	pick := func(out []byte) (string, string) {
+		for _, l := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+			if p := strings.SplitN(l, "|", 3); len(p) == 3 && p[0] == "" {
+				return p[1], p[2]
+			}
+		}
+		return "", ""
+	}
+	if out, err := exec.Command("tmux", "display-message", "-p", "-t", win+".{last}", f).Output(); err == nil {
+		if pane, dir = pick(out); pane != "" {
+			return pane, dir
+		}
+	}
+	out, _ := exec.Command("tmux", "list-panes", "-t", win, "-F", f).Output()
+	return pick(out)
+}
+
 // kelBin is the kel that made this sidebar (sidebar_ensure passes it), so the
 // test suite's sidebars run the suite's kel, never an installed one.
 func kelBin() string {
@@ -903,6 +942,8 @@ func (m sbModel) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "t":
 		dir, _ := m.spaceFor(m.view().sel)
 		return m, runKel(dir, nil, "shell", dir)
+	case "|", "-":
+		return m, splitCmd(m.ui.myWindow, k == "|")
 	case "q", "Q", "shift+q":
 		m.mode = modeQuit
 	case "s":
@@ -970,6 +1011,8 @@ var sbHelp = [][2]string{
 	{"n", "new agent (tab: dir)"},
 	{"n x -- …", "…with claude flags"},
 	{"w", "new worktree agent"},
+	{"|", "split right"},
+	{"-", "split down"},
 	{"`", "next waiting agent"},
 	{"u", "usage (ccusage)"},
 	{"v", "PRs, every space"},
@@ -1306,7 +1349,7 @@ func helpKey(row string) string {
 		return ""
 	default:
 		switch f[0] {
-		case "/", "n", "w", "r", "x", "t", ";", "`", "s", "q", "f", "g", "d", "e", "o", "p", "c", "v", "u":
+		case "/", "n", "w", "r", "x", "t", ";", "`", "s", "q", "f", "g", "d", "e", "o", "p", "c", "v", "u", "|", "-":
 			return f[0]
 		}
 	}

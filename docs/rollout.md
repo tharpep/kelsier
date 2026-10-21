@@ -413,6 +413,19 @@ the `TodoWrite` design was stale, and the plan turned out to need no new hook.
   `./install.sh` because a new binary's first macOS launch is slow, and the
   cleanup's background `new-window` moved the switch, and its wake, to just
   after the split. Wake now signals only panes marked `@kel-ready`.
+- *on WSL (2026-10-21), from the author's screenshots:* the sidebar was
+  orange — `colour16` is peach in WezTerm's Catppuccin; it is `#000000` now.
+  tmux's own pane commands moved the sidebar and nothing put it back:
+  `select-layout` stretched it, `rotate-window` and main-vertical put it on
+  the right, `swap-pane` gave the agent its 32 columns. A `window-layout-changed`
+  hook (and the two rotate keys, which fire none) re-docks it. The keyboard
+  reached it by `select-pane -L` and `prefix o`, where a sentence for Claude
+  became sidebar keys; it now gets in only by `prefix Space` or a click. A
+  `break-pane` of the sidebar left a sidebar-only window; heal closes it.
+  `|` / `-` in the sidebar, clickable, split the pane you were in. The quota
+  bar's fill is green with a grey track (17% read as full), the repo is not
+  repeated beside a `<repo>-<n>` agent, and a waiting agent you answered goes
+  back to `working` on its next tool call — `PostToolUse` on every tool now.
 
 **Why this order:** M0–M1 are data and plumbing you can mostly ignore; M2 is
 where the tmux-hook risk lives, so it is proven before any UI depends on it;
