@@ -479,6 +479,7 @@ sidebar_wake() {
   | while read -r ready pid; do
       [ "$ready" = 1 ] && kill -USR1 "$pid" 2>/dev/null
     done
+  [ -n "${TMUX:-}" ] && tmux refresh-client -S 2>/dev/null || true
   return 0
 }
 
@@ -1082,6 +1083,7 @@ rename_agent() { # wid new
   fi
   say "renamed '$old' -> '$new'"
   snapshot
+  sidebar_wake
 }
 
 cmd_rename() {
