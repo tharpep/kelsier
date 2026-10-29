@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -130,12 +131,16 @@ func gitPositions(roots map[string]bool) map[string]*Git {
 	return out
 }
 
+var semverRe = regexp.MustCompile(`^[0-9]+\.[0-9]+(\.[0-9]+)?$`)
+
 // classify names what a pane is doing, cheapest signal first. agentCmd is the
 // first word of the window's record `agent` (empty for an unmanaged window).
 // Claude Code's process names itself `claude`, so tmux reports exactly that.
+// On macOS, native Claude installs link to versions/<version>, so tmux reports
+// the version (e.g. 2.1.304).
 func classify(cmd, agentCmd string, ports *[]int) (kind string, agent bool) {
 	switch {
-	case cmd != "" && (cmd == agentCmd || cmd == "claude"):
+	case cmd != "" && (cmd == agentCmd || cmd == "claude" || (semverRe.MatchString(cmd) && (agentCmd == "claude" || agentCmd == ""))):
 		return "agent", true
 	case ports != nil && len(*ports) > 0:
 		return "server", false
