@@ -517,6 +517,21 @@ ok "  ...and one a Claude Code session is using" '[ -d "$WORK/sw-hb" ] && [[ "$o
 ok "  ...and the unmerged one, without a word"  '[ -d "$WORK/sw-hw" ] && [[ "$o" != *"kept  hw"* ]]'
 rm -f "$WORK/claude-agents.json" "$STATE/claude-agents.json"
 
+# squash-merged branch deletion in sweep
+GW hsq
+( cd "$WORK/sw-hsq" && echo sq > sq && git add -A && git -c user.email=t@t -c user.name=t commit -qm sq && git push -q origin hsq ) >/dev/null 2>&1
+( cd "$WORK/sw" && git fetch -q && git merge --squash origin/hsq && git -c user.email=t@t -c user.name=t commit -qm "squash hsq" && git push -q origin main ) >/dev/null 2>&1
+git push -q "$WORK/origin.git" --delete hsq >/dev/null 2>&1
+HSQ_HEAD="$(git -C "$WORK/sw-hsq" rev-parse HEAD)"
+mkdir -p "$STATE/pr-cache"
+printf '[{"sha":"%s","merged":true,"state":"closed"}]\n' "$HSQ_HEAD" > "$STATE/pr-cache/example__sw.sha.json"
+git -C "$WORK/sw" remote set-url origin "https://github.com/example/sw.git"
+git -C "$WORK/sw" remote set-url --push origin "$WORK/origin.git"
+o="$("$KEL" sweep "$WORK/sw-hsq" 2>&1)"
+ok "sweep removes a squash-merged worktree and its local branch" '[ ! -d "$WORK/sw-hsq" ] && ! git -C "$WORK/sw" rev-parse --verify --quiet refs/heads/hsq >/dev/null'
+ok "  ...reporting both worktree and branch swept" '[[ "$o" == *"swept  hsq  (worktree and branch)"* ]]'
+git -C "$WORK/sw" remote set-url origin "$WORK/origin.git"
+
 section "config.toml (#10-adjacent, v0.8)"
 reset
 CH="$WORK/cfghome"; mkdir -p "$CH/.config/kel" "$WORK/repos/api-gw/.kel"
