@@ -988,6 +988,10 @@ func (m sbModel) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 							targetPane = p.PaneID
 							break
 						}
+						if p.Active {
+							targetWid = p.WindowID
+							targetPane = p.PaneID
+						}
 					}
 					jump(targetWid, targetPane)
 					return m, nil
