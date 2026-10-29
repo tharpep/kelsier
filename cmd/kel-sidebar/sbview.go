@@ -1031,15 +1031,19 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 					secName = "agents"
 				}
 				if body[off].ref.kind != "header" {
-					avail := room - 1
-					if last >= 0 && last >= off+avail {
-						off = last - avail + 1
+					if body[off].s == "" && off+1 < len(body) && body[off+1].ref.kind == "header" {
+						body = body[off:]
+					} else {
+						avail := room - 1
+						if last >= 0 && last >= off+avail {
+							off = last - avail + 1
+						}
+						if first >= 0 && first < off {
+							off = first
+						}
+						hdr := line{s: dim + truncate(secName, w) + reset, ref: lineRef{kind: "header"}}
+						body = append([]line{hdr}, body[off:]...)
 					}
-					if first >= 0 && first < off {
-						off = first
-					}
-					hdr := line{s: dim + truncate(secName, w) + reset, ref: lineRef{kind: "header"}}
-					body = append([]line{hdr}, body[off:]...)
 				} else {
 					body = body[off:]
 				}
@@ -1054,7 +1058,7 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 		// each; else the selection's alone; else neither, and the footer
 		// names the keys instead
 		var acts []line
-		if h >= 24 && room >= 22 {
+		if h >= 24 && room >= 18 {
 			switch {
 			case len(selActs) > 0 && len(body)+1+len(selActs)+1+len(kelActs)+1 <= room:
 				acts = append(append(append(acts, selActs...), line{"", lineRef{}}), kelActs...)
