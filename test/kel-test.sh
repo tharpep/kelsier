@@ -53,7 +53,7 @@ export TMUX_TMPDIR
   echo "refusing to run: TMUX_TMPDIR is not set, kill-server would hit the default socket" >&2
   exit 1
 }
-unset TMUX TMUX_PANE      # don't inherit an outer tmux; we are not "inside" ours
+unset TMUX TMUX_PANE VISUAL  # don't inherit an outer tmux or interactive editor
 # ...nor its config.  reset() starts the server with -f /dev/null, but once a
 # test kills it, the next one is started by KEL (`new-session` in a restore),
 # and that loads the developer's real ~/.tmux.conf — kel's own hooks included,
@@ -1060,6 +1060,15 @@ ok "j moves the shared cursor"                   '[ "$(jq -r .selected "$STATE/s
 tmux send-keys -t "$SP" Enter
 wait_until '[ "$(active_win)" = "$WTW" ]'
 ok "enter jumps to the agent's window"          '[ "$(active_win)" = "$WTW" ]'
+
+# enter on a space header row jumps to that space's window
+tmux select-window -t "$MW"
+wait_until '[ "$(active_win)" = "$MW" ]' 50
+tmux send-keys -t "$SP" k
+wait_until '[[ "$(jq -r .selected "$STATE/sidebar.json" 2>/dev/null)" == s:* ]]' 50
+tmux send-keys -t "$SP" Enter
+wait_until '[ "$(active_win)" = "$WTW" ]' 50
+ok "enter on a space header row jumps to that space's window" '[ "$(active_win)" = "$WTW" ]'
 
 # invariant 1, through the sidebar: x, y on dirty work is refused by kel kill
 "$KEL" _sidebar wake
