@@ -799,7 +799,7 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 	}
 	text := w - 3 // lead + dot + space
 
-	add(dim+truncate("spaces", w)+reset, lineRef{})
+	add(dim+truncate("spaces", w)+reset, lineRef{kind: "header"})
 	if v.unknown {
 		add("  "+dim+truncate("? panes unknown", w-2)+reset, lineRef{})
 	} else if len(v.spaces) == 0 {
@@ -864,7 +864,7 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 	}
 
 	add("", lineRef{})
-	add(dim+truncate("agents", w)+reset, lineRef{})
+	add(dim+truncate("agents", w)+reset, lineRef{kind: "header"})
 	if v.unknown {
 		add("  "+dim+truncate("? panes unknown", w-2)+reset, lineRef{})
 	} else if len(v.agents) == 0 {
@@ -1018,7 +1018,38 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 			if first >= 0 && first < off {
 				off = first
 			}
-			body = body[off:]
+			if off > 0 && room > 2 {
+				agentsIdx := -1
+				for i, l := range body {
+					if l.ref.kind == "header" && strings.Contains(l.s, "agents") {
+						agentsIdx = i
+						break
+					}
+				}
+				secName := "spaces"
+				if agentsIdx >= 0 && off >= agentsIdx {
+					secName = "agents"
+				}
+				if body[off].ref.kind != "header" {
+					if body[off].s == "" && off+1 < len(body) && body[off+1].ref.kind == "header" {
+						body = body[off:]
+					} else {
+						avail := room - 1
+						if last >= 0 && last >= off+avail {
+							off = last - avail + 1
+						}
+						if first >= 0 && first < off {
+							off = first
+						}
+						hdr := line{s: dim + truncate(secName, w) + reset, ref: lineRef{kind: "header"}}
+						body = append([]line{hdr}, body[off:]...)
+					}
+				} else {
+					body = body[off:]
+				}
+			} else {
+				body = body[off:]
+			}
 			if len(body) > room {
 				body = body[:room]
 			}
@@ -1027,13 +1058,15 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 		// each; else the selection's alone; else neither, and the footer
 		// names the keys instead
 		var acts []line
-		switch {
-		case len(selActs) > 0 && len(body)+1+len(selActs)+1+len(kelActs)+1 <= room:
-			acts = append(append(append(acts, selActs...), line{"", lineRef{}}), kelActs...)
-		case len(selActs) == 0 && len(body)+1+len(kelActs)+1 <= room:
-			acts = kelActs
-		case len(selActs) > 0 && len(body)+1+len(selActs)+1 <= room:
-			acts = selActs
+		if h >= 24 && room >= 18 {
+			switch {
+			case len(selActs) > 0 && len(body)+1+len(selActs)+1+len(kelActs)+1 <= room:
+				acts = append(append(append(acts, selActs...), line{"", lineRef{}}), kelActs...)
+			case len(selActs) == 0 && len(body)+1+len(kelActs)+1 <= room:
+				acts = kelActs
+			case len(selActs) > 0 && len(body)+1+len(selActs)+1 <= room:
+				acts = selActs
+			}
 		}
 		if len(tail) == 0 && !(v.barHint && (!v.focused || len(acts) > 0)) {
 			switch {
@@ -1113,6 +1146,12 @@ func hint(v sbView, w int) string {
 	case strings.HasPrefix(v.sel, "a:"):
 		// enter is the one key everybody tries; the room goes to the rest
 		keys = []string{"e edit", "p plan", "x kill", "r rename", "enter"}
+		for _, a := range v.agents {
+			if agentID(a.key) == v.sel && a.agent.State != nil && *a.agent.State == "dead" {
+				keys = append([]string{"R relaunch"}, keys...)
+				break
+			}
+		}
 	case strings.HasPrefix(v.sel, "s:"):
 		keys = []string{"f files", "g git", "e edit", "d diff", "n new", "t shell", "c claude", "G prs"}
 		for _, s := range v.spaces {
@@ -1173,6 +1212,9 @@ func selActions(v sbView) (string, string, []sbAct) {
 		for _, a := range v.agents {
 			if agentID(a.key) == v.sel {
 				acts := []sbAct{{"e", "edit file"}, {"p", "plan"}, {"r", "rename"}, {"x", "kill"}, {"z", "zoom"}}
+				if a.agent.State != nil && *a.agent.State == "dead" {
+					acts = append([]sbAct{{"R", "relaunch"}}, acts...)
+				}
 				if a.shared {
 					acts = append(acts, sbAct{"m", "own window"})
 				}
