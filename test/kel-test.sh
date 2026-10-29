@@ -53,7 +53,7 @@ export TMUX_TMPDIR
   echo "refusing to run: TMUX_TMPDIR is not set, kill-server would hit the default socket" >&2
   exit 1
 }
-unset TMUX TMUX_PANE      # don't inherit an outer tmux; we are not "inside" ours
+unset TMUX TMUX_PANE VISUAL  # don't inherit an outer tmux or interactive editor
 # ...nor its config.  reset() starts the server with -f /dev/null, but once a
 # test kills it, the next one is started by KEL (`new-session` in a restore),
 # and that loads the developer's real ~/.tmux.conf — kel's own hooks included,
