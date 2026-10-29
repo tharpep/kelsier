@@ -220,6 +220,71 @@ func prStateOf(dir string, wantPR bool) string {
 	return "none"
 }
 
+// mergedPRHeads returns the head SHAs of merged PRs found in the repo's PR cache.
+func mergedPRHeads(dir string) []string {
+	f := prCacheFile(dir)
+	if f == "" {
+		return nil
+	}
+	b, err := os.ReadFile(f)
+	if err != nil {
+		return nil
+	}
+	var prs []prEntry
+	if json.Unmarshal(b, &prs) != nil {
+		return nil
+	}
+	var shas []string
+	seen := map[string]bool{}
+	for _, p := range prs {
+		if p.Merged && p.SHA != "" && !seen[p.SHA] {
+			seen[p.SHA] = true
+			shas = append(shas, p.SHA)
+		}
+	}
+	return shas
+}
+
+// localCommits filters shas down to those present in the local repository as commit objects.
+func localCommits(dir string, shas []string) []string {
+	if len(shas) == 0 {
+		return nil
+	}
+	cmd := exec.Command("git", "-C", dir, "cat-file", "--batch-check=%(objectname) %(objecttype)")
+	cmd.Stdin = strings.NewReader(strings.Join(shas, "\n") + "\n")
+	out, err := cmd.Output()
+	if err != nil {
+		return nil
+	}
+	var local []string
+	for _, line := range strings.Split(string(out), "\n") {
+		parts := strings.Fields(line)
+		if len(parts) == 2 && parts[1] == "commit" {
+			local = append(local, parts[0])
+		}
+	}
+	return local
+}
+
+// mergedByPR returns true if every commit on HEAD is reachable from base or
+// from some merged PR head that is a local object (Issue #2).
+func mergedByPR(dir, base string) bool {
+	shas := localCommits(dir, mergedPRHeads(dir))
+	if len(shas) == 0 {
+		return false
+	}
+	args := []string{"rev-list", "--count", "HEAD", "--not"}
+	if base != "" {
+		args = append(args, base)
+	}
+	args = append(args, shas...)
+	out, ok := git(dir, args...)
+	if !ok {
+		return false
+	}
+	return strings.TrimSpace(out) == "0"
+}
+
 // localState is what the working tree alone can say: is it a repo, how many
 // files are uncommitted, how many commits are on no remote. One read serves
 // the dirty count, the two land codes that need no PR, and the privacy
@@ -242,7 +307,10 @@ func local(dir string) localState {
 		ls.dirty = countLines(out)
 	}
 	if ls.dirty == 0 && hasRemote(dir) {
-		if out, ok := git(dir, "log", "--oneline", "HEAD", "--not", "--remotes"); ok {
+		shas := localCommits(dir, mergedPRHeads(dir))
+		args := []string{"log", "--oneline", "HEAD", "--not", "--remotes"}
+		args = append(args, shas...)
+		if out, ok := git(dir, args...); ok {
 			ls.unpushed = countLines(out)
 		}
 	}
@@ -250,6 +318,9 @@ func local(dir string) localState {
 }
 
 func landOf(dir, branch string, wantPR bool) *Land {
+	if wantPR {
+		prRefresh(dir)
+	}
 	return landFrom(dir, branch, wantPR, local(dir))
 }
 
@@ -264,9 +335,6 @@ func landFrom(dir, branch string, wantPR bool, ls localState) *Land {
 	if ls.dirty > 0 {
 		return &Land{Code: "dirty", N: num(ls.dirty)}
 	}
-	if ls.unpushed > 0 {
-		return &Land{Code: "unpushed", N: num(ls.unpushed)}
-	}
 
 	base := baseRef(dir)
 	// Ask git before gh: if HEAD is already an ancestor of the base the work is
@@ -277,6 +345,13 @@ func landFrom(dir, branch string, wantPR bool, ls localState) *Land {
 		if exec.Command("git", "-C", dir, "merge-base", "--is-ancestor", "HEAD", base).Run() == nil {
 			return &Land{Code: "merged"}
 		}
+	}
+	if (base == "" || branch != strings.TrimPrefix(base, "origin/")) && mergedByPR(dir, base) {
+		return &Land{Code: "merged"}
+	}
+
+	if ls.unpushed > 0 {
+		return &Land{Code: "unpushed", N: num(ls.unpushed)}
 	}
 
 	pr := prStateOf(dir, wantPR)

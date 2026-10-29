@@ -53,7 +53,7 @@ export TMUX_TMPDIR
   echo "refusing to run: TMUX_TMPDIR is not set, kill-server would hit the default socket" >&2
   exit 1
 }
-unset TMUX TMUX_PANE      # don't inherit an outer tmux; we are not "inside" ours
+unset TMUX TMUX_PANE VISUAL  # don't inherit an outer tmux or interactive editor
 # ...nor its config.  reset() starts the server with -f /dev/null, but once a
 # test kills it, the next one is started by KEL (`new-session` in a restore),
 # and that loads the developer's real ~/.tmux.conf — kel's own hooks included,
@@ -1469,6 +1469,23 @@ out="$("$KEL" kill unpushed/up 2>&1)"
 ok "a worktree whose commits are on no remote is refused" '[[ "$out" == *refusing* ]] && [ -n "$(window_of unpushed up)" ]'
 ok "  ...naming the commit at risk"       '[[ "$out" == *"only here"* ]]'
 "$KEL" kill unpushed/up -f >/dev/null 2>&1
+
+# Issue #2: a worktree whose commits are in a merged PR's head is safe to kill
+# even if the remote tracking branch was deleted on merge
+MR="$WORK/merged-pr"; MO="$WORK/merged-origin.git"
+git init -q --bare -b main "$MO"
+git init -q -b main "$MR" && git -C "$MR" -c user.email=t@t -c user.name=t commit -q --allow-empty -m base
+git -C "$MR" remote add origin "$MO" && git -C "$MR" push -q origin main
+git -C "$MR" remote set-url origin "https://github.com/example/merged.git"
+git -C "$MR" remote set-url --push origin "$MO"
+( cd "$MR" && "$KEL" new mp -w --agent 'sleep 9999' >/dev/null 2>&1 )
+MWT="$(jq -r .cwd "$SESSIONS/merged/mp.json" 2>/dev/null)"
+git -C "$MWT" -c user.email=t@t -c user.name=t commit -q --allow-empty -m "in pr"
+MP_HEAD="$(git -C "$MWT" rev-parse HEAD)"
+mkdir -p "$STATE/pr-cache"
+printf '[{"sha":"%s","merged":true,"state":"closed"}]\n' "$MP_HEAD" > "$STATE/pr-cache/example__merged.sha.json"
+out="$("$KEL" kill merged/mp 2>&1)"
+ok "a worktree in a merged PR is safe to kill without -f" '[[ "$out" == *killed* ]]'
 
 # a worktree directory removed by hand (rm -rf, a file manager) BEFORE kill
 # used to leave git's own worktree record behind, permanently locking the
