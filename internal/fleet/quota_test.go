@@ -82,3 +82,39 @@ func TestWithClaude(t *testing.T) {
 		}
 	}
 }
+
+func TestQuotaCmd(t *testing.T) {
+	sd := t.TempDir()
+	now := time.Now().Unix()
+
+	// 1. Quota fallback from quota-cmd
+	os.WriteFile(filepath.Join(sd, "quota-cmd"), []byte(fmt.Sprintf("42 0 %d\n", now)), 0o600)
+	q := loadQuota(sd, now)
+	if q == nil || q.Spend == nil || q.Spend.Pct == nil || *q.Spend.Pct != 42 {
+		t.Fatalf("quota-cmd fallback: got %+v, want Spend.Pct=42", q)
+	}
+
+	// 2. Claude Code quota payload spend_limit beats quota-cmd
+	// format: <pct5> <at5> <pct7> <at7> <spend> <atspend> <epoch>
+	os.WriteFile(filepath.Join(sd, "quota"), []byte(fmt.Sprintf("-1 0 -1 0 85 0 %d\n", now)), 0o600)
+	q = loadQuota(sd, now)
+	if q == nil || q.Spend == nil || q.Spend.Pct == nil || *q.Spend.Pct != 85 {
+		t.Fatalf("quota payload wins: got %+v, want Spend.Pct=85", q)
+	}
+
+	// 3. Stale quota-cmd (reset in the past)
+	os.Remove(filepath.Join(sd, "quota"))
+	os.WriteFile(filepath.Join(sd, "quota-cmd"), []byte(fmt.Sprintf("42 %d %d\n", now-10, now)), 0o600)
+	q = loadQuota(sd, now)
+	if q != nil && q.Spend != nil && q.Spend.Pct != nil {
+		t.Fatalf("stale reset in past should be null: got %+v", q)
+	}
+
+	// 4. Stale quota-cmd older than 2 * ttl
+	t.Setenv("KEL_QUOTA_TTL", "10")
+	os.WriteFile(filepath.Join(sd, "quota-cmd"), []byte(fmt.Sprintf("42 0 %d\n", now-25)), 0o600)
+	q = loadQuota(sd, now)
+	if q != nil && q.Spend != nil && q.Spend.Pct != nil {
+		t.Fatalf("older than 2*ttl should be null: got %+v", q)
+	}
+}
