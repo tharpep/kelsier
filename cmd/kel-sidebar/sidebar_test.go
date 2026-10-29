@@ -744,3 +744,63 @@ func TestTwoAgentsOneWindow(t *testing.T) {
 		t.Errorf("the two agents share an id or a pane: %+v", v.agents)
 	}
 }
+
+func TestStickyHeadersAndResponsiveGrid(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+
+	// 1. Responsive Action Grid
+	oneDoc := loadFixture(t, "one-agent")
+	vOne := buildView(oneDoc, uiState{focused: true})
+
+	// At h=20 (< 24), action grid collapses to preserve entries
+	out20, refs20 := renderView(vOne, 32, 20, 0)
+	hasActionGrid20 := false
+	for _, r := range refs20 {
+		if strings.HasPrefix(r.id, "act:") {
+			hasActionGrid20 = true
+			break
+		}
+	}
+	if hasActionGrid20 {
+		t.Errorf("expected action grid to collapse at h=20, but found act: refs")
+	}
+	lines20 := strings.Split(plain(out20), "\n")
+	if lastLine := lines20[len(lines20)-1]; !strings.Contains(lastLine, "· ?") && !strings.Contains(lastLine, "e edit") {
+		t.Errorf("expected compact footer at h=20, got: %q", lastLine)
+	}
+
+	// At h=30 (>= 24), action grid is rendered when room permits
+	_, refs30 := renderView(vOne, 32, 30, 0)
+	hasActionGrid30 := false
+	for _, r := range refs30 {
+		if strings.HasPrefix(r.id, "act:") {
+			hasActionGrid30 = true
+			break
+		}
+	}
+	if !hasActionGrid30 {
+		t.Errorf("expected action grid at h=30 for one-agent")
+	}
+
+	// 2. Sticky Section Headers
+	fifteenDoc := loadFixture(t, "fifteen-three-repos")
+
+	// Select last agent "spike" (@8) at tight height h=16
+	vSpike := buildView(fifteenDoc, uiState{focused: true, sel: "a:@8"})
+	outSpike, _ := renderView(vSpike, 32, 16, 0)
+	linesSpike := strings.Split(plain(outSpike), "\n")
+	if len(linesSpike) == 0 || linesSpike[0] != "agents" {
+		t.Errorf("sticky header for scrolled agents: want agents at line 0, got %q", linesSpike[0])
+	}
+	if !strings.Contains(plain(outSpike), "spike") {
+		t.Errorf("selected agent spike was scrolled off screen")
+	}
+
+	// Select a space that scrolls past the top at h=16
+	vSpace := buildView(fifteenDoc, uiState{focused: true, sel: spaceID("/home/me/code/web-dashboard")})
+	outSpace, _ := renderView(vSpace, 32, 16, 0)
+	linesSpace := strings.Split(plain(outSpace), "\n")
+	if len(linesSpace) == 0 || linesSpace[0] != "spaces" {
+		t.Errorf("sticky header for scrolled spaces: want spaces at line 0, got %q", linesSpace[0])
+	}
+}
