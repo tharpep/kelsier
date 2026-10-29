@@ -174,6 +174,14 @@ git_root() { git rev-parse --show-toplevel 2>/dev/null; }
 in_tmux()  { [ -n "${TMUX:-}" ]; }
 has_remote() { [ -n "$(git -C "$1" remote 2>/dev/null)" ]; }
 
+# owner/repo of a GitHub remote, or nothing
+repo_slug() { # dir
+  local u; u="$(git -C "$1" remote get-url origin 2>/dev/null)" || return 0
+  case "$u" in *github.com*) ;; *) return 0 ;; esac
+  u="${u#*github.com}"; u="${u#[:/]}"; u="${u%.git}"
+  printf '%s\n' "$u"
+}
+
 # derive the group for a new agent:
 #   --group flag  >  $KEL_GROUP (force everything into one group)  >  repo basename  >  misc
 # --group flag > $KEL_GROUP > .kel/group > repo basename > misc
@@ -783,12 +791,37 @@ prune_state() {
   done
 }
 
+# unpushed commits on HEAD (or target ref), excluding commits on any remote and commits in merged PR heads
+worktree_unpushed() { # cwd [ref]
+  local extra=()
+  local slug; slug="$(repo_slug "$1")"
+  if [ -n "$slug" ] && [ -f "$STATE_DIR/pr-cache/${slug//\//__}.sha.json" ]; then
+    local m; m="$(jq -r '.[] | select(.merged == true) | .sha' "$STATE_DIR/pr-cache/${slug//\//__}.sha.json" 2>/dev/null || true)"
+    if [ -n "$m" ]; then
+      local l; l="$(printf '%s\n' "$m" | git -C "$1" cat-file --batch-check='%(objectname) %(objecttype)' 2>/dev/null | awk '$2 == "commit" { print $1 }')"
+      if [ -n "$l" ]; then
+        extra=($l)
+      fi
+    fi
+  fi
+  local target="${2:-HEAD}"
+  if has_remote "$1"; then
+    git -C "$1" log --oneline "$target" --not --remotes ${extra[@]+"${extra[@]}"} 2>/dev/null || true
+  else
+    local base=''
+    for b in main master; do
+      if git -C "$1" rev-parse --verify --quiet "$b" >/dev/null 2>&1; then base="$b"; break; fi
+    done
+    [ -n "$base" ] && git -C "$1" log --oneline "$target" --not "$base" ${extra[@]+"${extra[@]}"} 2>/dev/null || true
+  fi
+}
+
 # 0 (true) if the worktree has uncommitted changes or commits on no remote
 worktree_unsafe() { # cwd
   [ -d "$1" ] || return 1
   [ -n "$(git -C "$1" status --porcelain 2>/dev/null || true)" ] && return 0
   if has_remote "$1"; then
-    [ -n "$(git -C "$1" log --oneline HEAD --not --remotes 2>/dev/null || true)" ] && return 0
+    [ -n "$(worktree_unpushed "$1")" ] && return 0
   fi
   return 1
 }
@@ -798,7 +831,7 @@ worktree_report() { # cwd
   local d u=''
   d="$(git -C "$1" status --short 2>/dev/null || true)"
   [ -n "$d" ] && { echo "  uncommitted changes:" >&2; echo "$d" | sed 's/^/    /' >&2; }
-  has_remote "$1" && u="$(git -C "$1" log --oneline HEAD --not --remotes 2>/dev/null || true)"
+  has_remote "$1" && u="$(worktree_unpushed "$1")"
   [ -n "$u" ] && { echo "  commits not on any remote:" >&2; echo "$u" | sed 's/^/    /' >&2; }
   return 0
 }
@@ -1659,6 +1692,8 @@ sweep_worktree() { # doc path dry
   fi
   if [ -n "$branch" ] && git -C "$main" rev-parse --verify --quiet "refs/heads/$branch" >/dev/null; then
     if git -C "$main" branch -d "$branch" >/dev/null 2>&1; then
+      say "swept  $label  (worktree and branch)"
+    elif [ -z "$(worktree_unpushed "$main" "refs/heads/$branch")" ] && git -C "$main" branch -D "$branch" >/dev/null 2>&1; then
       say "swept  $label  (worktree and branch)"
     else
       say "swept  $label  (worktree; branch kept — git does not see it merged, e.g. a squash merge)"

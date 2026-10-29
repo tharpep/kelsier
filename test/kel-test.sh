@@ -53,7 +53,7 @@ export TMUX_TMPDIR
   echo "refusing to run: TMUX_TMPDIR is not set, kill-server would hit the default socket" >&2
   exit 1
 }
-unset TMUX TMUX_PANE      # don't inherit an outer tmux; we are not "inside" ours
+unset TMUX TMUX_PANE VISUAL  # don't inherit an outer tmux or interactive editor
 # ...nor its config.  reset() starts the server with -f /dev/null, but once a
 # test kills it, the next one is started by KEL (`new-session` in a restore),
 # and that loads the developer's real ~/.tmux.conf — kel's own hooks included,
@@ -502,6 +502,21 @@ ok "  ...leaves one with a new file in it"     '[ -f "$WORK/sw-hd/untracked" ] &
 ok "  ...and one a Claude Code session is using" '[ -d "$WORK/sw-hb" ] && [[ "$o" == *"kept  hb  — a Claude Code session"* ]]'
 ok "  ...and the unmerged one, without a word"  '[ -d "$WORK/sw-hw" ] && [[ "$o" != *"kept  hw"* ]]'
 rm -f "$WORK/claude-agents.json" "$STATE/claude-agents.json"
+
+# squash-merged branch deletion in sweep
+GW hsq
+( cd "$WORK/sw-hsq" && echo sq > sq && git add -A && git -c user.email=t@t -c user.name=t commit -qm sq && git push -q origin hsq ) >/dev/null 2>&1
+( cd "$WORK/sw" && git fetch -q && git merge --squash origin/hsq && git -c user.email=t@t -c user.name=t commit -qm "squash hsq" && git push -q origin main ) >/dev/null 2>&1
+git push -q "$WORK/origin.git" --delete hsq >/dev/null 2>&1
+HSQ_HEAD="$(git -C "$WORK/sw-hsq" rev-parse HEAD)"
+mkdir -p "$STATE/pr-cache"
+printf '[{"sha":"%s","merged":true,"state":"closed"}]\n' "$HSQ_HEAD" > "$STATE/pr-cache/example__sw.sha.json"
+git -C "$WORK/sw" remote set-url origin "https://github.com/example/sw.git"
+git -C "$WORK/sw" remote set-url --push origin "$WORK/origin.git"
+o="$("$KEL" sweep "$WORK/sw-hsq" 2>&1)"
+ok "sweep removes a squash-merged worktree and its local branch" '[ ! -d "$WORK/sw-hsq" ] && ! git -C "$WORK/sw" rev-parse --verify --quiet refs/heads/hsq >/dev/null'
+ok "  ...reporting both worktree and branch swept" '[[ "$o" == *"swept  hsq  (worktree and branch)"* ]]'
+git -C "$WORK/sw" remote set-url origin "$WORK/origin.git"
 
 section "config.toml (#10-adjacent, v0.8)"
 reset
