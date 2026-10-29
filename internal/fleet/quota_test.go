@@ -117,4 +117,11 @@ func TestQuotaCmd(t *testing.T) {
 	if q != nil && q.Spend != nil && q.Spend.Pct != nil {
 		t.Fatalf("older than 2*ttl should be null: got %+v", q)
 	}
+
+	// 5. Stale quota-cmd with future reset but sample older than 2 * ttl
+	os.WriteFile(filepath.Join(sd, "quota-cmd"), []byte(fmt.Sprintf("42 %d %d\n", now+1000, now-25)), 0o600)
+	q = loadQuota(sd, now)
+	if q != nil && q.Spend != nil && q.Spend.Pct != nil {
+		t.Fatalf("future reset with sample older than 2*ttl should be null: got %+v", q)
+	}
 }

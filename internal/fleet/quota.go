@@ -70,6 +70,7 @@ func refreshQuotaCmd(sd string, now int64) {
 			}
 		}
 	}
+	_ = os.MkdirAll(sd, 0o700)
 	_ = os.WriteFile(atFile, []byte(strconv.FormatInt(now, 10)+"\n"), 0o644)
 
 	target := filepath.Join(sd, "quota-cmd")
@@ -87,7 +88,9 @@ printf '%%s %%s %%d\n' "$pct" "$reset" %d > "$tmp" && mv -f "$tmp" "%s"
 `, cmdStr, sd, now, target)
 
 	cmd := exec.Command("sh", "-c", script)
-	_ = cmd.Start()
+	if err := cmd.Start(); err == nil {
+		go func() { _ = cmd.Wait() }()
+	}
 }
 
 // loadQuota reads `<pct5> <at5> <pct7> <at7> <spend> <atspend> <epoch>`; -1
@@ -148,7 +151,7 @@ func loadQuota(sd string, now int64) *Quota {
 				at, err3 := strconv.ParseInt(fields[2], 10, 64)
 				if err1 == nil && err2 == nil && err3 == nil && pct >= 0 && pct <= 100 {
 					ttl := quotaTTL()
-					stale := (reset > 0 && int64(reset) <= now) || (reset == 0 && now-at > 2*ttl)
+					stale := (reset > 0 && int64(reset) <= now) || (now-at > 2*ttl)
 					if !stale {
 						w := &Window{}
 						p := pct
