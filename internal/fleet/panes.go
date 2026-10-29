@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 )
 
 // Pane is one tmux pane in a kel window — every pane, not just agents. The
@@ -106,13 +107,36 @@ func parseStatusV2(out string) Git {
 	return g
 }
 
+type gitCacheEntry struct {
+	at  time.Time
+	git Git
+}
+
+var (
+	gitMu    sync.RWMutex
+	gitCache = map[string]gitCacheEntry{}
+)
+
+const gitTTL = 2 * time.Second
+
 // gitPositions computes Git for each distinct repo root, concurrently — one
-// `git status` fork per repo however many panes stand in it.
+// `git status` fork per repo however many panes stand in it. Results are
+// cached for gitTTL (2s) to prevent thrashing during rapid sidebar updates.
 func gitPositions(roots map[string]bool) map[string]*Git {
 	out := map[string]*Git{}
 	var mu sync.Mutex
 	var wg sync.WaitGroup
+	now := time.Now()
 	for r := range roots {
+		gitMu.RLock()
+		cached, ok := gitCache[r]
+		gitMu.RUnlock()
+		if ok && now.Sub(cached.at) < gitTTL {
+			cp := cached.git
+			out[r] = &cp
+			continue
+		}
+
 		wg.Add(1)
 		go func(r string) {
 			defer wg.Done()
@@ -122,6 +146,11 @@ func gitPositions(roots map[string]bool) map[string]*Git {
 			}
 			g := parseStatusV2(string(b))
 			g.Root = r
+
+			gitMu.Lock()
+			gitCache[r] = gitCacheEntry{at: time.Now(), git: g}
+			gitMu.Unlock()
+
 			mu.Lock()
 			out[r] = &g
 			mu.Unlock()

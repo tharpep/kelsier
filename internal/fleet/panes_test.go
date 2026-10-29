@@ -2,6 +2,7 @@ package fleet
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"testing"
@@ -112,5 +113,22 @@ func TestRepoRootWorktree(t *testing.T) {
 	}
 	if _, _, ok := repoRoot(root); ok {
 		t.Error("outside a repo should not be ok")
+	}
+}
+
+func TestGitPositionsCaching(t *testing.T) {
+	dir := t.TempDir()
+	exec.Command("git", "-C", dir, "init", "-q", "-b", "main").Run()
+	exec.Command("git", "-C", dir, "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "init").Run()
+
+	res1 := gitPositions(map[string]bool{dir: true})
+	if res1[dir] == nil || res1[dir].Branch == nil || *res1[dir].Branch != "main" {
+		t.Fatalf("first gitPositions: %+v", res1[dir])
+	}
+
+	// Cached entry returns valid result
+	res2 := gitPositions(map[string]bool{dir: true})
+	if res2[dir] == nil || res2[dir].Branch == nil || *res2[dir].Branch != "main" {
+		t.Fatalf("cached gitPositions: %+v", res2[dir])
 	}
 }
