@@ -976,7 +976,29 @@ func (m sbModel) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "k", "up":
 		m.move(-1)
 	case "enter":
-		m.activate(m.view().sel)
+		v := m.view()
+		if strings.HasPrefix(v.sel, "s:") {
+			for _, s := range v.spaces {
+				if spaceID(s.key) == v.sel && len(s.panes) > 0 {
+					targetWid := s.panes[0].WindowID
+					targetPane := s.panes[0].PaneID
+					for _, p := range s.panes {
+						if p.Agent {
+							targetWid = p.WindowID
+							targetPane = p.PaneID
+							break
+						}
+						if p.Active {
+							targetWid = p.WindowID
+							targetPane = p.PaneID
+						}
+					}
+					jump(targetWid, targetPane)
+					return m, nil
+				}
+			}
+		}
+		m.activate(v.sel)
 		c := m.pending
 		m.pending = nil
 		return m, c
