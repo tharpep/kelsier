@@ -800,7 +800,7 @@ worktree_unpushed() { # cwd [ref]
     if [ -n "$m" ]; then
       local l; l="$(printf '%s\n' "$m" | git -C "$1" cat-file --batch-check='%(objectname) %(objecttype)' 2>/dev/null | awk '$2 == "commit" { print $1 }')"
       if [ -n "$l" ]; then
-        extra=($l)
+        while IFS= read -r sha; do [ -n "$sha" ] && extra+=("$sha"); done <<< "$l"
       fi
     fi
   fi
@@ -2098,14 +2098,6 @@ panel_prs() { # dir
     printf '  - title: assigned to me\n    filters: is:open assignee:@me %s\n' "$q"
   } > "$cfg"
   popup "$HOME" "PRs · every open space · / search · ? its keys · prefix q closes" gh dash --config "$cfg"
-}
-
-# owner/repo of a GitHub remote, or nothing
-repo_slug() { # dir
-  local u; u="$(git -C "$1" remote get-url origin 2>/dev/null)" || return 0
-  case "$u" in *github.com*) ;; *) return 0 ;; esac
-  u="${u#*github.com}"; u="${u#[:/]}"; u="${u%.git}"
-  printf '%s\n' "$u"
 }
 
 # c: the Claude Code configuration that applies here, to look at and open —
