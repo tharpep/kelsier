@@ -56,7 +56,7 @@ func panePorts(panePids []int) map[int][]int {
 	var parent map[int]int
 	var listen map[int][]int // pid -> ports it listens on
 	if _, err := os.Stat("/proc/net/tcp"); err == nil {
-		parent, listen = procScan()
+		parent, listen = procScan(panePids)
 	} else {
 		parent, listen = lsofScan()
 	}
@@ -64,10 +64,7 @@ func panePorts(panePids []int) map[int][]int {
 		return nil
 	}
 
-	children := map[int][]int{}
-	for c, p := range parent {
-		children[p] = append(children[p], c)
-	}
+	children, _ := paneDescendants(parent, nil)
 	out := map[int][]int{}
 	for _, root := range panePids {
 		seen := map[int]bool{}
@@ -126,8 +123,8 @@ func parseProcNetTCP(s string) map[string]int {
 	return out
 }
 
-// procScan: every pid's parent, and which pids hold a listening socket.
-func procScan() (parent map[int]int, listen map[int][]int) {
+// procScan: parent of each pid, and listening ports for panePids and their descendants.
+func procScan(panePids []int) (parent map[int]int, listen map[int][]int) {
 	inodes := map[string]int{}
 	for _, f := range []string{"/proc/net/tcp", "/proc/net/tcp6"} {
 		if b, err := os.ReadFile(f); err == nil {
@@ -135,6 +132,9 @@ func procScan() (parent map[int]int, listen map[int][]int) {
 				inodes[k] = v
 			}
 		}
+	}
+	if len(inodes) == 0 {
+		return map[int]int{}, map[int][]int{}
 	}
 	ents, err := os.ReadDir("/proc")
 	if err != nil {
@@ -159,15 +159,21 @@ func procScan() (parent map[int]int, listen map[int][]int) {
 				}
 			}
 		}
-		if len(inodes) == 0 {
-			continue
-		}
-		fds, err := os.ReadDir(filepath.Join("/proc", e.Name(), "fd"))
+	}
+
+	// Scope fd inspection strictly to panePids and their descendants.
+	// On systems with thousands of processes, reading /proc/*/fd for every
+	// unrelated process wastes significant I/O and CPU.
+	_, relevant := paneDescendants(parent, panePids)
+
+	for pid := range relevant {
+		pidStr := strconv.Itoa(pid)
+		fds, err := os.ReadDir(filepath.Join("/proc", pidStr, "fd"))
 		if err != nil {
 			continue // not ours to read — fine, not ours to report either
 		}
 		for _, fd := range fds {
-			t, err := os.Readlink(filepath.Join("/proc", e.Name(), "fd", fd.Name()))
+			t, err := os.Readlink(filepath.Join("/proc", pidStr, "fd", fd.Name()))
 			if err != nil || !strings.HasPrefix(t, "socket:[") {
 				continue
 			}
@@ -177,6 +183,27 @@ func procScan() (parent map[int]int, listen map[int][]int) {
 		}
 	}
 	return parent, listen
+}
+
+func paneDescendants(parent map[int]int, panePids []int) (children map[int][]int, relevant map[int]bool) {
+	children = map[int][]int{}
+	for c, p := range parent {
+		children[p] = append(children[p], c)
+	}
+	relevant = map[int]bool{}
+	for _, root := range panePids {
+		stack := []int{root}
+		for len(stack) > 0 {
+			pid := stack[len(stack)-1]
+			stack = stack[:len(stack)-1]
+			if relevant[pid] {
+				continue
+			}
+			relevant[pid] = true
+			stack = append(stack, children[pid]...)
+		}
+	}
+	return children, relevant
 }
 
 // lsofScan is the macOS path: one lsof for listening sockets, one ps for the
