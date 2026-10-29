@@ -744,3 +744,136 @@ func TestTwoAgentsOneWindow(t *testing.T) {
 		t.Errorf("the two agents share an id or a pane: %+v", v.agents)
 	}
 }
+
+func TestSidebarRelaunchDeadAgent(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	doc := loadFixture(t, "dead-agent")
+	// a:@2 is the dead agent ("crashed")
+	vDead := buildView(doc, uiState{focused: true, sel: "a:@2"})
+	_, _, actsDead := selActions(vDead)
+	hasRelaunch := false
+	for _, a := range actsDead {
+		if a.key == "R" && a.label == "relaunch" {
+			hasRelaunch = true
+			break
+		}
+	}
+	if !hasRelaunch {
+		t.Errorf("dead agent actions missing R relaunch: %+v", actsDead)
+	}
+	if h := hint(vDead, 40); !strings.Contains(h, "R relaunch") {
+		t.Errorf("dead agent hint missing R relaunch: %q", h)
+	}
+
+	// a:@1 is live ("kelsier")
+	vLive := buildView(doc, uiState{focused: true, sel: "a:@1"})
+	_, _, actsLive := selActions(vLive)
+	for _, a := range actsLive {
+		if a.key == "R" {
+			t.Errorf("live agent actions unexpectedly has R: %+v", actsLive)
+		}
+	}
+
+	// pressing R triggers relaunch
+	m := sbModel{doc: doc, width: 32, height: 30, visible: true, ui: uiState{focused: true, sel: "a:@2"}}
+	nm, cmd := m.Update(tea.KeyPressMsg{Code: rune('R'), Text: "R"})
+	if nm.(sbModel).msg != "relaunching crashed…" {
+		t.Errorf("got msg %q, want 'relaunching crashed…'", nm.(sbModel).msg)
+	}
+	if cmd == nil {
+		t.Error("pressing R did not return a tea.Cmd")
+	}
+
+	// pressing R on live agent warns that it is not dead
+	mLive := sbModel{doc: doc, width: 32, height: 30, visible: true, ui: uiState{focused: true, sel: "a:@1"}}
+	nmLive, cmdLive := mLive.Update(tea.KeyPressMsg{Code: rune('R'), Text: "R"})
+	if nmLive.(sbModel).msg != "kelsier is not dead" || !nmLive.(sbModel).msgBad {
+		t.Errorf("live agent R msg: got %q (bad=%v), want 'kelsier is not dead'", nmLive.(sbModel).msg, nmLive.(sbModel).msgBad)
+	}
+	if cmdLive != nil {
+		t.Error("pressing R on live agent should not return a tea.Cmd")
+	}
+
+	// clicking R in the action grid triggers relaunch
+	out, refs := renderView(m.view(), 32, 30, 0)
+	_ = out
+	y, x := -1, 2
+	for i, r := range refs {
+		if r.id == "act:R" {
+			y = i
+		}
+		if r.id2 == "act:R" {
+			y, x = i, r.split+2
+		}
+	}
+	if y < 0 {
+		t.Fatal("no R action in grid refs")
+	}
+	nmClick, cmdClick := m.Update(tea.MouseClickMsg{X: x, Y: y, Button: tea.MouseLeft})
+	if nmClick.(sbModel).msg != "relaunching crashed…" {
+		t.Errorf("clicking R: got msg %q", nmClick.(sbModel).msg)
+	}
+	if cmdClick == nil {
+		t.Error("clicking R did not return a tea.Cmd")
+	}
+}
+
+func TestStickyHeadersAndResponsiveGrid(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+
+	// 1. Responsive Action Grid
+	oneDoc := loadFixture(t, "one-agent")
+	vOne := buildView(oneDoc, uiState{focused: true})
+
+	// At h=20 (< 24), action grid collapses to preserve entries
+	out20, refs20 := renderView(vOne, 32, 20, 0)
+	hasActionGrid20 := false
+	for _, r := range refs20 {
+		if strings.HasPrefix(r.id, "act:") {
+			hasActionGrid20 = true
+			break
+		}
+	}
+	if hasActionGrid20 {
+		t.Errorf("expected action grid to collapse at h=20, but found act: refs")
+	}
+	lines20 := strings.Split(plain(out20), "\n")
+	if lastLine := lines20[len(lines20)-1]; !strings.Contains(lastLine, "· ?") && !strings.Contains(lastLine, "e edit") {
+		t.Errorf("expected compact footer at h=20, got: %q", lastLine)
+	}
+
+	// At h=30 (>= 24), action grid is rendered when room permits
+	_, refs30 := renderView(vOne, 32, 30, 0)
+	hasActionGrid30 := false
+	for _, r := range refs30 {
+		if strings.HasPrefix(r.id, "act:") {
+			hasActionGrid30 = true
+			break
+		}
+	}
+	if !hasActionGrid30 {
+		t.Errorf("expected action grid at h=30 for one-agent")
+	}
+
+	// 2. Sticky Section Headers
+	fifteenDoc := loadFixture(t, "fifteen-three-repos")
+
+	// Select last agent "spike" (@8) at tight height h=16
+	vSpike := buildView(fifteenDoc, uiState{focused: true, sel: "a:@8"})
+	outSpike, _ := renderView(vSpike, 32, 16, 0)
+	linesSpike := strings.Split(plain(outSpike), "\n")
+	if len(linesSpike) == 0 || linesSpike[0] != "agents" {
+		t.Errorf("sticky header for scrolled agents: want agents at line 0, got %q", linesSpike[0])
+	}
+	if !strings.Contains(plain(outSpike), "spike") {
+		t.Errorf("selected agent spike was scrolled off screen")
+	}
+
+	// Select a space that scrolls past the top at h=16
+	vSpace := buildView(fifteenDoc, uiState{focused: true, sel: spaceID("/home/me/code/web-dashboard")})
+	outSpace, _ := renderView(vSpace, 32, 16, 0)
+	linesSpace := strings.Split(plain(outSpace), "\n")
+	if len(linesSpace) == 0 || linesSpace[0] != "spaces" {
+		t.Errorf("sticky header for scrolled spaces: want spaces at line 0, got %q", linesSpace[0])
+	}
+}
