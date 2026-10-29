@@ -425,7 +425,7 @@ func Load(o Options) Doc {
 			_, st := stateMap[r.id]
 			_, cx := ctxMap[r.id]
 			_, rp := paneRec(r)
-			if st || cx || rp || r.cmd == "claude" || semverRe.MatchString(r.cmd) {
+			if st || cx || rp || r.cmd == "claude" || (agentCmd == "claude" && semverRe.MatchString(r.cmd)) {
 				aps = append(aps, r)
 			}
 		}

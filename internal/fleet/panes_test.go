@@ -75,7 +75,7 @@ func TestClassify(t *testing.T) {
 		{"claude", "claude", &none, "agent", true},
 		{"claude", "", &none, "agent", true},     // unmanaged Claude Code
 		{"2.1.304", "claude", &none, "agent", true}, // macOS native install symlink
-		{"2.1.304", "", &none, "agent", true},       // macOS unmanaged native Claude
+		{"2.1.304", "", &none, "program", false},    // macOS unmanaged native Claude is promoted by withClaude
 		{"2.1.304", "sleep", &none, "program", false},
 		{"sleep", "sleep", &none, "agent", true}, // the record's own agent
 		{"node", "claude", &ports, "server", false},

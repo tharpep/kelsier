@@ -137,10 +137,11 @@ var semverRe = regexp.MustCompile(`^[0-9]+\.[0-9]+(\.[0-9]+)?$`)
 // first word of the window's record `agent` (empty for an unmanaged window).
 // Claude Code's process names itself `claude`, so tmux reports exactly that.
 // On macOS, native Claude installs link to versions/<version>, so tmux reports
-// the version (e.g. 2.1.304).
+// the version (e.g. 2.1.304). When agentCmd is claude, we recognize the semver.
+// Unmanaged native Claude panes are promoted by withClaude via PID verification.
 func classify(cmd, agentCmd string, ports *[]int) (kind string, agent bool) {
 	switch {
-	case cmd != "" && (cmd == agentCmd || cmd == "claude" || (semverRe.MatchString(cmd) && (agentCmd == "claude" || agentCmd == ""))):
+	case cmd != "" && (cmd == agentCmd || cmd == "claude" || (agentCmd == "claude" && semverRe.MatchString(cmd))):
 		return "agent", true
 	case ports != nil && len(*ports) > 0:
 		return "server", false
