@@ -979,22 +979,35 @@ func (m sbModel) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		v := m.view()
 		if strings.HasPrefix(v.sel, "s:") {
 			for _, s := range v.spaces {
-				if spaceID(s.key) == v.sel && len(s.panes) > 0 {
-					targetWid := s.panes[0].WindowID
-					targetPane := s.panes[0].PaneID
-					for _, p := range s.panes {
-						if p.Agent {
-							targetWid = p.WindowID
-							targetPane = p.PaneID
+				if spaceID(s.key) == v.sel {
+					var targetWid, targetPane string
+					for _, a := range v.agents {
+						if a.wid != "" && ((a.agent.Cwd != nil && *a.agent.Cwd == s.key) || a.repo == s.key) {
+							targetWid = a.wid
+							targetPane = a.pane
 							break
 						}
-						if p.Active {
-							targetWid = p.WindowID
-							targetPane = p.PaneID
+					}
+					if targetWid == "" && m.doc.Panes != nil {
+						for _, p := range *m.doc.Panes {
+							k, _ := spaceKey(p)
+							if k == s.key {
+								targetWid = p.WindowID
+								targetPane = p.PaneID
+								if p.Active {
+									break
+								}
+							}
 						}
 					}
-					jump(targetWid, targetPane)
-					return m, nil
+					if targetWid == "" && len(s.panes) > 0 {
+						targetWid = s.panes[0].WindowID
+						targetPane = s.panes[0].PaneID
+					}
+					if targetWid != "" {
+						jump(targetWid, targetPane)
+						return m, nil
+					}
 				}
 			}
 		}

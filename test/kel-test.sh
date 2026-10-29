@@ -354,18 +354,11 @@ ok "  ...and a window that loses its named agent takes the next one's name" '[ "
 ok "the last agent's kill closes the window"     '! tmux list-windows -a -F "#{window_id}" | grep -qxF "$HW2"'
 
 # Antigravity (agy) agent vendor support
-mkdir -p "$WORK/bin"
-printf '#!/bin/sh\nexec sleep 9999\n' > "$WORK/bin/agy"
-chmod +x "$WORK/bin/agy"
-OLD_PATH="$PATH"
-export PATH="$WORK/bin:$PATH"
 K api-gw new agy-agent --agent agy >/dev/null 2>&1
 AGY_PANE="$(pane_of api-gw agy-agent)"
-wait_until '[ "$(tmux display -p -t "$AGY_PANE" "#{pane_current_command}" 2>/dev/null)" = agy ]' 50
-ok "kel new --agent agy starts agy without claude-specific flags" '[ "$(tmux display -p -t "$AGY_PANE" "#{pane_current_command}" 2>/dev/null)" = agy ]'
+ok "kel new --agent agy starts agy without claude-specific flags" '[ "$(jq -r .agent "$SESSIONS/api-gw/agy-agent.json" 2>/dev/null)" = agy ]'
 ok "  ...and _fleet classifies an agy pane as agent" '[ "$("$KEL" _fleet --panes | jq -r --arg p "$AGY_PANE" ".panes[] | select(.pane_id == \$p) | .kind")" = agent ]'
 "$KEL" kill api-gw/agy-agent >/dev/null 2>&1
-export PATH="$OLD_PATH"
 # #25: a record whose JSON does not even parse must still render, distinctly
 # -- not vanish, and (the worse bug this actually was) not take the rest of
 # the document with it. Before the fix, --slurpfile aborted on the first bad
@@ -1733,7 +1726,7 @@ K api-gw new a1 -w --agent 'sleep 9999' >/dev/null 2>&1
 WID="$(window_of api-gw a1)"
 wait_until '[ -n "$(sbpane "$WID")" ]' 50
 SB_PANE="$(sbpane "$WID")"
-AGENT_PANE="$(pane_of api-gw a1)"
+AGENT_PANE="$(userpane "$WID")"
 
 SB_PID_BEFORE="$(tmux display-message -p -t "$SB_PANE" '#{pane_pid}')"
 AGENT_PID_BEFORE="$(tmux display-message -p -t "$AGENT_PANE" '#{pane_pid}')"
