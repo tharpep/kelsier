@@ -39,6 +39,8 @@
                                 # off leaves land on local git alone, which
                                 # still gives dirty / unpushed / merged / behind
 # pr_ttl       = 300            # seconds to cache a repo's PR state before re-asking gh
+# quota_cmd    = ""             # prints "<pct> <resets_at epoch | 0>" for spend fallback
+# quota_ttl    = 300            # seconds between quota_cmd runs
 # restore_cmds = "nvim vim hx nano lazygit lazydocker htop btop k9s"
                                 # pane commands `kel restore` will re-run
 

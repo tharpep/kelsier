@@ -1910,6 +1910,31 @@ ok "a payload with rate limits writes the quota file" '[ "$(cut -d" " -f1 "$STAT
 rm -f "$STATE/quota"
 sl '{"session_id":"a","context_window":{"context_window_size":200000,"used_percentage":5}}' >/dev/null
 ok "  ...and one without writes none"               '[ ! -f "$STATE/quota" ]'
+
+# Issue #3: quota_cmd fallback when Claude Code statusline carries no spend_limit
+export KEL_QUOTA_CMD="echo 42 0"
+export KEL_QUOTA_TTL=60
+rm -f "$STATE/quota" "$STATE/quota-cmd" "$STATE/quota-cmd.at"
+"$KEL" _fleet >/dev/null 2>&1
+wait_until '[ -f "$STATE/quota-cmd" ]' 30
+ok "quota_cmd populates spend percentage fallback (#3)" '[ "$("$KEL" _fleet | jq -r .quota.spend.pct)" = 42 ]'
+
+# quota_cmd that fails leaves .quota.spend null
+export KEL_QUOTA_CMD="exit 1"
+rm -f "$STATE/quota" "$STATE/quota-cmd" "$STATE/quota-cmd.at"
+"$KEL" _fleet >/dev/null 2>&1
+sleep 0.2
+ok "failing quota_cmd leaves .quota.spend null" '[ "$("$KEL" _fleet | jq -r .quota.spend)" = null ]'
+
+# pr = off suppresses quota_cmd
+MARKER="$WORK/quota-ran"
+export KEL_QUOTA_CMD="touch $MARKER && echo 42 0"
+export KEL_PR=off
+rm -f "$STATE/quota" "$STATE/quota-cmd" "$STATE/quota-cmd.at" "$MARKER"
+"$KEL" _fleet >/dev/null 2>&1
+sleep 0.2
+ok "pr = off stops quota_cmd from running" '[ ! -f "$MARKER" ]'
+unset KEL_QUOTA_CMD KEL_QUOTA_TTL KEL_PR
 ok "non-default modes render"                       '[[ "$(sl "{\"session_id\":\"a\",\"fast_mode\":true,\"effort\":{\"level\":\"xhigh\"},\"context_window\":{\"context_window_size\":200000,\"used_percentage\":5}}")" == *"fast xhigh"* ]]'
 ok "  ...and default ones do not"                   '[[ "$(sl "{\"session_id\":\"a\",\"effort\":{\"level\":\"medium\"},\"thinking\":{\"enabled\":true},\"context_window\":{\"context_window_size\":200000,\"used_percentage\":5}}")" != *medium* ]]'
 
