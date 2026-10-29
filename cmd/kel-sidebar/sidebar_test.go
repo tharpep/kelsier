@@ -744,3 +744,66 @@ func TestTwoAgentsOneWindow(t *testing.T) {
 		t.Errorf("the two agents share an id or a pane: %+v", v.agents)
 	}
 }
+
+func TestSidebarRelaunchDeadAgent(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	doc := loadFixture(t, "dead-agent")
+	// a:@2 is the dead agent ("crashed")
+	vDead := buildView(doc, uiState{focused: true, sel: "a:@2"})
+	_, _, actsDead := selActions(vDead)
+	hasRelaunch := false
+	for _, a := range actsDead {
+		if a.key == "R" && a.label == "relaunch" {
+			hasRelaunch = true
+			break
+		}
+	}
+	if !hasRelaunch {
+		t.Errorf("dead agent actions missing R relaunch: %+v", actsDead)
+	}
+	if h := hint(vDead, 40); !strings.Contains(h, "R relaunch") {
+		t.Errorf("dead agent hint missing R relaunch: %q", h)
+	}
+
+	// a:@1 is live ("kelsier")
+	vLive := buildView(doc, uiState{focused: true, sel: "a:@1"})
+	_, _, actsLive := selActions(vLive)
+	for _, a := range actsLive {
+		if a.key == "R" {
+			t.Errorf("live agent actions unexpectedly has R: %+v", actsLive)
+		}
+	}
+
+	// pressing R triggers relaunch
+	m := sbModel{doc: doc, width: 32, height: 30, visible: true, ui: uiState{focused: true, sel: "a:@2"}}
+	nm, cmd := m.Update(tea.KeyPressMsg{Code: rune('R'), Text: "R"})
+	if nm.(sbModel).msg != "relaunching crashed…" {
+		t.Errorf("got msg %q, want 'relaunching crashed…'", nm.(sbModel).msg)
+	}
+	if cmd == nil {
+		t.Error("pressing R did not return a tea.Cmd")
+	}
+
+	// clicking R in the action grid triggers relaunch
+	out, refs := renderView(m.view(), 32, 30, 0)
+	_ = out
+	y, x := -1, 2
+	for i, r := range refs {
+		if r.id == "act:R" {
+			y = i
+		}
+		if r.id2 == "act:R" {
+			y, x = i, r.split+2
+		}
+	}
+	if y < 0 {
+		t.Fatal("no R action in grid refs")
+	}
+	nmClick, cmdClick := m.Update(tea.MouseClickMsg{X: x, Y: y, Button: tea.MouseLeft})
+	if nmClick.(sbModel).msg != "relaunching crashed…" {
+		t.Errorf("clicking R: got msg %q", nmClick.(sbModel).msg)
+	}
+	if cmdClick == nil {
+		t.Error("clicking R did not return a tea.Cmd")
+	}
+}

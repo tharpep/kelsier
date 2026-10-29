@@ -1113,6 +1113,12 @@ func hint(v sbView, w int) string {
 	case strings.HasPrefix(v.sel, "a:"):
 		// enter is the one key everybody tries; the room goes to the rest
 		keys = []string{"e edit", "p plan", "x kill", "r rename", "enter"}
+		for _, a := range v.agents {
+			if agentID(a.key) == v.sel && a.agent.State != nil && *a.agent.State == "dead" {
+				keys = append([]string{"R relaunch"}, keys...)
+				break
+			}
+		}
 	case strings.HasPrefix(v.sel, "s:"):
 		keys = []string{"f files", "g git", "e edit", "d diff", "n new", "t shell", "c claude", "G prs"}
 		for _, s := range v.spaces {
@@ -1173,6 +1179,9 @@ func selActions(v sbView) (string, string, []sbAct) {
 		for _, a := range v.agents {
 			if agentID(a.key) == v.sel {
 				acts := []sbAct{{"e", "edit file"}, {"p", "plan"}, {"r", "rename"}, {"x", "kill"}, {"z", "zoom"}}
+				if a.agent.State != nil && *a.agent.State == "dead" {
+					acts = append([]sbAct{{"R", "relaunch"}}, acts...)
+				}
 				if a.shared {
 					acts = append(acts, sbAct{"m", "own window"})
 				}
