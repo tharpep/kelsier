@@ -10,7 +10,7 @@
 
 [workspace]
 # session      = "kel"          # tmux session prefix: sessions are <prefix>/<group>
-# agent        = "claude"       # what `kel new` launches
+# agent        = "claude"       # what `kel new` launches (e.g. claude, agy, codex, aider)
 # group        = ""             # force every new agent into ONE group, ignoring the repo
 # worktrees    = ""             # where `kel new -w` puts worktrees
                                 # (default: <parent-of-repo>/.kel-worktrees)

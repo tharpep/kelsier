@@ -196,6 +196,14 @@ func withClaude(doc *Doc, sd string, panes []Pane) {
 		if !ok {
 			continue // a claude in no kel pane: another terminal, not this workspace
 		}
+		if doc.Panes != nil {
+			for pi := range *doc.Panes {
+				if (*doc.Panes)[pi].PaneID == pane {
+					(*doc.Panes)[pi].Kind = "agent"
+					(*doc.Panes)[pi].Agent = true
+				}
+			}
+		}
 		i, ok := byPane[pane]
 		if !ok {
 			i, ok = byWin[paneWin[pane]]
