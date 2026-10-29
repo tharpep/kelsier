@@ -784,6 +784,16 @@ func TestSidebarRelaunchDeadAgent(t *testing.T) {
 		t.Error("pressing R did not return a tea.Cmd")
 	}
 
+	// pressing R on live agent warns that it is not dead
+	mLive := sbModel{doc: doc, width: 32, height: 30, visible: true, ui: uiState{focused: true, sel: "a:@1"}}
+	nmLive, cmdLive := mLive.Update(tea.KeyPressMsg{Code: rune('R'), Text: "R"})
+	if nmLive.(sbModel).msg != "kelsier is not dead" || !nmLive.(sbModel).msgBad {
+		t.Errorf("live agent R msg: got %q (bad=%v), want 'kelsier is not dead'", nmLive.(sbModel).msg, nmLive.(sbModel).msgBad)
+	}
+	if cmdLive != nil {
+		t.Error("pressing R on live agent should not return a tea.Cmd")
+	}
+
 	// clicking R in the action grid triggers relaunch
 	out, refs := renderView(m.view(), 32, 30, 0)
 	_ = out

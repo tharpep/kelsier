@@ -1079,6 +1079,14 @@ func (m sbModel) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			return m, runKel("", nil, "restore")
 		}
 		if a, ok := m.agentOf(m.view().sel); ok {
+			if !a.agent.Managed {
+				m.msg, m.msgBad = "only managed agents can be relaunched", true
+				return m, nil
+			}
+			if a.agent.State == nil || *a.agent.State != "dead" {
+				m.msg, m.msgBad = a.agent.Name + " is not dead", true
+				return m, nil
+			}
 			name := a.agent.Name
 			if a.agent.Managed && a.agent.Group != "" {
 				name = a.agent.Group + "/" + name
