@@ -324,14 +324,15 @@ func Load(o Options) Doc {
 		}
 		return "misc"
 	}
-	// Keyed by window id: since v0.10 the session no longer names the group,
+	// Keyed by window id and name: since v0.10 the session no longer names the group,
 	// so a record is matched to its window the way liveness always was — the
-	// same id AND the same name (see the dead-record loop below).
-	recByWid := map[string]record{}
+	// same id AND the same name (see the dead-record loop below). Keying by both
+	// prevents dead records with reused window ids from taking live records.
+	recByWidName := map[string]record{}
 	recByPane := map[string]record{}
 	for _, r := range records {
 		if r.WindowID != "" {
-			recByWid[r.WindowID] = r
+			recByWidName[r.WindowID+"\t"+r.Name] = r
 		}
 		if r.PaneID != "" {
 			recByPane[r.PaneID] = r
@@ -391,10 +392,7 @@ func Load(o Options) Doc {
 		if w.sess != pfx {
 			continue
 		}
-		rec, managed := recByWid[w.wid]
-		if managed && rec.Name != w.name {
-			managed = false
-		}
+		rec, managed := recByWidName[w.wid+"\t"+w.name]
 		// where a window's group comes from, most authoritative first: its
 		// record; the @kel-group window option kel new sets; the repo its
 		// first pane stands in
@@ -427,7 +425,7 @@ func Load(o Options) Doc {
 			_, st := stateMap[r.id]
 			_, cx := ctxMap[r.id]
 			_, rp := paneRec(r)
-			if st || cx || rp || isAgentCmd(r.cmd) || (agentCmd != "" && r.cmd == agentCmd) {
+			if st || cx || rp || isAgentCmd(r.cmd) || (agentCmd != "" && (r.cmd == agentCmd || (agentCmd == "claude" && semverRe.MatchString(r.cmd)))) {
 				aps = append(aps, r)
 			}
 		}
@@ -510,7 +508,7 @@ func Load(o Options) Doc {
 					a.Land = lands[*arec.Cwd]
 				}
 			}
-			if r.id != "" && (!legacy || amanaged || isAgentCmd(r.cmd) || (agentCmd != "" && r.cmd == agentCmd)) {
+			if r.id != "" && (!legacy || amanaged || isAgentCmd(r.cmd) || (agentCmd != "" && (r.cmd == agentCmd || (agentCmd == "claude" && semverRe.MatchString(r.cmd))))) {
 				agentPanes[r.id] = true
 			}
 			agents = append(agents, a)

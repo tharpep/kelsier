@@ -25,6 +25,7 @@ _kel() {
     'quit:save the workspace, then close it all'
     'restore:bring back a previous workspace (--list to choose)'
     'relaunch:relaunch ONE crashed agent in its existing window'
+    'reload:reload tmux config and restart sidebars in place'
     'sweep:close finished agents whose work has merged'
     'prune:discard dead agent records'
     'doctor:capability probe'

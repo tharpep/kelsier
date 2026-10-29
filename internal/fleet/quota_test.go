@@ -82,3 +82,26 @@ func TestWithClaude(t *testing.T) {
 		}
 	}
 }
+
+// withClaude marks a pane whose pid is in the session list as an agent, even
+// if its Cmd is a version number (macOS native installer). A shell beside it
+// stays a shell.
+func TestWithClaudeMarksPaneAgent(t *testing.T) {
+	sd := t.TempDir()
+	pid := os.Getpid()
+	cache := fmt.Sprintf(`{"at":%d,"sessions":[{"pid":%d,"kind":"interactive","status":"busy"}]}`, time.Now().Unix(), pid)
+	os.WriteFile(filepath.Join(sd, "claude-agents.json"), []byte(cache), 0o600)
+	p := float64(pid)
+	panes := []Pane{
+		{PaneID: "%1", WindowID: "@1", PID: &p, Cmd: "2.1.304", Kind: "program", Agent: false},
+		{PaneID: "%2", WindowID: "@1", Cmd: "bash", Kind: "shell", Agent: false},
+	}
+	doc := Doc{Panes: &panes, Agents: []Agent{{WindowID: sp("@1")}}}
+	withClaude(&doc, sd, panes)
+	if (*doc.Panes)[0].Kind != "agent" || !(*doc.Panes)[0].Agent {
+		t.Errorf("pane %%1: got kind=%s agent=%v, want agent/true", (*doc.Panes)[0].Kind, (*doc.Panes)[0].Agent)
+	}
+	if (*doc.Panes)[1].Kind != "shell" || (*doc.Panes)[1].Agent {
+		t.Errorf("pane %%2: got kind=%s agent=%v, want shell/false", (*doc.Panes)[1].Kind, (*doc.Panes)[1].Agent)
+	}
+}

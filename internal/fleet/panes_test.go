@@ -78,6 +78,9 @@ func TestClassify(t *testing.T) {
 		{"codex", "", &none, "agent", true},      // unmanaged Codex
 		{"aider", "", &none, "agent", true},      // unmanaged Aider
 		{"opencode", "", &none, "agent", true},   // unmanaged OpenCode
+		{"2.1.304", "claude", &none, "agent", true}, // macOS native install symlink
+		{"2.1.304", "", &none, "program", false},    // macOS unmanaged native Claude is promoted by withClaude
+		{"2.1.304", "sleep", &none, "program", false},
 		{"sleep", "sleep", &none, "agent", true}, // the record's own agent
 		{"node", "claude", &ports, "server", false},
 		{"bash", "claude", &none, "shell", false},
