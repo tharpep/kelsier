@@ -64,10 +64,7 @@ func panePorts(panePids []int) map[int][]int {
 		return nil
 	}
 
-	children := map[int][]int{}
-	for c, p := range parent {
-		children[p] = append(children[p], c)
-	}
+	children, _ := paneDescendants(parent, nil)
 	out := map[int][]int{}
 	for _, root := range panePids {
 		seen := map[int]bool{}
@@ -167,23 +164,7 @@ func procScan(panePids []int) (parent map[int]int, listen map[int][]int) {
 	// Scope fd inspection strictly to panePids and their descendants.
 	// On systems with thousands of processes, reading /proc/*/fd for every
 	// unrelated process wastes significant I/O and CPU.
-	children := map[int][]int{}
-	for c, p := range parent {
-		children[p] = append(children[p], c)
-	}
-	relevant := map[int]bool{}
-	for _, root := range panePids {
-		stack := []int{root}
-		for len(stack) > 0 {
-			pid := stack[len(stack)-1]
-			stack = stack[:len(stack)-1]
-			if relevant[pid] {
-				continue
-			}
-			relevant[pid] = true
-			stack = append(stack, children[pid]...)
-		}
-	}
+	_, relevant := paneDescendants(parent, panePids)
 
 	for pid := range relevant {
 		pidStr := strconv.Itoa(pid)
@@ -202,6 +183,27 @@ func procScan(panePids []int) (parent map[int]int, listen map[int][]int) {
 		}
 	}
 	return parent, listen
+}
+
+func paneDescendants(parent map[int]int, panePids []int) (children map[int][]int, relevant map[int]bool) {
+	children = map[int][]int{}
+	for c, p := range parent {
+		children[p] = append(children[p], c)
+	}
+	relevant = map[int]bool{}
+	for _, root := range panePids {
+		stack := []int{root}
+		for len(stack) > 0 {
+			pid := stack[len(stack)-1]
+			stack = stack[:len(stack)-1]
+			if relevant[pid] {
+				continue
+			}
+			relevant[pid] = true
+			stack = append(stack, children[pid]...)
+		}
+	}
+	return children, relevant
 }
 
 // lsofScan is the macOS path: one lsof for listening sockets, one ps for the
