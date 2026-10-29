@@ -74,6 +74,10 @@ func TestClassify(t *testing.T) {
 	}{
 		{"claude", "claude", &none, "agent", true},
 		{"claude", "", &none, "agent", true},     // unmanaged Claude Code
+		{"agy", "", &none, "agent", true},        // unmanaged Antigravity CLI
+		{"codex", "", &none, "agent", true},      // unmanaged Codex
+		{"aider", "", &none, "agent", true},      // unmanaged Aider
+		{"opencode", "", &none, "agent", true},   // unmanaged OpenCode
 		{"2.1.304", "claude", &none, "agent", true}, // macOS native install symlink
 		{"2.1.304", "", &none, "program", false},    // macOS unmanaged native Claude is promoted by withClaude
 		{"2.1.304", "sleep", &none, "program", false},

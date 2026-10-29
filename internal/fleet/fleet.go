@@ -425,7 +425,7 @@ func Load(o Options) Doc {
 			_, st := stateMap[r.id]
 			_, cx := ctxMap[r.id]
 			_, rp := paneRec(r)
-			if st || cx || rp || r.cmd == "claude" || (agentCmd == "claude" && semverRe.MatchString(r.cmd)) {
+			if st || cx || rp || isAgentCmd(r.cmd) || (agentCmd != "" && (r.cmd == agentCmd || (agentCmd == "claude" && semverRe.MatchString(r.cmd)))) {
 				aps = append(aps, r)
 			}
 		}
@@ -508,7 +508,7 @@ func Load(o Options) Doc {
 					a.Land = lands[*arec.Cwd]
 				}
 			}
-			if r.id != "" && (!legacy || amanaged || (agentCmd != "" && (r.cmd == agentCmd || (agentCmd == "claude" && semverRe.MatchString(r.cmd))))) {
+			if r.id != "" && (!legacy || amanaged || isAgentCmd(r.cmd) || (agentCmd != "" && (r.cmd == agentCmd || (agentCmd == "claude" && semverRe.MatchString(r.cmd))))) {
 				agentPanes[r.id] = true
 			}
 			agents = append(agents, a)
