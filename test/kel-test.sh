@@ -1688,6 +1688,37 @@ ok "  ...and left HEAD alone"              '[ "$(UHEAD)" = "$before" ]'
 mkdir -p "$WORK/nogit/bin" && cp "$KEL" "$WORK/nogit/bin/kel"
 ok "refuses when it is not a git clone"  '[[ "$("$WORK/nogit/bin/kel" update 2>&1 || true)" == *"not a git clone"* ]]'
 
+section "kel reload refreshes config and restarts sidebars in place (#4)"
+reset
+export KEL_SIDEBAR=on
+K api-gw new a1 -w --agent 'sleep 9999' >/dev/null 2>&1
+WID="$(window_of api-gw a1)"
+wait_until '[ -n "$(sbpane "$WID")" ]' 50
+SB_PANE="$(sbpane "$WID")"
+AGENT_PANE="$(pane_of api-gw a1)"
+
+SB_PID_BEFORE="$(tmux display-message -p -t "$SB_PANE" '#{pane_pid}')"
+AGENT_PID_BEFORE="$(tmux display-message -p -t "$AGENT_PANE" '#{pane_pid}')"
+
+"$KEL" reload >/dev/null 2>&1
+# wait for sidebar process to respawn with a new pid
+wait_until '[ "$(tmux display-message -p -t "'"$SB_PANE"'" "#{pane_pid}")" != "'"$SB_PID_BEFORE"'" ]' 50
+SB_PID_AFTER="$(tmux display-message -p -t "$SB_PANE" '#{pane_pid}')"
+AGENT_PID_AFTER="$(tmux display-message -p -t "$AGENT_PANE" '#{pane_pid}')"
+
+ok "after reload, the sidebar pane has a new pid" '[ -n "$SB_PID_AFTER" ] && [ "$SB_PID_AFTER" != "$SB_PID_BEFORE" ]'
+ok "  ...and the agent pane pid is unchanged (invariant 4)" '[ "$AGENT_PID_AFTER" = "$AGENT_PID_BEFORE" ]'
+
+# with sidebar-off, nothing is respawned
+touch "$STATE/sidebar-off"
+SB_PID_SAVED="$SB_PID_AFTER"
+"$KEL" reload >/dev/null 2>&1
+sleep 0.5
+SB_PID_OFF="$(tmux display-message -p -t "$SB_PANE" '#{pane_pid}')"
+ok "with sidebar-off, no sidebar is respawned" '[ "$SB_PID_OFF" = "$SB_PID_SAVED" ]'
+rm -f "$STATE/sidebar-off"
+export KEL_SIDEBAR=off
+
 section "the docs keep up with the code"
 # Two hand-written lists of things bin/kel already knows. That is the shape that
 # rots here: the spec's probe table was missing `gh authenticated` and `statusLine wired`
