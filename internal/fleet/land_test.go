@@ -163,4 +163,11 @@ func TestSquashMergedAncestorReachable(t *testing.T) {
 	if l := landOf(dir, "feat", false); l.Code != "unpushed" || l.N == nil || *l.N != 1 {
 		t.Fatalf("unmerged work: got %q (n=%v), want unpushed 1", l.Code, l.N)
 	}
+
+	// A branch with a new commit not in any merged PR reads unpushed
+	run(dir, "checkout", "-q", "-b", "other", "main")
+	run(dir, "commit", "-q", "--allow-empty", "-m", "other commit")
+	if l := landOf(dir, "other", false); l.Code != "unpushed" || l.N == nil || *l.N != 1 {
+		t.Fatalf("other work: got %q (n=%v), want unpushed 1", l.Code, l.N)
+	}
 }

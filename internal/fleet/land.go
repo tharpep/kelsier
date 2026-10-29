@@ -273,6 +273,12 @@ func mergedByPR(dir, base string) bool {
 	if len(shas) == 0 {
 		return false
 	}
+	// A branch with zero commits ahead of base has nothing to land and was not merged by PR
+	if base != "" {
+		if out, ok := git(dir, "rev-list", "--count", base+"..HEAD"); !ok || strings.TrimSpace(out) == "0" {
+			return false
+		}
+	}
 	args := []string{"rev-list", "--count", "HEAD", "--not"}
 	if base != "" {
 		args = append(args, base)
@@ -422,11 +428,18 @@ func landMap(records []record, wantPR bool) (map[string]*Land, map[string]localS
 	}
 	if wantPR {
 		done := map[string]bool{}
+		refreshed := false
 		for _, j := range seen {
 			ls := locals[j.cwd]
-			if s := repoSlug(j.cwd); s != "" && !done[s] && ls.dirty == 0 && ls.unpushed == 0 {
+			if s := repoSlug(j.cwd); s != "" && !done[s] && ls.dirty == 0 {
 				done[s] = true
 				prRefresh(j.cwd)
+				refreshed = true
+			}
+		}
+		if refreshed {
+			for _, j := range seen {
+				locals[j.cwd] = local(j.cwd)
 			}
 		}
 	}
