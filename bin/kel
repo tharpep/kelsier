@@ -783,12 +783,29 @@ prune_state() {
   done
 }
 
+# unpushed commits on HEAD, excluding commits on any remote and commits in merged PR heads
+worktree_unpushed() { # cwd
+  has_remote "$1" || return 0
+  local slug; slug="$(repo_slug "$1")"
+  local extra=()
+  if [ -n "$slug" ] && [ -f "$STATE_DIR/pr-cache/${slug//\//__}.sha.json" ]; then
+    local m; m="$(jq -r '.[] | select(.merged == true) | .sha' "$STATE_DIR/pr-cache/${slug//\//__}.sha.json" 2>/dev/null || true)"
+    if [ -n "$m" ]; then
+      local l; l="$(printf '%s\n' "$m" | git -C "$1" cat-file --batch-check='%(objectname) %(objecttype)' 2>/dev/null | awk '$2 == "commit" { print $1 }')"
+      if [ -n "$l" ]; then
+        extra=($l)
+      fi
+    fi
+  fi
+  git -C "$1" log --oneline HEAD --not --remotes ${extra[@]+"${extra[@]}"} 2>/dev/null || true
+}
+
 # 0 (true) if the worktree has uncommitted changes or commits on no remote
 worktree_unsafe() { # cwd
   [ -d "$1" ] || return 1
   [ -n "$(git -C "$1" status --porcelain 2>/dev/null || true)" ] && return 0
   if has_remote "$1"; then
-    [ -n "$(git -C "$1" log --oneline HEAD --not --remotes 2>/dev/null || true)" ] && return 0
+    [ -n "$(worktree_unpushed "$1")" ] && return 0
   fi
   return 1
 }
@@ -798,7 +815,7 @@ worktree_report() { # cwd
   local d u=''
   d="$(git -C "$1" status --short 2>/dev/null || true)"
   [ -n "$d" ] && { echo "  uncommitted changes:" >&2; echo "$d" | sed 's/^/    /' >&2; }
-  has_remote "$1" && u="$(git -C "$1" log --oneline HEAD --not --remotes 2>/dev/null || true)"
+  has_remote "$1" && u="$(worktree_unpushed "$1")"
   [ -n "$u" ] && { echo "  commits not on any remote:" >&2; echo "$u" | sed 's/^/    /' >&2; }
   return 0
 }

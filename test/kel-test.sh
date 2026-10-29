@@ -1470,6 +1470,23 @@ ok "a worktree whose commits are on no remote is refused" '[[ "$out" == *refusin
 ok "  ...naming the commit at risk"       '[[ "$out" == *"only here"* ]]'
 "$KEL" kill unpushed/up -f >/dev/null 2>&1
 
+# Issue #2: a worktree whose commits are in a merged PR's head is safe to kill
+# even if the remote tracking branch was deleted on merge
+MR="$WORK/merged-pr"; MO="$WORK/merged-origin.git"
+git init -q --bare -b main "$MO"
+git init -q -b main "$MR" && git -C "$MR" -c user.email=t@t -c user.name=t commit -q --allow-empty -m base
+git -C "$MR" remote add origin "$MO" && git -C "$MR" push -q origin main
+git -C "$MR" remote set-url origin "https://github.com/example/merged.git"
+git -C "$MR" remote set-url --push origin "$MO"
+( cd "$MR" && "$KEL" new mp -w --agent 'sleep 9999' >/dev/null 2>&1 )
+MWT="$(jq -r .cwd "$SESSIONS/merged/mp.json" 2>/dev/null)"
+git -C "$MWT" -c user.email=t@t -c user.name=t commit -q --allow-empty -m "in pr"
+MP_HEAD="$(git -C "$MWT" rev-parse HEAD)"
+mkdir -p "$STATE/pr-cache"
+printf '[{"sha":"%s","merged":true,"state":"closed"}]\n' "$MP_HEAD" > "$STATE/pr-cache/example__merged.sha.json"
+out="$("$KEL" kill merged/mp 2>&1)"
+ok "a worktree in a merged PR is safe to kill without -f" '[[ "$out" == *killed* ]]'
+
 # a worktree directory removed by hand (rm -rf, a file manager) BEFORE kill
 # used to leave git's own worktree record behind, permanently locking the
 # branch ("used by worktree") until someone ran `git worktree prune` by
