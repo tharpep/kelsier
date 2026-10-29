@@ -4,9 +4,11 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 )
 
 // Pane is one tmux pane in a kel window — every pane, not just agents. The
@@ -105,13 +107,36 @@ func parseStatusV2(out string) Git {
 	return g
 }
 
+type gitCacheEntry struct {
+	at  time.Time
+	git Git
+}
+
+var (
+	gitMu    sync.RWMutex
+	gitCache = map[string]gitCacheEntry{}
+)
+
+const gitTTL = 2 * time.Second
+
 // gitPositions computes Git for each distinct repo root, concurrently — one
-// `git status` fork per repo however many panes stand in it.
+// `git status` fork per repo however many panes stand in it. Results are
+// cached for gitTTL (2s) to prevent thrashing during rapid sidebar updates.
 func gitPositions(roots map[string]bool) map[string]*Git {
 	out := map[string]*Git{}
 	var mu sync.Mutex
 	var wg sync.WaitGroup
+	now := time.Now()
 	for r := range roots {
+		gitMu.RLock()
+		cached, ok := gitCache[r]
+		gitMu.RUnlock()
+		if ok && now.Sub(cached.at) < gitTTL {
+			cp := cached.git
+			out[r] = &cp
+			continue
+		}
+
 		wg.Add(1)
 		go func(r string) {
 			defer wg.Done()
@@ -121,6 +146,11 @@ func gitPositions(roots map[string]bool) map[string]*Git {
 			}
 			g := parseStatusV2(string(b))
 			g.Root = r
+
+			gitMu.Lock()
+			gitCache[r] = gitCacheEntry{at: time.Now(), git: g}
+			gitMu.Unlock()
+
 			mu.Lock()
 			out[r] = &g
 			mu.Unlock()
@@ -130,12 +160,31 @@ func gitPositions(roots map[string]bool) map[string]*Git {
 	return out
 }
 
+var semverRe = regexp.MustCompile(`^[0-9]+\.[0-9]+(\.[0-9]+)?$`)
+
+var knownAgents = map[string]bool{
+	"claude":   true,
+	"agy":      true,
+	"codex":    true,
+	"aider":    true,
+	"opencode": true,
+}
+
+func isAgentCmd(cmd string) bool {
+	return knownAgents[cmd]
+}
+
 // classify names what a pane is doing, cheapest signal first. agentCmd is the
 // first word of the window's record `agent` (empty for an unmanaged window).
 // Claude Code's process names itself `claude`, so tmux reports exactly that.
+// Known agents (claude, agy, codex, aider, opencode) are recognized even
+// without an agent record. On macOS, native Claude installs link to
+// versions/<version>, so tmux reports the version (e.g. 2.1.304). When agentCmd
+// is claude, we recognize the semver.
+// Unmanaged native Claude panes are promoted by withClaude via PID verification.
 func classify(cmd, agentCmd string, ports *[]int) (kind string, agent bool) {
 	switch {
-	case cmd != "" && (cmd == agentCmd || cmd == "claude"):
+	case cmd != "" && (cmd == agentCmd || knownAgents[cmd] || (agentCmd == "claude" && semverRe.MatchString(cmd))):
 		return "agent", true
 	case ports != nil && len(*ports) > 0:
 		return "server", false

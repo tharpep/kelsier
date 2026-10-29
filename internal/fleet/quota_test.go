@@ -82,3 +82,69 @@ func TestWithClaude(t *testing.T) {
 		}
 	}
 }
+
+// withClaude marks a pane whose pid is in the session list as an agent, even
+// if its Cmd is a version number (macOS native installer). A shell beside it
+// stays a shell.
+func TestWithClaudeMarksPaneAgent(t *testing.T) {
+	sd := t.TempDir()
+	pid := os.Getpid()
+	cache := fmt.Sprintf(`{"at":%d,"sessions":[{"pid":%d,"kind":"interactive","status":"busy"}]}`, time.Now().Unix(), pid)
+	os.WriteFile(filepath.Join(sd, "claude-agents.json"), []byte(cache), 0o600)
+	p := float64(pid)
+	panes := []Pane{
+		{PaneID: "%1", WindowID: "@1", PID: &p, Cmd: "2.1.304", Kind: "program", Agent: false},
+		{PaneID: "%2", WindowID: "@1", Cmd: "bash", Kind: "shell", Agent: false},
+	}
+	doc := Doc{Panes: &panes, Agents: []Agent{{WindowID: sp("@1")}}}
+	withClaude(&doc, sd, panes)
+	if (*doc.Panes)[0].Kind != "agent" || !(*doc.Panes)[0].Agent {
+		t.Errorf("pane %%1: got kind=%s agent=%v, want agent/true", (*doc.Panes)[0].Kind, (*doc.Panes)[0].Agent)
+	}
+	if (*doc.Panes)[1].Kind != "shell" || (*doc.Panes)[1].Agent {
+		t.Errorf("pane %%2: got kind=%s agent=%v, want shell/false", (*doc.Panes)[1].Kind, (*doc.Panes)[1].Agent)
+	}
+}
+
+func TestQuotaCmd(t *testing.T) {
+	sd := t.TempDir()
+	now := time.Now().Unix()
+
+	// 1. Quota fallback from quota-cmd
+	os.WriteFile(filepath.Join(sd, "quota-cmd"), []byte(fmt.Sprintf("42 0 %d\n", now)), 0o600)
+	q := loadQuota(sd, now)
+	if q == nil || q.Spend == nil || q.Spend.Pct == nil || *q.Spend.Pct != 42 {
+		t.Fatalf("quota-cmd fallback: got %+v, want Spend.Pct=42", q)
+	}
+
+	// 2. Claude Code quota payload spend_limit beats quota-cmd
+	// format: <pct5> <at5> <pct7> <at7> <spend> <atspend> <epoch>
+	os.WriteFile(filepath.Join(sd, "quota"), []byte(fmt.Sprintf("-1 0 -1 0 85 0 %d\n", now)), 0o600)
+	q = loadQuota(sd, now)
+	if q == nil || q.Spend == nil || q.Spend.Pct == nil || *q.Spend.Pct != 85 {
+		t.Fatalf("quota payload wins: got %+v, want Spend.Pct=85", q)
+	}
+
+	// 3. Stale quota-cmd (reset in the past)
+	os.Remove(filepath.Join(sd, "quota"))
+	os.WriteFile(filepath.Join(sd, "quota-cmd"), []byte(fmt.Sprintf("42 %d %d\n", now-10, now)), 0o600)
+	q = loadQuota(sd, now)
+	if q != nil && q.Spend != nil && q.Spend.Pct != nil {
+		t.Fatalf("stale reset in past should be null: got %+v", q)
+	}
+
+	// 4. Stale quota-cmd older than 2 * ttl
+	t.Setenv("KEL_QUOTA_TTL", "10")
+	os.WriteFile(filepath.Join(sd, "quota-cmd"), []byte(fmt.Sprintf("42 0 %d\n", now-25)), 0o600)
+	q = loadQuota(sd, now)
+	if q != nil && q.Spend != nil && q.Spend.Pct != nil {
+		t.Fatalf("older than 2*ttl should be null: got %+v", q)
+	}
+
+	// 5. Stale quota-cmd with future reset but sample older than 2 * ttl
+	os.WriteFile(filepath.Join(sd, "quota-cmd"), []byte(fmt.Sprintf("42 %d %d\n", now+1000, now-25)), 0o600)
+	q = loadQuota(sd, now)
+	if q != nil && q.Spend != nil && q.Spend.Pct != nil {
+		t.Fatalf("future reset with sample older than 2*ttl should be null: got %+v", q)
+	}
+}

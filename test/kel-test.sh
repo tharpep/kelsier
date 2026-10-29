@@ -53,7 +53,7 @@ export TMUX_TMPDIR
   echo "refusing to run: TMUX_TMPDIR is not set, kill-server would hit the default socket" >&2
   exit 1
 }
-unset TMUX TMUX_PANE      # don't inherit an outer tmux; we are not "inside" ours
+unset TMUX TMUX_PANE VISUAL  # don't inherit an outer tmux or interactive editor
 # ...nor its config.  reset() starts the server with -f /dev/null, but once a
 # test kills it, the next one is started by KEL (`new-session` in a restore),
 # and that loads the developer's real ~/.tmux.conf — kel's own hooks included,
@@ -352,6 +352,20 @@ K api-gw new guest --split down --at "$HP" --agent 'sleep 9999' >/dev/null 2>&1
 ok "  ...and a window that loses its named agent takes the next one's name" '[ "$(tmux display -p -t "$HW2" "#{window_name}")" = guest ]'
 "$KEL" kill api-gw/guest >/dev/null 2>&1
 ok "the last agent's kill closes the window"     '! tmux list-windows -a -F "#{window_id}" | grep -qxF "$HW2"'
+
+# Antigravity (agy) agent vendor support
+mkdir -p "$WORK/bin"
+printf '#!/bin/sh\nexec sleep 9999\n' > "$WORK/bin/agy"
+chmod +x "$WORK/bin/agy"
+OLD_PATH="$PATH"
+export PATH="$WORK/bin:$PATH"
+K api-gw new agy-agent --agent agy >/dev/null 2>&1
+AGY_PANE="$(pane_of api-gw agy-agent)"
+wait_until '[ "$(tmux display -p -t "$AGY_PANE" "#{pane_current_command}" 2>/dev/null)" = agy ]' 50
+ok "kel new --agent agy starts agy without claude-specific flags" '[ "$(tmux display -p -t "$AGY_PANE" "#{pane_current_command}" 2>/dev/null)" = agy ]'
+ok "  ...and _fleet classifies an agy pane as agent" '[ "$("$KEL" _fleet --panes | jq -r --arg p "$AGY_PANE" ".panes[] | select(.pane_id == \$p) | .kind")" = agent ]'
+"$KEL" kill api-gw/agy-agent >/dev/null 2>&1
+export PATH="$OLD_PATH"
 # #25: a record whose JSON does not even parse must still render, distinctly
 # -- not vanish, and (the worse bug this actually was) not take the rest of
 # the document with it. Before the fix, --slurpfile aborted on the first bad
@@ -1061,6 +1075,15 @@ tmux send-keys -t "$SP" Enter
 wait_until '[ "$(active_win)" = "$WTW" ]'
 ok "enter jumps to the agent's window"          '[ "$(active_win)" = "$WTW" ]'
 
+# enter on a space header row jumps to that space's window
+tmux select-window -t "$MW"
+wait_until '[ "$(active_win)" = "$MW" ]' 50
+tmux send-keys -t "$SP" k
+wait_until '[[ "$(jq -r .selected "$STATE/sidebar.json" 2>/dev/null)" == s:* ]]' 50
+tmux send-keys -t "$SP" Enter
+wait_until '[ "$(active_win)" = "$WTW" ]' 50
+ok "enter on a space header row jumps to that space's window" '[ "$(active_win)" = "$WTW" ]'
+
 # invariant 1, through the sidebar: x, y on dirty work is refused by kel kill
 "$KEL" _sidebar wake
 SW="$(sbpane "$WTW")"
@@ -1470,6 +1493,23 @@ ok "a worktree whose commits are on no remote is refused" '[[ "$out" == *refusin
 ok "  ...naming the commit at risk"       '[[ "$out" == *"only here"* ]]'
 "$KEL" kill unpushed/up -f >/dev/null 2>&1
 
+# Issue #2: a worktree whose commits are in a merged PR's head is safe to kill
+# even if the remote tracking branch was deleted on merge
+MR="$WORK/merged-pr"; MO="$WORK/merged-origin.git"
+git init -q --bare -b main "$MO"
+git init -q -b main "$MR" && git -C "$MR" -c user.email=t@t -c user.name=t commit -q --allow-empty -m base
+git -C "$MR" remote add origin "$MO" && git -C "$MR" push -q origin main
+git -C "$MR" remote set-url origin "https://github.com/example/merged.git"
+git -C "$MR" remote set-url --push origin "$MO"
+( cd "$MR" && "$KEL" new mp -w --agent 'sleep 9999' >/dev/null 2>&1 )
+MWT="$(jq -r .cwd "$SESSIONS/merged/mp.json" 2>/dev/null)"
+git -C "$MWT" -c user.email=t@t -c user.name=t commit -q --allow-empty -m "in pr"
+MP_HEAD="$(git -C "$MWT" rev-parse HEAD)"
+mkdir -p "$STATE/pr-cache"
+printf '[{"sha":"%s","merged":true,"state":"closed"}]\n' "$MP_HEAD" > "$STATE/pr-cache/example__merged.sha.json"
+out="$("$KEL" kill merged/mp 2>&1)"
+ok "a worktree in a merged PR is safe to kill without -f" '[[ "$out" == *killed* ]]'
+
 # a worktree directory removed by hand (rm -rf, a file manager) BEFORE kill
 # used to leave git's own worktree record behind, permanently locking the
 # branch ("used by worktree") until someone ran `git worktree prune` by
@@ -1671,6 +1711,37 @@ ok "  ...and left HEAD alone"              '[ "$(UHEAD)" = "$before" ]'
 mkdir -p "$WORK/nogit/bin" && cp "$KEL" "$WORK/nogit/bin/kel"
 ok "refuses when it is not a git clone"  '[[ "$("$WORK/nogit/bin/kel" update 2>&1 || true)" == *"not a git clone"* ]]'
 
+section "kel reload refreshes config and restarts sidebars in place (#4)"
+reset
+export KEL_SIDEBAR=on
+K api-gw new a1 -w --agent 'sleep 9999' >/dev/null 2>&1
+WID="$(window_of api-gw a1)"
+wait_until '[ -n "$(sbpane "$WID")" ]' 50
+SB_PANE="$(sbpane "$WID")"
+AGENT_PANE="$(pane_of api-gw a1)"
+
+SB_PID_BEFORE="$(tmux display-message -p -t "$SB_PANE" '#{pane_pid}')"
+AGENT_PID_BEFORE="$(tmux display-message -p -t "$AGENT_PANE" '#{pane_pid}')"
+
+"$KEL" reload >/dev/null 2>&1
+# wait for sidebar process to respawn with a new pid
+wait_until '[ "$(tmux display-message -p -t "'"$SB_PANE"'" "#{pane_pid}")" != "'"$SB_PID_BEFORE"'" ]' 50
+SB_PID_AFTER="$(tmux display-message -p -t "$SB_PANE" '#{pane_pid}')"
+AGENT_PID_AFTER="$(tmux display-message -p -t "$AGENT_PANE" '#{pane_pid}')"
+
+ok "after reload, the sidebar pane has a new pid" '[ -n "$SB_PID_AFTER" ] && [ "$SB_PID_AFTER" != "$SB_PID_BEFORE" ]'
+ok "  ...and the agent pane pid is unchanged (invariant 4)" '[ "$AGENT_PID_AFTER" = "$AGENT_PID_BEFORE" ]'
+
+# with sidebar-off, nothing is respawned
+touch "$STATE/sidebar-off"
+SB_PID_SAVED="$SB_PID_AFTER"
+"$KEL" reload >/dev/null 2>&1
+sleep 0.5
+SB_PID_OFF="$(tmux display-message -p -t "$SB_PANE" '#{pane_pid}')"
+ok "with sidebar-off, no sidebar is respawned" '[ "$SB_PID_OFF" = "$SB_PID_SAVED" ]'
+rm -f "$STATE/sidebar-off"
+export KEL_SIDEBAR=off
+
 section "the docs keep up with the code"
 # Two hand-written lists of things bin/kel already knows. That is the shape that
 # rots here: the spec's probe table was missing `gh authenticated` and `statusLine wired`
@@ -1848,6 +1919,31 @@ ok "a payload with rate limits writes the quota file" '[ "$(cut -d" " -f1 "$STAT
 rm -f "$STATE/quota"
 sl '{"session_id":"a","context_window":{"context_window_size":200000,"used_percentage":5}}' >/dev/null
 ok "  ...and one without writes none"               '[ ! -f "$STATE/quota" ]'
+
+# Issue #3: quota_cmd fallback when Claude Code statusline carries no spend_limit
+export KEL_QUOTA_CMD="echo 42 0"
+export KEL_QUOTA_TTL=60
+rm -f "$STATE/quota" "$STATE/quota-cmd" "$STATE/quota-cmd.at"
+"$KEL" _fleet >/dev/null 2>&1
+wait_until '[ -f "$STATE/quota-cmd" ]' 30
+ok "quota_cmd populates spend percentage fallback (#3)" '[ "$("$KEL" _fleet | jq -r .quota.spend.pct)" = 42 ]'
+
+# quota_cmd that fails leaves .quota.spend null
+export KEL_QUOTA_CMD="exit 1"
+rm -f "$STATE/quota" "$STATE/quota-cmd" "$STATE/quota-cmd.at"
+"$KEL" _fleet >/dev/null 2>&1
+sleep 0.2
+ok "failing quota_cmd leaves .quota.spend null" '[ "$("$KEL" _fleet | jq -r .quota.spend)" = null ]'
+
+# pr = off suppresses quota_cmd
+MARKER="$WORK/quota-ran"
+export KEL_QUOTA_CMD="touch $MARKER && echo 42 0"
+export KEL_PR=off
+rm -f "$STATE/quota" "$STATE/quota-cmd" "$STATE/quota-cmd.at" "$MARKER"
+"$KEL" _fleet >/dev/null 2>&1
+sleep 0.2
+ok "pr = off stops quota_cmd from running" '[ ! -f "$MARKER" ]'
+unset KEL_QUOTA_CMD KEL_QUOTA_TTL KEL_PR
 ok "non-default modes render"                       '[[ "$(sl "{\"session_id\":\"a\",\"fast_mode\":true,\"effort\":{\"level\":\"xhigh\"},\"context_window\":{\"context_window_size\":200000,\"used_percentage\":5}}")" == *"fast xhigh"* ]]'
 ok "  ...and default ones do not"                   '[[ "$(sl "{\"session_id\":\"a\",\"effort\":{\"level\":\"medium\"},\"thinking\":{\"enabled\":true},\"context_window\":{\"context_window_size\":200000,\"used_percentage\":5}}")" != *medium* ]]'
 
