@@ -1090,10 +1090,35 @@ func (m sbModel) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		if sp, ok := m.selSpace(m.view().sel); ok && strings.HasPrefix(m.view().sel, "s:") && sp.parent != "" {
 			m.target = sp.key
 		}
-	case "b", "R", "shift+r":
+	case "b":
 		if m.ui.restore {
 			m.msg = "restoring…"
 			return m, runKel("", nil, "restore")
+		}
+	case "R", "shift+r":
+		if m.ui.restore {
+			m.msg = "restoring…"
+			return m, runKel("", nil, "restore")
+		}
+		if a, ok := m.agentOf(m.view().sel); ok {
+			if !a.agent.Managed {
+				m.msg, m.msgBad = "only managed agents can be relaunched", true
+				return m, nil
+			}
+			if a.agent.State == nil || *a.agent.State != "dead" {
+				m.msg, m.msgBad = a.agent.Name + " is not dead", true
+				return m, nil
+			}
+			name := a.agent.Name
+			if a.agent.Managed && a.agent.Group != "" {
+				name = a.agent.Group + "/" + name
+			}
+			m.msg = "relaunching " + a.agent.Name + "…"
+			return m, runKel("", nil, "relaunch", name)
+		}
+		if !strings.HasPrefix(m.view().sel, "a:") {
+			m.msg, m.msgBad = "select an agent first", true
+			return m, nil
 		}
 	case "`":
 		return m, runKel("", nil, "jump")
@@ -1136,6 +1161,7 @@ var sbHelp = [][2]string{
 	{"p", "plan and tasks"},
 	{"r", "rename"},
 	{"x", "kill"},
+	{"R", "relaunch crashed"},
 	{"z", "zoom"},
 	{"m", "own window"},
 	{"#", "a pane"},
@@ -1493,7 +1519,7 @@ func helpKey(row string) string {
 		return ""
 	default:
 		switch f[0] {
-		case "/", "n", "w", "r", "x", "t", ";", "`", "s", "q", "f", "g", "d", "e", "o", "p", "c", "v", "u", "|", "-", "z", "m":
+		case "/", "n", "w", "r", "x", "t", ";", "`", "s", "q", "f", "g", "d", "e", "o", "p", "c", "v", "u", "|", "-", "z", "m", "R":
 			return f[0]
 		}
 	}
