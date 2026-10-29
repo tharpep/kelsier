@@ -74,6 +74,10 @@ func TestClassify(t *testing.T) {
 	}{
 		{"claude", "claude", &none, "agent", true},
 		{"claude", "", &none, "agent", true},     // unmanaged Claude Code
+		{"agy", "", &none, "agent", true},        // unmanaged Antigravity CLI
+		{"codex", "", &none, "agent", true},      // unmanaged Codex
+		{"aider", "", &none, "agent", true},      // unmanaged Aider
+		{"opencode", "", &none, "agent", true},   // unmanaged OpenCode
 		{"sleep", "sleep", &none, "agent", true}, // the record's own agent
 		{"node", "claude", &ports, "server", false},
 		{"bash", "claude", &none, "shell", false},

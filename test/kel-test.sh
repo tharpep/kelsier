@@ -53,7 +53,7 @@ export TMUX_TMPDIR
   echo "refusing to run: TMUX_TMPDIR is not set, kill-server would hit the default socket" >&2
   exit 1
 }
-unset TMUX TMUX_PANE      # don't inherit an outer tmux; we are not "inside" ours
+unset TMUX TMUX_PANE VISUAL  # don't inherit an outer tmux or interactive editor
 # ...nor its config.  reset() starts the server with -f /dev/null, but once a
 # test kills it, the next one is started by KEL (`new-session` in a restore),
 # and that loads the developer's real ~/.tmux.conf — kel's own hooks included,
@@ -352,6 +352,20 @@ K api-gw new guest --split down --at "$HP" --agent 'sleep 9999' >/dev/null 2>&1
 ok "  ...and a window that loses its named agent takes the next one's name" '[ "$(tmux display -p -t "$HW2" "#{window_name}")" = guest ]'
 "$KEL" kill api-gw/guest >/dev/null 2>&1
 ok "the last agent's kill closes the window"     '! tmux list-windows -a -F "#{window_id}" | grep -qxF "$HW2"'
+
+# Antigravity (agy) agent vendor support
+mkdir -p "$WORK/bin"
+printf '#!/bin/sh\nexec sleep 9999\n' > "$WORK/bin/agy"
+chmod +x "$WORK/bin/agy"
+OLD_PATH="$PATH"
+export PATH="$WORK/bin:$PATH"
+K api-gw new agy-agent --agent agy >/dev/null 2>&1
+AGY_PANE="$(pane_of api-gw agy-agent)"
+wait_until '[ "$(tmux display -p -t "$AGY_PANE" "#{pane_current_command}" 2>/dev/null)" = agy ]' 50
+ok "kel new --agent agy starts agy without claude-specific flags" '[ "$(tmux display -p -t "$AGY_PANE" "#{pane_current_command}" 2>/dev/null)" = agy ]'
+ok "  ...and _fleet classifies an agy pane as agent" '[ "$("$KEL" _fleet --panes | jq -r --arg p "$AGY_PANE" ".panes[] | select(.pane_id == \$p) | .kind")" = agent ]'
+"$KEL" kill api-gw/agy-agent >/dev/null 2>&1
+export PATH="$OLD_PATH"
 # #25: a record whose JSON does not even parse must still render, distinctly
 # -- not vanish, and (the worse bug this actually was) not take the rest of
 # the document with it. Before the fix, --slurpfile aborted on the first bad

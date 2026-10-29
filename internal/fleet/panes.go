@@ -130,12 +130,25 @@ func gitPositions(roots map[string]bool) map[string]*Git {
 	return out
 }
 
+var knownAgents = map[string]bool{
+	"claude":   true,
+	"agy":      true,
+	"codex":    true,
+	"aider":    true,
+	"opencode": true,
+}
+
+func isAgentCmd(cmd string) bool {
+	return knownAgents[cmd]
+}
+
 // classify names what a pane is doing, cheapest signal first. agentCmd is the
 // first word of the window's record `agent` (empty for an unmanaged window).
-// Claude Code's process names itself `claude`, so tmux reports exactly that.
+// Known agents (claude, agy, codex, aider, opencode) are recognized even
+// without an agent record.
 func classify(cmd, agentCmd string, ports *[]int) (kind string, agent bool) {
 	switch {
-	case cmd != "" && (cmd == agentCmd || cmd == "claude"):
+	case cmd != "" && (cmd == agentCmd || knownAgents[cmd]):
 		return "agent", true
 	case ports != nil && len(*ports) > 0:
 		return "server", false

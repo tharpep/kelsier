@@ -427,7 +427,7 @@ func Load(o Options) Doc {
 			_, st := stateMap[r.id]
 			_, cx := ctxMap[r.id]
 			_, rp := paneRec(r)
-			if st || cx || rp || r.cmd == "claude" {
+			if st || cx || rp || isAgentCmd(r.cmd) || (agentCmd != "" && r.cmd == agentCmd) {
 				aps = append(aps, r)
 			}
 		}
@@ -510,7 +510,7 @@ func Load(o Options) Doc {
 					a.Land = lands[*arec.Cwd]
 				}
 			}
-			if r.id != "" && (!legacy || amanaged || (agentCmd != "" && r.cmd == agentCmd)) {
+			if r.id != "" && (!legacy || amanaged || isAgentCmd(r.cmd) || (agentCmd != "" && r.cmd == agentCmd)) {
 				agentPanes[r.id] = true
 			}
 			agents = append(agents, a)

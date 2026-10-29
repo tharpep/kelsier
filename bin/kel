@@ -357,7 +357,7 @@ record_pane() { # wid meta
 
 other_agents() { # wid pane -> the names of the window's other agents, one a line
   tmux list-panes -t "$1" -F '#{pane_id}|#{@kel-sidebar}|#{@kel-agent}|#{pane_current_command}' 2>/dev/null \
-    | awk -F'|' -v p="$2" '$1 != p && $2 == "" && ($3 != "" || $4 == "claude") { n = $3; sub(/.*\//, "", n); print (n == "" ? $1 : n) }'
+    | awk -F'|' -v p="$2" '$1 != p && $2 == "" && ($3 != "" || $4 ~ /^(claude|agy|codex|aider|opencode)$/) { n = $3; sub(/.*\//, "", n); print (n == "" ? $1 : n) }'
 }
 
 own_window() { # pane
