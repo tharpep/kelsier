@@ -32,6 +32,7 @@
 #                              commented out with its default)
 #   kel update                 fast-forward the clone kel runs from, then
 #                              re-run install.sh (refuses on a dirty tree)
+#   kel reload                 reload tmux config and restart sidebars in place
 #
 # internal (wired by install.sh; some are fine to type, none are the point):
 #   kel status-line [group]    render tmux status-left
@@ -2575,12 +2576,65 @@ cmd_update() {
     || die "kel update: the pull landed but install.sh failed — run ./install.sh in $root"
 
   say "now at $(git -C "$root" rev-parse --short HEAD)"
-  printf '  %s\n' "tmux source-file ~/.tmux.conf   # if kel.conf changed" >&2
+  cmd_reload
   # Explicit, because the pull rewrote this very file. bash reads a script
   # incrementally and would otherwise read the next command from the old byte
   # offset into new content. Every function is already parsed — a definition is
   # one command — so only the return to `main` at the bottom is exposed.
   exit 0
+}
+
+# ---------------------------------------------------------------------------
+# kel reload  —  pick up updates without tearing down the workspace (#4)
+# ---------------------------------------------------------------------------
+cmd_reload() {
+  need tmux
+  say "reloading kelsier"
+
+  # Invariant 2: lock snapshots while hooks are rewired
+  date +%s > "$RESTORE_LOCK"
+
+  # 1. re-source tmux config
+  local root; root="$(dirname "$(dirname "$(_real_self)")")"
+  if [ -f "$root/tmux/kel.conf" ]; then
+    tmux source-file "$root/tmux/kel.conf" 2>/dev/null || true
+  elif [ -f "$HOME/.tmux.conf" ]; then
+    tmux source-file "$HOME/.tmux.conf" 2>/dev/null || true
+  elif [ -f "$HOME/.config/tmux/tmux.conf" ]; then
+    tmux source-file "$HOME/.config/tmux/tmux.conf" 2>/dev/null || true
+  fi
+
+  # 2. restart sidebars in place (only if enabled, never if sidebar-off)
+  local reloaded=0
+  if sidebar_enabled; then
+    sidebar_width_opts
+    local flag id wid
+    while read -r flag id wid; do
+      [ "$flag" = 1 ] || continue
+      [ -n "$id" ] || continue
+      # Invariant 4: double-check that this pane is strictly a sidebar pane
+      [ "$(tmux display-message -p -t "$id" '#{@kel-sidebar}' 2>/dev/null)" = 1 ] || continue
+
+      # Clear @kel-ready so wake does not signal before it is ready
+      tmux set-option -p -u -t "$id" @kel-ready 2>/dev/null \
+        || tmux set-option -p -t "$id" @kel-ready "" 2>/dev/null || true
+
+      # Respawn the pane with the new binary
+      tmux respawn-pane -k -t "$id" -e "KEL_BIN=$SELF" "exec '$KEL_SIDEBAR_BIN' 2>>'$STATE_DIR/sidebar-fail.log'" 2>/dev/null || true
+      [ -n "$wid" ] && sidebar_style "$wid"
+      reloaded=$((reloaded + 1))
+    done < <(tmux list-panes -a -F '#{@kel-sidebar} #{pane_id} #{window_id}' 2>/dev/null || true)
+  fi
+
+  # 3. redraw status line with new kel-fleet
+  tmux refresh-client -S 2>/dev/null || true
+
+  rm -f "$RESTORE_LOCK"
+  if [ "$reloaded" -gt 0 ]; then
+    say "reloaded config and $reloaded sidebar(s)"
+  else
+    say "reloaded config"
+  fi
 }
 
 cmd_config() {
@@ -3375,6 +3429,7 @@ main() {
     rename)       migrate_meta; cmd_rename "$@" ;;
     restore)      migrate_meta; cmd_restore "$@" ;;
     relaunch)     migrate_meta; cmd_relaunch "$@" ;;
+    reload)       cmd_reload "$@" ;;
     sweep)        migrate_meta; cmd_sweep "$@" ;;
     prune)        migrate_meta; cmd_prune "$@" ;;
     snapshot)     cmd_snapshot ;;
