@@ -441,9 +441,6 @@ sidebar_ensure() { # wid
     2>/dev/null || true
   sidebar_style "$wid"
   banner_apply
-  if tmux_at_least 3 2; then
-    tmux refresh-client -B "kel-sub:@*:#{window_name}" 2>/dev/null || true
-  fi
 }
 
 sidebar_width_opts() {
