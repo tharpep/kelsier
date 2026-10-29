@@ -2576,12 +2576,10 @@ cmd_update() {
     || die "kel update: the pull landed but install.sh failed — run ./install.sh in $root"
 
   say "now at $(git -C "$root" rev-parse --short HEAD)"
-  cmd_reload
   # Explicit, because the pull rewrote this very file. bash reads a script
   # incrementally and would otherwise read the next command from the old byte
-  # offset into new content. Every function is already parsed — a definition is
-  # one command — so only the return to `main` at the bottom is exposed.
-  exit 0
+  # offset into new content. Exec reload cleanly starts the newly pulled script.
+  exec "$SELF" reload
 }
 
 # ---------------------------------------------------------------------------
@@ -2593,15 +2591,17 @@ cmd_reload() {
 
   # Invariant 2: lock snapshots while hooks are rewired
   date +%s > "$RESTORE_LOCK"
+  trap 'rm -f "$RESTORE_LOCK"' EXIT INT TERM
 
-  # 1. re-source tmux config
+  # 1. re-source tmux config (user config first, then kel.conf)
   local root; root="$(dirname "$(dirname "$(_real_self)")")"
-  if [ -f "$root/tmux/kel.conf" ]; then
-    tmux source-file "$root/tmux/kel.conf" 2>/dev/null || true
-  elif [ -f "$HOME/.tmux.conf" ]; then
+  if [ -f "$HOME/.tmux.conf" ]; then
     tmux source-file "$HOME/.tmux.conf" 2>/dev/null || true
   elif [ -f "$HOME/.config/tmux/tmux.conf" ]; then
     tmux source-file "$HOME/.config/tmux/tmux.conf" 2>/dev/null || true
+  fi
+  if [ -f "$root/tmux/kel.conf" ]; then
+    tmux source-file "$root/tmux/kel.conf" 2>/dev/null || true
   fi
 
   # 2. restart sidebars in place (only if enabled, never if sidebar-off)
