@@ -1,0 +1,12 @@
+spaces
+▌  orca
+   main · no window
+ └  − worktrees
+ └  task/a  ↑3 unpushed
+ └  task/b  ↑2 unpushed
+ └  task/c  ↑1 unpushed
+ └  task/d  ↑4 unpushed
+
+agents
+  none
+click, or Ctrl-b then space
