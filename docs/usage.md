@@ -114,11 +114,7 @@ in two sections:
   ↑1 · review`, grey when no window stands there, `merged` in green when it
   has landed. `s` sweeps a landed one (`s` elsewhere: everything landed),
   asking first. A checkout two or more agents work in says so (`2 agents`)
-  — said, never refused. A repo with **more than three** worktrees folds
-  them behind one row, `└ +10 worktrees  30 unpushed` (the commits on no
-  remote, so the pile is not mistaken for clutter). Worktrees with an agent,
-  or the one you are in, stay listed. `enter` or a click on that row opens the
-  list (`− worktrees` closes it); the choice is saved with the other folds.
+  — said, never refused.
 - **`agents`** — who needs you, most urgent first: a dot per state (yellow
   waiting, cyan working, green finished-and-not-yet-looked-at, dim idle or
   seen, magenta throttled, red `✕` dead, dim `?` unknown), then how long, the

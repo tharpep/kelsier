@@ -215,7 +215,7 @@ func Load(o Options) Doc {
 		defer wg.Done()
 		// path last: it is the one field that could hold anything
 		panesRaw = tmuxOut("list-panes", "-a", "-F",
-			"#{window_id}\t#{pane_current_command}\t#{pane_id}\t#{pane_index}\t#{pane_active}\t#{pane_pid}\t#{@kel-sidebar}\t#{@kel-agent}\t#{pane_current_path}")
+			"#{window_id}\t#{pane_current_command}\t#{pane_id}\t#{pane_index}\t#{pane_active}\t#{pane_pid}\t#{@kel-sidebar}\t#{@kel-agent}\t#{@kel-state}\t#{pane_current_path}")
 	}()
 	go func() {
 		defer wg.Done()
@@ -232,8 +232,8 @@ func Load(o Options) Doc {
 	firstPath := map[string]string{} // window id -> its first pane's cwd
 	paneRows := map[string][]paneRow{}
 	for _, l := range lines(panesRaw) {
-		p := strings.SplitN(l, "\t", 9)
-		if len(p) != 9 {
+		p := strings.SplitN(l, "\t", 10)
+		if len(p) != 10 {
 			continue
 		}
 		// The sidebar pane (v0.10 M2) is kel's, not the user's: it runs
@@ -244,10 +244,10 @@ func Load(o Options) Doc {
 		}
 		paneMap[p[0]] = append(paneMap[p[0]], p[1])
 		if _, seen := firstPath[p[0]]; !seen {
-			firstPath[p[0]] = p[8]
+			firstPath[p[0]] = p[9]
 		}
 		paneRows[p[0]] = append(paneRows[p[0]], paneRow{
-			wid: p[0], cmd: p[1], id: p[2], idx: p[3], active: p[4], pid: p[5], stamp: p[7], path: p[8]})
+			wid: p[0], cmd: p[1], id: p[2], idx: p[3], active: p[4], pid: p[5], stamp: p[7], kstate: p[8], path: p[9]})
 	}
 
 	type stateEntry struct {
@@ -426,7 +426,7 @@ func Load(o Options) Doc {
 			_, cx := ctxMap[r.id]
 			_, rp := paneRec(r)
 			isAgent := isAgentCmd(r.cmd) || (agentCmd != "" && (r.cmd == agentCmd || (agentCmd == "claude" && semverRe.MatchString(r.cmd))))
-			if rp || isAgent || r.stamp != "" || ((st || cx) && !shells[r.cmd]) {
+			if rp || isAgent || r.stamp != "" || (st && r.kstate != "") || ((st || cx) && !shells[r.cmd]) {
 				aps = append(aps, r)
 			}
 		}
@@ -480,7 +480,9 @@ func Load(o Options) Doc {
 						alive = !shells[r.cmd]
 					}
 					if !alive {
-						if amanaged || r.stamp != "" {
+						// @kel-state is set by the hook and dies with the server, so
+						// a hooked pane now at a shell is a dead agent, not a stale file.
+						if amanaged || r.stamp != "" || r.kstate != "" {
 							eff = sp("dead")
 						} else {
 							eff = nil

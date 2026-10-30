@@ -4,9 +4,11 @@
  [36m●[0m [1mkelsier[0m
    [2mmain ↑2 ●3[0m
   [2m▸[0m nvim
- [2m└[0m  [2m+3 worktrees[0m
+ [2m└[0m  [2magent-af1a1567ab46d…[0m  [2m●3[0m
  [2m└[0m[32m●[0m docs
  [2m└[0m[33m[1m●[0m fix-auth  [2m↑1[0m[2m · [0m[2mreview[0m
+ [2m└[0m  [2mgone[0m  [31mmissing[0m
+ [2m└[0m  [2mold-ui[0m  [32mmerged[0m
    misc
    [2m~[0m
    notes

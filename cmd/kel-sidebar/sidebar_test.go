@@ -563,8 +563,7 @@ func TestWorktreesNest(t *testing.T) {
 			if !s.closed || s.repoName() != "kelsier" || s.land.Code != "merged" {
 				t.Errorf("old-ui: %+v", s)
 			}
-			// kelsier folds its idle worktrees; old-ui is selectable only open
-			ui := uiState{focused: true, sel: spaceID(s.key), expanded: map[string]bool{wtKey("/home/me/code/kelsier"): true}}
+			ui := uiState{focused: true, sel: spaceID(s.key)}
 			if h := hint(buildView(loadFixture(t, "worktrees"), ui), 40); !strings.HasPrefix(h, "s sweep") {
 				t.Errorf("a merged worktree's hint: %q", h)
 			}
@@ -576,81 +575,6 @@ func TestWorktreesNest(t *testing.T) {
 			if !s.closed || spaceDetail(s) != "main · no window" {
 				t.Errorf("a repo known only from a worktree: %q", spaceDetail(s))
 			}
-		}
-	}
-}
-
-// A repo with more than three worktrees folds them behind one summary row; the
-// row opens the list and closes it again. The frames are plain text.
-func TestWorktreeFold(t *testing.T) {
-	t.Setenv("HOME", "/home/me")
-	t.Setenv("XDG_STATE_HOME", t.TempDir())
-	const repo = "/home/me/code/orca"
-	doc := loadFixture(t, "folds/many-worktrees")
-	frame := func(ui uiState) string {
-		out, _ := renderView(buildView(doc, ui), 32, 0, 0)
-		return plain(out) + "\n"
-	}
-	check := func(name, got string) {
-		t.Helper()
-		gold := filepath.Join(fixtures, "folds", "many-worktrees."+name+".32.golden")
-		if *update {
-			if err := os.WriteFile(gold, []byte(got), 0o644); err != nil {
-				t.Fatal(err)
-			}
-			return
-		}
-		want, err := os.ReadFile(gold)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if got != string(want) {
-			t.Errorf("%s changed:\n--- got\n%s\n--- want\n%s", name, got, want)
-		}
-	}
-	check("folded", frame(uiState{}))
-	check("expanded", frame(uiState{expanded: map[string]bool{wtKey(repo): true}}))
-
-	// enter on the summary row (a click is the same call) flips the fold, in the
-	// shared map like any other, and keeps the cursor on the row
-	m := sbModel{doc: doc, width: 32, height: 30, visible: true}
-	m.ui.sel = wtID(repo)
-	if v := m.view(); v.indexOf(wtID(repo)) < 0 {
-		t.Fatalf("the summary row is not selectable: %v", v.entryIDs)
-	}
-	m.activate(wtID(repo))
-	if !m.ui.expanded[wtKey(repo)] || m.ui.sel != wtID(repo) {
-		t.Errorf("after enter: expanded %v, sel %q", m.ui.expanded, m.ui.sel)
-	}
-	if v := m.view(); v.indexOf(spaceID("/home/me/code/orca-a")) < 0 {
-		t.Errorf("an open list should select worktrees: %v", v.entryIDs)
-	}
-	m.activate(wtID(repo))
-	if m.ui.expanded[wtKey(repo)] {
-		t.Errorf("a second enter should fold again: %v", m.ui.expanded)
-	}
-
-	// three worktrees do not fold
-	three := doc
-	three.Repos = &[]fleet.Repo{(*doc.Repos)[0]}
-	(*three.Repos)[0].Worktrees = (*three.Repos)[0].Worktrees[:3]
-	for _, s := range buildView(three, uiState{}).spaces {
-		if s.folded || s.wtSummary() {
-			t.Errorf("%s: three worktrees folded", s.label)
-		}
-	}
-}
-
-// A worktree with an agent in it stays on screen while its repo is folded.
-func TestWorktreeFoldKeepsAgents(t *testing.T) {
-	v := buildView(loadFixture(t, "worktrees"), uiState{})
-	shown := map[string]bool{}
-	for _, s := range v.spaces {
-		shown[s.label] = !s.folded
-	}
-	for label, want := range map[string]bool{"docs": true, "fix-auth": true, "agent-af1a1567ab46ddb66": false, "old-ui": false, "gone": false} {
-		if shown[label] != want {
-			t.Errorf("%s shown=%v, want %v", label, shown[label], want)
 		}
 	}
 }
@@ -670,8 +594,7 @@ func TestHelpHover(t *testing.T) {
 // A long worktree name gives way to its state, at any width.
 func TestWorktreeRowKeepsState(t *testing.T) {
 	for _, w := range []int{28, 32, 40} {
-		ui := uiState{expanded: map[string]bool{wtKey("/home/me/code/kelsier"): true}}
-		out, _ := renderView(buildView(loadFixture(t, "worktrees"), ui), w, 0, 0)
+		out, _ := renderView(buildView(loadFixture(t, "worktrees"), uiState{}), w, 0, 0)
 		found := false
 		for _, l := range strings.Split(plain(out), "\n") {
 			if strings.Contains(l, "agent-af1a") {
