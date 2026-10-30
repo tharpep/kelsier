@@ -776,7 +776,22 @@ prune_state() {
   for f in "$STATE_DIR"/*.state "$STATE_DIR"/*.ctx "$STATE_DIR"/*.seen "$STATE_DIR"/*.edit "$STATE_DIR"/*.plan "$STATE_DIR"/*.view "$STATE_DIR"/*.subs; do
     [ -e "$f" ] || continue
     wid="${f##*/}"; wid="${wid%.*}"
-    printf '%s\n' "$live" | grep -qxF "$wid" || rm -f "$f"
+    if ! printf '%s\n' "$live" | grep -qxF "$wid"; then
+      rm -f "$f"
+    elif [[ "$wid" == %* ]]; then
+      # A pane ID is reused across tmux restarts. If the live pane has no @kel-agent
+      # or @kel-state, and is running a shell, any lingering state/ctx file is stale.
+      local info; info="$(tmux display-message -p -t "$wid" '#{@kel-agent}	#{@kel-state}	#{pane_current_command}' 2>/dev/null || true)"
+      if [ -n "$info" ]; then
+        local k_ag k_st k_cmd
+        IFS=$'\t' read -r k_ag k_st k_cmd <<< "$info"
+        if [ -z "$k_ag" ] && [ -z "$k_st" ]; then
+          case "$k_cmd" in
+            bash|zsh|sh|fish|csh|tcsh) rm -f "$f" ;;
+          esac
+        fi
+      fi
+    fi
   done
   # SessionEnd removes a session's own stash entry, including on /clear, which
   # fires it with reason "clear". Nothing fires when a session dies with its
