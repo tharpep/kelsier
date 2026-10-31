@@ -478,6 +478,35 @@ an agent could not be a split. Decided with the author:
    yellow, working cyan, throttled magenta, dead red, the rest grey: the
    sidebar's colours (§5d), where the window border keeps its orange.
 
+**M8 — cards**  ·  *designed 2026-10-31, not started*
+
+Agents report to you with `kel card`. The design is `spec.md` §10a. Each step
+is a change the suite can prove; nothing here touches an agent.
+
+1. **The command.** `cmd_card` in `bin/kel`: kinds, flags, `--json`, `--schema`,
+   the limits, control characters stripped, `.cards` written atomically and
+   trimmed to 20. Add the files to `rm_agent_state` and both sweeps. Dispatcher,
+   `kel --help` and both completions, which the suite checks against each other.
+   *Proof:* in the suite, a valid card lands; each bad one exits 2 with a reason;
+   outside kel exits 0 and stores nothing; a title with an escape sequence is
+   stored without it.
+2. **The fleet.** `cards` on `panes[]`, reading only the last line, and honouring
+   the same stale-pane check as `.state`. Go tests. *Proof:* a reused pane id
+   does not adopt old cards; a corrupt file reads `unreadable`, not empty.
+3. **Frames first.** Fixtures for an unseen `result`, an unseen `decision`, and
+   a card on a non-agent pane, at 28, 32 and 40 columns. **Show the author before
+   wiring anything** (§5e), including the `· 1 card` alternative.
+4. **The sidebar.** The line under the entry, from approved frames only.
+5. **The popup.** `i`, `kel _panel cards`, newest first, `.cards-seen` written on
+   open. `KEL_POPUP_TRACE` lets the suite check what it opens. Add the key to the
+   selected entry's actions, `usage.md` and the `?` list.
+6. **Docs in the same change** (house style): the `CLAUDE.md` on-disk contract,
+   `usage.md`, `rollout.md` status.
+
+**Out of scope for M8:** replies from the sidebar (invariant 4), kel editing any
+agent's instructions, a card history beyond the last 20, notifications on a
+card. A `decision` might later join `KEL_NOTIFY`; decide that from use.
+
 **Why this order:** M0–M1 are data and plumbing you can mostly ignore; M2 is
 where the tmux-hook risk lives, so it is proven before any UI depends on it;
 M3 is the first thing that feels different.

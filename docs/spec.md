@@ -848,6 +848,135 @@ what it was asking and were just trying to move on. So:
 changes, and names what is at risk. Deleting an agent's only copy of its work
 is the one unforgivable bug in this category of tool (invariant 1).
 
+### 10a. Cards — agents reporting to you  ·  *designed 2026-10-31, not built*
+
+**The problem.** What an agent wants to tell you lands in its scrollback. With
+several running, "it finished, tests pass, here's the PR" or "I need you to
+pick one" is easy to miss until you visit that pane. kel already shows *state*
+(`waiting`, `done`); it has no way to show *what the agent said about it*.
+
+**The idea.** A small, fixed set of cards that any agent can fill in by running
+one command. The agent chooses to report; kel validates, stores and shows it.
+
+```sh
+kel card result --title "Auth fix ready" --row "Tests=passed" --row "PR=#42" \
+  --link "PR=https://github.com/owner/repo/pull/42"
+kel card decision --title "Which schema?" --note "A is simpler, B keeps history"
+echo '{"title":"Migrating","rows":[{"label":"Step","value":"3 of 5"}]}' | kel card update --json
+kel card --schema        # the format, as JSON Schema
+```
+
+**Why a command, not MCP or a hook.** Every agent can run a shell command, and
+that is the only thing this asks of them. An MCP server is ruled out by R2:
+kel wiring tools into a session is the definition of a harness, and it costs
+tokens in every session to describe one small tool. A `PostToolUse` hook would
+be Claude-only and would have kel read tool results.
+
+**How it stays inside the rules.**
+
+- **One way.** Agent to you, never back. There is no button that answers: that
+  would be typing into a pane, which invariant 4 forbids. You answer in the
+  agent's own prompt.
+- **Not storing agent output.** #39 ruled out kel reading a pane's output. A
+  card is different: the agent chose to send it, and kel reads nothing else.
+- **kel does not teach agents about it.** Telling them would be injecting.
+  `install.sh` does not touch any agent's instructions. `kel card --schema`
+  documents the format for an agent that is told to look; being told is the
+  user's job, in their own `CLAUDE.md`, `GEMINI.md` or `AGENTS.md`.
+- **One surface** (invariant 6): a CLI command, a sidebar line, one key.
+- **Never a guess** (invariant 3): a card file that will not parse reads
+  `unreadable`, never as no cards.
+
+**Kinds.** Three, and adding one needs a reason:
+
+| kind | means | colour |
+|---|---|---|
+| `result` | work finished: what happened, what to look at | grey, as a calm state |
+| `update` | progress worth knowing without visiting | grey |
+| `decision` | it needs you to choose | waiting's yellow |
+
+Colour still means state (§5d): a `decision` is the same state as `waiting`,
+so it wears that colour and nothing new. Cards carry no colours of their own.
+
+**The format.** One JSON object:
+
+```json
+{
+  "kind": "result",
+  "title": "Auth fix ready",
+  "note": "Not tested on macOS",
+  "rows": [{"label": "Tests", "value": "passed"}],
+  "links": [{"label": "PR", "url": "https://github.com/owner/repo/pull/42"}]
+}
+```
+
+`kind` and `title` are required; kel adds `at` (epoch). Limits, enforced on the
+way in so a card cannot break the sidebar: title 80 characters, note 500, up to
+8 rows (label 24, value 120), up to 4 links, `http` and `https` only. Unknown
+fields are refused.
+
+**Validation is the agent's feedback.** Exit 0 means stored. Exit 2 prints what
+was wrong in one line, so the agent can fix it and retry. Outside kel, or in a
+pane kel does not know, it prints why to stderr, stores nothing and exits 0: a
+stray call must never fail an agent's task.
+
+**Control characters are stripped before storing.** Everything in a card ends
+up in a terminal, and agents read web pages and repos, so a title must not be
+able to carry escape sequences (invariant 4's spirit: nothing gets to type into
+your terminal). Strip everything below `0x20` except newline in `note`, and
+`0x7f`. This needs a test of its own.
+
+**Keyed by pane, not agent.** Only Claude Code is tracked as an agent today
+(`backlog.md` #9), so a Gemini or Codex pane reads as `program` or `shell`.
+Cards attach to `$TMUX_PANE`, and the fleet document carries them on `panes[]`,
+so any agent's card shows. The sidebar puts it under the agent if the pane has
+one, otherwise under the pane's row.
+
+**On disk.** `<pane-id>.cards`: JSON lines, newest last, the last 20 kept,
+rewritten atomically. `<pane-id>.cards-seen`: the epoch you last opened them.
+Both join the pane-keyed files in `rm_agent_state` and the two sweeps that
+clear stale state. Pane ids are reused after a server restart (rollout M7), so
+a file must only be read for a pane that passes the same check `.state` does:
+a stale pane adopting old cards is the bug `caa11fa` fixed for state.
+
+**The fleet document** gains, on each pane, `cards`: `null` when there are
+none, otherwise `{count, unseen, latest: {kind, title, at}}`. Reading it costs
+one small file per pane with a card, and it reads only the last line, so it
+stays inside invariant 5.
+
+**The sidebar.** An unseen card adds one dim line under its entry, in frames
+the author approves first (§5e):
+
+```
+agents
+▌● kelsier
+   working 1m · 30% · $2.00
+   ▸ result: Auth fix ready
+```
+
+This is a deliberate exception to "two lines per entry" (§5d), and only while a
+card is unseen. Worth trying the alternative on real frames: `· 1 card` at the
+end of the second line. A `decision` makes the line yellow.
+
+**The popup.** `i` on the selected entry opens the pane's cards, newest first,
+through `kel _panel cards`, composed like `p` composes the plan (`panel_plan`).
+Opening them writes `.cards-seen`. `c` was the obvious key, but it is Claude's
+config.
+
+```
+ result · Auth fix ready        2m ago
+ Tests   passed
+ PR      https://github.com/owner/repo/pull/42
+ Not tested on macOS
+```
+
+**Telling your agents, outside this repo.** One line in each agent's global
+instructions, in the user's own config (`ai-context` here, not kel):
+
+> Inside kel (`$TMUX_PANE` is set and `kel` is on `PATH`), report with `kel card`
+> when you finish something or need a decision. `kel card --schema` has the
+> format. Don't send a card for routine progress.
+
 ---
 
 ## 11. Capability probe

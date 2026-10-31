@@ -171,6 +171,22 @@ agent as a split (`n`, then `|` or `-`) avoids it.
 **Gate:** wanting an agent beside you that is already running elsewhere, and
 starting a fresh one being the worse choice.
 
+### 43. Cards — agents report to you  ·  `[fits]`  ·  **designed 2026-10-31**
+
+Any agent runs `kel card <kind>`; kel validates it and shows it in the sidebar
+and a popup. Agent to you only, so invariant 4 holds. Agent-neutral because it
+is a shell command; MCP is ruled out by R2. Design in `spec.md` §10a, build
+order in `rollout.md` M8.
+
+**Gate:** waived by the author, 2026-10-31: wanted so agents can communicate
+better, ahead of the daily-use pain. `[fits]` is the author's call to confirm,
+since kel storing what an agent sends is close to the line #39 drew; the
+difference is that the agent chose to send it.
+
+Noticed alongside it, comparing with Claude Code's desktop sidebar, not part of
+this: a **Changes** list (the PRs this agent opened) would fit, since `pr-cache`
+exists; **connector status** is agent-specific, so it needs its own look.
+
 ### 38. Automations view  ·  `[borderline]`
 
 The author's sixth want (`spec.md` §3): see and organise scheduled or looping
