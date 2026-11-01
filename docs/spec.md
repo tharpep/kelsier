@@ -848,7 +848,7 @@ what it was asking and were just trying to move on. So:
 changes, and names what is at risk. Deleting an agent's only copy of its work
 is the one unforgivable bug in this category of tool (invariant 1).
 
-### 10a. Cards — agents reporting to you  ·  *designed 2026-10-31, not built*
+### 10a. Cards — agents reporting to you  ·  *designed 2026-10-31, built 2026-11-01*
 
 **The problem.** What an agent wants to tell you lands in its scrollback. With
 several running, "it finished, tests pass, here's the PR" or "I need you to

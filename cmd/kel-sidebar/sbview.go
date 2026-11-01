@@ -860,6 +860,15 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 				}
 			}
 			add(lead(p.PaneID)+indent+" "+paneGlyph(p.Kind)+" "+weight(label, p.Current), pr)
+			if p.Cards != nil && p.Cards.Unseen && p.Cards.Latest != nil {
+				latest := p.Cards.Latest
+				col := dim
+				if latest.Kind == "decision" {
+					col = yellow
+				}
+				cardText := "▸ " + latest.Kind + ": " + latest.Title
+				add(indent+"   "+col+truncate(cardText, text)+reset, pr)
+			}
 		}
 	}
 
@@ -891,6 +900,15 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 		// what it is doing now, from Claude Code's transcript (backlog #40)
 		if a.agent.Doing != nil && a.agent.State != nil && *a.agent.State == "working" {
 			add("   "+dim+italic+truncate(*a.agent.Doing, text)+reset, r)
+		}
+		if a.agent.Cards != nil && a.agent.Cards.Unseen && a.agent.Cards.Latest != nil {
+			latest := a.agent.Cards.Latest
+			col := dim
+			if latest.Kind == "decision" {
+				col = yellow
+			}
+			cardText := "▸ " + latest.Kind + ": " + latest.Title
+			add("   "+col+truncate(cardText, text)+reset, r)
 		}
 		// subagents: the Task-tool helpers this agent has running, under it
 		for _, sub := range a.agent.Subagents {
@@ -1211,7 +1229,7 @@ func selActions(v sbView) (string, string, []sbAct) {
 	case strings.HasPrefix(v.sel, "a:"):
 		for _, a := range v.agents {
 			if agentID(a.key) == v.sel {
-				acts := []sbAct{{"e", "edit file"}, {"p", "plan"}, {"r", "rename"}, {"x", "kill"}, {"z", "zoom"}}
+				acts := []sbAct{{"e", "edit file"}, {"p", "plan"}, {"i", "cards"}, {"r", "rename"}, {"x", "kill"}, {"z", "zoom"}}
 				if a.agent.State != nil && *a.agent.State == "dead" {
 					acts = append([]sbAct{{"R", "relaunch"}}, acts...)
 				}
@@ -1263,7 +1281,7 @@ func selActions(v sbView) (string, string, []sbAct) {
 				if p.Kind == "server" {
 					acts = append(acts, sbAct{"o", "browser"})
 				}
-				acts = append(acts, sbAct{"f", "files"}, sbAct{"g", "git"}, sbAct{"e", "nvim"}, sbAct{"x", "close"}, sbAct{"z", "zoom"})
+				acts = append(acts, sbAct{"f", "files"}, sbAct{"g", "git"}, sbAct{"e", "nvim"}, sbAct{"i", "cards"}, sbAct{"x", "close"}, sbAct{"z", "zoom"})
 				return "pane", paneLabel(p), acts
 			}
 		}

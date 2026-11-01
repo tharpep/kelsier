@@ -77,6 +77,8 @@ kel config             edit config.toml (seeded from the example, once)
 kel update             fast-forward the clone kel runs from, then re-run
                        install.sh. Refuses on a dirty tree, detached HEAD,
                        no upstream, or a non-fast-forward
+kel card <kind> ...    report from an agent to you (result, update, decision);
+                       --schema shows the JSON schema; --json reads stdin
 ```
 
 Internal (wired into tmux / Claude Code): `kel status-line`, `kel jump`,
@@ -205,6 +207,7 @@ then \`` in yellow, which a click also jumps — then shows the keys for whateve
 | `t` | a plain shell window in the selected space — no agent |
 | `q` | quit kel, after `y`: saves the workspace, then closes it all; refuses while a worktree holds unsaved work |
 | `p` | the selected agent's plan (from plan mode), then its task list — `✓` done, `▸` in progress, `·` pending, and what blocks what. Most sessions on newer models keep no task list; it says so. Rendered with glow when installed |
+| `i` | the selected entry's cards (reports from agents) in a popup, newest first — result, update, decision. Rendered with glow when installed |
 | `c` | the Claude Code configuration that applies to the selected space, in yazi, a tab per place: the repo's `CLAUDE.md`, its `.claude/`, the global `~/.claude` and the project's memory. To read and open — kel writes none of it |
 | `v` | gh dash across **every repo a space is open in**: tabs for the selected space's repo, yours everywhere, review requests, all open; issues too. `/` edits a search, `t` drops the repo filter, `?` lists gh dash's keys |
 | `u` | Claude Code usage from ccusage — the current 5-hour block and two weeks by day; quit it (`q`) and type any other report (`monthly`, `session`, `daily --since 20261001`). ccusage reads Claude Code's own transcripts, so kel stores no history |

@@ -33,6 +33,8 @@
 #   kel update                 fast-forward the clone kel runs from, then
 #                              re-run install.sh (refuses on a dirty tree)
 #   kel reload                 reload tmux config and restart sidebars in place
+#   kel card <kind> ...        report from an agent to you (result, update, decision)
+#                              (--schema shows format; --json reads stdin)
 #
 # internal (wired by install.sh; some are fine to type, none are the point):
 #   kel status-line [group]    render tmux status-left
@@ -407,7 +409,7 @@ rm_agent_state() { # key...
   local k
   for k in "$@"; do
     [ -n "$k" ] && rm -f "$STATE_DIR/$k.state" "$STATE_DIR/$k.ctx" "$STATE_DIR/$k.edit" \
-      "$STATE_DIR/$k.plan" "$STATE_DIR/$k.view" "$STATE_DIR/$k.subs"
+      "$STATE_DIR/$k.plan" "$STATE_DIR/$k.view" "$STATE_DIR/$k.subs" "$STATE_DIR/$k.cards" "$STATE_DIR/$k.cards-seen"
   done
   return 0
 }
@@ -773,7 +775,7 @@ prune_state() {
   local live f wid panes pane
   live="$(tmux list-windows -a -F '#{window_id}' 2>/dev/null; tmux list-panes -a -F '#{pane_id}' 2>/dev/null)"
   [ -n "$live" ] || return 0
-  for f in "$STATE_DIR"/*.state "$STATE_DIR"/*.ctx "$STATE_DIR"/*.seen "$STATE_DIR"/*.edit "$STATE_DIR"/*.plan "$STATE_DIR"/*.view "$STATE_DIR"/*.subs; do
+  for f in "$STATE_DIR"/*.state "$STATE_DIR"/*.ctx "$STATE_DIR"/*.seen "$STATE_DIR"/*.edit "$STATE_DIR"/*.plan "$STATE_DIR"/*.view "$STATE_DIR"/*.subs "$STATE_DIR"/*.cards "$STATE_DIR"/*.cards-seen; do
     [ -e "$f" ] || continue
     wid="${f##*/}"; wid="${wid%.*}"
     if ! printf '%s\n' "$live" | grep -qxF "$wid"; then
@@ -2053,6 +2055,7 @@ cmd_panel() {
     diff)  panel_diff "$dir" "$title" "$arg" ;;
     edit)  panel_edit "$dir" "$title" "$arg" ;;
     plan)  panel_plan "$dir" "$title" "$arg" ;;
+    cards) panel_cards "$dir" "$title" "$arg" ;;
     attach) need_tool claude
            # a background agent (`claude --bg`) has no pane: open it here.
            # Kept like yazi — prefix q closes the popup, the agent runs on
@@ -2431,6 +2434,46 @@ panel_plan() { # dir title wid
   if command -v glow >/dev/null 2>&1; then popup "$dir" "plan · $title · prefix q closes" glow -p "$view"
   elif command -v bat >/dev/null 2>&1; then popup "$dir" "plan · $title · prefix q closes" bat --paging=always -l md "$view"
   else popup "$dir" "plan · $title · prefix q closes" less -R "$view"; fi
+}
+
+panel_cards() { # dir title pane_or_wid
+  local dir="$1" title="$2" target="$3" pane=''
+  case "$target" in
+    %*) pane="$target" ;;
+    @*) pane="$(agent_pane "$target")" ;;
+    *)  pane="$target" ;;
+  esac
+  local cf="$STATE_DIR/$pane.cards"
+  [ -f "$cf" ] || die "no cards for this entry"
+  [ -s "$cf" ] || die "no cards for this entry"
+  date +%s > "$STATE_DIR/$pane.cards-seen"
+  sidebar_wake
+  local view="$STATE_DIR/$pane.view"
+  {
+    jq -rs --arg now "$(date +%s)" '
+      def humanize(s):
+        if s < 60 then "\(s)s ago"
+        elif s < 3600 then "\(s / 60 | floor)m ago"
+        elif s < 86400 then "\(s / 3600 | floor)h ago"
+        else "\(s / 86400 | floor)d ago" end;
+      reverse | .[] |
+      ( ($now | tonumber) - (.at // ($now | tonumber)) ) as $age |
+      "## \(.kind) · \(.title)    ·    \(humanize($age))\n",
+      ( if .rows and (.rows | length) > 0 then
+          ( .rows[] | "**\(.label):** \(.value)  " ), ""
+        else empty end ),
+      ( if .links and (.links | length) > 0 then
+          ( .links[] | "**\(.label):** \(.url)  " ), ""
+        else empty end ),
+      ( if .note and (.note | length) > 0 then
+          "> \(.note)\n"
+        else empty end ),
+      "---\n"
+    ' "$cf" 2>/dev/null | sed '$d'
+  } > "$view.$$" && mv -f "$view.$$" "$view"
+  if command -v glow >/dev/null 2>&1; then popup "$dir" "cards · $title · prefix q closes" glow -p "$view"
+  elif command -v bat >/dev/null 2>&1; then popup "$dir" "cards · $title · prefix q closes" bat --paging=always -l md "$view"
+  else popup "$dir" "cards · $title · prefix q closes" less -R "$view"; fi
 }
 
 # the task list as markdown: ✓ done, ▸ in progress, · pending, and what blocks
@@ -3221,6 +3264,232 @@ cmd_substatus() {
   fi
 }
 
+cmd_card() {
+  local schema_json='{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "KelCard",
+  "type": "object",
+  "required": ["kind", "title"],
+  "additionalProperties": false,
+  "properties": {
+    "kind": { "type": "string", "enum": ["result", "update", "decision"] },
+    "title": { "type": "string", "maxLength": 80 },
+    "note": { "type": "string", "maxLength": 500 },
+    "rows": {
+      "type": "array",
+      "maxItems": 8,
+      "items": {
+        "type": "object",
+        "required": ["label", "value"],
+        "additionalProperties": false,
+        "properties": {
+          "label": { "type": "string", "maxLength": 24 },
+          "value": { "type": "string", "maxLength": 120 }
+        }
+      }
+    },
+    "links": {
+      "type": "array",
+      "maxItems": 4,
+      "items": {
+        "type": "object",
+        "required": ["label", "url"],
+        "additionalProperties": false,
+        "properties": {
+          "label": { "type": "string", "maxLength": 24 },
+          "url": { "type": "string", "pattern": "^https?://" }
+        }
+      }
+    }
+  }
+}'
+
+  local kind='' from_json=0 title='' note=''
+  local -a rows=() links=()
+
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --schema)
+        printf '%s\n' "$schema_json"
+        return 0
+        ;;
+      --json)
+        from_json=1
+        ;;
+      --title)
+        shift
+        [ $# -gt 0 ] || { echo "kel card: --title requires a value" >&2; exit 2; }
+        title="$1"
+        ;;
+      --note)
+        shift
+        [ $# -gt 0 ] || { echo "kel card: --note requires a value" >&2; exit 2; }
+        note="$1"
+        ;;
+      --row)
+        shift
+        [ $# -gt 0 ] || { echo "kel card: --row requires a label=value argument" >&2; exit 2; }
+        rows+=( "$1" )
+        ;;
+      --link)
+        shift
+        [ $# -gt 0 ] || { echo "kel card: --link requires a label=url argument" >&2; exit 2; }
+        links+=( "$1" )
+        ;;
+      result|update|decision)
+        if [ -n "$kind" ]; then
+          echo "kel card: unexpected argument '$1' (kind already set to '$kind')" >&2
+          exit 2
+        fi
+        kind="$1"
+        ;;
+      -*)
+        echo "kel card: unknown flag $1" >&2
+        exit 2
+        ;;
+      *)
+        echo "kel card: unexpected argument '$1'" >&2
+        exit 2
+        ;;
+    esac
+    shift
+  done
+
+  local raw_json=''
+  if [ "$from_json" = 1 ]; then
+    raw_json="$(cat 2>/dev/null || true)"
+    if [ -z "$raw_json" ]; then
+      echo "kel card: empty JSON on stdin" >&2
+      exit 2
+    fi
+    if ! printf '%s' "$raw_json" | jq -e . >/dev/null 2>&1; then
+      echo "kel card: invalid JSON on stdin" >&2
+      exit 2
+    fi
+    if [ -n "$kind" ]; then
+      local json_kind
+      json_kind="$(printf '%s' "$raw_json" | jq -r '.kind // ""' 2>/dev/null)"
+      if [ -n "$json_kind" ] && [ "$json_kind" != "$kind" ]; then
+        echo "kel card: kind in JSON ('$json_kind') does not match argument ('$kind')" >&2
+        exit 2
+      fi
+      raw_json="$(printf '%s' "$raw_json" | jq -c --arg k "$kind" '.kind = $k')"
+    fi
+  else
+    if [ -z "$kind" ]; then
+      echo "kel card: kind is required (result, update, decision)" >&2
+      exit 2
+    fi
+    if [ -z "$title" ]; then
+      echo "kel card: --title is required" >&2
+      exit 2
+    fi
+    if [ "${#rows[@]}" -gt 8 ]; then
+      echo "kel card: too many rows (max 8)" >&2
+      exit 2
+    fi
+    if [ "${#links[@]}" -gt 4 ]; then
+      echo "kel card: too many links (max 4)" >&2
+      exit 2
+    fi
+    local row_objs="[]" link_objs="[]" r l rl rv ll lu
+    for r in "${rows[@]}"; do
+      case "$r" in
+        *=*) rl="${r%%=*}"; rv="${r#*=}" ;;
+        *)   echo "kel card: --row must be Label=Value" >&2; exit 2 ;;
+      esac
+      row_objs="$(printf '%s' "$row_objs" | jq -c --arg l "$rl" --arg v "$rv" '. + [{label:$l, value:$v}]')"
+    done
+    for l in "${links[@]}"; do
+      case "$l" in
+        *=*) ll="${l%%=*}"; lu="${l#*=}" ;;
+        *)   echo "kel card: --link must be Label=URL" >&2; exit 2 ;;
+      esac
+      case "$lu" in
+        http://*|https://*) ;;
+        *) echo "kel card: link url must start with http:// or https://" >&2; exit 2 ;;
+      esac
+      link_objs="$(printf '%s' "$link_objs" | jq -c --arg l "$ll" --arg u "$lu" '. + [{label:$l, url:$u}]')"
+    done
+
+    raw_json="$(jq -nc \
+      --arg k "$kind" \
+      --arg t "$title" \
+      --arg n "$note" \
+      --argjson rw "$row_objs" \
+      --argjson lk "$link_objs" '
+      {kind: $k, title: $t}
+      + (if $n != "" then {note: $n} else {} end)
+      + (if ($rw | length) > 0 then {rows: $rw} else {} end)
+      + (if ($lk | length) > 0 then {links: $lk} else {} end)
+    ')"
+  fi
+
+  local clean_card err
+  local jq_filter='
+def clean_str: gsub("[\u0000-\u001f\u007f]"; "");
+def clean_note: gsub("[\u0000-\u0009\u000b-\u001f\u007f]"; "");
+
+if type != "object" then error("card must be a JSON object") else . end |
+(keys - ["kind", "title", "note", "rows", "links"]) as $bad |
+if ($bad | length > 0) then error("unknown field: " + ($bad | join(", "))) else . end |
+.kind as $k |
+if ($k != "result" and $k != "update" and $k != "decision") then error("invalid kind: " + ($k // "null")) else . end |
+.title = ((.title // "") | clean_str) |
+if (.title | length == 0 or length > 80) then error("title must be 1-80 chars") else . end |
+if has("note") and .note != null then
+  .note = (.note | clean_note) |
+  if (.note | length > 500) then error("note must be at most 500 chars") else . end
+else del(.note) end |
+if has("rows") and .rows != null then
+  if (.rows | type != "array" or length > 8) then error("rows must be array of at most 8 items") else . end |
+  .rows = [.rows[] | {
+    label: ((.label // "") | clean_str),
+    value: ((.value // "") | clean_str)
+  } | if (.label | length == 0 or length > 24) then error("row label must be 1-24 chars")
+      elif (.value | length > 120) then error("row value must be at most 120 chars")
+      else . end]
+else del(.rows) end |
+if has("links") and .links != null then
+  if (.links | type != "array" or length > 4) then error("links must be array of at most 4 items") else . end |
+  .links = [.links[] | {
+    label: ((.label // "") | clean_str),
+    url: ((.url // "") | clean_str)
+  } | if (.label | length == 0 or length > 24) then error("link label must be 1-24 chars")
+      elif (.url | test("^https?://") | not) then error("link url must start with http:// or https://")
+      else . end]
+else del(.links) end |
+.at = ($epoch | tonumber)
+'
+  clean_card="$(printf '%s' "$raw_json" | jq -c --arg epoch "$(date +%s)" "$jq_filter" 2>&1)" || {
+    err="$(printf '%s' "$clean_card" | sed 's/.*error (at [^)]*): //; s/jq: error: //')"
+    echo "kel card: $err" >&2
+    exit 2
+  }
+
+  local pane="${TMUX_PANE:-}"
+  if [ -z "$pane" ] || ! command -v tmux >/dev/null 2>&1; then
+    echo "kel card: outside kel (TMUX_PANE not set)" >&2
+    return 0
+  fi
+  local sess
+  sess="$(tmux display-message -p -t "$pane" '#{session_name}' 2>/dev/null || true)"
+  if [ "$sess" != "$KEL_PREFIX" ]; then
+    echo "kel card: pane $pane is not in kel session '$KEL_PREFIX'" >&2
+    return 0
+  fi
+
+  mkdir -p "$STATE_DIR"
+  local tmp
+  tmp="$(mktemp "$STATE_DIR/.cards.${pane#%}.XXXXXX" 2>/dev/null)" || return 0
+  if [ -f "$STATE_DIR/$pane.cards" ]; then
+    tail -n 19 "$STATE_DIR/$pane.cards" 2>/dev/null > "$tmp" || true
+  fi
+  printf '%s\n' "$clean_card" >> "$tmp"
+  mv -f "$tmp" "$STATE_DIR/$pane.cards"
+  sidebar_wake
+}
+
 # --------------------------------------------------------------------------
 # kel hook <EVENT>
 # --------------------------------------------------------------------------
@@ -3504,6 +3773,7 @@ main() {
     doctor)       cmd_doctor "$@" ;;
     config)       cmd_config ;;
     update)       cmd_update "$@" ;;
+    card)         cmd_card "$@" ;;
     status-line)  cmd_status_line "$@" ;;
     _fleet)       fleet_json "$@" ;;
     _copy)        copy_stdin ;;

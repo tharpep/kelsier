@@ -478,7 +478,7 @@ an agent could not be a split. Decided with the author:
    yellow, working cyan, throttled magenta, dead red, the rest grey: the
    sidebar's colours (§5d), where the window border keeps its orange.
 
-**M8 — cards**  ·  *designed 2026-10-31, not started*
+**M8 — cards**  ·  *built 2026-11-01*
 
 Agents report to you with `kel card`. The design is `spec.md` §10a. Each step
 is a change the suite can prove; nothing here touches an agent.
