@@ -49,7 +49,7 @@ type Git struct {
 
 // paneRow is one line of `tmux list-panes -a`.
 type paneRow struct {
-	wid, cmd, id, idx, active, pid, stamp, path string
+	wid, cmd, id, idx, active, pid, stamp, kstate, path string
 }
 
 // repoRoot walks up from dir to the first directory holding `.git`. linked is

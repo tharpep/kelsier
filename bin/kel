@@ -33,6 +33,7 @@
 #   kel update                 fast-forward the clone kel runs from, then
 #                              re-run install.sh (refuses on a dirty tree)
 #   kel reload                 reload tmux config and restart sidebars in place
+#   kel sync                   sync state and context for running agy agents
 #
 # internal (wired by install.sh; some are fine to type, none are the point):
 #   kel status-line [group]    render tmux status-left
@@ -270,6 +271,32 @@ state_of() { # wid | pane -> raw state from the hook, or empty
   printf '%s' "$s"
 }
 
+agy_pane_waiting() { # wid | pane
+  local p="$1"
+  case "$p" in
+    @*) p="$(agent_pane "$p")" ;;
+  esac
+  [ -n "$p" ] || return 1
+  local tail
+  tail="$(tmux capture-pane -p -t "$p" 2>/dev/null | grep . | tail -20)" || return 1
+  case "$tail" in
+    *"Requesting permission for:"*|\
+    *"Run this command?"*|\
+    *"> 1. Yes, run command"*|\
+    *"1. Yes, run command"*|\
+    *"Yes, and always allow"*|\
+    *"Grant permission"*|\
+    *"Do you want to proceed?"*|\
+    *"Are you sure you want to"*|\
+    *"(Recommended)"*|\
+    *"select all that apply"*|\
+    *"Press Enter to submit"*)
+      return 0
+      ;;
+  esac
+  return 1
+}
+
 # effective_state: raw hook state, but "dead" if the agent process is gone
 # (a crash/OOM fires no Stop/SessionEnd hook — the window just drops to a shell)
 effective_state() { # wid
@@ -288,6 +315,12 @@ effective_state() { # wid
     idle|working|waiting|throttled)
       agent_alive "$1" || { printf 'dead'; return; } ;;
   esac
+  if [ "$s" = "working" ] || [ "$s" = "idle" ]; then
+    if agy_pane_waiting "$1"; then
+      printf 'waiting'
+      return
+    fi
+  fi
   printf '%s' "$s"
 }
 
@@ -1231,6 +1264,13 @@ agent_resume_cmd() { # record
   agent="$(jq -r '.agent // "claude"' "$1" 2>/dev/null)"; agent="${agent:-claude}"
   cid="$(jq -r '.claude_session // ""' "$1" 2>/dev/null)"
   name="$(jq -r '.name // ""' "$1" 2>/dev/null)"
+  case "${agent%% *}" in
+    agy|*/agy)
+      if [ -n "$cid" ]; then printf '%s --conversation %s || %s' "$agent" "$cid" "$agent"
+      else printf '%s' "$agent"; fi
+      return 0
+      ;;
+  esac
   case "$agent" in
     *" --name $name"|*" --name $name "*) ;;   # named: --resume <name> finds it
     *) name='' ;;                              # not ours to name: start fresh
@@ -1856,6 +1896,10 @@ cmd_doctor() {
   if gh extension list 2>/dev/null | grep -q gh-dash; then printf '  \033[1;32m✓\033[0m %s\n' "gh-dash (optional, for G)" >&2
   else printf '  \033[2m·\033[0m %s\n' "gh-dash not installed (optional — gh extension install dlvhdr/gh-dash)" >&2; fi
 
+  if [ -f "$HOME/.gemini/config/hooks.json" ] && jq -e '.kelsier != null' "$HOME/.gemini/config/hooks.json" >/dev/null 2>&1; then
+    printf '  \033[1;32m✓\033[0m %s\n' "agy hooks wired in hooks.json (optional)" >&2
+  fi
+
   # install.sh writes the absolute path of the clone it ran from into
   # settings.json. Move or rename that clone and every hook plus the statusLine
   # silently stops firing, with settings.json still naming the old path.
@@ -2419,17 +2463,48 @@ panel_plan() { # dir title wid
   tdir="$CLAUDE_HOME/tasks/$sid"
   [ -n "$plan" ] && have=1
   [ -n "$sid" ] && [ -d "$tdir" ] && have=1
+
+  local art_dir=''
+  local af; af="$(state_file "$wid" artifact_dir)"
+  [ -f "$af" ] && read -r art_dir < "$af"
+  if [ -z "$art_dir" ] && [ -n "$sid" ]; then
+    if [ -d "$HOME/.gemini/antigravity-cli/brain/$sid" ]; then
+      art_dir="$HOME/.gemini/antigravity-cli/brain/$sid"
+    elif [ -d "$HOME/.gemini/antigravity/brain/$sid" ]; then
+      art_dir="$HOME/.gemini/antigravity/brain/$sid"
+    fi
+  fi
+  local -a art_files=()
+  if [ -n "$art_dir" ] && [ -d "$art_dir" ]; then
+    for f in "$art_dir"/*.md; do
+      [ -f "$f" ] && art_files+=( "$f" )
+    done
+  fi
+  [ "${#art_files[@]}" -gt 0 ] && have=1
+
   [ "$have" = 1 ] || die "no plan or task list for this agent"
   view="$(state_file "$wid" view)"
   {
-    if [ -z "$plan" ]; then printf '# plan\n\nnone — this session has not written one\n'
-    elif [ -f "$plan" ]; then cat "$plan"
-    else printf '# plan\n\n%s is gone\n' "$plan"; fi
+    if [ "${#art_files[@]}" -gt 0 ]; then
+      local first=1
+      for f in "${art_files[@]}"; do
+        [ "$first" = 1 ] && first=0 || printf '\n---\n\n'
+        printf '# %s\n\n' "${f##*/}"
+        cat "$f"
+      done
+    elif [ -z "$plan" ]; then
+      printf '# plan\n\nnone — this session has not written one\n'
+    elif [ -f "$plan" ]; then
+      cat "$plan"
+    else
+      printf '# plan\n\n%s is gone\n' "$plan"
+    fi
     printf '\n---\n\n'
     plan_tasks "$sid" "$tdir"
   } > "$view.$$" && mv -f "$view.$$" "$view"
   if command -v glow >/dev/null 2>&1; then popup "$dir" "plan · $title · prefix q closes" glow -p "$view"
   elif command -v bat >/dev/null 2>&1; then popup "$dir" "plan · $title · prefix q closes" bat --paging=always -l md "$view"
+  elif command -v batcat >/dev/null 2>&1; then popup "$dir" "plan · $title · prefix q closes" batcat --paging=always -l md "$view"
   else popup "$dir" "plan · $title · prefix q closes" less -R "$view"; fi
 }
 
@@ -2679,6 +2754,86 @@ cmd_reload() {
   else
     say "reloaded config"
   fi
+}
+
+# ---------------------------------------------------------------------------
+# kel sync  —  sync state, context and artifacts for running agy agents
+# ---------------------------------------------------------------------------
+cmd_sync() {
+  need tmux
+  local count=0
+  local pane pid cmd path sb
+  while IFS='|' read -r pane pid cmd path sb; do
+    [ -z "$sb" ] || continue
+    local cpid
+    if [ "$cmd" = "agy" ]; then
+      cpid="$pid"
+    else
+      cpid="$(pgrep -P "$pid" -x agy 2>/dev/null | head -1)"
+    fi
+    [ -n "$cpid" ] || continue
+
+    local cid=''
+    cid="$(tr '\0' '\n' < "/proc/$cpid/cmdline" 2>/dev/null | grep -oE '[a-f0-9-]{36}' | head -1 || true)"
+    if [ -z "$cid" ]; then
+      cid="$(ls -l "/proc/$cpid/fd" 2>/dev/null | grep -oE '[a-f0-9-]{36}\.db' | head -1 | sed 's/\.db//' || true)"
+    fi
+    if [ -z "$cid" ]; then
+      local logfile
+      logfile="$(ls -l "/proc/$cpid/fd" 2>/dev/null | grep -oE '/.*cli-[0-9_]+\.log' | head -1 || true)"
+      if [ -n "$logfile" ] && [ -f "$logfile" ]; then
+        cid="$(grep -oE 'conversation[/: ][a-f0-9-]{36}' "$logfile" 2>/dev/null | grep -oE '[a-f0-9-]{36}' | head -1 || true)"
+      fi
+    fi
+
+    local bdir=""
+    if [ -n "$cid" ]; then
+      printf '%s' "$pane" > "$STASH_DIR/$cid"
+      if [ -d "$HOME/.gemini/antigravity-cli/brain/$cid" ]; then
+        bdir="$HOME/.gemini/antigravity-cli/brain/$cid"
+      elif [ -d "$HOME/.gemini/antigravity/brain/$cid" ]; then
+        bdir="$HOME/.gemini/antigravity/brain/$cid"
+      fi
+    fi
+
+    if [ -n "$bdir" ]; then
+      printf '%s' "$bdir" > "$STATE_DIR/$pane.artifact_dir"
+      for f in "$bdir"/*.md; do
+        if [ -f "$f" ]; then
+          printf '%s\n' "$f" > "$STATE_DIR/$pane.plan"
+          break
+        fi
+      done
+      local tr_path="$bdir/.system_generated/logs/transcript.jsonl"
+      if [ -f "$tr_path" ]; then
+        printf '%s' "$tr_path" > "$STATE_DIR/$pane.transcript_path"
+        agy_update_ctx "$pane" "$tr_path" "auto"
+      fi
+    fi
+
+    local state_file="$STATE_DIR/$pane.state"
+    if [ ! -f "$state_file" ]; then
+      local init_state="idle" init_note=""
+      if agy_pane_waiting "$pane"; then
+        init_state="waiting"
+        init_note="permission"
+      fi
+      printf '%s %s %s\n' "$init_state" "$(date +%s)" "$init_note" > "$state_file"
+      tmux set-option -p -t "$pane" @kel-state "$init_state" 2>/dev/null
+    elif agy_pane_waiting "$pane"; then
+      local prev_st; prev_st="$(state_of "$pane")"
+      if [ "$prev_st" = "working" ] || [ "$prev_st" = "idle" ]; then
+        printf '%s %s %s\n' "waiting" "$(date +%s)" "permission" > "$state_file"
+        tmux set-option -p -t "$pane" @kel-state "waiting" 2>/dev/null
+      fi
+    fi
+
+    count=$((count + 1))
+  done < <(tmux list-panes -s -t "=$KEL_PREFIX" -F '#{pane_id}|#{pane_pid}|#{pane_current_command}|#{pane_current_path}|#{@kel-sidebar}' 2>/dev/null || true)
+
+  tmux refresh-client -S 2>/dev/null || true
+  sidebar_wake
+  say "synced $count agy agent pane(s)"
 }
 
 cmd_config() {
@@ -3237,21 +3392,232 @@ hook_edit() { # payload sid cwd
   [ -n "$path" ] || return 0
   pane="$(resolve_pane "$2" "$3")"; [ -n "$pane" ] || return 0
   case "$path" in /*) ;; *) path="$3/$path" ;; esac
-  # In plan mode Claude writes its plan with Write, under its plans directory
-  # (measured on 2.1.300): that write is the session's plan, not "the file
-  # the agent last touched" — `p` shows it, and `e` must not open it
   local kind=edit
   case "$path" in "$CLAUDE_HOME/plans/"*) kind=plan ;; esac
   printf '%s\n%s\n' "$path" "$line" > "$STATE_DIR/$pane.$kind.$$" && mv -f "$STATE_DIR/$pane.$kind.$$" "$STATE_DIR/$pane.$kind"
 }
 
+agy_update_ctx() { # pane tr_path model
+  local pane="$1" tr_path="$2" model="${3:-auto}"
+  [ -n "$pane" ] || return 0
+  [ -f "$tr_path" ] || return 0
+
+  local in cache out
+  {
+    read -r in; read -r cache; read -r out
+  } < <(tail -n 100 "$tr_path" 2>/dev/null \
+        | jq -r 'select(.type == "PLANNER_RESPONSE") | [.input_tokens // 0, .cache_read_tokens // 0, .output_tokens // 0] | @tsv' 2>/dev/null \
+        | tail -1 | tr '\t' '\n')
+
+  case "${in:-}" in ''|*[!0-9]*) in=0 ;; esac
+  case "${cache:-}" in ''|*[!0-9]*) cache=0 ;; esac
+  case "${out:-}" in ''|*[!0-9]*) out=0 ;; esac
+
+  local in_tokens=$((in + cache))
+  [ "$in_tokens" -gt 0 ] || return 0
+
+  local ctxsz=1000000
+  local pct=$(( in_tokens * 100 / ctxsz ))
+  [ "$pct" -gt 100 ] && pct=100
+
+  local cost=0 rl5=-1 now
+  now="$(date +%s)"
+
+  local tmp
+  tmp="$(mktemp "$STATE_DIR/.${pane#%}.ctx.XXXXXX" 2>/dev/null)" || return 0
+  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+    "$pct" "$cost" "$in_tokens" "$ctxsz" "$rl5" "$now" "$model" > "$tmp"
+  mv -f "$tmp" "$STATE_DIR/$pane.ctx"
+  tmux refresh-client -S 2>/dev/null || true
+}
+
+cmd_hook_agy() {
+  local event="${1:-}"
+  local payload
+  payload="$(cat 2>/dev/null || true)"
+
+  if [ "$event" = "PreToolUse" ]; then
+    printf '{"decision":"allow"}\n'
+  else
+    printf '{}\n'
+  fi
+
+  command -v tmux >/dev/null 2>&1 || exit 0
+  [ -n "$payload" ] || exit 0
+  command -v jq >/dev/null 2>&1 || exit 0
+
+  local sid cwd tr_path art_dir model tool term
+  {
+    read -r sid
+    read -r cwd
+    read -r tr_path
+    read -r art_dir
+    read -r model
+    read -r tool
+    read -r term
+  } < <(printf '%s' "$payload" | jq -r '[
+      (.conversationId // ""),
+      ((.workspacePaths // [])[0] // ""),
+      (.transcriptPath // ""),
+      (.artifactDirectoryPath // ""),
+      (.modelName // ""),
+      (.toolCall.name // ""),
+      (.terminationReason // "")
+    ] | .[] | tostring | gsub("[\n\t]"; " ")' 2>/dev/null)
+
+  local pane
+  pane="$(resolve_pane "$sid" "$cwd")"
+  if [ "$event" = "SessionStart" ] && [ -n "$pane" ] && [ -n "$sid" ]; then
+    printf '%s' "$pane" > "$STASH_DIR/$sid"
+  fi
+  [ -z "$pane" ] && exit 0
+
+  local wid
+  wid="$(tmux display-message -p -t "$pane" '#{window_id}' 2>/dev/null || true)"
+  [ -z "$wid" ] && exit 0
+  local prev
+  prev="$(state_of "$pane")"
+
+  if [ -n "$art_dir" ]; then
+    printf '%s' "$art_dir" > "$STATE_DIR/$pane.artifact_dir"
+  fi
+  if [ -n "$tr_path" ]; then
+    printf '%s' "$tr_path" > "$STATE_DIR/$pane.transcript_path"
+  fi
+
+  if [ -n "$sid" ]; then
+    local mr m mg mn
+    if mr="$(meta_by_pane "$pane")"; then
+      m="${mr##*$'\t'}"
+      if [ "$(jq -r '(.claude_session // "") + " " + (.pane_id // "")' "$m" 2>/dev/null)" != "$sid $pane" ]; then
+        meta_update "$m" '.claude_session=$s | .pane_id=$p' --arg s "$sid" --arg p "$pane"
+        IFS=$'\t' read -r mg mn _ <<< "$mr"
+        stamp_pane "$pane" "$mg" "$mn"
+      fi
+    fi
+  fi
+
+  local state='' ntext=''
+  case "$event" in
+    SessionStart)
+      state=idle
+      ;;
+    PreInvocation)
+      state=working
+      ;;
+    PreToolUse)
+      if [ "$tool" = "ask_question" ]; then
+        state=waiting
+        ntext="your input"
+      elif [ "$tool" = "ask_custom_permission" ]; then
+        state=waiting
+        ntext="permission"
+      elif [ "$tool" = "invoke_subagent" ]; then
+        state=working
+        local role
+        role="$(printf '%s' "$payload" | jq -r '.toolCall.args.Role // .toolCall.args.TypeName // ""' 2>/dev/null)"
+        ntext="${role:+subagent: }$role"
+        [ -n "$ntext" ] || ntext="invoke_subagent"
+      else
+        state=working
+        ntext="$tool"
+      fi
+      ;;
+    PostToolUse)
+      state=working
+      if [ "$tool" = "invoke_subagent" ]; then
+        local role
+        role="$(printf '%s' "$payload" | jq -r '.toolCall.args.Role // .toolCall.args.TypeName // ""' 2>/dev/null)"
+        ntext="${role:+subagent: }$role"
+        [ -n "$ntext" ] || ntext="invoke_subagent"
+      else
+        ntext="$tool"
+      fi
+      if [ "$tool" = "edit_file" ]; then
+        local ep
+        ep="$(printf '%s' "$payload" | jq -r '.toolCall.args.Path // ""' 2>/dev/null)"
+        if [ -n "$ep" ]; then
+          case "$ep" in /*) ;; *) ep="$cwd/$ep" ;; esac
+          printf '%s\n1\n' "$ep" > "$STATE_DIR/$pane.edit.$$" && mv -f "$STATE_DIR/$pane.edit.$$" "$STATE_DIR/$pane.edit"
+        fi
+      elif [ "$tool" = "write_file" ]; then
+        local wp
+        wp="$(printf '%s' "$payload" | jq -r '.toolCall.args.Path // ""' 2>/dev/null)"
+        if [ -n "$wp" ]; then
+          case "$wp" in /*) ;; *) wp="$cwd/$wp" ;; esac
+          case "$wp" in
+            *.md|*/brain/*)
+              printf '%s\n' "$wp" > "$STATE_DIR/$pane.plan.$$" && mv -f "$STATE_DIR/$pane.plan.$$" "$STATE_DIR/$pane.plan"
+              ;;
+            *)
+              printf '%s\n1\n' "$wp" > "$STATE_DIR/$pane.edit.$$" && mv -f "$STATE_DIR/$pane.edit.$$" "$STATE_DIR/$pane.edit"
+              ;;
+          esac
+        fi
+      fi
+      agy_update_ctx "$pane" "$tr_path" "$model"
+      ;;
+    Stop)
+      state=done
+      if [ "$term" = "ERROR" ]; then
+        ntext="error"
+      fi
+      agy_update_ctx "$pane" "$tr_path" "$model"
+      ;;
+    *)
+      exit 0
+      ;;
+  esac
+
+  [ -n "$state" ] || exit 0
+
+  local tmp
+  tmp="$(mktemp "$STATE_DIR/.${pane#%}.XXXXXX" 2>/dev/null)" || exit 0
+  printf '%s %s %s\n' "$state" "$(date +%s)" "$ntext" > "$tmp"
+  mv -f "$tmp" "$STATE_DIR/$pane.state"
+  tmux set-option -p -t "$pane" @kel-state "$state" 2>/dev/null
+  [ "$(agent_pane "$wid")" = "$pane" ] && rm -f "$STATE_DIR/$wid.state"
+
+  if [ -n "$sid" ]; then
+    if [ "$state" = waiting ]; then
+      mkdir -p "$WAITING_DIR" 2>/dev/null && : > "$WAITING_DIR/$sid"
+    else
+      rm -f "$WAITING_DIR/$sid"
+    fi
+  fi
+
+  paint_state "$wid" "$(window_state "$wid")"
+  tmux refresh-client -S 2>/dev/null || true
+  sidebar_wake
+
+  [ "$state" = "$prev" ] && exit 0
+  banner_drop "$pane"
+  case " $KEL_NOTIFY " in
+    *" $state "*)
+      window_focused "$wid" && exit 0
+      local wn; wn="$(tmux display-message -p -t "$pane" '#{@kel-agent}' 2>/dev/null)"; wn="${wn##*/}"
+      [ -n "$wn" ] || wn="$(tmux display-message -p -t "$wid" '#{window_name}' 2>/dev/null || echo "$wid")"
+      case "${KEL_NOTIFY_BANNER:-on}" in off|0|no|false) ;; *) banner_add "$pane" "$state" "$wn" "$ntext" ;; esac
+      notify "kel: $wn" "${ntext:-$state}" ;;
+  esac
+}
+
 cmd_hook() {
   local event="${1:-}"
+  if [ "$event" = "agy" ]; then
+    shift
+    cmd_hook_agy "$@"
+    return
+  fi
   command -v tmux >/dev/null 2>&1 || exit 0
   # one jq pass, one field per line — never `IFS=$'\t' read`, which folds runs
   # of tab into a single delimiter and shifts everything after an empty field
   local payload evt sid cwd tool ntype ntext
   payload="$(cat 2>/dev/null || true)"
+  if printf '%s' "$payload" | jq -e 'has("conversationId")' >/dev/null 2>&1; then
+    cmd_hook_agy "$event" <<< "$payload"
+    return
+  fi
   {
     read -r evt; read -r sid; read -r cwd; read -r tool; read -r ntype; read -r ntext
   } < <(printf '%s' "$payload" | jq -r '[
@@ -3474,6 +3840,7 @@ main() {
     restore)      migrate_meta; cmd_restore "$@" ;;
     relaunch)     migrate_meta; cmd_relaunch "$@" ;;
     reload)       cmd_reload "$@" ;;
+    sync)         cmd_sync "$@" ;;
     sweep)        migrate_meta; cmd_sweep "$@" ;;
     prune)        migrate_meta; cmd_prune "$@" ;;
     snapshot)     cmd_snapshot ;;

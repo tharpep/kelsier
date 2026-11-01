@@ -50,6 +50,16 @@ func TestDoing(t *testing.T) {
 			t.Errorf("%s: %q, want %q", name, got, want)
 		}
 	}
+	agyLine := `{"type":"PLANNER_RESPONSE","tool_calls":[{"name":"edit_file","args":{"Path":"/code/kel/bin/kel"}}]}`
+	write(agyLine)
+	if doingOf(f) != "editing kel" {
+		t.Errorf("agy edit: %q", doingOf(f))
+	}
+	agyCmd := `{"type":"PLANNER_RESPONSE","tool_calls":[{"name":"run_command","args":{"CommandLine":"git status","toolSummary":"Git status check"}}]}`
+	write(agyCmd)
+	if doingOf(f) != "git status check" {
+		t.Errorf("agy cmd: %q", doingOf(f))
+	}
 	if transcriptOf("../x") != "" || transcriptOf("") != "" {
 		t.Error("a session id is not a path")
 	}

@@ -31,6 +31,7 @@ _kel() {
     'doctor:capability probe'
     'config:edit config.toml (seeded from the shipped example)'
     'update:fast-forward the clone kel runs from, then re-wire'
+    'sync:sync state and context for running agy agents'
     'help:usage'
   )
 

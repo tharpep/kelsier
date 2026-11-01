@@ -31,10 +31,17 @@ func transcriptOf(sid string) string {
 		return ""
 	}
 	m, _ := filepath.Glob(filepath.Join(claudeHome(), "projects", "*", sid+".jsonl"))
-	if len(m) == 0 {
-		return ""
+	if len(m) > 0 {
+		return m[0]
 	}
-	return m[0]
+	h, _ := os.UserHomeDir()
+	for _, app := range []string{"antigravity-cli", "antigravity"} {
+		p := filepath.Join(h, ".gemini", app, "brain", sid, ".system_generated", "logs", "transcript.jsonl")
+		if _, err := os.Stat(p); err == nil {
+			return p
+		}
+	}
+	return ""
 }
 
 func claudeHome() string {
@@ -80,6 +87,16 @@ func doingOf(path string) string {
 	return ""
 }
 
+type agyToolCall struct {
+	Name string         `json:"name"`
+	Args map[string]any `json:"args"`
+}
+
+type agyLine struct {
+	Type      string        `json:"type"`
+	ToolCalls []agyToolCall `json:"tool_calls"`
+}
+
 // doingIn reads the last n bytes; found is false when they hold no assistant
 // turn, so the caller may look further back.
 func doingIn(f *os.File, size, n int64) (string, bool) {
@@ -96,6 +113,15 @@ func doingIn(f *os.File, size, n int64) (string, bool) {
 		lines = lines[1:] // the first is cut mid-line
 	}
 	for i := len(lines) - 1; i >= 0; i-- {
+		var al agyLine
+		if json.Unmarshal(lines[i], &al) == nil && al.Type == "PLANNER_RESPONSE" {
+			if len(al.ToolCalls) > 0 {
+				tc := al.ToolCalls[len(al.ToolCalls)-1]
+				return describeAgyTool(tc.Name, tc.Args), true
+			}
+			return "thinking", true
+		}
+
 		var l tline
 		if json.Unmarshal(lines[i], &l) != nil || l.Type != "assistant" {
 			continue
@@ -121,7 +147,36 @@ func doingIn(f *os.File, size, n int64) (string, bool) {
 
 func str(in map[string]any, k string) string {
 	s, _ := in[k].(string)
-	return strings.TrimSpace(strings.SplitN(s, "\n", 2)[0])
+	s = strings.TrimSpace(strings.SplitN(s, "\n", 2)[0])
+	return strings.Trim(s, "\"")
+}
+
+func describeAgyTool(name string, in map[string]any) string {
+	base := func(k string) string { return filepath.Base(str(in, k)) }
+	switch name {
+	case "run_command":
+		if s := str(in, "toolSummary"); s != "" {
+			return strings.ToLower(s[:1]) + s[1:]
+		}
+		return "$ " + str(in, "CommandLine")
+	case "edit_file":
+		return "editing " + base("Path")
+	case "write_file":
+		return "writing " + base("Path")
+	case "read_file":
+		return "reading " + base("Path")
+	case "search_web":
+		return "searching the web: " + str(in, "query")
+	case "invoke_subagent":
+		if r := str(in, "Role"); r != "" {
+			return "subagent: " + r
+		}
+		return "running a subagent"
+	case "ask_question":
+		return "asking you"
+	default:
+		return strings.ToLower(name)
+	}
 }
 
 // describeTool says a tool call the way you would: "editing sbview.go".
