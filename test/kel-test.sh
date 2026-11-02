@@ -1129,9 +1129,13 @@ wait_until '[ "$(active_win)" = "$MW" ]' 50
 ok "enter on a space header row jumps to that space's window" '[ "$(active_win)" = "$MW" ]'
 
 # invariant 1, through the sidebar: x, y on dirty work is refused by kel kill
+tmux select-window -t "$WTW"
 "$KEL" _sidebar wake
 SW="$(sbpane "$WTW")"
 wait_until 'sbtext "$SW" | grep -q agents'
+wait_until '[ "$(active_win)" = "$WTW" ]' 50
+[ "$(jq -r .selected "$STATE/sidebar.json" 2>/dev/null)" = "a:$(userpane "$WTW")" ] || tmux send-keys -t "$SW" j
+wait_until '[ "$(jq -r .selected "$STATE/sidebar.json" 2>/dev/null)" = "a:$(userpane "$WTW")" ]' 50
 tmux send-keys -t "$SW" x
 wait_until 'sbtext "$SW" | grep -q "kill wt?"'
 ok "x asks before killing, and says how to answer" 'sbtext "$SW" | grep -q "kill wt?" && sbtext "$SW" | grep -q "y yes · n no"'
@@ -1199,7 +1203,9 @@ hook "$(userpane "$WTW")" Stop
 U() { "$KEL" _fleet | jq -r --arg w "$WTW" '.agents[] | select(.window_id == $w) | "\(.state) \(.unseen)"'; }
 ok "a done agent you have not looked at is unseen" '[ "$(U)" = "done true" ]'
 # the earlier jump already marked this window; time a fresh mark, not that
-tmux select-window -t "$MW"; rm -f "$STATE/$WTW.seen"
+tmux select-window -t "$MW"
+wait_until '[ "$(active_win)" = "$MW" ]' 50
+rm -f "$STATE/$WTW.seen"
 t0="$(ms)"
 tmux select-window -t "$WTW"; "$KEL" _sidebar wake
 wait_until '[ -f "$STATE/$WTW.seen" ]' 30
