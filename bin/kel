@@ -3393,14 +3393,14 @@ cmd_card() {
       exit 2
     fi
     local row_objs="[]" link_objs="[]" r l rl rv ll lu
-    for r in "${rows[@]}"; do
+    for r in ${rows[@]+"${rows[@]}"}; do
       case "$r" in
         *=*) rl="${r%%=*}"; rv="${r#*=}" ;;
         *)   echo "kel card: --row must be Label=Value" >&2; exit 2 ;;
       esac
       row_objs="$(printf '%s' "$row_objs" | jq -c --arg l "$rl" --arg v "$rv" '. + [{label:$l, value:$v}]')"
     done
-    for l in "${links[@]}"; do
+    for l in ${links[@]+"${links[@]}"}; do
       case "$l" in
         *=*) ll="${l%%=*}"; lu="${l#*=}" ;;
         *)   echo "kel card: --link must be Label=URL" >&2; exit 2 ;;

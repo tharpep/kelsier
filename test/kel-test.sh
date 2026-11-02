@@ -1984,9 +1984,8 @@ ok "kel card --schema outputs valid json schema" \
    '"$KEL" card --schema | jq -e ".properties.kind and .properties.title and .properties.rows and .properties.links" >/dev/null'
 
 rm -f "$STATE"/*.cards
-env -u TMUX -u TMUX_PANE "$KEL" card result --title "outside kel" >/dev/null 2>&1
 ok "outside kel, kel card exits 0 without writing .cards" \
-   '[ $? -eq 0 ] && [ $(ls "$STATE"/*.cards 2>/dev/null | wc -l) -eq 0 ]'
+   'env -u TMUX -u TMUX_PANE "$KEL" card result --title "outside kel" >/dev/null 2>&1 && [ ! -e "$STATE"/*.cards ]'
 
 ok "invalid kind exits 2" \
    '! "$KEL" card invalid_kind --title "ok" >/dev/null 2>&1'
@@ -2024,7 +2023,7 @@ echo "{not valid json}" >> "$STATE/$CP.cards"
 FJSON_CORRUPT="$("$KEL" _fleet --panes)"
 ok "corrupt card entry in file causes latest to read unreadable" \
    'printf "%s" "$FJSON_CORRUPT" | jq -e --arg p "$CP" ".panes[] | select(.pane_id == \$p) | select(.cards.latest.kind == \"unreadable\" and .cards.latest.title == \"unreadable\")" >/dev/null'
-sed -i '$d' "$STATE/$CP.cards"
+sed '$d' "$STATE/$CP.cards" > "$STATE/$CP.cards.tmp" && mv -f "$STATE/$CP.cards.tmp" "$STATE/$CP.cards"
 
 KEL_POPUP_TRACE="$WORK/card-popups" "$KEL" _panel cards "$WORK/repos/api-gw" "api-gw/ccard" "$CP" >/dev/null 2>&1
 ok "_panel cards records seen epoch" '[ -f "$STATE/$CP.cards-seen" ]'
