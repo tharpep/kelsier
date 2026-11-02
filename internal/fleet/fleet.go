@@ -55,8 +55,9 @@ type Agent struct {
 	Activity      *float64 `json:"activity"`
 	// Doing: a working agent's last tool call in words, read from the tail
 	// of Claude Code's transcript (doing.go). Sidebar path only
-	Doing   *string  `json:"doing,omitempty"`
-	Context *Context `json:"context"`
+	Doing   *string    `json:"doing,omitempty"`
+	Context *Context   `json:"context"`
+	Cards   *PaneCards `json:"cards,omitempty"`
 	// Unseen marks a `done` the user has not looked at since it finished: the
 	// state is newer than the epoch in <window-id>.seen, which the sidebar
 	// writes when the window is shown (spec.md §9). No .seen file means never
@@ -590,15 +591,26 @@ func Load(o Options) Doc {
 			}
 		}
 	}
+	stalePanes := map[string]bool{}
+	for _, prs := range paneRows {
+		for _, r := range prs {
+			if shells[r.cmd] && r.stamp == "" && r.kstate == "" && !agentPanes[r.id] {
+				stalePanes[r.id] = true
+			}
+		}
+	}
+
 	if o.Panes || o.Worktrees {
 		ps := buildPanes(paneRows, paneWins, curPane, agentPanes)
 		doc.Panes = &ps
 		withClaude(&doc, sd, ps)
 		withAgy(&doc)
+		withCards(&doc, sd, stalePanes)
 		withDoing(&doc)
 		withRepos(&doc, sd, o.Worktrees)
 	} else {
 		withAgy(&doc)
+		withCards(&doc, sd, stalePanes)
 	}
 	return doc
 }

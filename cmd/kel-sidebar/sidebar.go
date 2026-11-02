@@ -592,7 +592,23 @@ func (m sbModel) panel(what string) (sbModel, tea.Cmd) {
 		// git calls, so it is asked for off the key path
 		m.mode, m.target, m.input = modeDiff, spaceID(sp.key), ""
 		return m, func() tea.Msg { return sbBase{fleet.BaseRef(dir)} }
-	case "edit", "plan":
+	case "edit", "plan", "cards":
+		if what == "cards" {
+			key := ""
+			if a, ok := m.agentOf(m.view().sel); ok {
+				key = a.pane
+				if key == "" {
+					key = a.wid
+				}
+			} else if p, ok := m.paneOf(m.view().sel); ok {
+				key = p.PaneID
+			}
+			if key == "" {
+				m.msg, m.msgBad = "select an agent or pane first", true
+				return m, nil
+			}
+			return m, runKel(dir, nil, "_panel", what, dir, title, key)
+		}
 		a, ok := m.agentOf(m.view().sel)
 		if !ok && what == "edit" {
 			// e on a space or a pane: your own nvim at that directory
@@ -1073,6 +1089,8 @@ func (m sbModel) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m.browse()
 	case "p":
 		return m.panel("plan")
+	case "i":
+		return m.panel("cards")
 	case "c":
 		return m.panel("claude")
 	case "v", "G", "shift+g":
@@ -1172,6 +1190,7 @@ var sbHelp = [][2]string{
 	{"#", "an agent"},
 	{"e", "edit its last file"},
 	{"p", "plan and tasks"},
+	{"i", "cards (agent report)"},
 	{"r", "rename"},
 	{"x", "kill"},
 	{"R", "relaunch crashed"},
@@ -1532,7 +1551,7 @@ func helpKey(row string) string {
 		return ""
 	default:
 		switch f[0] {
-		case "/", "n", "w", "r", "x", "t", ";", "`", "s", "q", "f", "g", "d", "e", "o", "p", "c", "v", "u", "|", "-", "z", "m", "R":
+		case "/", "n", "w", "r", "x", "t", ";", "`", "s", "q", "f", "g", "d", "e", "o", "p", "c", "v", "u", "|", "-", "z", "m", "R", "i":
 			return f[0]
 		}
 	}

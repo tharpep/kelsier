@@ -31,8 +31,9 @@ type Pane struct {
 	Agent       bool     `json:"agent"` // this pane is its window's agent
 	// Ports is the listening TCP ports in the pane's process tree. null means
 	// "could not tell" (no /proc and no lsof), never "none" — that is [].
-	Ports *[]int `json:"ports"`
-	Git   *Git   `json:"git"` // null outside a repo
+	Ports *[]int     `json:"ports"`
+	Git   *Git       `json:"git"` // null outside a repo
+	Cards *PaneCards `json:"cards"`
 }
 
 // Git is where a pane's directory stands: position, not the land verdict

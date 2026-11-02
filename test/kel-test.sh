@@ -2023,6 +2023,66 @@ ok "the wheel down never enters copy mode" \
 ok "  ...and the wheel up scrolls as it enters" \
    "grep '^bind -n WheelUpPane' '$HERE/../tmux/kel.conf' | grep -q 'copy-mode -e.*scroll-up'"
 
+section "cards: agents reporting to you (M8)"
+ok "kel card --schema outputs valid json schema" \
+   '"$KEL" card --schema | jq -e ".properties.kind and .properties.title and .properties.rows and .properties.links" >/dev/null'
+
+rm -f "$STATE"/*.cards
+ok "outside kel, kel card exits 0 without writing .cards" \
+   'env -u TMUX -u TMUX_PANE "$KEL" card result --title "outside kel" >/dev/null 2>&1 && [ ! -e "$STATE"/*.cards ]'
+
+ok "invalid kind exits 2" \
+   '! "$KEL" card invalid_kind --title "ok" >/dev/null 2>&1'
+ok "missing title exits 2" \
+   '! "$KEL" card result >/dev/null 2>&1'
+ok "title > 80 chars exits 2" \
+   '! "$KEL" card result --title "this title is way too long and exceeds the eighty character maximum limit specified by the schema and spec" >/dev/null 2>&1'
+ok "invalid row format exits 2" \
+   '! "$KEL" card result --title "ok" --row "invalid_row" >/dev/null 2>&1'
+ok "non-http/https link exits 2" \
+   '! "$KEL" card result --title "ok" --link "ftp://example.com" >/dev/null 2>&1'
+ok "unknown field in json exits 2" \
+   '! printf "%s" "{\"kind\":\"result\",\"title\":\"ok\",\"extra\":\"bad\"}" | "$KEL" card --json >/dev/null 2>&1'
+
+reset
+NEW api-gw ccard
+CP="$(pane_of api-gw ccard)"
+
+TMUX_PANE="$CP" "$KEL" card result --title "unit tests pass" --note "all 42 green" --row "tests=42" --link "pr=https://github.com/foo/bar/pull/1"
+ok "valid card creates pane .cards file" '[ -f "$STATE/$CP.cards" ]'
+ok "card content preserves kind, title, note, rows, and links" \
+   'jq -e "select(.kind==\"result\" and .title==\"unit tests pass\" and .note==\"all 42 green\" and .rows[0].label==\"tests\" and .links[0].url==\"https://github.com/foo/bar/pull/1\")" "$STATE/$CP.cards" >/dev/null'
+
+TMUX_PANE="$CP" "$KEL" card update --title "$(printf 'clean\x07title\x7f')"
+ok "control characters stripped from title" \
+   'tail -n 1 "$STATE/$CP.cards" | jq -e "select(.title == \"cleantitle\")" >/dev/null'
+
+FJSON="$("$KEL" _fleet --panes)"
+ok "fleet doc pane reports cards count and unseen" \
+   'printf "%s" "$FJSON" | jq -e --arg p "$CP" ".panes[] | select(.pane_id == \$p) | select(.cards.count == 2 and .cards.unseen == true and .cards.latest.kind == \"update\")" >/dev/null'
+ok "fleet doc agent reports cards count and unseen" \
+   'printf "%s" "$FJSON" | jq -e ".agents[] | select(.name == \"ccard\") | select(.cards.count == 2 and .cards.unseen == true)" >/dev/null'
+
+echo "{not valid json}" >> "$STATE/$CP.cards"
+FJSON_CORRUPT="$("$KEL" _fleet --panes)"
+ok "corrupt card entry in file causes latest to read unreadable" \
+   'printf "%s" "$FJSON_CORRUPT" | jq -e --arg p "$CP" ".panes[] | select(.pane_id == \$p) | select(.cards.latest.kind == \"unreadable\" and .cards.latest.title == \"unreadable\")" >/dev/null'
+sed '$d' "$STATE/$CP.cards" > "$STATE/$CP.cards.tmp" && mv -f "$STATE/$CP.cards.tmp" "$STATE/$CP.cards"
+
+KEL_POPUP_TRACE="$WORK/card-popups" "$KEL" _panel cards "$WORK/repos/api-gw" "api-gw/ccard" "$CP" >/dev/null 2>&1
+ok "_panel cards records seen epoch" '[ -f "$STATE/$CP.cards-seen" ]'
+ok "_panel cards composes markdown view" \
+   'grep -q "## update · cleantitle" "$STATE/$CP.view" && grep -q "## result · unit tests pass" "$STATE/$CP.view"'
+ok "_panel cards opens popup" '[ -f "$WORK/card-popups" ] && grep -q "cards · api-gw/ccard" "$WORK/card-popups"'
+
+FJSON_SEEN="$("$KEL" _fleet --panes)"
+ok "after opening cards, fleet reports unseen: false" \
+   'printf "%s" "$FJSON_SEEN" | jq -e --arg p "$CP" ".panes[] | select(.pane_id == \$p) | select(.cards.unseen == false)" >/dev/null'
+
+K api-gw kill ccard >/dev/null 2>&1
+ok "kel kill removes .cards and .cards-seen" \
+   '[ ! -f "$STATE/$CP.cards" ] && [ ! -f "$STATE/$CP.cards-seen" ]'
+
 # ---------------------------------------------------------------- summary
 printf '\n'
 if [ "$fail" -eq 0 ]; then

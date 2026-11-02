@@ -90,6 +90,8 @@ change; migrate old records in `migrate_meta`.
 | `<pane-id>.edit` | two lines: the path the window's agent last edited, then its first changed line. Written by the `PostToolUse` hook (on every tool since 2026-10-21; only edits write this), read by `kel _panel edit` |
 | `<pane-id>.plan` | two lines like `.edit`: the plan file a plan-mode `Write` under `$CLAUDE_CONFIG_DIR/plans/` named. The same hook, sorted by path |
 | `<pane-id>.view` | what `p` last composed (plan, then tasks) for its popup; overwritten each time |
+| `<pane-id>.cards` | JSON lines of cards reported by agents (`kel card`), newest last, last 20 kept (spec §10a) |
+| `<pane-id>.cards-seen` | one epoch: when the pane's cards were last viewed via `i`. If `latest.at > seen`, cards are unseen |
 | `lazygit-overlay.yml` | `quitOnTopLevelReturn: true`, laid over the user's lazygit config (never written into it) so `esc` closes kel's lazygit popup |
 | `prompt.out` | the last multi-line answer `prefix k` showed in a popup |
 | `claude-agents.json` | `{at, bin, sessions, failed}` — `claude agents --json`, cached 10 s for the sidebar's path; `bin` remembers where claude is |
