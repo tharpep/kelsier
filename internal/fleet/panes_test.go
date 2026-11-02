@@ -97,7 +97,10 @@ func TestClassify(t *testing.T) {
 }
 
 func TestRepoRootWorktree(t *testing.T) {
-	root := t.TempDir()
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
 	main := filepath.Join(root, "repo")
 	wt := filepath.Join(root, "wt")
 	os.MkdirAll(filepath.Join(main, ".git"), 0o755)
@@ -113,6 +116,12 @@ func TestRepoRootWorktree(t *testing.T) {
 	}
 	if _, _, ok := repoRoot(root); ok {
 		t.Error("outside a repo should not be ok")
+	}
+	sym := filepath.Join(root, "sym")
+	if err := os.Symlink(main, sym); err == nil {
+		if r, linked, ok := repoRoot(filepath.Join(sym, "sub")); !ok || r != main || linked {
+			t.Errorf("symlink checkout: %q %v %v", r, linked, ok)
+		}
 	}
 }
 
