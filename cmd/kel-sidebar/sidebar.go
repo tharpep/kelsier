@@ -488,6 +488,14 @@ func (m *sbModel) activate(id string) {
 				m.toggle(s.key, s.open)
 			}
 		}
+	case strings.HasPrefix(id, "w:"):
+		for _, s := range v.spaces {
+			if wtID(s.key) == id {
+				m.toggle(wtKey(s.key), s.wtOpen)
+				m.ui.sel = id
+				m.saveShared()
+			}
+		}
 	case strings.HasPrefix(id, "a:"):
 		if a, ok := m.agentOf(id); ok {
 			jump(a.wid, a.pane)
@@ -557,6 +565,8 @@ func (m sbModel) selSpace(id string) (sbSpace, bool) {
 	switch {
 	case strings.HasPrefix(id, "s:"):
 		key = strings.TrimPrefix(id, "s:")
+	case strings.HasPrefix(id, "w:"):
+		key = strings.TrimPrefix(id, "w:")
 	case m.doc.Panes != nil:
 		wid := ""
 		if a, ok := m.agentOf(id); ok {

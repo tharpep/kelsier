@@ -67,7 +67,10 @@ func worktreeStamp(main string) int64 {
 func mainRoot(root string) string {
 	b, err := os.ReadFile(filepath.Join(root, ".git"))
 	if err != nil {
-		return root // a directory (the main checkout), or unreadable
+		if eval, err := filepath.EvalSymlinks(root); err == nil {
+			return eval
+		}
+		return root
 	}
 	gd := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(string(b)), "gitdir:"))
 	if !filepath.IsAbs(gd) {
@@ -75,7 +78,14 @@ func mainRoot(root string) string {
 	}
 	sep := string(filepath.Separator)
 	if i := strings.Index(gd, sep+".git"+sep+"worktrees"+sep); i > 0 {
-		return gd[:i]
+		mr := gd[:i]
+		if eval, err := filepath.EvalSymlinks(mr); err == nil {
+			return eval
+		}
+		return mr
+	}
+	if eval, err := filepath.EvalSymlinks(root); err == nil {
+		return eval
 	}
 	return root
 }

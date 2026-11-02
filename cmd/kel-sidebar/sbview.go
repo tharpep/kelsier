@@ -61,7 +61,34 @@ type sbSpace struct {
 	missing bool        // a worktree whose directory is gone
 	agents  int         // agents working in this checkout
 	repo    string      // the repo's name, for a worktree whose label is its branch
+	folded     bool
+	wtFold     bool
+	wtOpen     bool
+	wtHidden   int
+	wtUnpushed int
 }
+
+const wtFoldAt = 3
+
+func wtID(key string) string { return "w:" + key }
+
+func (s sbSpace) wtSummary() bool { return s.wtFold && (s.wtOpen || s.wtHidden > 0) }
+
+func (s sbSpace) wtText() string {
+	if s.wtOpen {
+		return "− worktrees"
+	}
+	t := fmt.Sprintf("+%d worktrees", s.wtHidden)
+	if s.wtHidden == 1 {
+		t = "+1 worktree"
+	}
+	if s.wtUnpushed > 0 {
+		t += fmt.Sprintf("  %d unpushed", s.wtUnpushed)
+	}
+	return t
+}
+
+func wtKey(key string) string { return "wt:" + key }
 
 type sbAgent struct {
 	repo string // the repo its pane stands in — not its record's group,
@@ -392,6 +419,20 @@ func buildView(doc fleet.Doc, ui uiState) sbView {
 		}
 		v.spaces = v.spaces[:0:0]
 		for _, t := range tops {
+			if ks := kids[t.key]; ui.filter == "" && len(ks) > wtFoldAt {
+				t.wtFold, t.wtOpen = true, ui.expanded[wtKey(t.key)]
+				for i := range ks {
+					k := &ks[i]
+					if t.wtOpen || k.agents > 0 || k.current || k.state != nil {
+						continue
+					}
+					k.folded = true
+					t.wtHidden++
+					if k.land != nil && k.land.Code == "unpushed" && k.land.N != nil {
+						t.wtUnpushed += int(*k.land.N)
+					}
+				}
+			}
 			v.spaces = append(v.spaces, t)
 			v.spaces = append(v.spaces, kids[t.key]...)
 		}
@@ -418,11 +459,17 @@ func buildView(doc fleet.Doc, ui uiState) sbView {
 		}
 	}
 	for _, s := range v.spaces {
+		if s.folded {
+			continue
+		}
 		v.entryIDs = append(v.entryIDs, spaceID(s.key))
 		if s.open {
 			for _, p := range s.panes {
 				v.entryIDs = append(v.entryIDs, p.PaneID)
 			}
+		}
+		if s.wtSummary() {
+			v.entryIDs = append(v.entryIDs, wtID(s.key))
 		}
 	}
 	for _, a := range v.agents {
@@ -806,8 +853,17 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 		add("  "+dim+truncate("nothing open", w-2)+reset, lineRef{})
 	}
 	for _, s := range v.spaces {
+		if s.folded {
+			continue
+		}
 		id := spaceID(s.key)
 		r := lineRef{id: id, kind: "space"}
+		summary := func() {
+			if s.wtSummary() {
+				wid := wtID(s.key)
+				add(lead(wid)+dim+"└"+reset+"  "+dim+truncate(s.wtText(), w-4)+reset, lineRef{id: wid, kind: "space"})
+			}
+		}
 		dot := " "
 		if s.state != nil {
 			d, c := stateLook(s.state, s.unseen)
@@ -843,6 +899,7 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 			add("   "+dim+truncate(spaceDetail(s), text)+reset, r)
 		}
 		if !s.open {
+			summary()
 			continue
 		}
 		// two panes that would read the same (`$ bash`, `$ bash`) are told
@@ -870,6 +927,7 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 				add(indent+"   "+col+truncate(cardText, text)+reset, pr)
 			}
 		}
+		summary()
 	}
 
 	add("", lineRef{})
@@ -1170,6 +1228,8 @@ func hint(v sbView, w int) string {
 				break
 			}
 		}
+	case strings.HasPrefix(v.sel, "w:"):
+		keys = []string{"enter", "n new", "w worktree"}
 	case strings.HasPrefix(v.sel, "s:"):
 		keys = []string{"f files", "g git", "e edit", "d diff", "n new", "t shell", "c claude", "G prs"}
 		for _, s := range v.spaces {

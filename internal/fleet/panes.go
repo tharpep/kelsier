@@ -62,6 +62,9 @@ func repoRoot(dir string) (root string, linked, ok bool) {
 	}
 	for d := filepath.Clean(dir); ; d = filepath.Dir(d) {
 		if fi, err := os.Stat(filepath.Join(d, ".git")); err == nil {
+			if eval, err := filepath.EvalSymlinks(d); err == nil {
+				return eval, !fi.IsDir(), true
+			}
 			return d, !fi.IsDir(), true
 		}
 		if d == filepath.Dir(d) {
