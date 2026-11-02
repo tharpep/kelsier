@@ -66,6 +66,8 @@ chmod +x "$WORK/shim/tmux"
 export PATH="$WORK/shim:$PATH"
 printf '#!/bin/sh\n[ "$1 $2" = "agents --json" ] && { cat "%s/claude-agents.json" 2>/dev/null || echo "[]"; }\n' "$WORK" > "$WORK/claude-stub"
 chmod +x "$WORK/claude-stub"
+printf '#!/bin/sh\nexec sleep 9999\n' > "$WORK/shim/agy"
+chmod +x "$WORK/shim/agy"
 STATE="$XDG_STATE_HOME/kel"
 SESSIONS="$STATE/sessions"
 
@@ -126,6 +128,14 @@ hook() {
   printf '%s' "{\"session_id\":\"s\",\"cwd\":\"$WORK\",\"hook_event_name\":\"$2\"\
 ${3:+,\"notification_type\":\"$3\"}${4:+,\"message\":\"$4\"}}" \
     | TMUX_PANE="$1" "$KEL" hook "$2"
+}
+hook_agy() {
+  local tool="${3:-}" term="${4:-}"
+  printf '{"conversationId":"s-agy","workspacePaths":["%s"],"transcriptPath":"%s/transcript.jsonl","artifactDirectoryPath":"%s/brain","modelName":"auto"%s%s}\n' \
+    "$WORK" "$WORK" "$WORK" \
+    "${tool:+,\"toolCall\":{\"name\":\"$tool\",\"args\":{}}}" \
+    "${term:+,\"terminationReason\":\"$term\"}" \
+    | TMUX_PANE="$1" "$KEL" hook agy "$2"
 }
 state_of() { "$KEL" ls 2>/dev/null | awk -v n="$1" '$2==n {print $3}'; }
 # Look windows up by NAME, never by index.  kel.conf sets base-index 1, so a
@@ -358,6 +368,34 @@ K api-gw new agy-agent --agent agy >/dev/null 2>&1
 AGY_PANE="$(pane_of api-gw agy-agent)"
 ok "kel new --agent agy starts agy without claude-specific flags" '[ "$(jq -r .agent "$SESSIONS/api-gw/agy-agent.json" 2>/dev/null)" = agy ]'
 ok "  ...and _fleet classifies an agy pane as agent" '[ "$("$KEL" _fleet --panes | jq -r --arg p "$AGY_PANE" ".panes[] | select(.pane_id == \$p) | .kind")" = agent ]'
+
+# agy hooks: SessionStart, PreInvocation, PreToolUse, Stop
+tmux send-keys -t "$AGY_PANE" "exec sleep 9999" Enter
+wait_until '[ "$(tmux display -p -t "$AGY_PANE" "#{pane_current_command}")" = sleep ]'
+hook_agy "$AGY_PANE" SessionStart >/dev/null
+ok "agy SessionStart sets idle state" '[ "$(state_of agy-agent)" = idle ]'
+hook_agy "$AGY_PANE" PreInvocation >/dev/null
+ok "agy PreInvocation sets working state" '[ "$(state_of agy-agent)" = working ]'
+AGY_PRE_OUT="$(hook_agy "$AGY_PANE" PreToolUse ask_question)"
+ok "agy PreToolUse ask_question sets waiting state" '[ "$(state_of agy-agent)" = waiting ]'
+ok "  ...and PreToolUse returns allow decision" '[ "$(printf "%s" "$AGY_PRE_OUT" | jq -r .decision)" = allow ]'
+hook_agy "$AGY_PANE" PreToolUse ask_custom_permission >/dev/null
+ok "agy PreToolUse ask_custom_permission sets waiting state" '[ "$(state_of agy-agent)" = waiting ]'
+hook_agy "$AGY_PANE" PreToolUse invoke_subagent >/dev/null
+ok "agy PreToolUse invoke_subagent sets working state" '[ "$(state_of agy-agent)" = working ]'
+hook_agy "$AGY_PANE" Stop '' NO_TOOL_CALL >/dev/null
+ok "agy Stop sets done state" '[ "$(state_of agy-agent)" = done ]'
+
+# agy artifacts & plan
+mkdir -p "$WORK/brain"
+printf '# Implementation Plan\n\nStep 1: do it\n' > "$WORK/brain/implementation_plan.md"
+printf '%s' "{\"conversationId\":\"s-agy\",\"workspacePaths\":[\"$WORK\"],\"transcriptPath\":\"$WORK/transcript.jsonl\",\"artifactDirectoryPath\":\"$WORK/brain\",\"modelName\":\"auto\",\"toolCall\":{\"name\":\"write_file\",\"args\":{\"Path\":\"$WORK/brain/implementation_plan.md\"}}}" \
+  | TMUX_PANE="$AGY_PANE" "$KEL" hook agy PostToolUse >/dev/null
+ok "agy PostToolUse on artifact sets .plan" '[ -f "$STATE/$AGY_PANE.plan" ]'
+AGY_WID="$(tmux display-message -p -t "$AGY_PANE" '#{window_id}')"
+KEL_POPUP_NODRAW=1 "$KEL" _panel plan "$WORK" "agy-agent" "$AGY_WID" >/dev/null 2>&1 || true
+ok "agy plan popup composes view with artifact" 'grep -q "Implementation Plan" "$STATE/$AGY_PANE.view" 2>/dev/null'
+
 "$KEL" kill api-gw/agy-agent >/dev/null 2>&1
 # #25: a record whose JSON does not even parse must still render, distinctly
 # -- not vanish, and (the worse bug this actually was) not take the rest of
@@ -1264,7 +1302,12 @@ ok "  ...and leaves the agent's state alone"    '[ ! -f "$STATE/$K5.state" ]'
 ok "e with no nvim open there: a popup at the line" 'grep -q "^$WT5	nvim · api-gw/wt5 · prefix q closes	nvim +12 $WT5/README.md$" "$KEL_POPUP_TRACE"'
 # a pane whose process is called nvim (a renamed sleep), and a socket where
 # nvim 0.9+ would listen: e must reach it over the socket and select the pane
-mkdir -p "$WORK/nvimbin"; cp "$(command -v sleep)" "$WORK/nvimbin/nvim"
+mkdir -p "$WORK/nvimbin"
+if command -v cc >/dev/null 2>&1; then
+  printf '#include <unistd.h>\nint main(void) { pause(); return 0; }\n' | cc -x c -o "$WORK/nvimbin/nvim" -
+else
+  cp "$(command -v sleep)" "$WORK/nvimbin/nvim"
+fi
 NP="$(tmux split-window -d -P -F '#{pane_id}' -t "$W5" -c "$WT5" "'$WORK/nvimbin/nvim' 9999")"
 wait_until '[ "$(tmux display -p -t "$NP" "#{pane_current_command}")" = nvim ]'
 python3 -c 'import socket,sys; socket.socket(socket.AF_UNIX).bind(sys.argv[1])' "$XDG_RUNTIME_DIR/nvim.$(tmux display -p -t "$NP" '#{pane_pid}').0"
@@ -1316,6 +1359,7 @@ unset CLAUDE_CONFIG_DIR
 printf '#!/bin/sh\nexec sleep 30\n' > "$WORK/shim/yazi"
 ( unset KEL_POPUP_TRACE; KEL_POPUP_NODRAW=1 TMUX="$TMUX_TMPDIR/tmux-$(id -u)/default,1,0" "$KEL" _panel files "$WT5" api-gw/wt5 ) >/dev/null 2>&1
 POP="$(tmux list-sessions -F '#{session_name}' | grep '^_kelpop_' | head -1)"
+wait_until '[ "$(tmux list-panes -t "=$POP:" -F "#{pane_current_command}" 2>/dev/null)" = sleep ]'
 ok "a popup's tool runs in a hosted session"     '[ -n "$POP" ] && [ "$(tmux list-panes -t "=$POP:" -F "#{pane_current_command}")" = sleep ]'
 ok "  ...marked as a popup's"                      '[ "$(tmux show-options -v -t "=$POP:" @kel-popup)" = 1 ]'
 ok "  ...nor a pane title — kel's labels stay out" '[ "$(tmux show-options -wv -t "=$POP:" pane-border-status)" = off ]'

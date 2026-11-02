@@ -97,6 +97,14 @@ if [ "${1:-}" = "--uninstall" ]; then
     fi
   fi
 
+  AGY_HOOKS="$HOME/.gemini/config/hooks.json"
+  if [ -f "$AGY_HOOKS" ] && jq -e '.kelsier // empty' "$AGY_HOOKS" >/dev/null 2>&1; then
+    backup "$AGY_HOOKS"
+    tmp="$(mktemp)"
+    jq 'del(.kelsier)' "$AGY_HOOKS" > "$tmp" && mv "$tmp" "$AGY_HOOKS"
+    echo "  unwired agy hooks from $AGY_HOOKS (backed up)"
+  fi
+
   if [ "$purge" = 1 ]; then
     printf '\033[1;31m>>> purge: delete %s and every agent record in it? [y/N] \033[0m' "$STATE_DIR"
     read -r a || a=n
@@ -234,6 +242,48 @@ tmp="$(mktemp)"
 jq --arg k "$KEL" '.statusLine = {type:"command", command:($k + " statusline")}' \
   "$SETTINGS" > "$tmp" && mv "$tmp" "$SETTINGS"
 echo "  wired: statusLine  (context % / cost per agent)"
+
+say "Antigravity (agy) hooks -> $HOME/.gemini/config/hooks.json"
+AGY_CONF_DIR="$HOME/.gemini/config"
+AGY_HOOKS="$AGY_CONF_DIR/hooks.json"
+if command -v agy >/dev/null 2>&1 || [ -d "$AGY_CONF_DIR" ]; then
+  mkdir -p "$AGY_CONF_DIR"
+  [ -f "$AGY_HOOKS" ] || echo '{}' > "$AGY_HOOKS"
+  backup "$AGY_HOOKS"
+  tmp="$(mktemp)"
+  jq --arg k "$KEL" '
+    .kelsier = {
+      "SessionStart": [
+        { "type": "command", "command": ($k + " hook agy SessionStart"), "timeout": 5 }
+      ],
+      "PreInvocation": [
+        { "type": "command", "command": ($k + " hook agy PreInvocation"), "timeout": 5 }
+      ],
+      "PreToolUse": [
+        {
+          "matcher": "*",
+          "hooks": [
+            { "type": "command", "command": ($k + " hook agy PreToolUse"), "timeout": 5 }
+          ]
+        }
+      ],
+      "PostToolUse": [
+        {
+          "matcher": "*",
+          "hooks": [
+            { "type": "command", "command": ($k + " hook agy PostToolUse"), "timeout": 5 }
+          ]
+        }
+      ],
+      "Stop": [
+        { "type": "command", "command": ($k + " hook agy Stop"), "timeout": 5 }
+      ]
+    }
+  ' "$AGY_HOOKS" > "$tmp" && mv "$tmp" "$AGY_HOOKS"
+  echo "  wired: SessionStart PreInvocation PreToolUse PostToolUse Stop"
+else
+  echo "  skipped: agy not installed and ~/.gemini/config does not exist"
+fi
 
 say "done"
 # Quoted on purpose: nothing below is a variable, and an unquoted heredoc

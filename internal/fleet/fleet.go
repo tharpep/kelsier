@@ -604,10 +604,12 @@ func Load(o Options) Doc {
 		ps := buildPanes(paneRows, paneWins, curPane, agentPanes)
 		doc.Panes = &ps
 		withClaude(&doc, sd, ps)
+		withAgy(&doc)
 		withCards(&doc, sd, stalePanes)
 		withDoing(&doc)
 		withRepos(&doc, sd, o.Worktrees)
 	} else {
+		withAgy(&doc)
 		withCards(&doc, sd, stalePanes)
 	}
 	return doc

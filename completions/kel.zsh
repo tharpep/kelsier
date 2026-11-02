@@ -32,6 +32,7 @@ _kel() {
     'config:edit config.toml (seeded from the shipped example)'
     'update:fast-forward the clone kel runs from, then re-wire'
     'card:report from an agent to you (result, update, decision)'
+    'sync:sync state and context for running agy agents'
     'help:usage'
   )
 
