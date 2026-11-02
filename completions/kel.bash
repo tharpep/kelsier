@@ -18,7 +18,7 @@ _kel() {
     cword=$COMP_CWORD
   }
 
-  local subcmds="new kill ls rename sidebar url shot shell quit restore relaunch reload sweep prune doctor config update help"
+  local subcmds="new kill ls rename sidebar url shot shell quit restore relaunch reload sweep prune doctor config update card help"
 
   if [ "$cword" -eq 1 ]; then
     COMPREPLY=( $(compgen -W "$subcmds" -- "$cur") )
@@ -27,6 +27,12 @@ _kel() {
 
   local sub="${COMP_WORDS[1]}"
   case "$sub" in
+    card)
+      case "$cword" in
+        2) COMPREPLY=( $(compgen -W "result update decision --schema --json" -- "$cur") ) ;;
+        *) COMPREPLY=( $(compgen -W "--title --note --row --link --json" -- "$cur") ) ;;
+      esac
+      ;;
     kill)
       case "$cur" in
         -*) COMPREPLY=( $(compgen -W "-f" -- "$cur") ) ;;

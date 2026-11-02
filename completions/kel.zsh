@@ -31,6 +31,7 @@ _kel() {
     'doctor:capability probe'
     'config:edit config.toml (seeded from the shipped example)'
     'update:fast-forward the clone kel runs from, then re-wire'
+    'card:report from an agent to you (result, update, decision)'
     'help:usage'
   )
 
@@ -41,6 +42,19 @@ _kel() {
 
   local sub="${words[2]}"
   case "$sub" in
+    card)
+      if (( CURRENT == 3 )); then
+        _values 'kind' result update decision
+      else
+        _arguments \
+          '--title[title of the card (max 80 chars)]:' \
+          '--note[note content (max 500 chars)]:' \
+          '*--row[label=value row (max 8)]:' \
+          '*--link[label=url link (max 4)]:' \
+          '--json[read card json from stdin]' \
+          '--schema[print json schema]'
+      fi
+      ;;
     kill)
       _alternative \
         'flags:flag:(-f)' \
