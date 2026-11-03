@@ -1543,7 +1543,7 @@ git init -q -b main "$UR" && git -C "$UR" -c user.email=t@t -c user.name=t commi
 git -C "$UR" remote add origin "$UO" && git -C "$UR" push -q origin main
 ( cd "$UR" && "$KEL" new up -w --agent 'sleep 9999' >/dev/null 2>&1 )
 UWT="$(jq -r .cwd "$SESSIONS/unpushed/up.json" 2>/dev/null)"
-git -C "$UWT" -c user.email=t@t -c user.name=t commit -q --allow-empty -m "only here"
+[ -d "$UWT" ] && git -C "$UWT" -c user.email=t@t -c user.name=t commit -q --allow-empty -m "only here"
 out="$("$KEL" kill unpushed/up 2>&1)"
 ok "a worktree whose commits are on no remote is refused" '[[ "$out" == *refusing* ]] && [ -n "$(window_of unpushed up)" ]'
 ok "  ...naming the commit at risk"       '[[ "$out" == *"only here"* ]]'
@@ -1558,12 +1558,15 @@ git -C "$MR" remote add origin "$MO" && git -C "$MR" push -q origin main
 git -C "$MR" remote set-url origin "https://github.com/example/merged.git"
 git -C "$MR" remote set-url --push origin "$MO"
 ( cd "$MR" && "$KEL" new mp -w --agent 'sleep 9999' >/dev/null 2>&1 )
-MWT="$(jq -r .cwd "$SESSIONS/merged/mp.json" 2>/dev/null)"
-git -C "$MWT" -c user.email=t@t -c user.name=t commit -q --allow-empty -m "in pr"
+MWT="$(jq -r .cwd "$SESSIONS/merged-pr/mp.json" 2>/dev/null)"
+# never `git -C ""`: with no worktree it commits into whatever checkout the
+# suite runs from, and it once did — into kelsier itself, on every run
+[ -d "$MWT" ] && git -C "$MWT" -c user.email=t@t -c user.name=t commit -q --allow-empty -m "in pr"
+ok "the merged-PR worktree holds its own commit"  '[ -d "$MWT" ] && [ "$(git -C "$MWT" log -1 --format=%s)" = "in pr" ]'
 MP_HEAD="$(git -C "$MWT" rev-parse HEAD)"
 mkdir -p "$STATE/pr-cache"
 printf '[{"sha":"%s","merged":true,"state":"closed"}]\n' "$MP_HEAD" > "$STATE/pr-cache/example__merged.sha.json"
-out="$("$KEL" kill merged/mp 2>&1)"
+out="$("$KEL" kill merged-pr/mp 2>&1)"
 ok "a worktree in a merged PR is safe to kill without -f" '[[ "$out" == *killed* ]]'
 
 # a worktree directory removed by hand (rm -rf, a file manager) BEFORE kill
