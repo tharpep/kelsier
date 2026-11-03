@@ -121,13 +121,15 @@ in two sections:
   remote, so the pile is not mistaken for clutter). Worktrees with an agent,
   or the one you are in, stay listed. `enter` or a click on that row opens the
   list (`− worktrees` closes it); the choice is saved with the other folds.
-- **`agents`** — who needs you, most urgent first: a dot per state (yellow
-  waiting, cyan working, green finished-and-not-yet-looked-at, dim idle or
-  seen, magenta throttled, red `✕` dead, dim `?` unknown), then how long, the
-  context % and the cost. A working agent adds a third line saying what it
-  is doing — `editing sbview.go`, `run the tests` — its last tool call, read
-  from the tail of Claude Code's own transcript. The repo beside an agent's
-  name is the one it works in.
+- **`agents`** — who needs you, grouped under the repo each works in, the
+  repo with the most urgent agent first: a dot per state (amber waiting, cyan
+  working, green finished-and-not-yet-looked-at, grey idle or seen, violet
+  throttled, red `✕` dead, grey `?` unknown) and how long, right-aligned. A
+  state that needs a word gets a chip: `needs you`, `done`, `dead`, `quota`.
+  A waiting agent shows what it waits for (`allow Bash?`). The selected agent
+  opens to its context % and cost, what it is doing — `editing sbview.go`,
+  its last tool call, read from the tail of Claude Code's own transcript —
+  and its subagents.
 
 At the foot, when there is room, two groups of keys you can also click, two to
 a line:
@@ -186,10 +188,9 @@ the key. kel writes every one of these the same way, using your real prefix.
 command never needs a shell: type `new docs -w`, `restore`, `url`… A
 one-line answer comes back as a message, a longer one in a popup.
 
-A blue `▌` marks the selection; where you are is the name in bold. Only states
-that need you are coloured — waiting yellow, working cyan, finished-and-unseen
-green, dead red; idle, seen and unknown are grey, and a doubtful `working?` is
-grey italic. The footer reads `click, or Ctrl-b then space` until the sidebar
+Each entry is one line. The selection stands on a lighter block with a blue
+`▌` down its side and its detail inside; where you are is the name in bold. A
+doubtful `working` reads `quiet 2h` in grey italic. The footer reads `click, or Ctrl-b then space` until the sidebar
 has the keyboard — or, while an agent waits on you, `1 waiting 6m · Ctrl-b
 then \`` in yellow, which a click also jumps — then shows the keys for whatever is selected (`e edit · p plan · x kill · ?` on an agent) — `?` lists them all, and a click on a bold key there runs it.
 
@@ -256,8 +257,8 @@ see `setup.md` §5b to change either. Hidden sidebars do no work; the one you ca
 seconds and at once when an agent changes state. `kel sidebar off` removes it
 everywhere (and new windows get none) until `kel sidebar on`; `sidebar =
 "off"` in config disables it outright; `sidebar_width` sets the width and
-`sidebar_style` its background (black by default; `"default"` for the
-terminal's own).
+`sidebar_style` its colours (kel's own by default, `fg=#e6e6e9,bg=#131316`;
+`"default"` for the terminal's own).
 
 ## Groups
 

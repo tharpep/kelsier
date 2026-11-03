@@ -41,15 +41,26 @@ func f(p *float64) float64 {
 	return *p
 }
 
+// kel's own theme (spec.md §5d), the same on every machine. The surface the
+// sidebar sits on is the pane's tmux style (KEL_SIDEBAR_STYLE in bin/kel);
+// these must stay readable on it.
 const (
 	reset  = "\x1b[0m"
-	dim    = "\x1b[2m"
 	bold   = "\x1b[1m"
-	yellow = "\x1b[33m"
-	red    = "\x1b[31m"
-	cyan   = "\x1b[36m"
-	green  = "\x1b[32m"
-	purple = "\x1b[35m"
+	dim    = "\x1b[38;2;107;107;116m"
+	mid    = "\x1b[38;2;161;161;170m"
+	faint  = "\x1b[38;2;85;85;94m"
+	yellow = "\x1b[38;2;245;167;66m"
+	red    = "\x1b[38;2;242;114;127m"
+	cyan   = "\x1b[38;2;86;212;221m"
+	green  = "\x1b[38;2;95;211;141m"
+	purple = "\x1b[38;2;180;140;242m"
+
+	raised   = "\x1b[48;2;29;29;34m"
+	yellowBg = "\x1b[48;2;46;34;16m"
+	redBg    = "\x1b[48;2;49;21;25m"
+	greenBg  = "\x1b[48;2;18;41;27m"
+	purpleBg = "\x1b[48;2;36;27;54m"
 )
 
 // humanizeSecs matches bin/kel's helper: 45s, 6m, 1h05m.

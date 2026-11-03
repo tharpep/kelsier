@@ -1,30 +1,30 @@
-[2mspaces[0m
- [36m●[0m [1mkelsier[0m
-   [2mmain[0m
- [2m○[0m kelsier
-   [2mfinished ↑3[0m
+  [38;2;107;107;116mspaces[0m
+  [38;2;86;212;221m●[0m [1mkelsier[0m                [38;2;107;107;116mmain[0m
+  [38;2;107;107;116m○[0m kelsier         [38;2;107;107;116mfinished ↑3[0m
 
-[2magents[0m
-[34m▌[0m[36m●[0m [1mkelsier[0m
-   [36mworking 1m[0m[2m · 30% · $2.00[0m
- [2m○[0m finished  [2mkelsier-fix-auth[0m
-   [2mdone 7m[0m[2m · 52% · $3.30[0m
-
-
+  [38;2;107;107;116magents[0m
+  [38;2;85;85;94mkelsier[0m
+[48;2;29;29;34m[38;2;106;167;248m▌[0m[48;2;29;29;34m                               [0m
+[48;2;29;29;34m[38;2;106;167;248m▌[0m[48;2;29;29;34m [38;2;86;212;221m●[0m[48;2;29;29;34m [1mkelsier[0m[48;2;29;29;34m                  [38;2;107;107;116m1m[0m[48;2;29;29;34m [0m
+[48;2;29;29;34m[38;2;106;167;248m▌[0m[48;2;29;29;34m   [38;2;161;161;170m30% · $2.00[0m[48;2;29;29;34m                 [0m
+[48;2;29;29;34m[38;2;106;167;248m▌[0m[48;2;29;29;34m                               [0m
+  [38;2;107;107;116m○[0m finished                 [38;2;107;107;116m7m[0m
 
 
 
 
-[2magent [0mkelsier
- [1me[0m [2medit file    [0m [1mp[0m [2mplan         [0m
- [1mi[0m [2mcards        [0m [1mr[0m [2mrename       [0m
- [1mx[0m [2mkill         [0m [1mz[0m [2mzoom         [0m
 
-[2mkel[0m
- [1mn[0m [2mnew agent    [0m [1mw[0m [2mworktree     [0m
- [1m|[0m [2msplit right  [0m [1m-[0m [2msplit down   [0m
- [1m`[0m [2mwaiting      [0m [1mu[0m [2musage        [0m
- [1mv[0m [2mPRs          [0m [1m;[0m [2mcommand      [0m
- [1m?[0m [2mkeys         [0m [1mq[0m [2mquit         [0m
 
-[2mesc back to your pane[0m
+  [38;2;107;107;116magent [0mkelsier
+  [1me[0m [38;2;107;107;116medit file   [0m  [1mp[0m [38;2;107;107;116mplan        [0m
+  [1mi[0m [38;2;107;107;116mcards       [0m  [1mr[0m [38;2;107;107;116mrename      [0m
+  [1mx[0m [38;2;107;107;116mkill        [0m  [1mz[0m [38;2;107;107;116mzoom        [0m
+
+  [38;2;107;107;116mkel[0m
+  [1mn[0m [38;2;107;107;116mnew agent   [0m  [1mw[0m [38;2;107;107;116mworktree    [0m
+  [1m|[0m [38;2;107;107;116msplit right [0m  [1m-[0m [38;2;107;107;116msplit down  [0m
+  [1m`[0m [38;2;107;107;116mwaiting     [0m  [1mu[0m [38;2;107;107;116musage       [0m
+  [1mv[0m [38;2;107;107;116mPRs         [0m  [1m;[0m [38;2;107;107;116mcommand     [0m
+  [1m?[0m [38;2;107;107;116mkeys        [0m  [1mq[0m [38;2;107;107;116mquit        [0m
+
+  [38;2;107;107;116mesc back to your pane[0m

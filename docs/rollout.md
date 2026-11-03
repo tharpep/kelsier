@@ -294,6 +294,10 @@ the `TodoWrite` design was stale, and the plan turned out to need no new hook.
   footer now shows the selection's keys, and `prefix space` when unfocused),
   and trapped in vim inside yazi — so every popup now hosts a small tmux
   session where `prefix q` always closes it (`spec.md` §5c, "the panel")
+- *the look (2026-11-03):* kel's own truecolor theme on a `#131316`
+  surface, one line per entry with the detail right-aligned, agents grouped
+  by repo, state chips, and the selection a raised block — herdr's layout
+  with opencode's selection, chosen from three mockups (`spec.md` §5d)
 - *the daily-use batch (2026-10-15, from three screenshots):* spaces named by
   their repo (two read "kelsier · main", one was ai-context); `idle_prompt`
   ends a `working` no `Stop` ended; no pane titles inside popups; `t` / `kel

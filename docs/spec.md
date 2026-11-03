@@ -160,8 +160,9 @@ or resized.**
     is blocked, which is why the tree the first draft of this section drew was
     split.
 
-  Each entry is two lines — the name, then a dim detail line. It is **the only
-  kel surface**: no board, no menus, no cheat sheet.
+  Each entry is one line — the name, and where it stands right-aligned; the
+  selected entry opens to its detail (§5d). It is **the only kel surface**: no
+  board, no menus, no cheat sheet.
 - **The window's own panes** — untouched. Agents stay byte-identical; an
   `[agent | nvim]` pair stays a pair.
 - **Panel** — files (`yazi`), git (`lazygit`), the session's plan and its task
@@ -283,7 +284,7 @@ where it already is** — which is exactly what a sidebar per window does.
 | footer | *built 2026-10-15, after daily use.* **The keys for what is selected, and only while the sidebar has the keyboard.** The author did not want to remember keys and did not want a busier sidebar, so the one footer line teaches them: an agent shows `e edit · p plan · x kill · ?`, a space `f files · g git · d diff · ?`, a server `o open · …`, as many as fit, then `?` for the rest; `enter` is left out as the key everybody tries. Without the keyboard it reads `click, or Ctrl-b then space` — how to get in, with "then" because `Ctrl-b space` read as one chord (2026-10-16) — or, while an agent waits, `1 waiting 6m · Ctrl-b then \``, the alarm tmux's bar used to carry — it names the key rather than the click (2026-10-19) because a click teaches nothing, and `` ` `` is a prefix key, so two presses; clicking it still jumps. Focus comes from the terminal's focus events (kel sets `focus-events on`), else `#{pane_active}` on each tick, and any key or click proves it |
 | actions | *built 2026-10-15, after daily use.* **The keys that do not depend on the selection, at the foot of the sidebar, clickable** — `n` new agent · `w` worktree agent · `t` shell · `Q` quit · `?` all keys. Only when the lists leave room; the same keys as everywhere, so one surface still (invariant 6). The author found the lower half empty and the keys hard to recall. *Revised 2026-10-16:* two grids, two keys to a line — the selected thing's verbs under what it is and its name, then kel's own — so the keys sit where they apply; no key needs shift (`q` quit, `v` PRs, `b` restore). *2026-10-21:* `|` split right and `-` split down join kel's own — the author wanted to click a pane into being. They split the pane you were in (tmux's last pane) at its directory, and the new shell takes the keyboard, as `prefix |` / `-` do. Dividers between your panes drag as tmux's do |
 | `kel>` prompt | *built 2026-10-15.* **`prefix k`** runs a typed kel command from wherever you are — the author asked where kel commands are meant to be typed when every pane is an agent. A one-line answer is a message, a longer one a popup, never view-mode on your pane |
-| visual language | *built (M3).* §5d. Settled on rendered frames, approved by the author, before M3 was wired to live data; the background is true black (`#000000` — `colour16` was the first try, but base16-style themes such as Catppuccin repurpose palette slot 16 as an accent), the author's call after `colour234` read as grey |
+| visual language | *built (M3).* §5d. Settled on rendered frames, approved by the author, before M3 was wired to live data; the background was true black (`#000000` — `colour16` was the first try, but base16-style themes such as Catppuccin repurpose palette slot 16 as an accent), the author's call after `colour234` read as grey. *Revised 2026-11-03:* kel's own theme on a `#131316` surface, one line per entry, chosen from three mockups (current, opencode-style, herdr-style) |
 
 **Still open** — settled when their milestone is planned, not before:
 
@@ -301,15 +302,27 @@ at. M2's frame — a repo name, one inverse-video row, a key hint — is the
 baseline it improves on. The rules, most of which are why herdr looks at home
 in any terminal:
 
-- **The terminal's 16 ANSI colours, never hex.** The sidebar then wears the
-  user's terminal theme, light or dark, with no theme of its own to maintain.
+- **kel's own theme, by RGB** (*revised 2026-11-03*; this rule said "the
+  terminal's 16 ANSI colours, never hex" until then). The sidebar looks the
+  same on all three machines. Its surface and default foreground are the
+  pane's tmux style, so a light terminal theme cannot put dark text on it.
 - **Colour means state, and nothing else.** One colour per state (waiting,
   working, done-unseen, throttled, dead); everything else is the default
   foreground, bold, or dim. A colour that does not mean a state is noise.
-- **Name bold, detail dim.** Two lines per entry; the second is always dim.
+- **One line per entry**, herdr's way (*revised 2026-11-03*; two lines
+  until then): the name on the left, its branch or age right-aligned and
+  dim. Agents sit under a dim heading naming their repo.
+- **The selection is a raised block**, opencode's way: a lighter fill with a
+  blank row above and below, the accent bar down its whole height, and the
+  entry's detail inside it — context and cost, what it is doing, subagents;
+  for a space, its ports and agent count. A waiting agent's reason shows
+  whether or not it is selected.
+- **A chip names a state that needs a word**: `needs you`, `done` (unseen),
+  `dead`, `quota`, `blocked`, on a dark fill of the state's colour. Calm
+  states are a dot and an age.
 - **One accent for the selected entry**, and it is not inverse video.
-- **Dots, not words, for state.** The word appears only where there is room to
-  say *why* (`waiting 6m`), never as the only signal.
+- **Dots, not words, for state.** A chip appears only beside the dot, never
+  as the only signal.
 - **Whitespace, not box-drawing.** No borders inside the sidebar; sections are
   separated by a blank line and a dim lowercase label (`spaces`, `agents`).
 - **Chrome, not a box** — the sidebar's background and border come from tmux
@@ -954,7 +967,7 @@ agents
    ▸ result: Auth fix ready
 ```
 
-This is a deliberate exception to "two lines per entry" (§5d), and only while a
+This is a deliberate exception to "one line per entry" (§5d), and only while a
 card is unseen. Worth trying the alternative on real frames: `· 1 card` at the
 end of the second line. A `decision` makes the line yellow.
 

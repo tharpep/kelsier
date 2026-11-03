@@ -1,10 +1,8 @@
-[2mspaces[0m
-  [2mnothing open[0m
+  [38;2;107;107;116mspaces[0m
+    [38;2;107;107;116mnothing open[0m
 
-[2magents[0m
-  [2mnone[0m
-
-
+  [38;2;107;107;116magents[0m
+    [38;2;107;107;116mnone[0m
 
 
 
@@ -20,11 +18,13 @@
 
 
 
-[2mkel[0m
- [1mn[0m [2mnew agent    [0m [1mw[0m [2mworktree     [0m
- [1m|[0m [2msplit right  [0m [1m-[0m [2msplit down   [0m
- [1m`[0m [2mwaiting      [0m [1mu[0m [2musage        [0m
- [1mv[0m [2mPRs          [0m [1m;[0m [2mcommand      [0m
- [1m?[0m [2mkeys         [0m [1mq[0m [2mquit         [0m
 
-[2mesc back to your pane[0m
+
+  [38;2;107;107;116mkel[0m
+  [1mn[0m [38;2;107;107;116mnew agent   [0m  [1mw[0m [38;2;107;107;116mworktree    [0m
+  [1m|[0m [38;2;107;107;116msplit right [0m  [1m-[0m [38;2;107;107;116msplit down  [0m
+  [1m`[0m [38;2;107;107;116mwaiting     [0m  [1mu[0m [38;2;107;107;116musage       [0m
+  [1mv[0m [38;2;107;107;116mPRs         [0m  [1m;[0m [38;2;107;107;116mcommand     [0m
+  [1m?[0m [38;2;107;107;116mkeys        [0m  [1mq[0m [38;2;107;107;116mquit        [0m
+
+  [38;2;107;107;116mesc back to your pane[0m
