@@ -3016,28 +3016,35 @@ cmd_jump() {
   local -a c=(); [ -n "${KEL_CLIENT:-}" ] && c=(-c "$KEL_CLIENT")
   cw="$(tmux display-message ${c[@]+"${c[@]}"} -p '#{window_index}' 2>/dev/null || echo '')"
 
-  # the waiting agents, by window index, from the fleet document — the same
-  # dead check and state the sidebar reads, not a second copy of them
+  # what needs you, by window index, from the fleet document — the same dead
+  # check and state the sidebar reads, not a second copy of them. In tiers:
+  # an agent blocked on you or stopped by an API error first; a finished one
+  # you have not looked at only once none is left. Landing on a finished one
+  # marks it seen, so pressing again works through the queue to empty
   local doc w
   doc="$(fleet_json)" || exit 1
   w="$(printf '%s' "$doc" | jq -r '
-    [ .agents[] | select(.state == "waiting" and .window_id != null and .index != null) ]
-    | sort_by(.index)[] | "\(.index)\t\(.window_id)\t\(.group)/\(.name)\t\(.state_since // "")\t\(.pane_id // "")"')"
-  [ -n "$w" ] || { tmux display-message "kel: nothing waiting"; exit 0; }
+    [ .agents[] | select(.window_id != null and .index != null)
+      | .tier = (if .state == "waiting" or .state == "error" then 0
+                 elif .state == "done" and .unseen == true then 1 else null end)
+      | select(.tier != null) ]
+    | (map(.tier) | min) as $t | map(select(.tier == $t))
+    | sort_by(.index)[] | "\(.index)\t\(.window_id)\t\(.group)/\(.name)\t\(.state_since // "")\t\(.pane_id // "")\t\(.state)"')"
+  [ -n "$w" ] || { tmux display-message "kel: nothing needs you"; exit 0; }
 
   # the next one after the window you are in, wrapping round
   local tgt
   tgt="$(printf '%s\n' "$w" | awk -F'\t' -v cw="${cw:-0}" '
     NR == 1 { first = $0 } $1 > cw && !found { print; found = 1 } END { if (!found) print first }')"
-  local ti tw label ep tp
-  IFS=$'\t' read -r ti tw label ep tp <<< "$tgt"
+  local ti tw label ep tp st
+  IFS=$'\t' read -r ti tw label ep tp st <<< "$tgt"
   tmux switch-client ${c[@]+"${c[@]}"} -t "=$KEL_PREFIX" \; select-window -t "$tw"
   [ -n "$tp" ] && tmux select-pane -t "$tp" 2>/dev/null
 
   # say where you landed and how long it has been sitting — the jump is
   # otherwise silent, and "which one was that?" is the next question
   case "${ep:-}" in ''|*[!0-9]*) tmux display-message "→ $label" ;;
-    *) tmux display-message "→ $label  (waiting $(humanize_secs $(( $(date +%s) - ${ep%.*} ))))" ;;
+    *) tmux display-message "→ $label  ($st $(humanize_secs $(( $(date +%s) - ${ep%.*} ))))" ;;
   esac
 }
 

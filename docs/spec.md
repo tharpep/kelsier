@@ -280,7 +280,7 @@ where it already is** — which is exactly what a sidebar per window does.
 | keys | *built (M3, M5).* `j`/`k` move · `enter` jump · `/` filter · `n` new agent · `w` new worktree agent · `x` kill (kill-safety intact) · `r` rename · `f` files · `g` git · `d` the worktree's diff · `e` edit what the agent last touched · `o` a server in the browser · `p` plan and tasks · `?` help. None deeper than one key. *M7 (2026-10-21):* an agent pane's title is `● <index> · <name> <state>` in the state's colour, from the pane options the hook sets (`@kel-state`, `@kel-name`) and computed by tmux; `n` then asks where — `enter` a window, `|` / `-` a split of the pane you were in — and `m` gives an agent sharing a window one of its own (`break-pane`) |
 | sections | *built (M3).* **`spaces` above `agents`** (§5), after herdr, replacing the single repo → worktree → pane tree |
 | mouse | *built (M3).* **First-class.** A click selects and jumps; the wheel scrolls; every gesture a key does on a row, a click can reach. Bubble Tea v2 reports mouse events; tmux passes them to the pane under the pointer with `mouse on`, which kel's config already sets |
-| done, until seen | *built (M3).* **`done` stays loud until you have looked at the agent**, then quietens — herdr's semantics, and what makes the dots worth reading. A **flag on `done`, not a new state**: `kel jump`, the notifications and every reader that matches on state are untouched. When "looked at" happened is recorded from the window-change event the sidebar already receives (§9) |
+| done, until seen | *built (M3).* **`done` stays loud until you have looked at the agent**, then quietens — herdr's semantics, and what makes the dots worth reading. A **flag on `done`, not a new state**: the notifications and every reader that matches on state are untouched (`kel jump` reads the flag since 2026-11-03). When "looked at" happened is recorded from the window-change event the sidebar already receives (§9) |
 | footer | *built 2026-10-15, after daily use.* **The keys for what is selected, and only while the sidebar has the keyboard.** The author did not want to remember keys and did not want a busier sidebar, so the one footer line teaches them: an agent shows `e edit · p plan · x kill · ?`, a space `f files · g git · d diff · ?`, a server `o open · …`, as many as fit, then `?` for the rest; `enter` is left out as the key everybody tries. Without the keyboard it reads `click, or Ctrl-b then space` — how to get in, with "then" because `Ctrl-b space` read as one chord (2026-10-16) — or, while an agent waits, `1 waiting 6m · Ctrl-b then \``, the alarm tmux's bar used to carry — it names the key rather than the click (2026-10-19) because a click teaches nothing, and `` ` `` is a prefix key, so two presses; clicking it still jumps. Focus comes from the terminal's focus events (kel sets `focus-events on`), else `#{pane_active}` on each tick, and any key or click proves it |
 | actions | *built 2026-10-15, after daily use.* **The keys that do not depend on the selection, at the foot of the sidebar, clickable** — `n` new agent · `w` worktree agent · `t` shell · `Q` quit · `?` all keys. Only when the lists leave room; the same keys as everywhere, so one surface still (invariant 6). The author found the lower half empty and the keys hard to recall. *Revised 2026-10-16:* two grids, two keys to a line — the selected thing's verbs under what it is and its name, then kel's own — so the keys sit where they apply; no key needs shift (`q` quit, `v` PRs, `b` restore). *2026-10-21:* `|` split right and `-` split down join kel's own — the author wanted to click a pane into being. They split the pane you were in (tmux's last pane) at its directory, and the new shell takes the keyboard, as `prefix |` / `-` do. Dividers between your panes drag as tmux's do |
 | `kel>` prompt | *built 2026-10-15.* **`prefix k`** runs a typed kel command from wherever you are — the author asked where kel commands are meant to be typed when every pane is an agent. A one-line answer is a message, a longer one a popup, never view-mode on your pane |
@@ -430,7 +430,7 @@ The sidebar's keys are decided in §5c. Today's bindings are listed in
 Two rules hold across both. **Switching is one keystroke** — never
 open-menu, find-row, press-enter. And **`` prefix ` `` is the key the tool
 exists for**: not "go to window 3" but "go to whoever is blocked on me",
-across every repo; it matches `waiting` only, cycles and wraps.
+across every repo, cycling and wrapping. *2026-11-03:* "blocked on me" grew to "needs me": `waiting` and `error` first, then a `done` you have not seen, once none is left — landing marks it seen, so pressing again works the queue to empty.
 
 ---
 
@@ -712,7 +712,7 @@ it is not `throttled`, which resumes on its own — this does not.
 
 `notification_text` is kept as the third field of the state file — the literal
 permission prompt — so "why is this blocked" needs no pane scrape. `kel jump`
-matches `waiting` only.
+takes `waiting` and `error` first, then a `done` you have not seen.
 
 `kel hook` resolves which window it is in, in order: `$TMUX_PANE`; the pane
 stashed by this session's `SessionStart`, keyed by session id; the single pane

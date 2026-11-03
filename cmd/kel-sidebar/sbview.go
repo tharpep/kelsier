@@ -1484,7 +1484,7 @@ var sbActions = []sbAct{
 	{"w", "worktree"},
 	{"|", "split right"},
 	{"-", "split down"},
-	{"`", "waiting"},
+	{"`", "needs you"},
 	{"u", "usage"},
 	{"v", "PRs"},
 	{";", "command"},

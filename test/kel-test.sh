@@ -716,6 +716,22 @@ ok "kel jump goes to the next waiting agent"    '[ "$cur" = "$CW" ]'
 TMUX="$TMUX_TMPDIR/tmux-$(id -u)/default,$(tmux display-message -p '#{pid}'),0" "$KEL" jump
 cur="$(tmux list-windows -t '=keltest' -F '#{window_active} #{window_id}' | awk '$1==1 {print $2}')"
 ok "  ...and wraps round to the first"          '[ "$cur" = "$DW" ]'
+# then what else needs you: an API error ranks with waiting; a finished agent
+# you have not seen comes only once nothing waits
+printf 'error %s\n' "$(( $(date +%s) - 60 ))" > "$STATE/$CW.state"
+tmux select-window -t "$DW"
+TMUX="$TMUX_TMPDIR/tmux-$(id -u)/default,$(tmux display-message -p '#{pid}'),0" "$KEL" jump
+cur="$(tmux list-windows -t '=keltest' -F '#{window_active} #{window_id}' | awk '$1==1 {print $2}')"
+ok "  ...an errored agent is next, like a waiting one" '[ "$cur" = "$CW" ]'
+printf 'done %s\n' "$(( $(date +%s) + 5 ))" > "$STATE/$CW.state"
+tmux select-window -t "$DW"
+TMUX="$TMUX_TMPDIR/tmux-$(id -u)/default,$(tmux display-message -p '#{pid}'),0" "$KEL" jump
+cur="$(tmux list-windows -t '=keltest' -F '#{window_active} #{window_id}' | awk '$1==1 {print $2}')"
+ok "  ...a finished one waits while another waits" '[ "$cur" = "$DW" ]'
+rm -f "$STATE/$DW.state"
+TMUX="$TMUX_TMPDIR/tmux-$(id -u)/default,$(tmux display-message -p '#{pid}'),0" "$KEL" jump
+cur="$(tmux list-windows -t '=keltest' -F '#{window_active} #{window_id}' | awk '$1==1 {print $2}')"
+ok "  ...and is next once none does"            '[ "$cur" = "$CW" ]'
 release_client
 rm -f "$STATE/$CW.state"
 now=$(date +%s)

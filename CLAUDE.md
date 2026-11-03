@@ -157,7 +157,7 @@ sidebar is off. `quota` is always present (null when no session reported one).
 `idle` · `working` · `waiting` (blocked on you) · `done` · `throttled` (waiting
 on quota, resumes itself) · `error` (the turn ended on an API error —
 `StopFailure`; it needs you to retry) · `dead` (process gone, computed at read time, not a
-hook). `kel jump` matches `waiting` only.
+hook). `kel jump` takes `waiting` and `error` first, then a `done` you have not seen.
 
 ---
 

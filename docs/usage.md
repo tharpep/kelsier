@@ -90,7 +90,7 @@ Keys below use `Ctrl-b`, tmux's default prefix; if you changed yours, kel's own 
 
 | | |
 |---|---|
-| `` Ctrl-b ` `` | jump to the next agent **waiting** on you — any group |
+| `` Ctrl-b ` `` | jump to the next agent that **needs you** — any group: waiting or stopped on an API error first, then finished ones you have not looked at; press again to work through them |
 | `Ctrl-b 1..9` / `n` / `p` / `w` | move between windows — every agent is in one session (native tmux) |
 | `Ctrl-b ,` | rename this window (routes through `kel rename`) |
 | `Ctrl-b \|` / `-` | split, keeping the current directory |
