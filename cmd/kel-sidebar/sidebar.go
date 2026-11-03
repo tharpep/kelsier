@@ -339,6 +339,8 @@ func trace(pane string) {
 	}
 }
 
+const sidebarFPS = 30
+
 func tickAfter(visible bool) tea.Cmd {
 	d := 10 * time.Second
 	if visible {
@@ -1320,7 +1322,13 @@ func runSidebar(once bool) {
 		fmt.Println(m.render())
 		return
 	}
-	p := tea.NewProgram(m)
+	// Bubble Tea wakes at its frame rate for the life of the program, shown
+	// or hidden: at its default 60 every sidebar cost ~2% of a core doing
+	// nothing (measured 2026-11-03). 30 halves that and keeps a keypress
+	// within 33 ms of its frame. Pausing the renderer while hidden is not
+	// available without leaving the alternate screen, which would flash
+	// the pane on every window switch
+	p := tea.NewProgram(m, tea.WithFPS(sidebarFPS))
 	ch := make(chan os.Signal, 4)
 	signal.Notify(ch, syscall.SIGUSR1)
 	if m.myPane != "" {
