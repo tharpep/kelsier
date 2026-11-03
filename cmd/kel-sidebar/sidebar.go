@@ -763,8 +763,11 @@ func (m sbModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		_, refs := renderView(m.view(), m.width, m.height, time.Now().Unix())
 		if msg.Y >= 0 && msg.Y < len(refs) && refs[msg.Y].kind == "hint2" && m.cands == "" {
-			// a prompt's choices: whichever word was clicked is that key
-			return m.key(hintKey(refs[msg.Y].text, msg.X))
+			// a prompt's choices: whichever word was clicked is that key;
+			// past the last one is anywhere else
+			if k := hintKey(refs[msg.Y].text, msg.X); k.Code != 0 {
+				return m.key(k)
+			}
 		}
 		// a click anywhere else ends a prompt, as esc would, and then does
 		// what it would have done

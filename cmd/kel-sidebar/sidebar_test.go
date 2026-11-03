@@ -100,6 +100,12 @@ func TestSidebarRendersAtAnyWidth(t *testing.T) {
 			if h > 0 && strings.Count(out, "\n")+1 != len(refs) {
 				t.Errorf("%dx%d: refs out of step with lines", w, h)
 			}
+			// a line wider than the pane is one tmux wraps onto the next
+			for _, l := range strings.Split(plain(out), "\n") {
+				if w > 0 && len([]rune(l)) > w {
+					t.Errorf("%dx%d: %q is wider than the pane", w, h, l)
+				}
+			}
 		}
 	}
 }
@@ -717,6 +723,17 @@ func TestPromptClickOff(t *testing.T) {
 	if got := nm.(sbModel); got.mode != modeNormal || got.input != "" {
 		t.Errorf("a click on an agent left the prompt open: %v %q", got.mode, got.input)
 	}
+	// past the last choice on the choices line is anywhere else too
+	_, refs = renderView(m.view(), 32, 30, 0)
+	for i, r := range refs {
+		if r.kind == "hint2" {
+			y = i
+		}
+	}
+	nm, _ = m.Update(tea.MouseClickMsg{X: 31, Y: y, Button: tea.MouseLeft})
+	if got := nm.(sbModel); got.mode != modeNormal {
+		t.Errorf("a click past the choices left the prompt open: %v", got.mode)
+	}
 	m.mode, m.input = modeNormal, ""
 	nm, _ = m.key(tea.KeyPressMsg{Code: ';', Text: ";"})
 	m = nm.(sbModel)
@@ -961,5 +978,22 @@ func TestStickyHeadersAndResponsiveGrid(t *testing.T) {
 	linesSpace := strings.Split(plain(outSpace), "\n")
 	if len(linesSpace) == 0 || linesSpace[0] != "  spaces" {
 		t.Errorf("sticky header for scrolled spaces: want spaces at line 0, got %q", linesSpace[0])
+	}
+}
+
+// A scrolled list pins the header of the section it shows, and never a
+// second header above the real one.
+func TestStickyHeaderNamesTheShownSection(t *testing.T) {
+	doc := loadFixture(t, "fifteen-three-repos")
+	for _, id := range buildView(doc, uiState{}).entryIDs {
+		for h := 8; h <= 24; h++ {
+			out, _ := renderView(buildView(doc, uiState{focused: true, sel: id}), 32, h, 0)
+			l := strings.Split(plain(out), "\n")
+			for i := 0; i < 3 && i+1 < len(l); i++ {
+				if l[i] == "  spaces" && (l[i+1] == "  agents" || (l[i+1] == "" && i+2 < len(l) && l[i+2] == "  agents")) {
+					t.Errorf("sel %s at h=%d: spaces pinned above agents:\n%s", id, h, strings.Join(l[:4], "\n"))
+				}
+			}
+		}
 	}
 }

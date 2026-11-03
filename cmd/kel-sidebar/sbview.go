@@ -1030,8 +1030,11 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 			}
 			rows := []string{spread(lead(id)+" "+dot+" "+weight(truncate(s.label, lw), s.current), right, w)}
 			if id == v.sel {
-				// the rest of where it stands: ports, how many agents
-				rows = append(rows, lead(id)+"   "+dim+truncate(spaceDetail(s), avail)+reset)
+				// the rest of where it stands — ports, how many agents —
+				// not the position its own row already shows
+				if more := strings.TrimPrefix(spaceDetail(s), spacePos(s)+" · "); more != spaceDetail(s) {
+					rows = append(rows, lead(id)+"   "+dim+truncate(more, avail)+reset)
+				}
 			}
 			entry(id, r, rows)
 		}
@@ -1061,7 +1064,7 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 				if latest.Kind == "decision" {
 					col = yellow
 				}
-				add("     "+indent+col+truncate("▸ "+latest.Kind+": "+latest.Title, lw)+reset, pr)
+				one(p.PaneID, pr, lead(p.PaneID)+"    "+indent+col+truncate("▸ "+latest.Kind+": "+latest.Title, lw)+reset)
 			}
 		}
 		summary()
@@ -1284,26 +1287,33 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 						break
 					}
 				}
-				secName := "spaces"
-				if agentsIdx >= 0 && off >= agentsIdx {
-					secName = "agents"
+				// a section's own header, or the blank before it, starts
+				// the screen as it is; anything else gets its section's
+				// header pinned above it, the offset settled first so the
+				// header names the section actually shown
+				starts := func(o int) bool {
+					return body[o].ref.kind == "header" || (body[o].s == "" && o+1 < len(body) && body[o+1].ref.kind == "header")
 				}
-				if body[off].ref.kind != "header" {
-					if body[off].s == "" && off+1 < len(body) && body[off+1].ref.kind == "header" {
-						body = body[off+1:]
-					} else {
-						avail := room - 1
-						if last >= 0 && last >= off+avail {
-							off = last - avail + 1
-						}
-						if first >= 0 && first < off {
-							off = first
-						}
-						hdr := line{s: label(secName), ref: lineRef{kind: "header"}}
-						body = append([]line{hdr}, body[off:]...)
+				if !starts(off) {
+					avail := room - 1
+					if last >= 0 && last >= off+avail {
+						off = last - avail + 1
 					}
-				} else {
+					if first >= 0 && first < off {
+						off = first
+					}
+				}
+				switch {
+				case body[off].ref.kind == "header":
 					body = body[off:]
+				case starts(off):
+					body = body[off+1:]
+				default:
+					secName := "spaces"
+					if agentsIdx >= 0 && off >= agentsIdx {
+						secName = "agents"
+					}
+					body = append([]line{{s: label(secName), ref: lineRef{kind: "header"}}}, body[off:]...)
 				}
 			} else {
 				body = body[off:]
@@ -1356,7 +1366,13 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 			body = append(body, line{"", lineRef{}})
 		}
 	} else if len(tail) == 0 {
-		tail = append(tail, line{in + keys(truncate(hint(v, w-2), w-2)), lineRef{}})
+		h := truncate(hint(v, w-2), w-2)
+		if v.focused {
+			h = keys(h)
+		} else {
+			h = dim + h + reset
+		}
+		tail = append(tail, line{in + h, lineRef{}})
 	}
 	if h != 1 || len(body) == 0 {
 		body = append(body, tail...)
@@ -1384,7 +1400,11 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 		if i > 0 {
 			b.WriteByte('\n')
 		}
-		b.WriteString(l.s + l.ref.right)
+		ls := l.s + l.ref.right
+		if w > 0 && visWidth(ls) > w {
+			ls = truncateStyled(ls, w)
+		}
+		b.WriteString(ls)
 		refs[i] = l.ref
 	}
 	return b.String(), refs
