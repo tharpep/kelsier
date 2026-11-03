@@ -704,6 +704,12 @@ and every reader that matches on state see plain `done`, as today.
 | `auth_success`, `elicitation_complete/response` | no change |
 | anything added later | `waiting` (safe default) |
 
+`StopFailure` fires instead of `Stop` when a turn ends on an API error (rate
+limit, overload, auth, billing): the state is `error`, its note Claude Code's
+error text. Before it was hooked, such an agent read `working` until the
+half-hour quiet guess. `error` notifies, colours red and sorts with `waiting`;
+it is not `throttled`, which resumes on its own — this does not.
+
 `notification_text` is kept as the third field of the state file — the literal
 permission prompt — so "why is this blocked" needs no pane scrape. `kel jump`
 matches `waiting` only.
@@ -719,7 +725,7 @@ window `claude`).
 
 **Dead agents.** A crash fires neither `Stop` nor `SessionEnd`, so the file
 keeps saying whatever it last said. kel catches this at *read* time: if the
-record says `idle` / `working` / `waiting` / `throttled` but the window's only
+record says `idle` / `working` / `waiting` / `throttled` / `error` but the window's only
 live process is a bare shell, the effective state is `dead`. This check lives
 in two places kept in sync by hand — `effective_state()` in `bin/kel` and
 `internal/fleet/fleet.go` — until `bin/kel`'s remaining readers move to Go.
@@ -755,7 +761,7 @@ The row Claude Code shows (repo identity, `250k/1M`, quota resets, `fast` /
 ### 9b. Notifications
 
 When an agent **transitions into** a state listed in `KEL_NOTIFY` (default
-`waiting`) and you are **not looking at that window**, kel notifies:
+`waiting error`) and you are **not looking at that window**, kel notifies:
 `tmux display-message`, **the bell** on every terminal attached to kel, and
 **a desktop notification** — a Windows toast from WSL (built-in WinRT via
 `powershell.exe`), `osascript` on macOS, `notify-send` on Linux.

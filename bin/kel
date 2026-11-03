@@ -143,7 +143,7 @@ SNAPSHOT_ARCHIVE="$STATE_DIR/snapshots"           # workspaces kel started fresh
 STATUSLINE_PREV="$HOME/.claude/statusline-prev"   # a statusLine kel displaced
 CLAUDE_HOME="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"   # plans/ and tasks/ live here
 KEL_CTX_WARN="${KEL_CTX_WARN:-70}"                # show context on the bar from here up
-KEL_NOTIFY="${KEL_NOTIFY:-waiting}"               # states worth interrupting you for
+KEL_NOTIFY="${KEL_NOTIFY:-waiting error}"               # states worth interrupting you for
 # The running script's own absolute path, preferred over a PATH lookup: kel
 # re-invokes itself (sweep, tmux bindings) and resolving that
 # through PATH breaks whenever kel is not installed — a fresh clone, or CI.
@@ -338,7 +338,7 @@ effective_state() { # wid
     # walking through the tool as a fresh user: an agent that crashes between
     # SessionStart and its first prompt used to sit reading "idle" forever,
     # with no glyph, no colour, nothing to tell you it was gone.
-    idle|working|waiting|throttled)
+    idle|working|waiting|throttled|error)
       agent_alive "$1" || { printf 'dead'; return; } ;;
   esac
   if [ "$s" = "working" ] || [ "$s" = "idle" ]; then
@@ -456,7 +456,7 @@ window_state() { # wid -> the most urgent state among its agents
   for p in $(tmux list-panes -t "$1" -F '#{@kel-sidebar}|#{pane_id}' 2>/dev/null | awk -F'|' '$1 == "" {print $2}') "$1"; do
     [ -f "$(state_file "$p" state)" ] || continue
     st="$(effective_state "$p")"
-    case "$st" in waiting) r=0 ;; dead) r=1 ;; throttled) r=2 ;; *) r=3 ;; esac
+    case "$st" in waiting) r=0 ;; error|dead) r=1 ;; throttled) r=2 ;; *) r=3 ;; esac
     [ "$r" -lt "$br" ] && { br="$r"; best="$st"; }
   done
   printf '%s' "$best"
@@ -3056,7 +3056,7 @@ paint_state() {   # wid state
   case "${2:-}" in
     waiting)   col=colour214 ;;   # blocked on you — the one that matters
     throttled) col=colour141 ;;
-    dead)      col=colour167 ;;
+    error|dead) col=colour167 ;;
     *)         col='' ;;          # working / idle / done: stay quiet
   esac
   if [ -n "$col" ]; then
@@ -3078,7 +3078,7 @@ repaint_all() {   # fleet-json
     [ -n "$wid" ] && paint_state "$wid" "$st"
   done < <(printf '%s' "$1" | jq -r '[.agents[] | select(.window_id != null)]
       | group_by(.window_id)[]
-      | min_by({waiting: 0, dead: 1, throttled: 2}[.state // ""] // 3)
+      | min_by({waiting: 0, error: 1, dead: 1, throttled: 2}[.state // ""] // 3)
                                       | [.window_id, (.state // "")] | @tsv')
 }
 
@@ -3919,7 +3919,10 @@ cmd_hook() {
       # Claude Code sends the words as .message (hooks docs, Notification);
       # kel read .notification_text, which it never sends — so no real agent
       # ever showed why it waited, only the test fixtures (2026-10-17)
-      (if .hook_event_name == "Notification" then (.message // .notification_text // "") else "" end)
+      (if .hook_event_name == "Notification" then (.message // .notification_text // "")
+       # StopFailure: the API error that ended the turn, as Claude Code showed it
+       elif .hook_event_name == "StopFailure" then (.last_assistant_message // .error // "")
+       else "" end)
     ] | .[] | tostring | gsub("[\n\t]"; " ")' 2>/dev/null)
   [ -n "$event" ] || event="$evt"
   if [ "$event" = PostToolUse ]; then
@@ -3974,6 +3977,10 @@ cmd_hook() {
         *)                    state=waiting ;;
       esac ;;
     Stop)             state=done ;;
+    # the turn ended on an API error (rate limit, overload, auth): Stop does
+    # not fire, so without this the agent read `working` until kel's
+    # half-hour quiet guess. It stopped, and it needs you to retry
+    StopFailure)      state=error ;;
     PostToolUse)      state=working ;;
     PreCompact)
       # Compaction happens mid-turn: the agent is still working, so do NOT

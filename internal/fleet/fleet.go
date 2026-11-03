@@ -468,7 +468,7 @@ func Load(o Options) Doc {
 			var eff *string
 			if hasState && st.state != "" {
 				eff = sp(st.state)
-				if st.state == "idle" || st.state == "working" || st.state == "waiting" || st.state == "throttled" {
+				if st.state == "idle" || st.state == "working" || st.state == "waiting" || st.state == "throttled" || st.state == "error" {
 					alive := false
 					if legacy {
 						for _, c := range panes {

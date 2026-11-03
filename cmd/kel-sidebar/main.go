@@ -19,7 +19,7 @@ func triageRank(state *string) int {
 		return 5
 	}
 	switch *state {
-	case "waiting":
+	case "waiting", "error":
 		return 0
 	case "working":
 		return 1

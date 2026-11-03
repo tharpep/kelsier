@@ -410,11 +410,32 @@ func TestShortNote(t *testing.T) {
 		"Claude needs your permission to use Bash":  "allow Bash?",
 		"Claude needs your permission to use Edit.": "allow Edit?",
 		"Claude is waiting for your input":          "your input",
+		"API Error: Rate limit reached":             "Rate limit reached",
 		"something new":                             "something new",
 	} {
 		if got := shortNote(in); got != want {
 			t.Errorf("shortNote(%q) = %q, want %q", in, got, want)
 		}
+	}
+}
+
+// An agent whose turn ended on an API error is red, says error, says why,
+// and sorts with the agents waiting on you.
+func TestErrorAgent(t *testing.T) {
+	doc := loadFixture(t, "fifteen-three-repos")
+	st, note := "error", "API Error: Rate limit reached"
+	for i := range doc.Agents {
+		if doc.Agents[i].Name == "gateway" {
+			doc.Agents[i].State, doc.Agents[i].Note = &st, &note
+		}
+	}
+	v := buildView(doc, uiState{})
+	if v.agents[0].agent.Name != "gateway" && v.agents[1].agent.Name != "gateway" {
+		t.Errorf("an errored agent's repo does not lead: %s, %s", v.agents[0].agent.Name, v.agents[1].agent.Name)
+	}
+	out, _ := renderView(v, 32, 0, 0)
+	if !strings.Contains(out, red+"●") || !strings.Contains(plain(out), " error ") || !strings.Contains(plain(out), "Rate limit reached") {
+		t.Errorf("error agent not drawn as one:\n%s", plain(out))
 	}
 }
 

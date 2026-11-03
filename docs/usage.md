@@ -124,9 +124,11 @@ in two sections:
 - **`agents`** — who needs you, grouped under the repo each works in, the
   repo with the most urgent agent first: a dot per state (amber waiting, cyan
   working, green finished-and-not-yet-looked-at, grey idle or seen, violet
-  throttled, red `✕` dead, grey `?` unknown) and how long, right-aligned. A
-  state that needs a word gets a chip: `needs you`, `done`, `dead`, `quota`.
-  A waiting agent shows what it waits for (`allow Bash?`). The selected agent
+  throttled, red `●` error, red `✕` dead, grey `?` unknown) and how long,
+  right-aligned. A state that needs a word gets a chip: `needs you`, `done`,
+  `error`, `dead`, `quota`. A waiting agent shows what it waits for (`allow
+  Bash?`); one whose turn ended on an API error shows which (`Rate limit
+  reached`). The selected agent
   opens to its context % and cost, what it is doing — `editing sbview.go`,
   its last tool call, read from the tail of Claude Code's own transcript —
   and its subagents.

@@ -1625,6 +1625,15 @@ hook "$P" Notification agent_needs_input "which?"
 ok "agent_needs_input -> waiting"                   '[ "$(state_of a)" = waiting ]'
 hook "$P" Notification some_type_from_the_future "?"
 ok "an unknown type falls back to waiting"          '[ "$(state_of a)" = waiting ]'
+hook "$P" UserPromptSubmit
+printf '%s' "{\"session_id\":\"s\",\"cwd\":\"$WORK\",\"hook_event_name\":\"StopFailure\",\"error\":\"rate_limit\",\"last_assistant_message\":\"API Error: Rate limit reached\"}" \
+  | TMUX_PANE="$P" "$KEL" hook StopFailure
+ok "a turn ended by an API error -> error, not working" '[ "$(state_of a)" = error ]'
+ok "  ...naming the error"                          'grep -q "Rate limit reached" "$STATE/$P.state"'
+ok "  ...and the fleet reports it, alive"           '[ "$("$KEL" _fleet | jq -r ".agents[] | select(.name==\"a\") | .state")" = error ]'
+hook "$P" UserPromptSubmit
+ok "  ...until the next prompt"                     '[ "$(state_of a)" = working ]'
+hook "$P" Notification permission_prompt "allow?"
 tooluse() { printf '%s' "{\"session_id\":\"s\",\"cwd\":\"$WORK\",\"hook_event_name\":\"PostToolUse\",\"tool_name\":\"$2\",\"tool_input\":{\"command\":\"ls\"}}" | TMUX_PANE="$1" "$KEL" hook PostToolUse; }
 tooluse "$P" Bash
 ok "a tool run after a wait -> working"             '[ "$(state_of a)" = working ]'

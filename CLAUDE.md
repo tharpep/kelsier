@@ -155,7 +155,8 @@ sidebar is off. `quota` is always present (null when no session reported one).
 ### Agent states
 
 `idle` · `working` · `waiting` (blocked on you) · `done` · `throttled` (waiting
-on quota, resumes itself) · `dead` (process gone, computed at read time, not a
+on quota, resumes itself) · `error` (the turn ended on an API error —
+`StopFailure`; it needs you to retry) · `dead` (process gone, computed at read time, not a
 hook). `kel jump` matches `waiting` only.
 
 ---
