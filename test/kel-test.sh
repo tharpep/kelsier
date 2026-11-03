@@ -1628,6 +1628,14 @@ ok "a tool run after a wait -> working"             '[ "$(state_of a)" = working
 hook "$P" Stop
 tooluse "$P" Bash
 ok "  ...but a tool never wakes a finished agent"   '[ "$(state_of a)" = done ]'
+# the fast path at the top of bin/kel: a tool call with nothing to do leaves
+# before kel loads, and anything that has something to do still gets there
+traced() { printf '%s' "{\"session_id\":\"s\",\"cwd\":\"$WORK\",\"hook_event_name\":\"PostToolUse\",\"tool_name\":\"$2\",\"tool_input\":{}}" | TMUX_PANE="$1" bash -x "$KEL" hook PostToolUse 2>&1 | grep -c '^+'; }
+ok "a tool call with nobody waiting leaves before kel loads" '[ "$(traced "$P" Read)" -lt 40 ]'
+ok "  ...but an edit takes the full path"           '[ "$(traced "$P" Edit)" -gt 100 ]'
+hook "$P" Notification permission_prompt "allow?"
+ok "  ...and so does any tool while an agent waits" '[ "$(traced "$P" Read)" -gt 100 ]'
+ok "  ...which ends the wait"                       '[ "$(state_of a)" = working ]'
 
 section "dead agents are detected at read time"
 reset

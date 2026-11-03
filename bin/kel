@@ -51,6 +51,30 @@
 #   kel _copy                  stdin to the system clipboard (copy-mode pipes here)
 set -uo pipefail
 
+# The hook that fires after every tool call, cut short. Bash parses a script
+# as it runs it, so leaving here skips the other four thousand lines: a Read
+# or a Bash call with nobody waiting costs ~8 ms, not ~43 (2026-11-03). Only
+# a positive "nothing to do" leaves; anything unclear takes the full path —
+# an edit to record, any agent waiting (the next tool call ends its wait), an
+# Antigravity payload, a payload with no tool name at all. Running the hook
+# async instead was ruled out: a late PostToolUse would overwrite Stop's done.
+unset KEL_HOOK_PAYLOAD
+if [ "${1:-}" = hook ] && [ "${2:-}" = PostToolUse ]; then
+  KEL_HOOK_PAYLOAD="$(cat 2>/dev/null || true)"
+  kel_waiting=0
+  for kel_f in "${XDG_STATE_HOME:-$HOME/.local/state}/kel/.waiting/"*; do
+    [ -e "$kel_f" ] && kel_waiting=1
+    break
+  done
+  kel_q='[[:space:]]*:[[:space:]]*"'
+  if [ "$kel_waiting" = 0 ] \
+    && [[ $KEL_HOOK_PAYLOAD =~ \"tool_name\"$kel_q[^\"]+\" ]] \
+    && ! [[ $KEL_HOOK_PAYLOAD =~ \"tool_name\"$kel_q(Edit|Write|MultiEdit)\" ]] \
+    && ! [[ $KEL_HOOK_PAYLOAD == *'"conversationId"'* ]]; then
+    exit 0
+  fi
+fi
+
 # --------------------------------------------------------------------------
 # config  —  ~/.config/kel/config.toml, and a per-repo .kel/config.toml
 # --------------------------------------------------------------------------
@@ -3882,7 +3906,7 @@ cmd_hook() {
   # one jq pass, one field per line — never `IFS=$'\t' read`, which folds runs
   # of tab into a single delimiter and shifts everything after an empty field
   local payload evt sid cwd tool ntype ntext
-  payload="$(cat 2>/dev/null || true)"
+  payload="${KEL_HOOK_PAYLOAD-$(cat 2>/dev/null || true)}"
   if printf '%s' "$payload" | jq -e 'has("conversationId")' >/dev/null 2>&1; then
     cmd_hook_agy "$event" <<< "$payload"
     return

@@ -255,6 +255,12 @@ with nothing in kel to assert against. Re-breaking an `unguarded` one is silent.
   under `/mnt/c`. The Go seam therefore stats one known path
   (`$KEL_FLEET_BIN`) instead. Never put a `command -v` for an optional binary
   on a hot path.
+- `[guarded]` **`PostToolUse` fires on every tool call, so its no-op case
+  leaves at the top of `bin/kel`.** Bash parses a script as it runs it; the
+  gate right under `set -uo pipefail` exits before the other four thousand
+  lines load (~11 ms, not ~43). Keep it above everything else, and keep it
+  conservative: it exits only on a positive "nothing to do". `async: true`
+  was rejected: a late PostToolUse would overwrite Stop's `done`.
 - `[unguarded]` **An unconditional `mkdir -p` is not free** — three already-existing dirs
   measured ~10ms, paid by every invocation including each bar redraw.
 - `[guarded]` **A hook's stdout lands in view-mode on the pane you are in.**
