@@ -1110,7 +1110,7 @@ hold_client 40
 tmux select-window -t "$MW"; "$KEL" _sidebar wake
 SP="$(sbpane "$MW")"
 wait_until 'sbtext "$SP" | grep -q "wt"' 50
-ok "the sidebar draws spaces, then agents"       'sbtext "$SP" | grep -qx spaces && sbtext "$SP" | grep -qx agents'
+ok "the sidebar draws spaces, then agents"       'sbtext "$SP" | grep -qx "  spaces" && sbtext "$SP" | grep -qx "  agents"'
 ok "  ...the worktree as a space of its own"     '[ "$(sbtext "$SP" | grep -c "api-gw")" -ge 2 ]'
 ok "  ...and selects with a bar, not inverse video" '! tmux capture-pane -e -p -t "$SP" | grep -q "\[7m" && sbtext "$SP" | grep -q "▌"'
 
@@ -1147,11 +1147,11 @@ ok "  ...naming the file at risk, in the sidebar" 'sbtext "$SW" | grep -q "scrat
 # n: a new agent in the selected entry's space, named in the footer
 f0=$fail
 tmux send-keys -t "$SW" n
-wait_until 'sbtext "$SW" | grep -q "^new agent in "'
+wait_until 'sbtext "$SW" | grep -q "^  new agent in "'
 tmux send-keys -t "$SW" -l fresh
 tmux send-keys -t "$SW" Enter
-wait_until 'sbtext "$SW" | grep -q "^new agent where?"'
-ok "n asks where, after the name"         'sbtext "$SW" | grep -q "enter window · | right · - down"'
+wait_until 'sbtext "$SW" | grep -q "^  new agent where?"'
+ok "n asks where, after the name"         'sbtext "$SW" | grep -q "enter window · | right" && sbtext "$SW" | grep -q -- "- down · esc"'
 tmux send-keys -t "$SW" Enter
 # kel new stamps the window's group before it writes the record, so wait for
 # both — waiting on the window alone raced the record on CI's macOS runner,
@@ -1164,9 +1164,9 @@ tmux select-window -t "$WTW"; "$KEL" _sidebar wake
 wait_until 'sbtext "$SW" | grep -q agents'
 f0=$fail
 tmux send-keys -t "$SW" n
-wait_until 'sbtext "$SW" | grep -q "^new agent in "'
+wait_until 'sbtext "$SW" | grep -q "^  new agent in "'
 tmux send-keys -t "$SW" Enter
-wait_until 'sbtext "$SW" | grep -q "^new agent where?"'
+wait_until 'sbtext "$SW" | grep -q "^  new agent where?"'
 tmux send-keys -t "$SW" Enter
 wait_until '[ -n "$(window_of api-gw api-gw-1)" ] && [ -f "$SESSIONS/api-gw/api-gw-1.json" ]' 80
 ok "  ...and n, enter needs no name"      '[ -n "$(window_of api-gw api-gw-1)" ] && [ -f "$SESSIONS/api-gw/api-gw-1.json" ]'
@@ -1176,9 +1176,9 @@ SW2="$(sbpane "$SPW")"
 wait_until 'sbtext "$SW2" | grep -q agents'
 tmux select-pane -t "$(userpane "$SPW")"; tmux select-pane -t "$SW2"
 tmux send-keys -t "$SW2" n
-wait_until 'sbtext "$SW2" | grep -q "^new agent in "'
+wait_until 'sbtext "$SW2" | grep -q "^  new agent in "'
 tmux send-keys -t "$SW2" Enter
-wait_until 'sbtext "$SW2" | grep -q "^new agent where?"'
+wait_until 'sbtext "$SW2" | grep -q "^  new agent where?"'
 tmux send-keys -t "$SW2" '|'
 wait_until '[ -f "$SESSIONS/api-gw/api-gw-2.json" ]' 80
 ok "  ...and n, enter, | splits the pane you were in" '[ "$(jq -r .window_id "$SESSIONS/api-gw/api-gw-2.json")" = "$SPW" ] && [ "$(tmux list-panes -t "$SPW" -F "#{@kel-agent}" | grep -cx "api-gw/api-gw-[12]")" = 2 ]'
@@ -1279,14 +1279,14 @@ sbdiag "$S5" "$f0"
 # d: committed and uncommitted work against the land base
 echo more >> "$WT5/README.md"
 tmux send-keys -t "$S5" d
-wait_until 'sbtext "$S5" | grep -q "^› main"'
-ok "d asks against what, offering the base it lands on" 'sbtext "$S5" | grep -q "^diff wt5 against" && sbtext "$S5" | grep -q "^› main"'
+wait_until 'sbtext "$S5" | grep -q "^  › main"'
+ok "d asks against what, offering the base it lands on" 'sbtext "$S5" | grep -q "^  diff wt5 against" && sbtext "$S5" | grep -q "^  › main"'
 tmux send-keys -t "$S5" Enter
 wait_until 'grep -q "diff ·" "$KEL_POPUP_TRACE"'
 ok "d diffs the worktree against its base"      'grep -q "^$WT5	diff · api-gw/wt5 · main · prefix q closes	" "$KEL_POPUP_TRACE"'
 # ;: a kel command typed in the sidebar, answered in its footer
 tmux send-keys -t "$S5" '\;'   # escaped: a lone ; is tmux's command separator
-wait_until 'sbtext "$S5" | grep -q "^kel command"'
+wait_until 'sbtext "$S5" | grep -q "^  kel command"'
 tmux send-keys -t "$S5" -l "url $WORK/repos"; tmux send-keys -t "$S5" Enter
 wait_until 'sbtext "$S5" | grep -q "no server listening"' 50
 ok "; runs a kel command and answers in the footer" 'sbtext "$S5" | grep -q "no server listening"'

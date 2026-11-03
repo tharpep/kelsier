@@ -24,9 +24,9 @@ import (
 	"github.com/tharpep/kelsier/internal/fleet"
 )
 
-// §5d: the 16 ANSI colours only, and colour means state. blue is the one
-// accent — no state uses it, so the selection can never read as a state.
-const accent = "\x1b[34m"
+// §5d: colour means state. blue is the one accent — no state uses it, so the
+// selection can never read as a state.
+const accent = "\x1b[38;2;106;167;248m"
 
 const italic = "\x1b[3m"
 
@@ -139,6 +139,7 @@ type lineRef struct {
 	id2   string
 	split int
 	right string // that action, drawn — kept here so the hover can mark it
+	text  string // a choices line as drawn, without colour, for hintKey
 }
 
 // at is the entry a click at column x hits.
@@ -274,6 +275,11 @@ func buildView(doc fleet.Doc, ui uiState) sbView {
 		for _, p := range byWin[wid] {
 			if p.PaneID == pane && p.Git != nil {
 				repo = repoLabel(doc, p.Git.Root)
+				// a linked worktree kel did not list under a repo: its group names
+				// the repo, as it does for the space (spaceKey)
+				if p.Git.Worktree && repo == filepath.Base(p.Git.Root) && p.Group != "" {
+					repo = p.Group
+				}
 			}
 		}
 		v.agents = append(v.agents, sbAgent{wid: wid, pane: pane, key: key, agent: a, current: wid == curWid, repo: repo, shared: len(byWin[wid]) > 1})
@@ -296,6 +302,15 @@ func buildView(doc fleet.Doc, ui uiState) sbView {
 		}
 		return ai.Name < aj.Name
 	})
+	// then grouped under their repo, the groups in the order of their most
+	// urgent agent, so a waiting agent's repo still comes first
+	rank := map[string]int{}
+	for i, a := range v.agents {
+		if _, ok := rank[a.repo]; !ok {
+			rank[a.repo] = i
+		}
+	}
+	sort.SliceStable(v.agents, func(i, j int) bool { return rank[v.agents[i].repo] < rank[v.agents[j].repo] })
 
 	idx := map[string]int{}
 	for _, p := range *doc.Panes {
@@ -589,19 +604,40 @@ func paneGlyph(kind string) string {
 // spaceDetail is the second line: branch and position, then ports. Unknowns
 // are a dim ?, never a clean-looking blank (invariant 3).
 func spaceDetail(s sbSpace) string {
-	var parts []string
+	if s.closed && s.git != nil {
+		// known from git alone: no window stands here to say more
+		return spacePos(s) + " · no window"
+	}
+	parts := []string{spacePos(s)}
+	if s.ports == nil {
+		parts = append(parts, ":?")
+	} else if len(*s.ports) > 0 {
+		ps := make([]string, len(*s.ports))
+		for i, n := range *s.ports {
+			ps[i] = fmt.Sprintf(":%d", n)
+		}
+		parts = append(parts, strings.Join(ps, " "))
+	}
+	if s.agents > 1 {
+		// passive: several agents in one checkout is allowed, just said
+		parts = append(parts, fmt.Sprintf("%d agents", s.agents))
+	}
+	return strings.Join(parts, " · ")
+}
+
+// spacePos is where a space stands — branch and position, or its directory —
+// the part of spaceDetail that fits on the entry's own line.
+func spacePos(s sbSpace) string {
 	switch g := s.git; {
 	case s.closed && g != nil:
-		// known from git alone: no window stands here to say more
-		b := "detached"
 		if g.Branch != nil {
-			b = *g.Branch
+			return *g.Branch
 		}
-		return b + " · no window"
+		return "detached"
 	case g == nil:
-		parts = append(parts, tildify(s.cwd))
+		return tildify(s.cwd)
 	case g.Branch == nil && g.Dirty == nil:
-		parts = append(parts, "?")
+		return "?"
 	default:
 		b := "detached"
 		if g.Branch != nil {
@@ -619,22 +655,8 @@ func spaceDetail(s sbSpace) string {
 		} else if *g.Dirty > 0 {
 			pos += fmt.Sprintf(" ●%d", *g.Dirty)
 		}
-		parts = append(parts, pos)
+		return pos
 	}
-	if s.ports == nil {
-		parts = append(parts, ":?")
-	} else if len(*s.ports) > 0 {
-		ps := make([]string, len(*s.ports))
-		for i, n := range *s.ports {
-			ps[i] = fmt.Sprintf(":%d", n)
-		}
-		parts = append(parts, strings.Join(ps, " "))
-	}
-	if s.agents > 1 {
-		// passive: several agents in one checkout is allowed, just said
-		parts = append(parts, fmt.Sprintf("%d agents", s.agents))
-	}
-	return strings.Join(parts, " · ")
 }
 
 // worktreeDetail is a worktree row's tail, coloured: where it stands, then
@@ -777,34 +799,40 @@ func shortNote(n string) string {
 	return n
 }
 
-// agentDetail: why it is in this state and for how long, then context and
-// cost — or, when it waits on you, what it is waiting for (Orca shows
-// "awaiting permission"; kel had the exact text all along and showed none of
-// it). The state word carries the state's colour; the rest is dim.
-// Plain text out, styles beside it: the renderer truncates first and colours
-// after, or the escape codes count as characters and cut the line short.
-func agentDetail(a fleet.Agent, now int64) (word, colour, rest, restColour string) {
+// agentAge is the right edge of an agent's row: how long it has been in its
+// state, and a chip naming the state when it is one that needs a word.
+// A `working` kel has not heard from reads "quiet", grey italic: kel is not
+// sure, and says so (invariant 3).
+func agentAge(a fleet.Agent, now int64) (age, chipText, chipFg, chipBg string) {
 	if q := quietFor(a, now); q > 0 {
-		// grey italic, the whole line: kel is not sure, and says so in how it
-		// looks as well as in the `?`
-		return "working?", dim + italic, " · quiet " + humanizeSecs(q), dim + italic
+		return dim + italic + "quiet " + humanizeSecs(q) + reset, "", "", ""
 	}
-	_, colour = stateLook(a.State, a.Unseen)
-	word = "?"
-	if a.State != nil && *a.State != "" {
-		word = *a.State
-		if a.StateSince != nil {
-			word += " " + humanizeSecs(now-int64(*a.StateSince))
+	if a.State == nil || *a.State == "" {
+		return dim + "?" + reset, "", "", ""
+	}
+	if a.StateSince != nil {
+		age = dim + humanizeSecs(now-int64(*a.StateSince)) + reset
+	}
+	switch *a.State {
+	case "waiting":
+		return age, "needs you", yellow, yellowBg
+	case "dead":
+		return age, "dead", red, redBg
+	case "throttled":
+		return age, "quota", purple, purpleBg
+	case "done":
+		if a.Unseen {
+			return age, "done", green, greenBg
 		}
 	}
-	// calm states (idle, a done you have seen, unknown) keep stateLook's
-	// grey: only what needs you stands out of the list
-	if a.State != nil && *a.State == "waiting" && a.Note != nil && *a.Note != "" {
-		// the reason is the point of the line: readable, not grey
-		return word, colour, " · " + shortNote(*a.Note), ""
-	}
+	return age, "", "", ""
+}
+
+// agentFacts is the selected agent's detail: context and cost. Unknowns are
+// `?`, never a plausible 0 (invariant 3).
+func agentFacts(a fleet.Agent) string {
 	if a.Context == nil {
-		return word, colour, " · ctx ?", dim
+		return "ctx ?"
 	}
 	pct := "ctx ?"
 	if a.Context.Pct != nil {
@@ -814,7 +842,78 @@ func agentDetail(a fleet.Agent, now int64) (word, colour, rest, restColour strin
 	if a.Context.CostUSD != nil {
 		c = money(*a.Context.CostUSD)
 	}
-	return word, colour, " · " + pct + " · " + c, dim
+	return pct + " · " + c
+}
+
+func chip(text, fg, bg string) string { return bg + fg + " " + text + " " + reset }
+
+// wrapHint breaks a choices line ("y yes · n no · esc") between choices to
+// fit w columns; a choice wider than w alone is cut.
+func wrapHint(h string, w int) []string {
+	if h == "" {
+		return nil
+	}
+	var out []string
+	cur := ""
+	for _, seg := range strings.Split(h, " · ") {
+		switch {
+		case cur == "":
+			cur = seg
+		case len([]rune(cur))+3+len([]rune(seg)) <= w:
+			cur += " · " + seg
+		default:
+			out = append(out, truncate(cur, w))
+			cur = seg
+		}
+	}
+	return append(out, truncate(cur, w))
+}
+
+// keys styles a hint ("e edit · p plan · ?"): each key bright, its word dim.
+func keys(h string) string {
+	parts := strings.Split(h, " · ")
+	for i, p := range parts {
+		k, rest, _ := strings.Cut(p, " ")
+		if rest != "" {
+			rest = " " + rest
+		}
+		parts[i] = bold + k + reset + dim + rest + reset
+	}
+	return strings.Join(parts, dim+" · "+reset)
+}
+
+func visWidth(s string) int { return len([]rune(stripANSI(s))) }
+
+// spread sets right flush against the right edge, one column in, after left.
+// Each side arrives already cut to fit.
+func spread(left, right string, w int) string {
+	if right == "" {
+		return left
+	}
+	return left + strings.Repeat(" ", max(1, w-visWidth(left)-visWidth(right)-1)) + right
+}
+
+// fill paints a line's background across w columns. A reset inside the line
+// would end the paint, so each one takes the background up again.
+func fill(s string, w int, bg string) string {
+	s = bg + strings.ReplaceAll(s, reset, reset+bg)
+	return s + strings.Repeat(" ", max(0, w-visWidth(s))) + reset
+}
+
+// fitPair cuts a name and a right-hand detail to share avail columns: the
+// name keeps at least half, the detail what is left, and goes when that is
+// too little to read.
+func fitPair(name string, right int, avail int) (nameW, rightW int) {
+	n := len([]rune(name))
+	if n+2+right <= avail {
+		return n, right
+	}
+	nameW = max(min(n, avail-2-right), min(n, avail/2))
+	rightW = avail - nameW - 2
+	if rightW < 4 {
+		return min(n, avail), 0
+	}
+	return nameW, rightW
 }
 
 // renderView draws the view at w×h. h == 0 means "no size yet": draw it all.
@@ -844,13 +943,42 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 		}
 		return s
 	}
-	text := w - 3 // lead + dot + space
+	// one line per entry, herdr's way (2026-11-03): the name, and what it
+	// is doing right-aligned. lead, a space, the dot and a space before the
+	// name; one column clear of the right edge
+	avail := max(w-5, 0)
+	in := "  " // the text column; a sidebar squeezed narrower than any name gives it up
+	if w < 12 {
+		in = ""
+	}
+	label := func(s string) string { return in + dim + truncate(s, w-2) + reset }
+	// the selected entry stands on a raised block, a blank row above and
+	// below, with its detail inside — opencode's way
+	entry := func(id string, r lineRef, rows []string) {
+		if id != v.sel {
+			for _, s := range rows {
+				add(s, r)
+			}
+			return
+		}
+		add(fill(lead(id), w, raised), r)
+		for _, s := range rows {
+			add(fill(s, w, raised), r)
+		}
+		add(fill(lead(id), w, raised), r)
+	}
+	one := func(id string, r lineRef, s string) {
+		if id == v.sel {
+			s = fill(s, w, raised)
+		}
+		add(s, r)
+	}
 
-	add(dim+truncate("spaces", w)+reset, lineRef{kind: "header"})
+	add(label("spaces"), lineRef{kind: "header"})
 	if v.unknown {
-		add("  "+dim+truncate("? panes unknown", w-2)+reset, lineRef{})
+		add("    "+dim+truncate("? panes unknown", w-4)+reset, lineRef{})
 	} else if len(v.spaces) == 0 {
-		add("  "+dim+truncate("nothing open", w-2)+reset, lineRef{})
+		add("    "+dim+truncate("nothing open", w-4)+reset, lineRef{})
 	}
 	for _, s := range v.spaces {
 		if s.folded {
@@ -861,7 +989,7 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 		summary := func() {
 			if s.wtSummary() {
 				wid := wtID(s.key)
-				add(lead(wid)+dim+"└"+reset+"  "+dim+truncate(s.wtText(), w-4)+reset, lineRef{id: wid, kind: "space"})
+				one(wid, lineRef{id: wid, kind: "space"}, lead(wid)+" "+dim+"└"+reset+"  "+dim+truncate(s.wtText(), w-6)+reset)
 			}
 		}
 		dot := " "
@@ -872,31 +1000,40 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 		indent := ""
 		if s.parent != "" {
 			// a worktree: one line under its repo, the branch and what
-			// landing it needs — `└ ● fix-auth  ↑2 · review`
+			// landing it needs — `└● fix-auth     ↑2 · review`
 			// the state is what the row is for, so a long name gives way to
 			// it (Claude Code names worktrees agent-af1a1567ab46ddb66)
 			d := worktreeDetail(s)
-			dw := len([]rune(stripANSI(d)))
-			avail := w - 4 // after the bar, └, the dot and a space
-			lw := avail
-			if d != "" && len([]rune(s.label))+2+dw > avail {
-				lw = max(avail-2-dw, 8)
+			dw := visWidth(d)
+			av := max(w-6, 0)
+			lw := av
+			if d != "" && len([]rune(s.label))+2+dw > av {
+				lw = max(av-2-dw, 8)
 			}
-			label := truncate(s.label, lw)
+			lbl := truncate(s.label, lw)
 			if s.closed {
-				label = dim + label + reset
+				lbl = dim + lbl + reset
 			}
-			row := lead(id) + dim + "└" + reset + dot + " " + weight(label, s.current)
-			if d != "" {
-				if room := avail - len([]rune(stripANSI(label))) - 2; room > 0 {
-					row += "  " + truncateStyled(d, room)
-				}
+			left := lead(id) + " " + dim + "└" + reset + dot + " " + weight(lbl, s.current)
+			right := ""
+			if room := av - visWidth(lbl) - 2; d != "" && room > 0 {
+				right = truncateStyled(d, room)
 			}
-			add(row, r)
+			one(id, r, spread(left, right, w))
 			indent = "  "
 		} else {
-			add(lead(id)+dot+" "+weight(truncate(s.label, text), s.current), r)
-			add("   "+dim+truncate(spaceDetail(s), text)+reset, r)
+			pos := spacePos(s)
+			lw, rw := fitPair(s.label, len([]rune(pos)), avail)
+			right := ""
+			if rw > 0 {
+				right = dim + truncate(pos, rw) + reset
+			}
+			rows := []string{spread(lead(id)+" "+dot+" "+weight(truncate(s.label, lw), s.current), right, w)}
+			if id == v.sel {
+				// the rest of where it stands: ports, how many agents
+				rows = append(rows, lead(id)+"   "+dim+truncate(spaceDetail(s), avail)+reset)
+			}
+			entry(id, r, rows)
 		}
 		if !s.open {
 			summary()
@@ -910,54 +1047,90 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 		}
 		for _, p := range s.panes {
 			pr := lineRef{id: p.PaneID, kind: "pane"}
-			label := truncate(paneLabel(p), w-5)
+			lw := max(w-7-len(indent), 0)
+			lbl := truncate(paneLabel(p), lw)
 			if seen[paneLabel(p)] > 1 && p.WindowName != "" {
-				if room := w - 5 - len([]rune(label)) - 3; room > 0 {
-					label += dim + " · " + truncate(p.WindowName, room) + reset
+				if room := lw - len([]rune(lbl)) - 3; room > 0 {
+					lbl += dim + " · " + truncate(p.WindowName, room) + reset
 				}
 			}
-			add(lead(p.PaneID)+indent+" "+paneGlyph(p.Kind)+" "+weight(label, p.Current), pr)
+			one(p.PaneID, pr, lead(p.PaneID)+"   "+indent+paneGlyph(p.Kind)+" "+weight(lbl, p.Current))
 			if p.Cards != nil && p.Cards.Unseen && p.Cards.Latest != nil {
 				latest := p.Cards.Latest
 				col := dim
 				if latest.Kind == "decision" {
 					col = yellow
 				}
-				cardText := "▸ " + latest.Kind + ": " + latest.Title
-				add(indent+"   "+col+truncate(cardText, text)+reset, pr)
+				add("     "+indent+col+truncate("▸ "+latest.Kind+": "+latest.Title, lw)+reset, pr)
 			}
 		}
 		summary()
 	}
 
 	add("", lineRef{})
-	add(dim+truncate("agents", w)+reset, lineRef{kind: "header"})
+	add(label("agents"), lineRef{kind: "header"})
 	if v.unknown {
-		add("  "+dim+truncate("? panes unknown", w-2)+reset, lineRef{})
+		add("    "+dim+truncate("? panes unknown", w-4)+reset, lineRef{})
 	} else if len(v.agents) == 0 {
-		add("  "+dim+truncate("none", w-2)+reset, lineRef{})
+		add("    "+dim+truncate("none", w-4)+reset, lineRef{})
 	}
+	// grouped under their repo: two repos can each have an agent called docs
+	group := "\x00"
 	for _, a := range v.agents {
+		if a.repo != group {
+			group = a.repo
+			g := group
+			if g == "" {
+				g = "misc"
+			}
+			add("  "+faint+truncate(g, w-3)+reset, lineRef{kind: "group"})
+		}
 		id := agentID(a.key)
 		r := lineRef{id: id, kind: "agent"}
 		d, c := stateLook(a.agent.State, a.agent.Unseen)
 		if quietFor(a.agent, now) > 0 {
 			d, c = "◌", dim // not heard from: no state colour it has not earned
 		}
-		name := weight(truncate(a.agent.Name, text), a.current)
-		// the repo, dim beside the name, when there is room: two repos can
-		// each have an agent called docs
-		if g := a.repo; g != "" && g != a.agent.Name && !strings.HasPrefix(a.agent.Name, g+"-") && len([]rune(a.agent.Name))+2+len([]rune(g)) <= text {
-			name += "  " + dim + g + reset
+		age, ct, cf, cb := agentAge(a.agent, now)
+		right := age
+		if ct != "" {
+			right = strings.TrimSpace(age + " " + chip(ct, cf, cb))
 		}
-		add(lead(id)+c+d+reset+" "+name, r)
-		word, wc, rest, rc := agentDetail(a.agent, now)
-		word = truncate(word, text)
-		rest = truncate(rest, text-len([]rune(word)))
-		add("   "+wc+word+reset+rc+rest+reset, r)
-		// what it is doing now, from Claude Code's transcript (backlog #40)
-		if a.agent.Doing != nil && a.agent.State != nil && *a.agent.State == "working" {
-			add("   "+dim+italic+truncate(*a.agent.Doing, text)+reset, r)
+		lw, rw := fitPair(a.agent.Name, visWidth(right), avail)
+		if rw < visWidth(right) {
+			// too narrow for both: the chip says more than the age
+			switch {
+			case ct != "" && len([]rune(ct))+2 <= rw:
+				right = chip(ct, cf, cb)
+			case visWidth(age) <= rw:
+				right = age
+			default:
+				right = ""
+			}
+		}
+		rows := []string{spread(lead(id)+" "+c+d+reset+" "+weight(truncate(a.agent.Name, lw), a.current), right, w)}
+		pre := lead(id) + "   "
+		// what it waits for is the point of a waiting agent: always shown,
+		// readable, not grey (Orca shows "awaiting permission"; kel had the
+		// exact text all along)
+		if a.agent.State != nil && *a.agent.State == "waiting" && a.agent.Note != nil && *a.agent.Note != "" {
+			rows = append(rows, pre+mid+truncate(shortNote(*a.agent.Note), avail)+reset)
+		}
+		if id == v.sel {
+			rows = append(rows, pre+mid+truncate(agentFacts(a.agent), avail)+reset)
+			// what it is doing now, from Claude Code's transcript (backlog #40)
+			if a.agent.Doing != nil && a.agent.State != nil && *a.agent.State == "working" {
+				rows = append(rows, pre+dim+italic+truncate(*a.agent.Doing, avail)+reset)
+			}
+			// subagents: the Task-tool helpers this agent has running
+			for _, sub := range a.agent.Subagents {
+				sd, sc := subLook(sub.Status)
+				sl := sub.Label
+				if sub.AgentType != "" && sub.AgentType != "general-purpose" {
+					sl += " · " + sub.AgentType
+				}
+				rows = append(rows, pre+dim+"└"+reset+" "+sc+sd+reset+" "+dim+truncate(sl, avail-4)+reset)
+			}
 		}
 		if a.agent.Cards != nil && a.agent.Cards.Unseen && a.agent.Cards.Latest != nil {
 			latest := a.agent.Cards.Latest
@@ -965,30 +1138,37 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 			if latest.Kind == "decision" {
 				col = yellow
 			}
-			cardText := "▸ " + latest.Kind + ": " + latest.Title
-			add("   "+col+truncate(cardText, text)+reset, r)
+			rows = append(rows, pre+col+truncate("▸ "+latest.Kind+": "+latest.Title, avail)+reset)
 		}
-		// subagents: the Task-tool helpers this agent has running, under it
-		for _, sub := range a.agent.Subagents {
-			d, c := subLook(sub.Status)
-			label := sub.Label
-			if sub.AgentType != "" && sub.AgentType != "general-purpose" {
-				label += " · " + sub.AgentType
-			}
-			add("   "+dim+"└"+reset+" "+c+d+reset+" "+dim+truncate(label, w-7)+reset, r)
-		}
+		entry(id, r, rows)
 		for _, b := range v.bgUnder[a.key] {
-			d, c, w2 := bgLook(b)
+			bd, bc, _ := bgLook(b)
 			bid := bgID(b.ID)
-			label := truncate(b.Name+" · bg · "+w2, w-7)
-			add(lead(bid)+"  "+dim+"└"+reset+" "+c+d+reset+" "+label, lineRef{id: bid, kind: "bg"})
+			bright := ""
+			if b.State == "blocked" {
+				bright = chip("blocked", yellow, yellowBg)
+			}
+			bl := truncate(b.Name+" · bg", max(avail-4-visWidth(bright)-1, 1))
+			one(bid, lineRef{id: bid, kind: "bg"}, spread(lead(bid)+"   "+dim+"└"+reset+" "+bc+bd+reset+" "+bl, bright, w))
 		}
 	}
+	if len(v.bgLoose) > 0 {
+		add("  "+faint+truncate("background", w-3)+reset, lineRef{kind: "group"})
+	}
 	for _, b := range v.bgLoose {
-		d, c, w2 := bgLook(b)
+		bd, bc, _ := bgLook(b)
 		bid := bgID(b.ID)
-		add(lead(bid)+c+d+reset+" "+truncate(b.Name, text)+"  "+dim+"bg"+reset, lineRef{id: bid, kind: "bg"})
-		add("   "+c+w2+reset+dim+truncate(" · "+b.Group, text-len([]rune(w2)))+reset, lineRef{id: bid, kind: "bg"})
+		right := ""
+		if b.State == "blocked" {
+			right = chip("blocked", yellow, yellowBg)
+		} else if b.Group != "" {
+			right = dim + b.Group + reset
+		}
+		lw, rw := fitPair(b.Name, visWidth(right), avail)
+		if rw < visWidth(right) {
+			right = ""
+		}
+		one(bid, lineRef{id: bid, kind: "bg"}, spread(lead(bid)+" "+bc+bd+reset+" "+truncate(b.Name, lw), right, w))
 	}
 
 	// The bottom is what you can do, as keys you can also click: first to
@@ -1003,7 +1183,7 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 		if k == "enter" {
 			k = "↵"
 		}
-		return " " + bold + k + reset + " " + dim + pad(truncate(a.label, cw-3), cw-3) + reset
+		return "  " + bold + k + reset + " " + dim + pad(truncate(a.label, cw-4), cw-4) + reset
 	}
 	grid := func(list []sbAct) []line {
 		cw := w / 2
@@ -1021,10 +1201,10 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 	var selActs, kelActs []line
 	if h > 0 {
 		if what, name, list := selActions(v); len(list) > 0 {
-			selActs = append(selActs, line{dim + what + " " + reset + truncate(name, w-len(what)-1), lineRef{}})
+			selActs = append(selActs, line{in + dim + what + " " + reset + truncate(name, w-len(what)-3), lineRef{}})
 			selActs = append(selActs, grid(list)...)
 		}
-		kelActs = append(kelActs, line{dim + truncate("kel", w) + reset, lineRef{}})
+		kelActs = append(kelActs, line{label("kel"), lineRef{}})
 		list := sbActions
 		if v.restore {
 			// one line at startup was the only mention: until it is used, the
@@ -1044,17 +1224,19 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 		if c == "" {
 			c = accent
 		}
-		tail = append(tail, line{c + bold + truncate(v.promptTitle, w) + reset, lineRef{}})
+		tail = append(tail, line{in + c + bold + truncate(v.promptTitle, w-2) + reset, lineRef{}})
 		if v.input != "" {
-			tail = append(tail, line{accent + "› " + reset + bold + tail2(v.input, w-2) + reset, lineRef{}})
+			tail = append(tail, line{in + accent + "› " + reset + bold + tail2(v.input, w-4) + reset, lineRef{}})
 		}
-		if v.hint2 != "" {
-			tail = append(tail, line{dim + truncate(v.hint2, w) + reset, lineRef{id: "hint2", kind: "hint2"}})
+		// the choices wrap rather than lose one off the end; each line keeps
+		// its own text, so a click finds the word under it
+		for _, h := range wrapHint(v.hint2, w-len(in)) {
+			tail = append(tail, line{in + dim + h + reset, lineRef{id: "hint2", kind: "hint2", text: in + h}})
 		}
 	case v.footer != "":
-		tail = append(tail, line{v.footerColour + truncate(v.footer, w) + reset, lineRef{}})
+		tail = append(tail, line{in + v.footerColour + truncate(v.footer, w-2) + reset, lineRef{}})
 	case v.filter != "":
-		tail = append(tail, line{dim + truncate("/"+v.filter+"  esc clears", w) + reset, lineRef{}})
+		tail = append(tail, line{in + dim + truncate("/"+v.filter+"  esc clears", w-2) + reset, lineRef{}})
 	case !v.focused && v.waiting > 0:
 		// the waiting alarm, which tmux's bar carried until the sidebar
 		// took its place: while you are elsewhere, it is the footer.
@@ -1066,7 +1248,7 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 			t += " " + humanizeSecs(now-v.waitSince)
 		}
 		t += " · " + v.prefix + " then `"
-		tail = append(tail, line{yellow + bold + truncate(t, w) + reset, lineRef{id: "act:`", kind: "action"}})
+		tail = append(tail, line{in + yellow + bold + truncate(t, w-2) + reset, lineRef{id: "act:`", kind: "action"}})
 	}
 	// scroll so the selected entry is on screen; the bottom is pinned
 	if h > 0 {
@@ -1108,7 +1290,7 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 				}
 				if body[off].ref.kind != "header" {
 					if body[off].s == "" && off+1 < len(body) && body[off+1].ref.kind == "header" {
-						body = body[off:]
+						body = body[off+1:]
 					} else {
 						avail := room - 1
 						if last >= 0 && last >= off+avail {
@@ -1117,7 +1299,7 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 						if first >= 0 && first < off {
 							off = first
 						}
-						hdr := line{s: dim + truncate(secName, w) + reset, ref: lineRef{kind: "header"}}
+						hdr := line{s: label(secName), ref: lineRef{kind: "header"}}
 						body = append([]line{hdr}, body[off:]...)
 					}
 				} else {
@@ -1147,11 +1329,11 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 		if len(tail) == 0 && !(v.barHint && (!v.focused || len(acts) > 0)) {
 			switch {
 			case !v.focused:
-				tail = append(tail, line{dim + truncate("click, or "+v.prefix+" then space", w) + reset, lineRef{}})
+				tail = append(tail, line{in + dim + truncate("click, or "+v.prefix+" then space", w-2) + reset, lineRef{}})
 			case len(acts) > 0:
-				tail = append(tail, line{dim + truncate("esc back to your pane", w) + reset, lineRef{}})
+				tail = append(tail, line{in + dim + truncate("esc back to your pane", w-2) + reset, lineRef{}})
 			default:
-				tail = append(tail, line{dim + truncate(hint(v, w), w) + reset, lineRef{}})
+				tail = append(tail, line{in + keys(truncate(hint(v, w-2), w-2)), lineRef{}})
 			}
 		}
 		if len(tail) > 0 && room == h && len(body) >= room {
@@ -1174,7 +1356,7 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 			body = append(body, line{"", lineRef{}})
 		}
 	} else if len(tail) == 0 {
-		tail = append(tail, line{dim + truncate(hint(v, w), w) + reset, lineRef{}})
+		tail = append(tail, line{in + keys(truncate(hint(v, w-2), w-2)), lineRef{}})
 	}
 	if h != 1 || len(body) == 0 {
 		body = append(body, tail...)

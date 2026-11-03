@@ -130,8 +130,9 @@ func TestSidebarView(t *testing.T) {
 	for _, a := range v.agents {
 		names = append(names, a.agent.Name)
 	}
-	// triage: waiting, working, an unseen done, throttled, seen done, idle, dead
-	if got := strings.Join(names, " "); got != "fix-auth kelsier usage-charts docs rate-limits dashboard gateway spike" {
+	// grouped under their repo, the groups in the order of their most urgent
+	// agent; triage order within a group
+	if got := strings.Join(names, " "); got != "fix-auth kelsier docs usage-charts dashboard spike rate-limits gateway" {
 		t.Errorf("agents in triage order: got %s", got)
 	}
 	if v.sel != "a:@1" {
@@ -205,11 +206,11 @@ func TestSidebarHint(t *testing.T) {
 	}
 	// someone waits: the unfocused footer is the alarm, which names its key
 	// and still jumps on a click
-	if got := foot(uiState{}, 32); got != "1 waiting · Ctrl-b then `" {
+	if got := foot(uiState{}, 32); got != "  1 waiting · Ctrl-b then `" {
 		t.Errorf("unfocused footer with one waiting: %q", got)
 	}
 	out, refs := renderView(buildView(loadFixture(t, "one-agent"), uiState{}), 32, 30, 0)
-	if l := strings.Split(plain(out), "\n"); l[len(l)-1] != "click, or Ctrl-b then space" {
+	if l := strings.Split(plain(out), "\n"); l[len(l)-1] != "  click, or Ctrl-b then space" {
 		t.Errorf("unfocused footer: %q", l[len(l)-1])
 	}
 	out, refs = renderView(buildView(doc, uiState{}), 32, 30, 0)
@@ -217,10 +218,10 @@ func TestSidebarHint(t *testing.T) {
 	if r := refs[len(refs)-1]; r.kind != "action" || r.id != "act:`" {
 		t.Errorf("the alarm does not jump: %+v", r)
 	}
-	if got := foot(uiState{focused: true}, 32); !strings.HasPrefix(got, "e edit · p plan · x kill") {
+	if got := foot(uiState{focused: true}, 32); !strings.HasPrefix(got, "  e edit · p plan · x kill") {
 		t.Errorf("agent footer: %q", got)
 	}
-	if got := foot(uiState{focused: true, sel: spaceID("/home/me/code/api-gw")}, 32); !strings.HasPrefix(got, "f files · g git · e edit") {
+	if got := foot(uiState{focused: true, sel: spaceID("/home/me/code/api-gw")}, 32); !strings.HasPrefix(got, "  f files · g git · e edit") {
 		t.Errorf("space footer: %q", got)
 	}
 	if got := foot(uiState{focused: true, sel: "%7", expanded: map[string]bool{"/home/me/code/api-gw": true}}, 40); !strings.Contains(got, "o open") {
@@ -361,7 +362,7 @@ func TestSidebarActions(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	m := sbModel{doc: loadFixture(t, "one-agent"), width: 32, height: 30, visible: true}
 	out, refs := renderView(m.view(), 32, 30, 0)
-	if !strings.Contains(plain(out), "\nkel\n") {
+	if !strings.Contains(plain(out), "\n  kel\n") {
 		t.Fatalf("no kel actions at 32x30:\n%s", plain(out))
 	}
 	y, x := -1, 2
@@ -460,6 +461,14 @@ func TestHintKey(t *testing.T) {
 	}
 	if k := hintKey("enter ok · esc cancel", 14); k.Code != tea.KeyEscape {
 		t.Errorf("click on cancel: %+v", k)
+	}
+	// a choices line too wide for the sidebar wraps; no choice is lost
+	got := wrapHint("enter window · | right · - down · esc", 30)
+	if strings.Join(got, " · ") != "enter window · | right · - down · esc" || len(got) != 2 {
+		t.Errorf("wrapped choices: %q", got)
+	}
+	if k := hintKey("  "+got[1], 3); k.Text != "-" {
+		t.Errorf("click on the wrapped line's first choice: %+v", k)
 	}
 	if keyWords("C-b") != "Ctrl-b" || keyWords("M-a") != "Alt-a" {
 		t.Error("the prefix must read in words")
@@ -745,7 +754,7 @@ func TestActionGrid(t *testing.T) {
 	// hover marks the half under the pointer
 	m.ui.hover, m.ui.hoverX = y+1, 20
 	out, _ = renderView(m.view(), 32, 30, 0)
-	if l := strings.Split(plain(out), "\n")[y]; !strings.Contains(l, "▏w") || strings.HasPrefix(l, "▏") {
+	if l := strings.Split(plain(out), "\n")[y]; !strings.Contains(l, "▏ w") || strings.HasPrefix(l, "▏") {
 		t.Errorf("hover on the right half: %q", l)
 	}
 }
@@ -939,7 +948,7 @@ func TestStickyHeadersAndResponsiveGrid(t *testing.T) {
 	vSpike := buildView(fifteenDoc, uiState{focused: true, sel: "a:@8"})
 	outSpike, _ := renderView(vSpike, 32, 16, 0)
 	linesSpike := strings.Split(plain(outSpike), "\n")
-	if len(linesSpike) == 0 || linesSpike[0] != "agents" {
+	if len(linesSpike) == 0 || linesSpike[0] != "  agents" {
 		t.Errorf("sticky header for scrolled agents: want agents at line 0, got %q", linesSpike[0])
 	}
 	if !strings.Contains(plain(outSpike), "spike") {
@@ -950,7 +959,7 @@ func TestStickyHeadersAndResponsiveGrid(t *testing.T) {
 	vSpace := buildView(fifteenDoc, uiState{focused: true, sel: spaceID("/home/me/code/web-dashboard")})
 	outSpace, _ := renderView(vSpace, 32, 16, 0)
 	linesSpace := strings.Split(plain(outSpace), "\n")
-	if len(linesSpace) == 0 || linesSpace[0] != "spaces" {
+	if len(linesSpace) == 0 || linesSpace[0] != "  spaces" {
 		t.Errorf("sticky header for scrolled spaces: want spaces at line 0, got %q", linesSpace[0])
 	}
 }
