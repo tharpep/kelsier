@@ -402,12 +402,19 @@ func TestSidebarHover(t *testing.T) {
 		}
 	}
 	out, _ := renderView(buildView(doc, uiState{hover: y + 1}), 32, 40, 0)
-	if !strings.Contains(strings.Split(out, "\n")[y], "▏") {
-		t.Errorf("hovered line has no hover bar: %q", plain(strings.Split(out, "\n")[y]))
+	soft := lifted.mix(baseBg, 0.25).bg()
+	if !strings.HasPrefix(strings.Split(out, "\n")[y], soft) {
+		t.Errorf("hovered line is not lifted: %q", plain(strings.Split(out, "\n")[y]))
 	}
-	// its two lines and the button strip hung under them
-	if strings.Count(out, "▏") != 3 {
-		t.Errorf("hover marks the whole entry (2 lines and its strip), got %d", strings.Count(out, "▏"))
+	// its two lines and the button strip hung under them, one lifted unit
+	lit := 0
+	for _, l := range strings.Split(out, "\n") {
+		if strings.HasPrefix(l, soft) {
+			lit++
+		}
+	}
+	if lit != 3 {
+		t.Errorf("hover lifts the whole entry (2 lines and its strip), got %d", lit)
 	}
 }
 
@@ -1171,4 +1178,77 @@ func TestWrapWords(t *testing.T) {
 	if got := wrapWords("editing sbview.go", 27, 2); len(got) != 1 {
 		t.Errorf("a short one stays one line: %q", got)
 	}
+}
+
+// The hovered entry never moves under the pointer: whatever the fixture,
+// height or row, nothing at or above the pointer moves when the strip opens,
+// past the first column, where the hover bar is drawn.
+func TestHoverKeepsTheEntryInPlace(t *testing.T) {
+	files, _ := filepath.Glob(filepath.Join(fixtures, "*.json"))
+	for _, f := range files {
+		doc := loadFixture(t, strings.TrimSuffix(filepath.Base(f), ".json"))
+		for _, h := range []int{12, 20, 30, 40} {
+			out, refs := renderView(buildView(doc, uiState{}), 32, h, 0)
+			lines := strings.Split(plain(out), "\n")
+			for y, r := range refs {
+				if len(rowButtons(r.kind)) == 0 {
+					continue
+				}
+				hout, _ := renderView(buildView(doc, uiState{hover: y + 1, hoverX: 4, hoverID: r.id}), 32, h, 0)
+				hl := strings.Split(plain(hout), "\n")
+				for i := 0; i <= y; i++ {
+					if strings.Trim(lines[i], " ▌") == "" {
+						continue // a block's foot row: the selected strip's place
+					}
+					if i >= len(hl) || strings.TrimRight(string([]rune(hl[i])[1:]), " ") != strings.TrimRight(string([]rune(lines[i])[1:]), " ") {
+						t.Errorf("%s h=%d: hovering row %d (%s) moved row %d:\n was %q", filepath.Base(f), h, y, r.id, i, lines[i])
+						break
+					}
+				}
+			}
+		}
+	}
+}
+
+// Moving down from one agent's strip onto the agent below keeps that agent
+// under the pointer: the strip above it closes, so the new one opens above
+// it, where the old one was.
+func TestHoverMovingDownKeepsPlace(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	m := sbModel{doc: loadFixture(t, "fifteen-three-repos"), width: 32, height: 40, visible: true}
+	ya := rowOf(t, m, "a:@4") // gateway, rate-limits under it
+	nm, _ := m.Update(tea.MouseMotionMsg{X: 4, Y: ya})
+	m = nm.(sbModel)
+	out, _ := renderView(m.view(), 32, 40, 0)
+	yb := ya + 2 // past gateway's strip
+	if l := strings.Split(plain(out), "\n")[yb]; !strings.Contains(l, "rate-limits") {
+		t.Fatalf("rate-limits not two rows down: %q", l)
+	}
+	nm, _ = m.Update(tea.MouseMotionMsg{X: 4, Y: yb})
+	m = nm.(sbModel)
+	out, _ = renderView(m.view(), 32, 40, 0)
+	if l := strings.Split(plain(out), "\n")[yb]; !strings.Contains(l, "rate-limits") {
+		t.Errorf("rate-limits moved from under the pointer: row %d is %q", yb, l)
+	}
+}
+
+// Down a run of agents and back up, each stays under the pointer.
+func TestHoverChainKeepsPlace(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	m := sbModel{doc: loadFixture(t, "fifteen-three-repos"), width: 32, height: 40, visible: true}
+	at := func(y int, name string) {
+		t.Helper()
+		nm, _ := m.Update(tea.MouseMotionMsg{X: 4, Y: y})
+		m = nm.(sbModel)
+		out, _ := renderView(m.view(), 32, 40, 0)
+		if l := strings.Split(plain(out), "\n")[y]; !strings.Contains(l, name) {
+			t.Errorf("pointer on row %d expected %s, found %q", y, name, l)
+		}
+	}
+	y := rowOf(t, m, "a:@6") // dashboard, usage-charts, spike
+	at(y, "dashboard")
+	at(y+2, "usage-charts") // past dashboard's strip
+	at(y+3, "spike")        // past usage-charts' strip, now above it
+	at(y+1, "usage-charts") // back up
+	at(y, "dashboard")
 }
