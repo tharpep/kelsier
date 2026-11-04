@@ -515,7 +515,8 @@ sidebar_width_opts() {
   local w="$KEL_SIDEBAR_WIDTH"
   tmux set-option -g @kel-sidebar-width "$w" \; \
        set-option -g @kel-hint-out "$(printf '%-*.*s' "$w" "$w" "click, or $(prefix_words) then space")" \; \
-       set-option -g @kel-hint-in "$(printf '%-*.*s' "$w" "$w" "esc back to your pane")" 2>/dev/null
+       set-option -g @kel-hint-in "$(printf '%-*.*s' "$w" "$w" "esc back to your pane")" \; \
+       set-option -g @kel-hint-blank "$(printf '%*s' "$w" '')" 2>/dev/null
 }
 
 # per-pane styles are tmux 3.1+; below that the sidebar just wears the
@@ -2376,6 +2377,8 @@ banner_apply() {
   # # is doubled: tmux must print it, never read it as a format
   name="${name//#/##}"; text="${text//#/##}"
   [ "${#text}" -gt 80 ] && text="${text:0:79}…"
+  # The row keeps the bar's lead for alignment, blank: the sidebar hint is
+  # the bar's, and on both rows it read twice (#22).
   # `↵ go` is what a click does; the key is named beside it so the banner
   # teaches it too (the sidebar's footer says the same).  ` is a prefix key:
   # two presses, so "then" — `Ctrl-b \`` read as one chord (2026-10-16).
@@ -2383,7 +2386,7 @@ banner_apply() {
   tmux set-option -t "$t" status 2 \; \
        set-option -u -t "$t" status-position \; \
        set-option -t "$t" status-format[1] "$bar" \; \
-       set-option -t "$t" status-format[0] "#[align=left,bg=default]#{E:@kel-bar-lead}#[range=user|bgo]#[fg=colour214,bold] ● $name#[nobold,fg=colour252] $word${text:+#[fg=colour245] — $text}$more #[norange]#[align=right]#[range=user|bgo]#[fg=colour255,bold] ↵ go #[nobold,fg=colour240]or $(prefix_words) then \` #[norange]#[range=user|bx]#[fg=colour245] ✕ #[norange]" \
+       set-option -t "$t" status-format[0] "#[align=left,bg=default]#{E:@kel-bar-lead-blank}#[range=user|bgo]#[fg=colour214,bold] ● $name#[nobold,fg=colour252] $word${text:+#[fg=colour245] — $text}$more #[norange]#[align=right]#[range=user|bgo]#[fg=colour255,bold] ↵ go #[nobold,fg=colour240]or $(prefix_words) then \` #[norange]#[range=user|bx]#[fg=colour245] ✕ #[norange]" \
        2>/dev/null
 }
 
