@@ -100,10 +100,15 @@ kel_config_read() {   # file
     [ -n "${line##*=*}" ] && continue
     local key="${line%%=*}" val="${line#*=}"
     key="${key%%[[:space:]]*}"
-    val="${val%%#*}"
-    val="${val#"${val%%[![:space:]]*}"}"; val="${val%"${val##*[![:space:]]}"}"
-    val="${val%\"}"; val="${val#\"}"
-    val="${val%\'}"; val="${val#\'}"
+    # a quoted value runs to its closing quote, so a # inside it is the
+    # value's ("#1e1e2e"); only an unquoted value loses a trailing # comment
+    val="${val#"${val%%[![:space:]]*}"}"
+    case "$val" in
+      \"*) val="${val#\"}"; val="${val%%\"*}" ;;
+      \'*) val="${val#\'}"; val="${val%%\'*}" ;;
+      \#*) val='' ;;
+      *)  val="${val%%[[:space:]]#*}"; val="${val%"${val##*[![:space:]]}"}" ;;
+    esac
     case "$key" in ''|*[!a-z0-9_]*) continue ;; esac
     local up=''
     case "$key" in *) up="$(printf '%s' "$key" | tr '[:lower:]' '[:upper:]')" ;; esac
@@ -4236,7 +4241,7 @@ main() {
     _fleet)       fleet_json "$@" ;;
     _menus)       menus_click ;;
     _copy)        copy_stdin ;;
-    _cfgdump)     printf 'ctx_warn=%s notify=%s group=%s\n' "${KEL_CTX_WARN:-}" "${KEL_NOTIFY:-}" "${KEL_GROUP:-}" ;;
+    _cfgdump)     printf 'ctx_warn=%s notify=%s group=%s sidebar_bg=%s\n' "${KEL_CTX_WARN:-}" "${KEL_NOTIFY:-}" "${KEL_GROUP:-}" "${KEL_SIDEBAR_BG:-}" ;;
     statusline)   cmd_statusline ;;                # hot path — skip migrate
     jump)         cmd_jump ;;
     ''|attach)    migrate_meta; cmd_attach ;;

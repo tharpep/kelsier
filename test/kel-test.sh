@@ -581,6 +581,8 @@ rm -f "$WORK/repos/api-gw/.kel/config.toml"
 ok "sections, comments and spacing"      '[[ "$(CFG "$CH")" == *"ctx_warn=42"* ]]'
 printf 'nonsense line with no equals\nBAD_KEY = 1\nctx_warn = 7\n' > "$CH/.config/kel/config.toml"
 ok "junk lines are skipped, not fatal"   '[[ "$(CFG "$CH")" == *"ctx_warn=7"* ]]'
+printf 'sidebar_bg = "#1e1e2e"   # Catppuccin\n' > "$CH/.config/kel/config.toml"
+ok "a # inside a quoted value is the value's, not a comment" '[[ "$(CFG "$CH")" == *"sidebar_bg=#1e1e2e"* ]]'
 ok "the shipped example parses"          'HOME="$CH" XDG_CONFIG_HOME="$CH/.config" bash -c "mkdir -p $CH/.config/kel && cp $HERE/../examples/config.toml $CH/.config/kel/config.toml && cd $CH && \"$KEL\" _cfgdump" >/dev/null'
 
 section "kel config (v0.9: it had no path into it at all before this)"
