@@ -131,7 +131,7 @@ the bash that remains.
 │                          │                      │                   │
 │ e edit · p plan · ?      │                      │                   │
 ├──────────────────────────┴──────────────────────────────────────────┤
-│ claude ███░░ 58% (1h20m) · wk 41%  │  1 waiting 6m · $24.10          │
+│ 5h ━━━━━━━━ 58% (1h20m)   7d 41% · $24.10    ▐needs you▌ docs 6m   14:32 │
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -491,7 +491,7 @@ the second (`status-format[1]`, copied from the global `status-format[0]`).
 tmux's bar always spans the client, so it cannot start right of the sidebar;
 it looks as if it does — both lines lead with `@kel-bar-lead`, the sidebar's
 width in its black (`@kel-sidebar-pad`) and the divider, while the window has
-a sidebar and is not zoomed (the author, 2026-10-21). The strip carries the sidebar's own hint — `click, or Ctrl-b then space`, or `esc back to your pane` while the sidebar is the active pane — so the sidebar gives that line to its lists.
+a sidebar and is not zoomed (the author, 2026-10-21). *Since 2026-11-04 the bar is kel's own `status-format[0]` on the sidebar's surface (kel-sidebar sets `status-style` when it publishes its palette), with no hint in it: the mouse-first sidebar needs none. The banner row keeps a blank lead of the sidebar's width.*
 
 **When the sidebar is hidden, the bar takes location back.** Hiding is one
 global gesture (`kel sidebar off`, which leaves `sidebar-off` in the state
@@ -522,6 +522,8 @@ Opus 5.5 · ████░░ 36% ctx · $10.65
   written either way — it is the account's, wherever it was observed.
 
 ### 7b. tmux's bottom bar  ·  *built (M4)*
+
+*Redesigned 2026-11-04, from the mockups:* `5h ━━━━━━━━ 58% (1h20m)   7d 41% · $24.10` on the left, a thin meter with labels in place of `claude ███░░` and `wk`; on the right `▐needs you▌ <agent> 6m +N`, a chip that jumps there, then the clock. The waiting alarm lives here only, so the sidebar's foot stays `Settings · Help`; `nothing waiting` went with it. The bar wears the sidebar's surface. What follows is the M4 design it grew from.
 
 ```
 claude ███░░ 58% (1h20m) · wk 41%  │  1 waiting 6m · $24.10

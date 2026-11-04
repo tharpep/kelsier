@@ -124,10 +124,7 @@ type sbView struct {
 	hover                int
 	hoverX               int
 	hoverID              string
-	prefix               string
 	restore              bool
-	waiting              int // agents blocked on you, and since when the oldest
-	waitSince            int64
 	menu                 *sbMenu // open over the rows, or nil
 }
 
@@ -222,18 +219,7 @@ func spaceKey(p fleet.Pane) (key, label string) {
 
 func buildView(doc fleet.Doc, ui uiState) sbView {
 	v := sbView{sel: ui.sel, filter: ui.filter, focused: ui.focused, hover: ui.hover, hoverX: ui.hoverX, hoverID: ui.hoverID,
-		prefix: ui.prefix, restore: ui.restore}
-	for _, a := range doc.Agents {
-		if a.WindowID != nil && a.State != nil && *a.State == "waiting" {
-			v.waiting++
-			if a.StateSince != nil && (v.waitSince == 0 || int64(*a.StateSince) < v.waitSince) {
-				v.waitSince = int64(*a.StateSince)
-			}
-		}
-	}
-	if v.prefix == "" {
-		v.prefix = "Ctrl-b"
-	}
+		restore: ui.restore}
 	if doc.Panes == nil {
 		v.unknown = true
 		return v
@@ -1234,18 +1220,6 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 		tail = append(tail, line{in + v.footerColour + truncate(v.footer, w-2) + reset, lineRef{}})
 	case v.filter != "":
 		tail = append(tail, line{in + dim + truncate("/"+v.filter+"  esc clears", w-2) + reset, lineRef{}})
-	case !v.focused && v.waiting > 0:
-		// the waiting alarm, which tmux's bar carried until the sidebar
-		// took its place: while you are elsewhere, it is the footer.
-		// It names the key as well as the click: ` is a prefix key, so two
-		// presses — "click to jump" taught neither that a key exists nor
-		// that the prefix comes first.
-		t := fmt.Sprintf("%d waiting", v.waiting)
-		if v.waitSince > 0 && now >= v.waitSince {
-			t += " " + humanizeSecs(now-v.waitSince)
-		}
-		t += " · " + v.prefix + " then `"
-		tail = append(tail, line{in + yellow + bold + truncate(t, w-2) + reset, lineRef{id: "act:`", kind: "action"}})
 	}
 	// scroll so the selected entry is on screen; the bottom is pinned
 	if h > 0 {
@@ -1661,7 +1635,6 @@ func buttonStrip(id, kind string, btns []sbAct, w int, fillc rgb) line {
 	}
 	return line{s, lineRef{id: id, kind: kind, hits: hits}}
 }
-
 
 // wrapWords breaks text into at most n lines of w columns, at spaces where it
 // can; what still does not fit ends the last line with an ellipsis. What an

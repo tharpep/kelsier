@@ -699,12 +699,12 @@ tmux kill-session -t '=keltest/legacy'
 # waiting alarm, live cost — and where you stand only while the sidebar is off
 bar() { TMUX="$TMUX_TMPDIR/tmux-$(id -u)/default,$(tmux display-message -p '#{pid}'),0" "$KEL" status-line | sed 's/#\[[^]]*\]//g'; }
 ok "the bar no longer lists windows"            '[[ "$(bar)" != *docs* ]] && [[ "$(bar)" != *handmade* ]]'
-ok "  ...shows no quota no session reported"    '[[ "$(bar)" != *claude* ]] && [[ "$(bar)" != *%* ]]'
-ok "  ...and says when nothing waits"           '[[ "$(bar)" == *"nothing waiting"* ]]'
+ok "  ...shows no quota no session reported"    '[[ "$(bar)" != *5h* ]] && [[ "$(bar)" != *%* ]]'
+ok "  ...and no needs-you chip when nothing waits" '[[ "$(bar)" != *"needs you"* ]]'
 DW="$(window_of api-gw docs)"
 printf 'waiting %s\n' "$(( $(date +%s) - 400 ))" > "$STATE/$DW.state"
-ok "one waiting agent, and for how long"        '[[ "$(bar)" == *"1 waiting 6m"* ]]'
-ok "  ...a click target that jumps there"        '[[ "$(TMUX="$TMUX_TMPDIR/tmux-$(id -u)/default,$(tmux display-message -p "#{pid}"),0" "$KEL" status-line)" == *"#[range=user|jump]"*"1 waiting"*"#[norange]"* ]]'
+ok "one waiting agent, named, and for how long"  '[[ "$(bar)" == *"needs you▌ docs 6m"* ]]'
+ok "  ...a click target that jumps there"        '[[ "$(TMUX="$TMUX_TMPDIR/tmux-$(id -u)/default,$(tmux display-message -p "#{pid}"),0" "$KEL" status-line)" == *"#[range=user|jump]"*"needs you"*"#[norange]"* ]]'
 # kel jump (prefix `): the next waiting agent after the window you are in,
 # wrapping round — read from the fleet document, so the same dead check and
 # state the sidebar shows
@@ -739,13 +739,13 @@ rm -f "$STATE/$CW.state"
 now=$(date +%s)
 printf '58 %s 41 %s 12 0 %s\n' "$((now + 5400))" "$((now + 300000))" "$now" > "$STATE/quota"
 rawbar() { TMUX="$TMUX_TMPDIR/tmux-$(id -u)/default,$(tmux display-message -p '#{pid}'),0" "$KEL" status-line; }
-ok "quota: 5h as a bar with its reset, then the week" '[[ "$(bar)" == *"claude █████ 58% (1h"* ]] && [[ "$(rawbar)" == *"███#[fg=colour238]██#[default]"* ]] && [[ "$(bar)" == *"wk 41%"* ]]'
+ok "quota: 5h as a meter with its reset, then the week" '[[ "$(bar)" == *"5h ━━━━━━━━ 58% (1h"* ]] && [[ "$(rawbar)" == *"━━━━━#[fg=#3a3a44]━━━#[default]"* ]] && [[ "$(bar)" == *"7d 41%"* ]]'
 ok "  ...spend only from 50%"                   '[[ "$(bar)" != *spend* ]]'
 printf '58 %s 41 %s 61 0 %s\n' "$((now + 5400))" "$((now + 300000))" "$now" > "$STATE/quota"
 ok "  ...and then it shows"                     '[[ "$(bar)" == *"spend 61%"* ]]'
 printf '58 %s 41 %s -1 0 %s\n' "$((now - 60))" "$((now + 300000))" "$now" > "$STATE/quota"
-ok "a 5h window that has reset reads unknown, not 58%" '[[ "$(rawbar)" == *"#[fg=colour238]█████#[default] ?"* ]] && [[ "$(bar)" != *58%* ]]'
-ok "  ...while the week still shows"            '[[ "$(bar)" == *"wk 41%"* ]]'
+ok "a 5h window that has reset reads unknown, not 58%" '[[ "$(rawbar)" == *"#[fg=#3a3a44]━━━━━━━━#[default] ?"* ]] && [[ "$(bar)" != *58%* ]]'
+ok "  ...while the week still shows"            '[[ "$(bar)" == *"7d 41%"* ]]'
 ok "no location while the sidebar shows"        '[[ "$(bar)" != *main* ]]'
 # "focused" needs a client: with none attached tmux has no pane to name
 : > "$STATE/sidebar-off"

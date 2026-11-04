@@ -514,8 +514,6 @@ sidebar_ensure() { # wid
 sidebar_width_opts() {
   local w="$KEL_SIDEBAR_WIDTH"
   tmux set-option -g @kel-sidebar-width "$w" \; \
-       set-option -g @kel-hint-out "$(printf '%-*.*s' "$w" "$w" "click, or $(prefix_words) then space")" \; \
-       set-option -g @kel-hint-in "$(printf '%-*.*s' "$w" "$w" "esc back to your pane")" \; \
        set-option -g @kel-hint-blank "$(printf '%*s' "$w" '')" 2>/dev/null
 }
 
@@ -2413,7 +2411,7 @@ banner_apply() {
   tmux set-option -t "$t" status 2 \; \
        set-option -u -t "$t" status-position \; \
        set-option -t "$t" status-format[1] "$bar" \; \
-       set-option -t "$t" status-format[0] "#[align=left,bg=default]#{E:@kel-bar-lead-blank}#[range=user|bgo]#[fg=colour214,bold] ● $name#[nobold,fg=colour252] $word${text:+#[fg=colour245] — $text}$more #[norange]#[align=right]#[range=user|bgo]#[fg=colour255,bold] ↵ go #[nobold,fg=colour240]or $(prefix_words) then \` #[norange]#[range=user|bx]#[fg=colour245] ✕ #[norange]" \
+       set-option -t "$t" status-format[0] "#[align=left]#{E:@kel-bar-lead-blank}#[range=user|bgo]#[fg=colour214,bold] ● $name#[nobold,fg=colour252] $word${text:+#[fg=colour245] — $text}$more #[norange]#[align=right]#[range=user|bgo]#[fg=colour255,bold] ↵ go #[nobold,fg=colour240]or $(prefix_words) then \` #[norange]#[range=user|bx]#[fg=colour245] ✕ #[norange]" \
        2>/dev/null
 }
 
@@ -3001,53 +2999,54 @@ cmd_status_line() {
     def dur: floor | if . < 60 then "\(.)s"
                      elif . < 3600 then "\(. / 60 | floor)m"
                      else "\(. / 3600 | floor)h\((. % 3600) / 60 | floor | tostring | if length < 2 then "0" + . else . end)m" end;
-    # full blocks, not ▓: in the author'"'"'s terminal font ▓ and ░ were the same
-    # grey, so 23% read as a solid bar. Claude'"'"'s row already used █/░.
-    def heat: if . >= 90 then "#[fg=colour167,bold]" elif . >= 70 then "#[fg=colour179]" else "" end;
-    def sep: "#[fg=colour240]  │  #[default]";
-    def dot: "#[fg=colour240] · #[default]";
+    # kel'"'"'s state colours, by RGB like the sidebar'"'"'s; the bar wears the
+    # sidebar'"'"'s surface (status-style, set by kel-sidebar)
+    def heat: if . >= 90 then "#[fg=#f2727f,bold]" elif . >= 70 then "#[fg=#f5a742]" else "#[fg=#5fd38d]" end;
+    def tag: "#[fg=#7f7f8a]" + . + "#[default] ";
+    def dot: "#[fg=#55555e] · #[default]";
+    # a thin meter, eight cells of a line: the author found blocks heavy
+    def meter: ((. + 6) / 12.5 | floor | if . > 8 then 8 else . end) as $f
+      | heat + ([range(0; $f)] | map("━") | join("")) + "#[fg=#3a3a44]" + ([range($f; 8)] | map("━") | join("")) + "#[default]";
     now as $now
     | (.quota // null) as $q
     | ( if $q == null then null else
           [ ( $q.five_hour // null | if . == null then empty
-              elif .pct == null then "#[fg=colour238]█████#[default] ?"
-              else (.pct | floor) as $p | ((($p + 19) / 20) | floor | if . > 5 then 5 else . end) as $f
-                # a solid grey track, not ░: in the authors font ░ is a
-                # checkerboard, busy beside the filled part
-                | ($p | heat) + ([range(0; $f)] | map("█") | join(""))
-                  + "#[fg=colour238]" + ([range($f; 5)] | map("█") | join("")) + "#[default]"
-                  + ($p | heat) + " \($p)%#[default]"
-                  + (if (.resets_at // 0) > $now then "#[fg=colour245] (\(.resets_at - $now | dur))#[default]" else "" end)
+              elif .pct == null then ("5h" | tag) + "#[fg=#3a3a44]━━━━━━━━#[default] ?"
+              else (.pct | floor) as $p
+                | ("5h" | tag) + ($p | meter) + " \($p)%"
+                  + (if (.resets_at // 0) > $now then "#[fg=#7f7f8a] (\(.resets_at - $now | dur))#[default]" else "" end)
               end ),
             ( $q.seven_day // null | if . == null then empty
-              elif .pct == null then "wk ?"
-              else (.pct | floor) as $p | ($p | heat) + "wk \($p)%#[default]" end ),
+              elif .pct == null then ("7d" | tag) + "?"
+              else (.pct | floor) as $p | ("7d" | tag) + (if $p >= 70 then ($p | heat) else "" end) + "\($p)%#[default]" end ),
             ( $q.spend // null | if . == null or .pct == null or .pct < 50 then empty
-              else (.pct | floor) as $p | ($p | heat) + "spend \($p)%#[default]" end ) ]
-          | if length == 0 then null else "#[fg=colour245]claude#[default] " + join(dot) end
+              else (.pct | floor) as $p | ("spend" | tag) + ($p | heat) + "\($p)%#[default]" end ) ]
+          | if length == 0 then null else join("   ") end
         end ) as $quota
     | [ .agents[] | select(.window_id != null and .state != "dead") ] as $live
     | [ $live[] | select(.state == "waiting") ] as $wait
     | ( [ $live[] | .context.cost_usd // empty ] | add // 0 ) as $cost
-    | ( if ($live | length) == 0 then "#[fg=colour245]no agents#[default]"
-        else
-          [ ( if ($wait | length) == 0 or $sb == 1 then empty
-              else "#[range=user|jump]#[fg=colour214,bold]\($wait | length) waiting"
-                   + ( [ $wait[] | .state_since // empty ] | min
-                       | if . == null then "" else " \($now - . | dur)" end )
-                   + "#[default]#[norange]" end ),
-            ( if $cost > 0 then "$" + ($cost * 100 | round / 100 | tostring
-                                       | if test("\\.") then (if test("\\.[0-9]$") then . + "0" else . end) else . + ".00" end)
-              else empty end ) ]
-          | if length == 0 then (if $sb == 1 then null else "#[fg=colour245]nothing waiting#[default]" end) else join(dot) end
-        end ) as $fleet
+    | ( if ($live | length) == 0 then "#[fg=#7f7f8a]no agents#[default]"
+        elif $cost > 0 then "#[fg=#a1a1aa]$" + ($cost * 100 | round / 100 | tostring
+                             | if test("\\.") then (if test("\\.[0-9]$") then . + "0" else . end) else . + ".00" end) + "#[default]"
+        else null end ) as $fleet
     | ( .here // null | if . == null then null else
           .group + ( .git // null | if . == null then ""
                      else dot + (.branch // "detached")
                           + (if (.ahead // 0) > 0 then " ↑\(.ahead)" else "" end)
                           + (if (.dirty // 0) > 0 then " ●\(.dirty)" else "" end) end )
         end ) as $here
-    | [ $quota, $fleet, $here ] | map(select(. != null and . != "")) | join(sep)
+    # what waits on you, on the right: a chip that jumps there, the one home
+    # of the waiting alarm (the sidebar'"'"'s foot is Settings and Help)
+    | ( if ($wait | length) == 0 then "" else
+          ($wait | sort_by(.state_since // 0) | .[0]) as $w
+          | "#[align=right]#[range=user|jump]#[fg=#3a2c1c]▐#[bg=#3a2c1c,fg=#f5a742]needs you#[default]#[fg=#3a2c1c]▌#[default] "
+            + $w.name
+            + ( if ($w.state_since // null) == null then "" else "#[fg=#7f7f8a] \($now - $w.state_since | dur)#[default]" end )
+            + ( if ($wait | length) > 1 then "#[fg=#7f7f8a] +\(($wait | length) - 1)#[default]" else "" end )
+            + "#[norange]   "
+        end ) as $right
+    | ([ $quota, $fleet, $here ] | map(select(. != null and . != "")) | join(dot)) + $right
   ' 2>/dev/null | tr -d '\n'
 }
 

@@ -176,7 +176,14 @@ func (m sbModel) repaint() {
 	lastPalette = p
 	_ = os.MkdirAll(fleet.StateDir(), 0o700)
 	fleet.WriteAtomic(sbStatePath("palette"), []byte(p+"\n"))
-	_ = exec.Command("tmux", "set-option", "-g", "@kel-surface", baseBg.hex()).Run()
+	publishSurface()
+}
+
+// publishSurface gives tmux the sidebar's surface: @kel-surface for the lead
+// under the sidebar, and the bar's own style, so the bar is one band with it.
+func publishSurface() {
+	_ = exec.Command("tmux", "set-option", "-g", "@kel-surface", baseBg.hex(), ";",
+		"set-option", "-g", "status-style", "bg="+baseBg.hex()+",fg="+baseFg.mix(baseBg, 0.30).hex()).Run()
 }
 
 // paintFrame gives every cell of a frame the sidebar's own colours: each
@@ -1506,8 +1513,8 @@ func runSidebar(once bool) {
 		// the pane wears no style of its own: tmux would give that as the
 		// terminal's background. kel up to v0.10 set one on every sidebar
 		_ = exec.Command("tmux", "set-option", "-pu", "-t", m.myPane, "window-style", ";",
-			"set-option", "-pu", "-t", m.myPane, "window-active-style", ";",
-			"set-option", "-g", "@kel-surface", baseBg.hex()).Run()
+			"set-option", "-pu", "-t", m.myPane, "window-active-style").Run()
+		publishSurface()
 		// the window this sidebar sits in is current to it, whatever the
 		// fleet document's idea of the client's window — with no client
 		// attached there is none

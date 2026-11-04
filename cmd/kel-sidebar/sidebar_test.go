@@ -950,8 +950,8 @@ func rowOf(t *testing.T, m sbModel, id string) int {
 	return -1
 }
 
-// The foot is Settings and Help, each a click, focused or not; while an
-// agent waits and the keyboard is elsewhere it is the alarm, which jumps.
+// The foot is Settings and Help, each a click, focused or not, whatever
+// waits.
 func TestSidebarFooter(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	doc := loadFixture(t, "one-agent")
@@ -971,10 +971,10 @@ func TestSidebarFooter(t *testing.T) {
 	if !nm.(sbModel).help {
 		t.Error("Help did not open the keys")
 	}
-	out, refs := renderView(buildView(loadFixture(t, "fifteen-three-repos"), uiState{}), 32, 30, 0)
-	l := strings.Split(plain(out), "\n")
-	if l[len(l)-1] != "  1 waiting · Ctrl-b then `" || refs[len(refs)-1].id != "act:`" {
-		t.Errorf("the alarm: %q %+v", l[len(l)-1], refs[len(refs)-1])
+	// someone waiting changes nothing here: the alarm lives on tmux's bar
+	out, _ := renderView(buildView(loadFixture(t, "fifteen-three-repos"), uiState{}), 32, 30, 0)
+	if l := strings.Split(plain(out), "\n"); !strings.HasPrefix(l[len(l)-1], "  ≡ Settings") {
+		t.Errorf("foot while an agent waits: %q", l[len(l)-1])
 	}
 	for w := 1; w <= 40; w++ {
 		out, _ := renderView(buildView(doc, uiState{}), w, 30, 0)

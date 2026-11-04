@@ -165,8 +165,7 @@ the context warning, PR lookups and how often. Each click writes your
 `config.toml` at once, keeping its comments; width refits every sidebar, and
 a background change restarts them. The agent command and worktree folder are
 shown, and `Open config.toml` edits the rest. `‹ Back` or esc returns. Help
-lists every key. While an agent waits and the
-keyboard is elsewhere, the foot is the waiting alarm instead.
+lists every key.
 
 **The keyboard gets into the sidebar only on purpose:** `Ctrl-b then space`, or
 a click. Moving between panes (`Ctrl-b o`, `Ctrl-b ←`, vim-tmux-navigator's
@@ -205,9 +204,7 @@ one-line answer comes back as a message, a longer one in a popup.
 
 Each entry is one line. The selection stands on a lighter block with a blue
 `▌` down its side and its detail inside; where you are is the name in bold. A
-doubtful `working` reads `quiet 2h` in grey italic. The footer reads `click, or Ctrl-b then space` until the sidebar
-has the keyboard — or, while an agent waits on you, `1 waiting 6m · Ctrl-b
-then \`` in yellow, which a click also jumps — then shows the keys for whatever is selected (`e edit · p plan · x kill · ?` on an agent) — `?` lists them all, and a click on a bold key there runs it.
+doubtful `working` reads `quiet 2h` in grey italic.
 
 | key | |
 |---|---|
@@ -300,28 +297,21 @@ the sidebar's colours.
 
 ## The quota line, and tmux's bar
 
-**tmux's bar runs along the bottom of the window, right of the sidebar** —
-its first columns are the sidebar's black and border, so the sidebar runs to
-the bottom: what belongs to no agent, with the clock alone on the right.
+**tmux's bar runs along the bottom of the window**, on the sidebar's own
+surface: what belongs to no agent on the left, what waits on you and the clock
+on the right.
 
 ```
-claude ███░░ 58% (1h20m) · wk 41%  │  $24.10                        14:32
-```
-
-With the sidebar off it also carries the waiting count and where the pane you
-are in stands:
-
-```
-claude ███░░ 58% (1h20m) · wk 41%  │  1 waiting 6m · $24.10  │  kelsier · main
+  5h ━━━━━━━━ 58% (1h20m)   7d 41% · $24.10          ▐needs you▌ docs 6m +1   14:32
 ```
 
 | segment | |
 |---|---|
-| `claude ███`‹grey›`██ 58% (1h20m)` | the 5-hour quota and when it resets; `░░░░░ ?` once it has reset since it was last seen, never the old figure |
-| `wk 41%` | the weekly quota (`wk ?` when stale) |
+| `5h ━━━━━━━━ 58% (1h20m)` | the 5-hour quota as a thin meter (green, amber from 70%, red from 90%) and when it resets; an empty meter and `?` once it has reset since it was last seen, never the old figure |
+| `7d 41%` | the weekly quota (`7d ?` when stale) |
 | `spend 61%` | the spend limit, from 50% only |
-| `1 waiting 6m` | only while the sidebar is off: agents blocked on you, and the longest wait; `nothing waiting` when none are |
 | `$24.10` | the cost of the agents open right now |
+| `▐needs you▌ docs 6m +1` | the agent that has waited on you longest, how long, and how many more; a click jumps there. Absent when none waits |
 | `kelsier · fix-auth ↑2 ●3` | only while the sidebar is off: where the pane you are in stands |
 
 No quota shows until a session has reported one — an API-key session never
