@@ -2305,6 +2305,35 @@ cmd_click() { # range popup client
 # One line per agent in $BANNER: <wid> TAB <state> TAB <name> TAB <text>.
 BANNER="$STATE_DIR/banner"
 
+# agent_label PANE WID — what a notification calls an agent: its kel name,
+# else the window's name, else the folder it stands in. Not a window name that
+# is only a version: tmux's automatic-rename sets the window to Claude Code's
+# process title, and a banner read "2.1.308 is waiting" (#23)
+agent_label() {
+  local n
+  n="$(tmux display-message -p -t "$1" '#{@kel-agent}' 2>/dev/null)"; n="${n##*/}"
+  [ -n "$n" ] || n="$(tmux display-message -p -t "$2" '#{window_name}' 2>/dev/null)"
+  case "$n" in ''|*[!0-9.]*) ;; *) n='' ;; esac
+  [ -n "$n" ] || { n="$(tmux display-message -p -t "$1" '#{pane_current_path}' 2>/dev/null)"; n="${n##*/}"; }
+  printf '%s' "${n:-$2}"
+}
+
+# banner_prune — drop lines whose pane is gone or has moved on from the state
+# the line announces. banner_drop runs on a hook's transition, and a pane that
+# exits, or leaves waiting some other way, never sends one; its line stayed up
+# for good (#23). One list-panes; an empty answer is tmux not answering, never
+# "no panes", so nothing is dropped on it. Status 0 means it dropped a line.
+banner_prune() {
+  [ -s "$BANNER" ] || return 0
+  local live f
+  live="$(tmux list-panes -a -F '#{pane_id}	#{@kel-state}' 2>/dev/null)"
+  [ -n "$live" ] || return 0
+  f="$(mktemp "$STATE_DIR/.banner.XXXXXX" 2>/dev/null)" || return 0
+  printf '%s\n' "$live" | awk -F'\t' 'NR == FNR {st[$1] = $2; next} ($1 in st) && st[$1] == $2' - "$BANNER" > "$f"
+  if cmp -s "$f" "$BANNER"; then rm -f "$f"; return 1; fi
+  mv -f "$f" "$BANNER"
+}
+
 banner_add() { # pane state name text
   local f; f="$(mktemp "$STATE_DIR/.banner.XXXXXX" 2>/dev/null)" || return 0
   { [ -f "$BANNER" ] && awk -F'\t' -v w="$1" '$1 != w' "$BANNER"
@@ -2339,6 +2368,9 @@ banner_clear() { rm -f "$BANNER"; banner_apply; }
 # the windows any attached client is looking at: visiting one clears its line
 banner_seen() {
   [ -s "$BANNER" ] || return 0
+  # a window change is the redraw a stale line waits for: banner_drop only
+  # redraws when it drops a line of its own
+  banner_prune && banner_apply
   # shellcheck disable=SC2046
   banner_drop $(tmux list-clients -F '#{window_id}' 2>/dev/null)
 }
@@ -2358,6 +2390,7 @@ banner_go() { # client
 # back to its one line
 banner_apply() {
   tmux has-session -t "=$KEL_PREFIX" 2>/dev/null || return 0
+  banner_prune || true
   local t="=$KEL_PREFIX:" n line wid st name text more='' word
   # grep -c prints 0 AND exits 1 on an empty file, so `|| echo 0` made n
   # "0\n0": the -eq test below errored, fell through, and drew "● is" from an
@@ -3914,8 +3947,7 @@ cmd_hook_agy() {
   case " $KEL_NOTIFY " in
     *" $state "*)
       window_focused "$wid" && exit 0
-      local wn; wn="$(tmux display-message -p -t "$pane" '#{@kel-agent}' 2>/dev/null)"; wn="${wn##*/}"
-      [ -n "$wn" ] || wn="$(tmux display-message -p -t "$wid" '#{window_name}' 2>/dev/null || echo "$wid")"
+      local wn; wn="$(agent_label "$pane" "$wid")"
       case "${KEL_NOTIFY_BANNER:-on}" in off|0|no|false) ;; *) banner_add "$pane" "$state" "$wn" "$ntext" ;; esac
       notify "kel: $wn" "${ntext:-$state}" ;;
   esac
@@ -4059,8 +4091,7 @@ cmd_hook() {
   case " $KEL_NOTIFY " in
     *" $state "*)
       window_focused "$wid" && exit 0
-      local wn; wn="$(tmux display-message -p -t "$pane" '#{@kel-agent}' 2>/dev/null)"; wn="${wn##*/}"
-      [ -n "$wn" ] || wn="$(tmux display-message -p -t "$wid" '#{window_name}' 2>/dev/null || echo "$wid")"
+      local wn; wn="$(agent_label "$pane" "$wid")"
       case "${KEL_NOTIFY_BANNER:-on}" in off|0|no|false) ;; *) banner_add "$pane" "$state" "$wn" "$ntext" ;; esac
       notify "kel: $wn" "${ntext:-$state}" ;;
   esac

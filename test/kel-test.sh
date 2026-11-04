@@ -1759,6 +1759,21 @@ tmux select-window -t "$(window_of api-gw b)"; hook "$P" UserPromptSubmit; hook 
 "$KEL" _click bx '' ''
 ok "✕ dismisses it"                        '[ ! -s "$STATE/banner" ]'
 ok "kel.conf clears it when a window is visited" 'grep -q "session-window-changed.*kel _banner seen" "$HERE/../tmux/kel.conf"'
+# #23: a line outlives what it announced when no hook says so — the pane
+# exited, or left waiting some other way. Every redraw drops those.
+tmux set-option -p -t "$P" @kel-state working
+printf '%%999\twaiting\tghost\tgone\n%s\twaiting\ta\tresumed\n' "$P" > "$STATE/banner"
+"$KEL" _banner seen
+ok "a banner line whose pane is gone, or has moved on, is dropped (#23)" '[ ! -s "$STATE/banner" ]'
+# ...and an agent kel did not name is called by its folder, not by the
+# version Claude Code puts in the window title
+VD="$WORK/vault-fix"; mkdir -p "$VD"
+VW="$(tmux new-window -d -P -F '#{window_id}' -t "=keltest:" -c "$VD" 'sleep 9999')"
+tmux set-window-option -t "$VW" automatic-rename off; tmux rename-window -t "$VW" 2.1.308
+VP="$(tmux display-message -p -t "$VW" '#{pane_id}')"
+hook "$VP" Notification permission_prompt "allow?"
+ok "  ...and a version-number window name gives way to the folder" '[ "$(cut -f3 "$STATE/banner" | tail -1)" = vault-fix ]'
+tmux kill-window -t "$VW"; : > "$STATE/banner"
 release_client
 unset KEL_NOTIFY_CMD
 # The cases above already prove the detached path: this suite never attaches a
