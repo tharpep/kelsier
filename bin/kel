@@ -2247,6 +2247,22 @@ panel_lazygit() { # dir title
   else KEL_POPUP_KEEP=1 popup "$1" "lazygit · $2 · ? its keys · prefix q closes" lazygit --use-config-file "$over"; fi
 }
 
+# tmux's right-click menus are press-drag-release: the button coming up off an
+# item closes them, so a plain right-click flashed one and lost it. -O (3.2+)
+# makes them click menus that stay open. tmux's own menus are rebound, not
+# copied, so they stay whatever this tmux ships; running twice adds no second -O
+menus_click() {
+  tmux_at_least 3 2 || return 0
+  local f k
+  f="$(mktemp)" || return 0
+  for k in MouseDown3Pane MouseDown3Status MouseDown3StatusLeft \
+           M-MouseDown3Pane M-MouseDown3Status M-MouseDown3StatusLeft; do
+    tmux list-keys -T root "$k" 2>/dev/null
+  done | sed -e 's/display-menu -O /display-menu /g' -e 's/display-menu /display-menu -O /g' > "$f"
+  [ -s "$f" ] && tmux source-file "$f" 2>/dev/null
+  rm -f "$f"
+}
+
 # tmux_at_least MAJOR MINOR — compared arithmetically: BSD sort has no -V
 tmux_at_least() {
   local v; v="$(tmux -V 2>/dev/null | grep -oE '[0-9]+\.[0-9]+' | head -1)"
@@ -4181,6 +4197,7 @@ main() {
     card)         cmd_card "$@" ;;
     status-line)  cmd_status_line "$@" ;;
     _fleet)       fleet_json "$@" ;;
+    _menus)       menus_click ;;
     _copy)        copy_stdin ;;
     _cfgdump)     printf 'ctx_warn=%s notify=%s group=%s\n' "${KEL_CTX_WARN:-}" "${KEL_NOTIFY:-}" "${KEL_GROUP:-}" ;;
     statusline)   cmd_statusline ;;                # hot path — skip migrate

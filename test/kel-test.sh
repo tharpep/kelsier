@@ -2039,6 +2039,18 @@ unset KEL_QUOTA_CMD KEL_QUOTA_TTL KEL_PR
 ok "non-default modes render"                       '[[ "$(sl "{\"session_id\":\"a\",\"fast_mode\":true,\"effort\":{\"level\":\"xhigh\"},\"context_window\":{\"context_window_size\":200000,\"used_percentage\":5}}")" == *"fast xhigh"* ]]'
 ok "  ...and default ones do not"                   '[[ "$(sl "{\"session_id\":\"a\",\"effort\":{\"level\":\"medium\"},\"thinking\":{\"enabled\":true},\"context_window\":{\"context_window_size\":200000,\"used_percentage\":5}}")" != *medium* ]]'
 
+section "right-click menus stay open until a click"
+# tmux's own menus close when the button comes up off an item, so a plain
+# right-click flashed one and lost it; kel _menus rebinds them with -O (3.2+)
+TV="$(tmux -V | grep -oE '[0-9]+\.[0-9]+' | head -1)"
+if [ "${TV%%.*}" -gt 3 ] || { [ "${TV%%.*}" -eq 3 ] && [ "${TV#*.}" -ge 2 ]; }; then
+  "$KEL" _menus; "$KEL" _menus
+  for k in MouseDown3Pane MouseDown3Status MouseDown3StatusLeft; do
+    ok "  $k opens a menu that stays open" 'tmux list-keys -T root '"$k"' | grep -q "display-menu -O "'
+  done
+  ok "  ...and a second run adds no second -O" '! tmux list-keys -T root | grep -q "display-menu -O -O"'
+fi
+
 section "a selection reaches the system clipboard, not just tmux's buffer"
 # tmux decides a terminal takes OSC 52 from TERM, and xterm-256color matches
 # its xterm*:clipboard feature — but Apple Terminal sets that TERM and does
