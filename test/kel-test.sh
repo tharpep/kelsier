@@ -1741,6 +1741,7 @@ ok "\$KEL_NOTIFY selects which states do"   '[ "$(grep -c . "$NLOG")" = 1 ]'
 : > "$NLOG"; hook "$P" UserPromptSubmit; hook "$P" Notification permission_prompt 'run #(touch pwned)?'
 AW="$(window_of api-gw a)"
 ok "a waiting agent puts up the banner, above the bar" '[ "$(tmux show-options -v -t "=keltest:" status)" = 2 ] && [ -n "$(tmux show-options -v -t "=keltest:" status-format[1])" ] && [[ "$(tmux show-options -v -t "=keltest:" status-format[0])" == *"a#[nobold,fg=colour252] is waiting"* ]]'
+ok "  ...the sidebar hint once, on the bar, not on the banner too (#22)" '[[ "$(tmux show-options -v -t "=keltest:" status-format[0])" == *"@kel-bar-lead-blank"* ]] && [[ "$(tmux show-options -v -t "=keltest:" status-format[0])" != *"{E:@kel-bar-lead}"* ]]'
 ok "  ...its text printed, never run as a format" '[[ "$(tmux show-options -v -t "=keltest:" status-format[0])" == *"##(touch pwned)"* ]]'
 hook "$P" UserPromptSubmit
 # "is waiting" alone let a bug through: an emptied banner file once drew
@@ -1758,6 +1759,21 @@ tmux select-window -t "$(window_of api-gw b)"; hook "$P" UserPromptSubmit; hook 
 "$KEL" _click bx '' ''
 ok "✕ dismisses it"                        '[ ! -s "$STATE/banner" ]'
 ok "kel.conf clears it when a window is visited" 'grep -q "session-window-changed.*kel _banner seen" "$HERE/../tmux/kel.conf"'
+# #23: a line outlives what it announced when no hook says so — the pane
+# exited, or left waiting some other way. Every redraw drops those.
+tmux set-option -p -t "$P" @kel-state working
+printf '%%999\twaiting\tghost\tgone\n%s\twaiting\ta\tresumed\n' "$P" > "$STATE/banner"
+"$KEL" _banner seen
+ok "a banner line whose pane is gone, or has moved on, is dropped (#23)" '[ ! -s "$STATE/banner" ]'
+# ...and an agent kel did not name is called by its folder, not by the
+# version Claude Code puts in the window title
+VD="$WORK/vault-fix"; mkdir -p "$VD"
+VW="$(tmux new-window -d -P -F '#{window_id}' -t "=keltest:" -c "$VD" 'sleep 9999')"
+tmux set-window-option -t "$VW" automatic-rename off; tmux rename-window -t "$VW" 2.1.308
+VP="$(tmux display-message -p -t "$VW" '#{pane_id}')"
+hook "$VP" Notification permission_prompt "allow?"
+ok "  ...and a version-number window name gives way to the folder" '[ "$(cut -f3 "$STATE/banner" | tail -1)" = vault-fix ]'
+tmux kill-window -t "$VW"; : > "$STATE/banner"
 release_client
 unset KEL_NOTIFY_CMD
 # The cases above already prove the detached path: this suite never attaches a
@@ -2038,6 +2054,18 @@ ok "pr = off stops quota_cmd from running" '[ ! -f "$MARKER" ]'
 unset KEL_QUOTA_CMD KEL_QUOTA_TTL KEL_PR
 ok "non-default modes render"                       '[[ "$(sl "{\"session_id\":\"a\",\"fast_mode\":true,\"effort\":{\"level\":\"xhigh\"},\"context_window\":{\"context_window_size\":200000,\"used_percentage\":5}}")" == *"fast xhigh"* ]]'
 ok "  ...and default ones do not"                   '[[ "$(sl "{\"session_id\":\"a\",\"effort\":{\"level\":\"medium\"},\"thinking\":{\"enabled\":true},\"context_window\":{\"context_window_size\":200000,\"used_percentage\":5}}")" != *medium* ]]'
+
+section "right-click menus stay open until a click"
+# tmux's own menus close when the button comes up off an item, so a plain
+# right-click flashed one and lost it; kel _menus rebinds them with -O (3.2+)
+TV="$(tmux -V | grep -oE '[0-9]+\.[0-9]+' | head -1)"
+if [ "${TV%%.*}" -gt 3 ] || { [ "${TV%%.*}" -eq 3 ] && [ "${TV#*.}" -ge 2 ]; }; then
+  "$KEL" _menus; "$KEL" _menus
+  for k in MouseDown3Pane MouseDown3Status MouseDown3StatusLeft; do
+    ok "  $k opens a menu that stays open" 'tmux list-keys -T root '"$k"' | grep -q "display-menu -O "'
+  done
+  ok "  ...and a second run adds no second -O" '! tmux list-keys -T root | grep -q "display-menu -O -O"'
+fi
 
 section "a selection reaches the system clipboard, not just tmux's buffer"
 # tmux decides a terminal takes OSC 52 from TERM, and xterm-256color matches

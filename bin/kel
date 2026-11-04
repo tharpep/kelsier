@@ -515,7 +515,8 @@ sidebar_width_opts() {
   local w="$KEL_SIDEBAR_WIDTH"
   tmux set-option -g @kel-sidebar-width "$w" \; \
        set-option -g @kel-hint-out "$(printf '%-*.*s' "$w" "$w" "click, or $(prefix_words) then space")" \; \
-       set-option -g @kel-hint-in "$(printf '%-*.*s' "$w" "$w" "esc back to your pane")" 2>/dev/null
+       set-option -g @kel-hint-in "$(printf '%-*.*s' "$w" "$w" "esc back to your pane")" \; \
+       set-option -g @kel-hint-blank "$(printf '%*s' "$w" '')" 2>/dev/null
 }
 
 # per-pane styles are tmux 3.1+; below that the sidebar just wears the
@@ -2247,6 +2248,22 @@ panel_lazygit() { # dir title
   else KEL_POPUP_KEEP=1 popup "$1" "lazygit · $2 · ? its keys · prefix q closes" lazygit --use-config-file "$over"; fi
 }
 
+# tmux's right-click menus are press-drag-release: the button coming up off an
+# item closes them, so a plain right-click flashed one and lost it. -O (3.2+)
+# makes them click menus that stay open. tmux's own menus are rebound, not
+# copied, so they stay whatever this tmux ships; running twice adds no second -O
+menus_click() {
+  tmux_at_least 3 2 || return 0
+  local f k
+  f="$(mktemp)" || return 0
+  for k in MouseDown3Pane MouseDown3Status MouseDown3StatusLeft \
+           M-MouseDown3Pane M-MouseDown3Status M-MouseDown3StatusLeft; do
+    tmux list-keys -T root "$k" 2>/dev/null
+  done | sed -e 's/display-menu -O /display-menu /g' -e 's/display-menu /display-menu -O /g' > "$f"
+  [ -s "$f" ] && tmux source-file "$f" 2>/dev/null
+  rm -f "$f"
+}
+
 # tmux_at_least MAJOR MINOR — compared arithmetically: BSD sort has no -V
 tmux_at_least() {
   local v; v="$(tmux -V 2>/dev/null | grep -oE '[0-9]+\.[0-9]+' | head -1)"
@@ -2288,6 +2305,35 @@ cmd_click() { # range popup client
 # One line per agent in $BANNER: <wid> TAB <state> TAB <name> TAB <text>.
 BANNER="$STATE_DIR/banner"
 
+# agent_label PANE WID — what a notification calls an agent: its kel name,
+# else the window's name, else the folder it stands in. Not a window name that
+# is only a version: tmux's automatic-rename sets the window to Claude Code's
+# process title, and a banner read "2.1.308 is waiting" (#23)
+agent_label() {
+  local n
+  n="$(tmux display-message -p -t "$1" '#{@kel-agent}' 2>/dev/null)"; n="${n##*/}"
+  [ -n "$n" ] || n="$(tmux display-message -p -t "$2" '#{window_name}' 2>/dev/null)"
+  case "$n" in ''|*[!0-9.]*) ;; *) n='' ;; esac
+  [ -n "$n" ] || { n="$(tmux display-message -p -t "$1" '#{pane_current_path}' 2>/dev/null)"; n="${n##*/}"; }
+  printf '%s' "${n:-$2}"
+}
+
+# banner_prune — drop lines whose pane is gone or has moved on from the state
+# the line announces. banner_drop runs on a hook's transition, and a pane that
+# exits, or leaves waiting some other way, never sends one; its line stayed up
+# for good (#23). One list-panes; an empty answer is tmux not answering, never
+# "no panes", so nothing is dropped on it. Status 0 means it dropped a line.
+banner_prune() {
+  [ -s "$BANNER" ] || return 0
+  local live f
+  live="$(tmux list-panes -a -F '#{pane_id}	#{@kel-state}' 2>/dev/null)"
+  [ -n "$live" ] || return 0
+  f="$(mktemp "$STATE_DIR/.banner.XXXXXX" 2>/dev/null)" || return 0
+  printf '%s\n' "$live" | awk -F'\t' 'NR == FNR {st[$1] = $2; next} ($1 in st) && st[$1] == $2' - "$BANNER" > "$f"
+  if cmp -s "$f" "$BANNER"; then rm -f "$f"; return 1; fi
+  mv -f "$f" "$BANNER"
+}
+
 banner_add() { # pane state name text
   local f; f="$(mktemp "$STATE_DIR/.banner.XXXXXX" 2>/dev/null)" || return 0
   { [ -f "$BANNER" ] && awk -F'\t' -v w="$1" '$1 != w' "$BANNER"
@@ -2322,6 +2368,9 @@ banner_clear() { rm -f "$BANNER"; banner_apply; }
 # the windows any attached client is looking at: visiting one clears its line
 banner_seen() {
   [ -s "$BANNER" ] || return 0
+  # a window change is the redraw a stale line waits for: banner_drop only
+  # redraws when it drops a line of its own
+  banner_prune && banner_apply
   # shellcheck disable=SC2046
   banner_drop $(tmux list-clients -F '#{window_id}' 2>/dev/null)
 }
@@ -2341,6 +2390,7 @@ banner_go() { # client
 # back to its one line
 banner_apply() {
   tmux has-session -t "=$KEL_PREFIX" 2>/dev/null || return 0
+  banner_prune || true
   local t="=$KEL_PREFIX:" n line wid st name text more='' word
   # grep -c prints 0 AND exits 1 on an empty file, so `|| echo 0` made n
   # "0\n0": the -eq test below errored, fell through, and drew "● is" from an
@@ -2360,6 +2410,8 @@ banner_apply() {
   # # is doubled: tmux must print it, never read it as a format
   name="${name//#/##}"; text="${text//#/##}"
   [ "${#text}" -gt 80 ] && text="${text:0:79}…"
+  # The row keeps the bar's lead for alignment, blank: the sidebar hint is
+  # the bar's, and on both rows it read twice (#22).
   # `↵ go` is what a click does; the key is named beside it so the banner
   # teaches it too (the sidebar's footer says the same).  ` is a prefix key:
   # two presses, so "then" — `Ctrl-b \`` read as one chord (2026-10-16).
@@ -2367,7 +2419,7 @@ banner_apply() {
   tmux set-option -t "$t" status 2 \; \
        set-option -u -t "$t" status-position \; \
        set-option -t "$t" status-format[1] "$bar" \; \
-       set-option -t "$t" status-format[0] "#[align=left,bg=default]#{E:@kel-bar-lead}#[range=user|bgo]#[fg=colour214,bold] ● $name#[nobold,fg=colour252] $word${text:+#[fg=colour245] — $text}$more #[norange]#[align=right]#[range=user|bgo]#[fg=colour255,bold] ↵ go #[nobold,fg=colour240]or $(prefix_words) then \` #[norange]#[range=user|bx]#[fg=colour245] ✕ #[norange]" \
+       set-option -t "$t" status-format[0] "#[align=left,bg=default]#{E:@kel-bar-lead-blank}#[range=user|bgo]#[fg=colour214,bold] ● $name#[nobold,fg=colour252] $word${text:+#[fg=colour245] — $text}$more #[norange]#[align=right]#[range=user|bgo]#[fg=colour255,bold] ↵ go #[nobold,fg=colour240]or $(prefix_words) then \` #[norange]#[range=user|bx]#[fg=colour245] ✕ #[norange]" \
        2>/dev/null
 }
 
@@ -3895,8 +3947,7 @@ cmd_hook_agy() {
   case " $KEL_NOTIFY " in
     *" $state "*)
       window_focused "$wid" && exit 0
-      local wn; wn="$(tmux display-message -p -t "$pane" '#{@kel-agent}' 2>/dev/null)"; wn="${wn##*/}"
-      [ -n "$wn" ] || wn="$(tmux display-message -p -t "$wid" '#{window_name}' 2>/dev/null || echo "$wid")"
+      local wn; wn="$(agent_label "$pane" "$wid")"
       case "${KEL_NOTIFY_BANNER:-on}" in off|0|no|false) ;; *) banner_add "$pane" "$state" "$wn" "$ntext" ;; esac
       notify "kel: $wn" "${ntext:-$state}" ;;
   esac
@@ -4040,8 +4091,7 @@ cmd_hook() {
   case " $KEL_NOTIFY " in
     *" $state "*)
       window_focused "$wid" && exit 0
-      local wn; wn="$(tmux display-message -p -t "$pane" '#{@kel-agent}' 2>/dev/null)"; wn="${wn##*/}"
-      [ -n "$wn" ] || wn="$(tmux display-message -p -t "$wid" '#{window_name}' 2>/dev/null || echo "$wid")"
+      local wn; wn="$(agent_label "$pane" "$wid")"
       case "${KEL_NOTIFY_BANNER:-on}" in off|0|no|false) ;; *) banner_add "$pane" "$state" "$wn" "$ntext" ;; esac
       notify "kel: $wn" "${ntext:-$state}" ;;
   esac
@@ -4181,6 +4231,7 @@ main() {
     card)         cmd_card "$@" ;;
     status-line)  cmd_status_line "$@" ;;
     _fleet)       fleet_json "$@" ;;
+    _menus)       menus_click ;;
     _copy)        copy_stdin ;;
     _cfgdump)     printf 'ctx_warn=%s notify=%s group=%s\n' "${KEL_CTX_WARN:-}" "${KEL_NOTIFY:-}" "${KEL_GROUP:-}" ;;
     statusline)   cmd_statusline ;;                # hot path — skip migrate
