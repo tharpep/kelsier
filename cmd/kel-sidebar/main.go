@@ -68,10 +68,10 @@ var (
 	mid      = rgb{161, 161, 170}.fg()
 	faint    = rgb{85, 85, 94}.fg()
 	raised   = rgb{29, 29, 34}.bg()
-	yellowBg = rgb{46, 34, 16}.bg()
-	redBg    = rgb{49, 21, 25}.bg()
-	greenBg  = rgb{18, 41, 27}.bg()
-	purpleBg = rgb{36, 27, 54}.bg()
+	yellowBg = rgb{46, 34, 16}
+	redBg    = rgb{49, 21, 25}
+	greenBg  = rgb{18, 41, 27}
+	purpleBg = rgb{36, 27, 54}
 )
 
 type rgb struct{ r, g, b uint8 }
@@ -113,7 +113,7 @@ func applyPalette(term, text rgb) {
 	dim = text.mix(surface, 0.50).fg()
 	faint = text.mix(surface, 0.64).fg()
 	raised = lift.bg()
-	chip := func(c rgb) string { return c.mix(surface, 0.80).bg() }
+	chip := func(c rgb) rgb { return c.mix(surface, 0.80) }
 	yellowBg, redBg = chip(rgb{245, 167, 66}), chip(rgb{242, 114, 127})
 	greenBg, purpleBg = chip(rgb{95, 211, 141}), chip(rgb{180, 140, 242})
 }

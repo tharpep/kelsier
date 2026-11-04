@@ -332,13 +332,13 @@ in any terminal:
   for a space, its ports and agent count. A waiting agent's reason shows
   whether or not it is selected.
 - **A chip names a state that needs a word**: `needs you`, `done` (unseen),
-  `dead`, `quota`, `blocked`, on a dark fill of the state's colour. Calm
+  `dead`, `quota`, `blocked`, on a dark fill of the state's colour, with half-block ends (`▐needs you▌`) so it reads rounded. Calm
   states are a dot and an age.
 - **One accent for the selected entry**, and it is not inverse video.
 - **Dots, not words, for state.** A chip appears only beside the dot, never
   as the only signal.
 - **Whitespace, not box-drawing.** No borders inside the sidebar; sections are
-  separated by a blank line and a dim lowercase label (`spaces`, `agents`).
+  separated by a blank line and a dim label (`Spaces`, `Agents`; lowercase until 2026-11-04). Repo groups under `Agents` are a blank row apart, each headed by its name and agent count.
 - **Chrome, not a box** — the sidebar's background and border come from tmux
   per-pane styles (§5a), so it reads as part of the window, the way herdr's
   does.

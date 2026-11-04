@@ -437,7 +437,7 @@ func TestErrorAgent(t *testing.T) {
 		}
 	}
 	out, _ := renderView(v, 32, 0, 0)
-	if !strings.Contains(out, red+"●") || !strings.Contains(plain(out), " error ") || !strings.Contains(plain(out), "Rate limit reached") {
+	if !strings.Contains(out, red+"●") || !strings.Contains(plain(out), "▐error▌") || !strings.Contains(plain(out), "Rate limit reached") {
 		t.Errorf("error agent not drawn as one:\n%s", plain(out))
 	}
 }
@@ -989,7 +989,7 @@ func TestStickyHeadersAndResponsiveGrid(t *testing.T) {
 	vSpike := buildView(fifteenDoc, uiState{focused: true, sel: "a:@8"})
 	outSpike, _ := renderView(vSpike, 32, 16, 0)
 	linesSpike := strings.Split(plain(outSpike), "\n")
-	if len(linesSpike) == 0 || linesSpike[0] != "  agents" {
+	if len(linesSpike) == 0 || linesSpike[0] != "  Agents" {
 		t.Errorf("sticky header for scrolled agents: want agents at line 0, got %q", linesSpike[0])
 	}
 	if !strings.Contains(plain(outSpike), "spike") {
@@ -1000,7 +1000,7 @@ func TestStickyHeadersAndResponsiveGrid(t *testing.T) {
 	vSpace := buildView(fifteenDoc, uiState{focused: true, sel: spaceID("/home/me/code/web-dashboard")})
 	outSpace, _ := renderView(vSpace, 32, 16, 0)
 	linesSpace := strings.Split(plain(outSpace), "\n")
-	if len(linesSpace) == 0 || linesSpace[0] != "  spaces" {
+	if len(linesSpace) == 0 || linesSpace[0] != "  Spaces" {
 		t.Errorf("sticky header for scrolled spaces: want spaces at line 0, got %q", linesSpace[0])
 	}
 }
@@ -1014,7 +1014,7 @@ func TestStickyHeaderNamesTheShownSection(t *testing.T) {
 			out, _ := renderView(buildView(doc, uiState{focused: true, sel: id}), 32, h, 0)
 			l := strings.Split(plain(out), "\n")
 			for i := 0; i < 3 && i+1 < len(l); i++ {
-				if l[i] == "  spaces" && (l[i+1] == "  agents" || (l[i+1] == "" && i+2 < len(l) && l[i+2] == "  agents")) {
+				if l[i] == "  Spaces" && (l[i+1] == "  Agents" || (l[i+1] == "" && i+2 < len(l) && l[i+2] == "  Agents")) {
 					t.Errorf("sel %s at h=%d: spaces pinned above agents:\n%s", id, h, strings.Join(l[:4], "\n"))
 				}
 			}

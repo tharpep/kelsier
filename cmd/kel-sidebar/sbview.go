@@ -795,12 +795,12 @@ func shortNote(n string) string {
 // state, and a chip naming the state when it is one that needs a word.
 // A `working` kel has not heard from reads "quiet", grey italic: kel is not
 // sure, and says so (invariant 3).
-func agentAge(a fleet.Agent, now int64) (age, chipText, chipFg, chipBg string) {
+func agentAge(a fleet.Agent, now int64) (age, chipText, chipFg string, chipBg rgb) {
 	if q := quietFor(a, now); q > 0 {
-		return dim + italic + "quiet " + humanizeSecs(q) + reset, "", "", ""
+		return dim + italic + "quiet " + humanizeSecs(q) + reset, "", "", rgb{}
 	}
 	if a.State == nil || *a.State == "" {
-		return dim + "?" + reset, "", "", ""
+		return dim + "?" + reset, "", "", rgb{}
 	}
 	if a.StateSince != nil {
 		age = dim + humanizeSecs(now-int64(*a.StateSince)) + reset
@@ -819,7 +819,7 @@ func agentAge(a fleet.Agent, now int64) (age, chipText, chipFg, chipBg string) {
 			return age, "done", green, greenBg
 		}
 	}
-	return age, "", "", ""
+	return age, "", "", rgb{}
 }
 
 // agentFacts is the selected agent's detail: context and cost. Unknowns are
@@ -839,7 +839,11 @@ func agentFacts(a fleet.Agent) string {
 	return pct + " · " + c
 }
 
-func chip(text, fg, bg string) string { return bg + fg + " " + text + " " + reset }
+// chip names a state on a fill of its colour, with half-block ends in that
+// fill so it reads rounded: ▐needs you▌. As wide as " text ".
+func chip(text, fg string, bg rgb) string {
+	return bg.fg() + "▐" + reset + bg.bg() + fg + text + reset + bg.fg() + "▌" + reset
+}
 
 // wrapHint breaks a choices line ("y yes · n no · esc") between choices to
 // fit w columns; a choice wider than w alone is cut.
@@ -968,7 +972,7 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 		add(s, r)
 	}
 
-	add(label("spaces"), lineRef{kind: "header"})
+	add(label("Spaces"), lineRef{kind: "header"})
 	if v.unknown {
 		add("    "+dim+truncate("? panes unknown", w-4)+reset, lineRef{})
 	} else if len(v.spaces) == 0 {
@@ -1065,22 +1069,33 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 	}
 
 	add("", lineRef{})
-	add(label("agents"), lineRef{kind: "header"})
+	add(label("Agents"), lineRef{kind: "header"})
 	if v.unknown {
 		add("    "+dim+truncate("? panes unknown", w-4)+reset, lineRef{})
 	} else if len(v.agents) == 0 {
 		add("    "+dim+truncate("none", w-4)+reset, lineRef{})
 	}
 	// grouped under their repo: two repos can each have an agent called docs
-	group := "\x00"
+	// each repo's agents under its name and their count, a blank row
+	// between repos: the author found one run of rows too tight to read
+	count := map[string]int{}
 	for _, a := range v.agents {
+		count[a.repo]++
+	}
+	groupHead := func(g string, n int) {
+		if g == "" {
+			g = "misc"
+		}
+		add(spread("  "+mid+truncate(g, w-8)+reset, faint+fmt.Sprint(n)+reset, w), lineRef{kind: "group"})
+	}
+	group := "\x00"
+	for i, a := range v.agents {
 		if a.repo != group {
-			group = a.repo
-			g := group
-			if g == "" {
-				g = "misc"
+			if i > 0 {
+				add("", lineRef{})
 			}
-			add("  "+faint+truncate(g, w-3)+reset, lineRef{kind: "group"})
+			group = a.repo
+			groupHead(group, count[group])
 		}
 		id := agentID(a.key)
 		r := lineRef{id: id, kind: "agent"}
@@ -1151,7 +1166,10 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 		}
 	}
 	if len(v.bgLoose) > 0 {
-		add("  "+faint+truncate("background", w-3)+reset, lineRef{kind: "group"})
+		if len(v.agents) > 0 {
+			add("", lineRef{})
+		}
+		groupHead("background", len(v.bgLoose))
 	}
 	for _, b := range v.bgLoose {
 		bd, bc, _ := bgLook(b)
@@ -1277,7 +1295,7 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 			if off > 0 && room > 2 {
 				agentsIdx := -1
 				for i, l := range body {
-					if l.ref.kind == "header" && strings.Contains(l.s, "agents") {
+					if l.ref.kind == "header" && strings.Contains(l.s, "Agents") {
 						agentsIdx = i
 						break
 					}
@@ -1304,9 +1322,9 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 				case starts(off):
 					body = body[off+1:]
 				default:
-					secName := "spaces"
+					secName := "Spaces"
 					if agentsIdx >= 0 && off >= agentsIdx {
-						secName = "agents"
+						secName = "Agents"
 					}
 					body = append([]line{{s: label(secName), ref: lineRef{kind: "header"}}}, body[off:]...)
 				}

@@ -1128,7 +1128,7 @@ hold_client 40
 tmux select-window -t "$MW"; "$KEL" _sidebar wake
 SP="$(sbpane "$MW")"
 wait_until 'sbtext "$SP" | grep -q "wt"' 50
-ok "the sidebar draws spaces, then agents"       'sbtext "$SP" | grep -qx "  spaces" && sbtext "$SP" | grep -qx "  agents"'
+ok "the sidebar draws spaces, then agents"       'sbtext "$SP" | grep -qx "  Spaces" && sbtext "$SP" | grep -qx "  Agents"'
 ok "  ...the worktree as a space of its own"     '[ "$(sbtext "$SP" | grep -c "api-gw")" -ge 2 ]'
 ok "  ...and selects with a bar, not inverse video" '! tmux capture-pane -e -p -t "$SP" | grep -q "\[7m" && sbtext "$SP" | grep -q "▌"'
 
@@ -1151,7 +1151,7 @@ ok "enter on a space header row jumps to that space's window" '[ "$(active_win)"
 tmux select-window -t "$WTW"
 "$KEL" _sidebar wake
 SW="$(sbpane "$WTW")"
-wait_until 'sbtext "$SW" | grep -q agents'
+wait_until 'sbtext "$SW" | grep -q Agents'
 wait_until '[ "$(active_win)" = "$WTW" ]' 50
 # down to wt, one key at a time, each one landing before the next
 for _ in 1 2 3 4 5 6 7 8; do
@@ -1185,7 +1185,7 @@ ok "n names and starts an agent, in that space's repo" '[ -n "$(window_of api-gw
 sbdiag "$SW" "$f0"
 wait_until '[ "$(active_win)" = "$(window_of api-gw fresh)" ]' 50
 tmux select-window -t "$WTW"; "$KEL" _sidebar wake
-wait_until 'sbtext "$SW" | grep -q agents'
+wait_until 'sbtext "$SW" | grep -q Agents'
 f0=$fail
 tmux send-keys -t "$SW" n
 wait_until 'sbtext "$SW" | grep -q "^  new agent in "'
@@ -1197,7 +1197,7 @@ ok "  ...and n, enter needs no name"      '[ -n "$(window_of api-gw api-gw-1)" ]
 SPW="$(window_of api-gw api-gw-1)"
 tmux select-window -t "$SPW"; "$KEL" _sidebar wake
 SW2="$(sbpane "$SPW")"
-wait_until 'sbtext "$SW2" | grep -q agents'
+wait_until 'sbtext "$SW2" | grep -q Agents'
 tmux select-pane -t "$(userpane "$SPW")"; tmux select-pane -t "$SW2"
 tmux send-keys -t "$SW2" n
 wait_until 'sbtext "$SW2" | grep -q "^  new agent in "'

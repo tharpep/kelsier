@@ -1,4 +1,4 @@
-  spaces
+  Spaces
 ▌                               
 ▌   orca                   main 
 ▌   no window                   
@@ -9,6 +9,6 @@
   └  task/c         ↑1 unpushed
   └  task/d         ↑4 unpushed
 
-  agents
+  Agents
     none
   click, or Ctrl-b then space
