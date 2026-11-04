@@ -1138,7 +1138,9 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 		if id == v.sel {
 			rows = append(rows, pre+mid+truncate(agentFacts(a.agent), avail)+reset)
 			if working {
-				rows = append(rows, pre+dim+italic+truncate(*a.agent.Doing, avail)+reset)
+				for _, l := range wrapWords(*a.agent.Doing, avail, 2) {
+					rows = append(rows, pre+dim+italic+l+reset)
+				}
 			}
 			// subagents: the Task-tool helpers this agent has running
 			for _, sub := range a.agent.Subagents {
@@ -1151,7 +1153,9 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 			}
 		}
 		if working && id != v.sel {
-			rows = append(rows, pre+faint+italic+truncate(*a.agent.Doing, avail)+reset)
+			for _, l := range wrapWords(*a.agent.Doing, avail, 2) {
+				rows = append(rows, pre+faint+italic+l+reset)
+			}
 		}
 		if a.agent.Cards != nil && a.agent.Cards.Unseen && a.agent.Cards.Latest != nil {
 			latest := a.agent.Cards.Latest
@@ -1658,3 +1662,34 @@ func buttonStrip(id, kind string, btns []sbAct, w int, fillc rgb) line {
 	return line{s, lineRef{id: id, kind: kind, hits: hits}}
 }
 
+
+// wrapWords breaks text into at most n lines of w columns, at spaces where it
+// can; what still does not fit ends the last line with an ellipsis. What an
+// agent is doing was always cut at one line (the author, 2026-11-04).
+func wrapWords(text string, w, n int) []string {
+	if w <= 0 || n <= 0 {
+		return nil
+	}
+	var out []string
+	r := []rune(strings.TrimSpace(text))
+	for len(r) > 0 && len(out) < n {
+		if len(r) <= w {
+			out = append(out, string(r))
+			return out
+		}
+		if len(out) == n-1 {
+			out = append(out, truncate(string(r), w))
+			return out
+		}
+		cut := w
+		for i := w; i > w/2; i-- {
+			if r[i] == ' ' {
+				cut = i
+				break
+			}
+		}
+		out = append(out, strings.TrimRight(string(r[:cut]), " "))
+		r = []rune(strings.TrimLeft(string(r[cut:]), " "))
+	}
+	return out
+}

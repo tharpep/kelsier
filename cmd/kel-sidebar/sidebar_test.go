@@ -1148,3 +1148,15 @@ func TestSettingsScreen(t *testing.T) {
 		t.Error("Back did not close the screen")
 	}
 }
+
+// What an agent is doing wraps onto a second line at a space, and only what
+// still does not fit is cut.
+func TestWrapWords(t *testing.T) {
+	got := wrapWords("track hovered entry so the strip persists across pointer moves", 27, 2)
+	if len(got) != 2 || got[0] != "track hovered entry so the" || !strings.HasSuffix(got[1], "…") {
+		t.Errorf("wrapped: %q", got)
+	}
+	if got := wrapWords("editing sbview.go", 27, 2); len(got) != 1 {
+		t.Errorf("a short one stays one line: %q", got)
+	}
+}
