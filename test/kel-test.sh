@@ -743,6 +743,10 @@ ok "quota: 5h as a meter with its reset, then the week" '[[ "$(bar)" == *"5h ━
 ok "  ...spend only from 50%"                   '[[ "$(bar)" != *spend* ]]'
 printf '58 %s 41 %s 61 0 %s\n' "$((now + 5400))" "$((now + 300000))" "$now" > "$STATE/quota"
 ok "  ...and then it shows"                     '[[ "$(bar)" == *"spend 61%"* ]]'
+# #28: a budget you watch on purpose can show from 0
+printf '58 %s 41 %s 26 0 %s\n' "$((now + 5400))" "$((now + 300000))" "$now" > "$STATE/quota"
+ok "  ...but not at 26% by default"             '[[ "$(bar)" != *spend* ]]'
+ok "  ...unless quota_from is lower"            '[[ "$(KEL_QUOTA_FROM=0 bar)" == *"spend 26%"* ]]'
 printf '58 %s 41 %s -1 0 %s\n' "$((now - 60))" "$((now + 300000))" "$now" > "$STATE/quota"
 ok "a 5h window that has reset reads unknown, not 58%" '[[ "$(rawbar)" == *"#[fg=#3a3a44]━━━━━━━━#[default] ?"* ]] && [[ "$(bar)" != *58%* ]]'
 ok "  ...while the week still shows"            '[[ "$(bar)" == *"7d 41%"* ]]'

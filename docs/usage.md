@@ -311,7 +311,7 @@ right. While an agent waits, the banner takes that line; only its `↵ go` and
 |---|---|
 | `5h ━━━━━━━━ 58% (1h20m)` | the 5-hour quota as a thin meter (green, amber from 70%, red from 90%) and when it resets; an empty meter and `?` once it has reset since it was last seen, never the old figure |
 | `7d 41%` | the weekly quota (`7d ?` when stale) |
-| `spend 61%` | the spend limit, from 50% only |
+| `spend 61%` | the spend limit, from 50% (`quota_from` in config; `0` shows it always) |
 | `$24.10` | the cost of the agents open right now |
 | `▐needs you▌ docs 6m +1` | the agent that has waited on you longest, how long, and how many more; a click jumps there. Absent when none waits |
 | `kelsier · fix-auth ↑2 ●3` | only while the sidebar is off: where the pane you are in stands |
