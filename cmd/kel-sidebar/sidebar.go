@@ -94,6 +94,9 @@ type sbModel struct {
 
 	menu *sbMenu // open over the rows: kel's, from the header, or an entry's
 
+	settings bool // the settings screen, in place of the lists
+	setSel   int  // its row the keyboard is on
+
 	termBg, termFg *rgb // the terminal's colours, once it has answered
 	fixedBg        bool // KEL_SIDEBAR_BG names the background: nothing to ask
 }
@@ -865,6 +868,9 @@ func (m sbModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.MouseClickMsg:
 		m.ui.focused = true
+		if m.settings {
+			return m.settingsClick(msg)
+		}
 		_, refs := renderView(m.view(), m.width, m.height, time.Now().Unix())
 		hit := func() lineRef {
 			if msg.Y >= 0 && msg.Y < len(refs) {
@@ -918,8 +924,7 @@ func (m sbModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case "open:help":
 				m.help = true
 			case "open:settings":
-				dir := filepath.Dir(kelConfigPath())
-				return m, runKel(dir, nil, "_panel", "editor", dir, "kel settings")
+				m.settings, m.setSel = true, 1
 			}
 			return m, nil
 		}
@@ -995,19 +1000,13 @@ func (m sbModel) press(k string) (tea.Model, tea.Cmd) {
 	return m.key(tea.KeyPressMsg{Code: rune(k[0]), Text: k})
 }
 
-// kelConfigPath is the user's config.toml, where Settings opens.
-func kelConfigPath() string {
-	if d := os.Getenv("XDG_CONFIG_HOME"); d != "" {
-		return filepath.Join(d, "kel", "config.toml")
-	}
-	h, _ := os.UserHomeDir()
-	return filepath.Join(h, ".config", "kel", "config.toml")
-}
-
 func (m sbModel) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	k := msg.String()
 	m.msg = ""
 	m.ui.focused = true
+	if m.settings {
+		return m.settingsKey(k)
+	}
 	if m.menu != nil {
 		// the arrows walk it, enter chooses, esc or any other key closes it
 		switch k {
@@ -1442,6 +1441,10 @@ var sbHelp = [][2]string{
 }
 
 func (m sbModel) render() string {
+	if m.settings {
+		s, _ := renderSettings(readConfig(kelConfigPath()), m.width, m.height, m.setSel, m.ui.hover, m.ui.hoverX)
+		return s
+	}
 	if m.help {
 		var b strings.Builder
 		b.WriteString(dim + truncate("keys", m.width) + reset + "\n")
@@ -1837,4 +1840,111 @@ func completeBranch(in, dir string) (string, string) {
 		names = append(names[:6], "…")
 	}
 	return common, strings.Join(names, " ")
+}
+
+// ---------------------------------------------------------------- settings
+
+// setting changes one setting and applies it: the width refits every
+// sidebar; the background restarts them, since each was started with it.
+func (m sbModel) setting(name, how string) (tea.Model, tea.Cmd) {
+	switch name {
+	case "open":
+		dir := filepath.Dir(kelConfigPath())
+		return m, runKel(dir, nil, "_panel", "editor", dir, "kel settings")
+	case "back":
+		m.settings = false
+		return m, nil
+	}
+	bg := "#1e1e2e"
+	if m.termBg != nil {
+		bg = m.termBg.hex()
+	} else if f := strings.Fields(lastPalette); len(f) == 2 {
+		bg = f[0]
+	}
+	refit, err := applySetting(kelConfigPath(), name, how, bg)
+	if err != nil {
+		m.msg, m.msgBad = err.Error(), true
+		return m, nil
+	}
+	if !refit {
+		return m, nil
+	}
+	if name == "sidebar_bg" {
+		return m, runKelSaying("background changed", "", nil, "reload")
+	}
+	return m, runKel("", nil, "_sidebar", "fit")
+}
+
+// settingRow is the setting on screen row y, if any.
+func (m sbModel) settingRow(y int) (setRow, bool) {
+	rows := settingRows(readConfig(kelConfigPath()))
+	if i := y - 2; i >= 0 && i < len(rows) && rows[i].settable() {
+		return rows[i], true
+	}
+	return setRow{}, false
+}
+
+func (m sbModel) settingsClick(msg tea.MouseClickMsg) (tea.Model, tea.Cmd) {
+	if msg.Button != tea.MouseLeft {
+		return m, nil
+	}
+	_, refs := renderSettings(readConfig(kelConfigPath()), m.width, m.height, m.setSel, m.ui.hover, m.ui.hoverX)
+	if msg.Y < 0 || msg.Y >= len(refs) {
+		return m, nil
+	}
+	r := refs[msg.Y]
+	if r.kind == "menu" {
+		switch r.at(msg.X) {
+		case "open:settings":
+			m.settings = false
+		case "open:help":
+			m.settings, m.help = false, true
+		}
+		return m, nil
+	}
+	for _, h := range r.hits {
+		if msg.X < h.x0 || msg.X >= h.x1 {
+			continue
+		}
+		if _, ok := m.settingRow(msg.Y); ok {
+			m.setSel = msg.Y - 2
+		}
+		return m.setting(strings.TrimPrefix(r.id, "set:"), h.key)
+	}
+	return m, nil
+}
+
+func (m sbModel) settingsKey(k string) (tea.Model, tea.Cmd) {
+	rows := settingRows(readConfig(kelConfigPath()))
+	move := func(d int) {
+		for i := m.setSel + d; i >= 0 && i < len(rows); i += d {
+			if rows[i].settable() {
+				m.setSel = i
+				return
+			}
+		}
+	}
+	switch k {
+	case "esc", "q":
+		m.settings = false
+	case "down", "j":
+		move(1)
+	case "up", "k":
+		move(-1)
+	case "left", "h", "right", "l", "enter", "space":
+		if m.setSel < 0 || m.setSel >= len(rows) || !rows[m.setSel].settable() {
+			return m, nil
+		}
+		how := "toggle"
+		switch {
+		case k == "left" || k == "h":
+			how = "dec"
+		case rows[m.setSel].kind == setStep:
+			how = "inc"
+		case rows[m.setSel].kind == setButton:
+			return m.setting("open", "")
+		}
+		return m.setting(rows[m.setSel].name, how)
+	}
+	return m, nil
 }

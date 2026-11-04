@@ -155,8 +155,15 @@ trackpad with no right button. A menu closes on esc or a click outside it; the
 arrows and enter walk it too. `|` and `-` split the pane you were in, right
 or below, at its directory, and put you in the new shell.
 
-The foot reads `≡ Settings` and `? Help`. Settings opens kel's config folder
-in the editor popup; Help lists every key. While an agent waits and the
+The foot reads `≡ Settings` and `? Help`; anything clickable lights up under
+the pointer. **Settings** replaces the lists with kel's options as switches,
+steppers and choices: which states notify you and how (bell, desktop,
+banner), the sidebar's width and background (from the terminal, or fixed),
+the context warning, PR lookups and how often. Each click writes your
+`config.toml` at once, keeping its comments; width refits every sidebar, and
+a background change restarts them. The agent command and worktree folder are
+shown, and `Open config.toml` edits the rest. `‹ Back` or esc returns. Help
+lists every key. While an agent waits and the
 keyboard is elsewhere, the foot is the waiting alarm instead.
 
 **The keyboard gets into the sidebar only on purpose:** `Ctrl-b then space`, or

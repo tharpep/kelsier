@@ -1192,12 +1192,11 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 	// right-click, with its key beside it — learned by using the mouse
 	var head []line
 	if w >= 16 {
-		right := button("+ New") + " " + button("⋯")
-		from := w - 1 - visWidth(right)
-		head = []line{
-			{spread("  "+bold+"kel"+reset, right, w), lineRef{kind: "menu", id: "menu:new", id2: "menu:kel", from: from, split: from + visWidth(button("+ New")) + 1}},
-			{"", lineRef{}},
-		}
+		from := w - 1 - visWidth(button("+ New")+" "+button("⋯"))
+		ref := lineRef{kind: "menu", id: "menu:new", id2: "menu:kel", from: from, split: from + visWidth(button("+ New")) + 1}
+		on := v.hoverOn(ref, 0)
+		right := buttonLit("+ New", on == "menu:new") + " " + buttonLit("⋯", on == "menu:kel")
+		head = []line{{spread("  "+bold+"kel"+reset, right, w), ref}, {"", lineRef{}}}
 	}
 
 	// the tail: a prompt — what it asks, what you type, how to answer — or
@@ -1239,7 +1238,8 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 	// scroll so the selected entry is on screen; the bottom is pinned
 	if h > 0 {
 		if len(tail) == 0 {
-			tail = append(tail, footerLine(w, in))
+			tail = append(tail, footerLine(w, in, ""))
+			tail[0] = footerLine(w, in, v.hoverOn(tail[0].ref, h-1))
 		}
 		room := h - len(tail) - len(head)
 		if room < 0 {
@@ -1309,7 +1309,7 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 			body = append(body, line{"", lineRef{}})
 		}
 	} else if len(tail) == 0 {
-		tail = append(tail, footerLine(w, in))
+		tail = append(tail, footerLine(w, in, ""))
 	}
 	body = append(head, body...)
 	if h != 1 || len(body) == 0 {
@@ -1549,17 +1549,42 @@ func menuLines(mn sbMenu, w int) []line {
 	return append(out, row(edge+"└"+strings.Repeat("─", max(0, mw-2))+"┘"+reset, lineRef{kind: "menuitem"}))
 }
 
-// button is a clickable word on a lifted fill, rounded like a chip.
-func button(t string) string {
-	return lifted.fg() + "▐" + reset + lifted.bg() + baseFg.fg() + t + reset + lifted.fg() + "▌" + reset
+// button is a clickable word on a lifted fill, rounded like a chip; under
+// the pointer it lights up, so it reads as something to click.
+func button(t string) string { return buttonIn(t, lifted) }
+
+func buttonLit(t string, on bool) string {
+	if on {
+		return buttonIn(t, lit)
+	}
+	return button(t)
+}
+
+func buttonIn(t string, c rgb) string {
+	return c.fg() + "▐" + reset + c.bg() + baseFg.fg() + t + reset + c.fg() + "▌" + reset
 }
 
 // footerLine is the foot of the sidebar: Settings on the left, Help on the
-// right, each a click.
-func footerLine(w int, in string) line {
-	right := dim + "? " + reset + "Help"
-	left := in + dim + "≡ " + reset + "Settings"
+// right, each a click; the one under the pointer (hover: its id) lights up.
+func footerLine(w int, in, hover string) line {
+	word := func(icon, t, id string) string {
+		if id == hover {
+			return accent + icon + " " + bold + t + reset
+		}
+		return dim + icon + " " + reset + t
+	}
+	right := word("?", "Help", "open:help")
+	left := in + word("≡", "Settings", "open:settings")
 	return line{spread(left, right, w), lineRef{kind: "menu", id: "open:settings", id2: "open:help", from: len([]rune(in)), split: w - 1 - visWidth(right)}}
+}
+
+// hoverOn is what the pointer is on in a line drawn as ref, at row y: an id,
+// or "".
+func (v sbView) hoverOn(ref lineRef, y int) string {
+	if v.hover != y+1 {
+		return ""
+	}
+	return ref.at(v.hoverX)
 }
 
 // rowButtons are the buttons an entry of a kind shows under the pointer.

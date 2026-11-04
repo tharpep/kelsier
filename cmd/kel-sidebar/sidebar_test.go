@@ -1055,3 +1055,69 @@ func TestRowButtons(t *testing.T) {
 		t.Errorf("⋯ opened %+v", mn)
 	}
 }
+
+// config.toml is read with bin/kel's rules and written in place: a key's
+// line keeps its indent and comment, a new key goes at the end, and every
+// other line is left as it was.
+func TestConfigReadWrite(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "kel", "config.toml")
+	if err := setConfig(p, "pr", "off"); err != nil || readConfig(p)["pr"] != "off" {
+		t.Fatalf("a new file: %v %v", err, readConfig(p))
+	}
+	os.WriteFile(p, []byte("[ui]\n  sidebar_bg = \"#1e1e2e\"   # WezTerm\n# notify = \"waiting\"\nctx_warn = 70 # percent\n"), 0o644)
+	c := readConfig(p)
+	if c["sidebar_bg"] != "#1e1e2e" || c["ctx_warn"] != "70" || c["notify"] != "" {
+		t.Errorf("read: %v", c)
+	}
+	setConfig(p, "ctx_warn", "75")
+	setConfig(p, "notify", "waiting done")
+	b, _ := os.ReadFile(p)
+	want := "[ui]\n  sidebar_bg = \"#1e1e2e\"   # WezTerm\n# notify = \"waiting\"\nctx_warn = \"75\"  # percent\nnotify = \"waiting done\"\n"
+	if string(b) != want {
+		t.Errorf("written:\n%s\nwant:\n%s", b, want)
+	}
+}
+
+// Settings opens from the foot; a click on a switch flips it in config.toml,
+// a stepper's arrows move it, and Back closes the screen.
+func TestSettingsScreen(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	m := sbModel{doc: loadFixture(t, "one-agent"), width: 32, height: 40, visible: true}
+	nm, _ := m.Update(tea.MouseClickMsg{X: 4, Y: 39, Button: tea.MouseLeft})
+	m = nm.(sbModel)
+	if !m.settings {
+		t.Fatal("Settings did not open")
+	}
+	row := func(name string) (int, lineRef) {
+		_, refs := renderSettings(readConfig(kelConfigPath()), 32, 40, m.setSel, 0, 0)
+		for i, r := range refs {
+			if r.id == "set:"+name {
+				return i, r
+			}
+		}
+		t.Fatalf("no row %s", name)
+		return 0, lineRef{}
+	}
+	y, _ := row("notify_bell")
+	nm, _ = m.Update(tea.MouseClickMsg{X: 10, Y: y, Button: tea.MouseLeft})
+	m = nm.(sbModel)
+	if readConfig(kelConfigPath())["notify_bell"] != "off" {
+		t.Error("the bell switch did not write off")
+	}
+	y, r := row("ctx_warn")
+	nm, _ = m.Update(tea.MouseClickMsg{X: r.hits[1].x0, Y: y, Button: tea.MouseLeft})
+	m = nm.(sbModel)
+	if readConfig(kelConfigPath())["ctx_warn"] != "75" {
+		t.Errorf("ctx_warn › wrote %q", readConfig(kelConfigPath())["ctx_warn"])
+	}
+	y, _ = row("notify:done")
+	m.Update(tea.MouseClickMsg{X: 10, Y: y, Button: tea.MouseLeft})
+	if got := readConfig(kelConfigPath())["notify"]; got != "waiting error done" {
+		t.Errorf("finishes switch: notify %q", got)
+	}
+	nm, _ = m.Update(tea.MouseClickMsg{X: 3, Y: 0, Button: tea.MouseLeft})
+	if nm.(sbModel).settings {
+		t.Error("Back did not close the screen")
+	}
+}
