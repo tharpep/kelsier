@@ -3001,7 +3001,7 @@ cmd_status_line() {
   local here='' sb=1
   [ -e "$SIDEBAR_OFF" ] && here='--here'
   sidebar_enabled || sb=0
-  fleet_json $here | jq -r --argjson sb "$sb" '
+  fleet_json $here | jq -r --argjson sb "$sb" --argjson from "$(quota_from)" '
     def dur: floor | if . < 60 then "\(.)s"
                      elif . < 3600 then "\(. / 60 | floor)m"
                      else "\(. / 3600 | floor)h\((. % 3600) / 60 | floor | tostring | if length < 2 then "0" + . else . end)m" end;
@@ -3025,7 +3025,7 @@ cmd_status_line() {
             ( $q.seven_day // null | if . == null then empty
               elif .pct == null then ("7d" | tag) + "?"
               else (.pct | floor) as $p | ("7d" | tag) + (if $p >= 70 then ($p | heat) else "" end) + "\($p)%#[default]" end ),
-            ( $q.spend // null | if . == null or .pct == null or .pct < 50 then empty
+            ( $q.spend // null | if . == null or .pct == null or .pct < $from then empty
               else (.pct | floor) as $p | ("spend" | tag) + ($p | heat) + "\($p)%#[default]" end ) ]
           | if length == 0 then null else join("   ") end
         end ) as $quota
@@ -3276,6 +3276,13 @@ time_until() { # epoch now
 }
 
 # one quota chip per rate limit; gated at 50%.
+# quota_from — the spend % at which the spend chip shows: quota_from in
+# config, 50 by default, 0 for always. A quota_cmd figure is a budget the user
+# chose to watch, maybe from the start of the period (#28)
+quota_from() {
+  case "${KEL_QUOTA_FROM:-}" in ''|*[!0-9]*) printf 50 ;; *) printf '%s' "$KEL_QUOTA_FROM" ;; esac
+}
+
 quota_chip() { # label pct resets_at now [from — default 50]
   [ "${2:--1}" -ge "${5:-50}" ] 2>/dev/null || return 0
   local r; r="$(time_until "${3:-0}" "${4:-0}")"
@@ -3461,7 +3468,7 @@ cmd_statusline() {
     # 75% (the author's call), spend from 50%: rarely what you are about to hit
     quota_chip 5h    "$rl5"   "$rl5at"   "$now" 0
     quota_chip 7d    "$rl7d"  "$rl7dat"  "$now" 75
-    quota_chip spend "$spend" "$spendat" "$now"
+    quota_chip spend "$spend" "$spendat" "$now" "$(quota_from)"
   fi
   # agent.name marks a `claude --agent` session, not a Task-tool subagent.
   [ -n "$agent" ] && printf ' \033[2m·\033[0m \033[35m%s\033[0m' "$agent"
