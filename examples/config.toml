@@ -20,6 +20,8 @@
 # sidebar      = "on"           # the pane on the left of every kel window
                                 # ("off" here, or `kel sidebar off` for now)
 # sidebar_width = 32            # identical in every window
+# cache_ttl    = 300            # seconds a finished agent's prompt cache stays warm,
+#                               # drawn as a green ○; 3600 for the one-hour cache
 # sidebar_bg   = "#1e1e2e"      # the background its colours are built from, for a
 #                               # terminal that does not answer kel's query (WezTerm on WSL)
 

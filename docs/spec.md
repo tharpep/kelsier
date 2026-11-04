@@ -334,6 +334,12 @@ in any terminal:
 - **A chip names a state that needs a word**: `needs you`, `done` (unseen),
   `dead`, `quota`, `blocked`, on a dark fill of the state's colour, with half-block ends (`▐needs you▌`) so it reads rounded. Calm
   states are a dot and an age.
+- **A finished agent you have seen is warm, then cold** (*2026-11-04, #29*):
+  a green `○` while its prompt cache is still warm, since resuming it is
+  then cheap, the dim `○` once it is not. kel cannot see the cache, so the
+  lifetime is a setting, `cache_ttl` (300 s; 3600 for the one-hour cache),
+  measured from `state_since`. A `done` with no `state_since` is cold
+  (invariant 3).
 - **One accent for the selected entry**, and it is not inverse video.
 - **Dots, not words, for state.** A chip appears only beside the dot, never
   as the only signal.
