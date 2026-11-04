@@ -204,13 +204,14 @@ jq --arg k "$KEL" '
   | .hooks.UserPromptSubmit = wire("UserPromptSubmit")
   | .hooks.Notification     = wire("Notification")
   | .hooks.Stop             = wire("Stop")
+  | .hooks.StopFailure      = wire("StopFailure")
   | .hooks.SessionEnd       = wire("SessionEnd")
   | .hooks.PreCompact       = wire("PreCompact")
   | .hooks.PostCompact      = wire("PostCompact")
   | .hooks.PostToolUse      = (((.hooks.PostToolUse // []) | strip_kel)
       + [{ "hooks": [{ "type": "command", "command": ($k + " hook PostToolUse") }] }])
 ' "$SETTINGS" > "$tmp" && mv "$tmp" "$SETTINGS"
-echo "  wired: SessionStart UserPromptSubmit Notification Stop SessionEnd PreCompact PostCompact PostToolUse"
+echo "  wired: SessionStart UserPromptSubmit Notification Stop StopFailure SessionEnd PreCompact PostCompact PostToolUse"
 
 say "Claude Code subagentStatusLine -> $SETTINGS"
 # subagents, for the sidebar to nest under their agent. kel's command prints

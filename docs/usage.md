@@ -90,7 +90,7 @@ Keys below use `Ctrl-b`, tmux's default prefix; if you changed yours, kel's own 
 
 | | |
 |---|---|
-| `` Ctrl-b ` `` | jump to the next agent **waiting** on you — any group |
+| `` Ctrl-b ` `` | jump to the next agent that **needs you** — any group: waiting or stopped on an API error first, then finished ones you have not looked at; press again to work through them |
 | `Ctrl-b 1..9` / `n` / `p` / `w` | move between windows — every agent is in one session (native tmux) |
 | `Ctrl-b ,` | rename this window (routes through `kel rename`) |
 | `Ctrl-b \|` / `-` | split, keeping the current directory |
@@ -124,9 +124,11 @@ in two sections:
 - **`agents`** — who needs you, grouped under the repo each works in, the
   repo with the most urgent agent first: a dot per state (amber waiting, cyan
   working, green finished-and-not-yet-looked-at, grey idle or seen, violet
-  throttled, red `✕` dead, grey `?` unknown) and how long, right-aligned. A
-  state that needs a word gets a chip: `needs you`, `done`, `dead`, `quota`.
-  A waiting agent shows what it waits for (`allow Bash?`). The selected agent
+  throttled, red `●` error, red `✕` dead, grey `?` unknown) and how long,
+  right-aligned. A state that needs a word gets a chip: `needs you`, `done`,
+  `error`, `dead`, `quota`. A waiting agent shows what it waits for (`allow
+  Bash?`); one whose turn ended on an API error shows which (`Rate limit
+  reached`). The selected agent
   opens to its context % and cost, what it is doing — `editing sbview.go`,
   its last tool call, read from the tail of Claude Code's own transcript —
   and its subagents.
@@ -253,7 +255,7 @@ permission to use Bash   ↵ go  or Ctrl-b then \`  ✕`, with `+1 more` when se
 visit that agent or the agent moves on; it is never shown for the agent you
 are looking at. `notify_banner = "off"` turns it off. kel also rings your
 terminal's bell and shows a desktop notification (a Windows toast on WSL) —
-see `setup.md` §5b to change either. Hidden sidebars do no work; the one you can see refreshes every two
+see `setup.md` §5b to change either. Hidden sidebars do no work of their own (Bubble Tea still wakes 30 times a second, ~0.4% of a core each); the one you can see refreshes every two
 seconds and at once when an agent changes state. `kel sidebar off` removes it
 everywhere (and new windows get none) until `kel sidebar on`; `sidebar =
 "off"` in config disables it outright; `sidebar_width` sets the width and

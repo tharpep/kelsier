@@ -273,14 +273,14 @@ where it already is** — which is exactly what a sidebar per window does.
 | groups | *built (M0).* **One `kel` tmux session for everything.** The sidebar groups by repo → worktree from each pane's directory; sessions-per-repo would only duplicate that and make navigation two-level. `group` stays in the records as the repo label (no format change); `.kel/group` keeps working as a display grouping; restore merges old per-repo sessions into the one |
 | the panel | **a `display-popup` first** (~90%) for `yazi`, `lazygit`, plan and tasks — no layout cost, nothing resizes. A pinned right-hand pane only if the popup gets reopened constantly. *Revised 2026-10-15, after the author was trapped:* a popup takes every key, prefix included, so when yazi handed them to vim, the title's "q closes" started a vim macro. **Each popup now hosts a small tmux session of its own** (`_kelpop_<n>`, status off, marked `@kel-popup`) and attaches to it; inside, tmux's keys work again and `prefix q` detaches — closing the popup whatever runs there. The `_` name keeps it out of every kel filter (sidebar, fleet, snapshot, restore). yazi and lazygit keep their session between opens; the diff, plan and edit views are made fresh |
 | sidebar width | *built (M2).* **Fixed, 32 columns by default**, `sidebar_width` in config, identical in every window. Hide/show applies to every window at once and resizes the user's panes, so it is a rare gesture. *Held in place 2026-10-21:* tmux's own pane commands move the sidebar like any pane — `select-layout` (prefix M-1..5) stretched it, `rotate-window` and main-vertical put it on the right, `swap-pane` gave the agent its 32 columns. A `window-layout-changed` hook, guarded by a format so bash starts only when a sidebar is out of place, runs `kel _sidebar fit`: a sidebar off the left or short of full height is closed and made again (`join-pane -f` postdates the 3.0 floor), one at the wrong width resized. `rotate-window` fires no layout hook, so its two keys call fit themselves. A dragged sidebar edge springs back — the author's call: the width is fixed. A `break-pane` of the sidebar left a window holding only it; heal now reaps first |
-| idle and wake | *built (M2).* **Hook-driven.** Hidden sidebars sleep; `session-window-changed` wakes the shown one; it refreshes when kel's state hooks fire, plus a slow fallback poll. **Next (decided after M2):** format subscriptions (§5a) replace the visible sidebar's 2 s poll on tmux ≥ 3.2; the hooks and `SIGUSR1` stay, as the wake for kel's own state changes, which tmux cannot see |
+| idle and wake | *built (M2).* **Hook-driven.** Hidden sidebars sleep; `session-window-changed` wakes the shown one; it refreshes when kel's state hooks fire, plus a slow fallback poll. **Next (decided after M2):** format subscriptions (§5a) replace the visible sidebar's 2 s poll on tmux ≥ 3.2; the hooks and `SIGUSR1` stay, as the wake for kel's own state changes, which tmux cannot see. *2026-11-03:* "sleep" covers kel's work only — Bubble Tea's frame ticker wakes every sidebar regardless, ~2% of a core each at its default 60 fps; kel runs it at 30 |
 | restore | *built (M2).* **Rebuild windows and splits as today, sidebars included, under the existing `.restoring` lock.** A snapshot records each sidebar as a `@kel-sidebar` pane (its geometry is part of the window's layout string, so skipping it would break `select-layout`), and restore relaunches it rather than replaying a command — so a restore cannot duplicate one. The author found the old restore hard to work with — the rebuild is a chance to simplify it, not just extend it |
 | scope | **only kel's session.** Panes in other tmux sessions are not part of the workspace |
 | focus | *built (M3).* **One key to focus the sidebar** (`prefix Space`, taking tmux's `next-layout`); `enter` jumps to the selected pane, `esc` returns where you were. `` prefix ` `` is unchanged. *Only on purpose, 2026-10-21:* the sidebar's keys are bare letters, and `select-pane -L` from your leftmost pane (Ctrl-h under vim-tmux-navigator) or `prefix o` put a sentence meant for Claude into it — `t` opened a shell. `prefix Space` and a click (kel's `MouseDown1Pane`: tmux's own, plus the mark) set the window option `@kel-via`; a `pane-focus-in` hook moves any other arrival on to the next pane — your first, since the sidebar is pane 1 — and focusing your own pane clears it. Pure tmux, no kel start on a pane change |
 | keys | *built (M3, M5).* `j`/`k` move · `enter` jump · `/` filter · `n` new agent · `w` new worktree agent · `x` kill (kill-safety intact) · `r` rename · `f` files · `g` git · `d` the worktree's diff · `e` edit what the agent last touched · `o` a server in the browser · `p` plan and tasks · `?` help. None deeper than one key. *M7 (2026-10-21):* an agent pane's title is `● <index> · <name> <state>` in the state's colour, from the pane options the hook sets (`@kel-state`, `@kel-name`) and computed by tmux; `n` then asks where — `enter` a window, `|` / `-` a split of the pane you were in — and `m` gives an agent sharing a window one of its own (`break-pane`) |
 | sections | *built (M3).* **`spaces` above `agents`** (§5), after herdr, replacing the single repo → worktree → pane tree |
 | mouse | *built (M3).* **First-class.** A click selects and jumps; the wheel scrolls; every gesture a key does on a row, a click can reach. Bubble Tea v2 reports mouse events; tmux passes them to the pane under the pointer with `mouse on`, which kel's config already sets |
-| done, until seen | *built (M3).* **`done` stays loud until you have looked at the agent**, then quietens — herdr's semantics, and what makes the dots worth reading. A **flag on `done`, not a new state**: `kel jump`, the notifications and every reader that matches on state are untouched. When "looked at" happened is recorded from the window-change event the sidebar already receives (§9) |
+| done, until seen | *built (M3).* **`done` stays loud until you have looked at the agent**, then quietens — herdr's semantics, and what makes the dots worth reading. A **flag on `done`, not a new state**: the notifications and every reader that matches on state are untouched (`kel jump` reads the flag since 2026-11-03). When "looked at" happened is recorded from the window-change event the sidebar already receives (§9) |
 | footer | *built 2026-10-15, after daily use.* **The keys for what is selected, and only while the sidebar has the keyboard.** The author did not want to remember keys and did not want a busier sidebar, so the one footer line teaches them: an agent shows `e edit · p plan · x kill · ?`, a space `f files · g git · d diff · ?`, a server `o open · …`, as many as fit, then `?` for the rest; `enter` is left out as the key everybody tries. Without the keyboard it reads `click, or Ctrl-b then space` — how to get in, with "then" because `Ctrl-b space` read as one chord (2026-10-16) — or, while an agent waits, `1 waiting 6m · Ctrl-b then \``, the alarm tmux's bar used to carry — it names the key rather than the click (2026-10-19) because a click teaches nothing, and `` ` `` is a prefix key, so two presses; clicking it still jumps. Focus comes from the terminal's focus events (kel sets `focus-events on`), else `#{pane_active}` on each tick, and any key or click proves it |
 | actions | *built 2026-10-15, after daily use.* **The keys that do not depend on the selection, at the foot of the sidebar, clickable** — `n` new agent · `w` worktree agent · `t` shell · `Q` quit · `?` all keys. Only when the lists leave room; the same keys as everywhere, so one surface still (invariant 6). The author found the lower half empty and the keys hard to recall. *Revised 2026-10-16:* two grids, two keys to a line — the selected thing's verbs under what it is and its name, then kel's own — so the keys sit where they apply; no key needs shift (`q` quit, `v` PRs, `b` restore). *2026-10-21:* `|` split right and `-` split down join kel's own — the author wanted to click a pane into being. They split the pane you were in (tmux's last pane) at its directory, and the new shell takes the keyboard, as `prefix |` / `-` do. Dividers between your panes drag as tmux's do |
 | `kel>` prompt | *built 2026-10-15.* **`prefix k`** runs a typed kel command from wherever you are — the author asked where kel commands are meant to be typed when every pane is an agent. A one-line answer is a message, a longer one a popup, never view-mode on your pane |
@@ -430,7 +430,7 @@ The sidebar's keys are decided in §5c. Today's bindings are listed in
 Two rules hold across both. **Switching is one keystroke** — never
 open-menu, find-row, press-enter. And **`` prefix ` `` is the key the tool
 exists for**: not "go to window 3" but "go to whoever is blocked on me",
-across every repo; it matches `waiting` only, cycles and wraps.
+across every repo, cycling and wrapping. *2026-11-03:* "blocked on me" grew to "needs me": `waiting` and `error` first, then a `done` you have not seen, once none is left — landing marks it seen, so pressing again works the queue to empty.
 
 ---
 
@@ -704,9 +704,15 @@ and every reader that matches on state see plain `done`, as today.
 | `auth_success`, `elicitation_complete/response` | no change |
 | anything added later | `waiting` (safe default) |
 
+`StopFailure` fires instead of `Stop` when a turn ends on an API error (rate
+limit, overload, auth, billing): the state is `error`, its note Claude Code's
+error text. Before it was hooked, such an agent read `working` until the
+half-hour quiet guess. `error` notifies, colours red and sorts with `waiting`;
+it is not `throttled`, which resumes on its own — this does not.
+
 `notification_text` is kept as the third field of the state file — the literal
 permission prompt — so "why is this blocked" needs no pane scrape. `kel jump`
-matches `waiting` only.
+takes `waiting` and `error` first, then a `done` you have not seen.
 
 `kel hook` resolves which window it is in, in order: `$TMUX_PANE`; the pane
 stashed by this session's `SessionStart`, keyed by session id; the single pane
@@ -719,7 +725,7 @@ window `claude`).
 
 **Dead agents.** A crash fires neither `Stop` nor `SessionEnd`, so the file
 keeps saying whatever it last said. kel catches this at *read* time: if the
-record says `idle` / `working` / `waiting` / `throttled` but the window's only
+record says `idle` / `working` / `waiting` / `throttled` / `error` but the window's only
 live process is a bare shell, the effective state is `dead`. This check lives
 in two places kept in sync by hand — `effective_state()` in `bin/kel` and
 `internal/fleet/fleet.go` — until `bin/kel`'s remaining readers move to Go.
@@ -755,7 +761,7 @@ The row Claude Code shows (repo identity, `250k/1M`, quota resets, `fast` /
 ### 9b. Notifications
 
 When an agent **transitions into** a state listed in `KEL_NOTIFY` (default
-`waiting`) and you are **not looking at that window**, kel notifies:
+`waiting error`) and you are **not looking at that window**, kel notifies:
 `tmux display-message`, **the bell** on every terminal attached to kel, and
 **a desktop notification** — a Windows toast from WSL (built-in WinRT via
 `powershell.exe`), `osascript` on macOS, `notify-send` on Linux.

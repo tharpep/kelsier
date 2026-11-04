@@ -716,6 +716,22 @@ ok "kel jump goes to the next waiting agent"    '[ "$cur" = "$CW" ]'
 TMUX="$TMUX_TMPDIR/tmux-$(id -u)/default,$(tmux display-message -p '#{pid}'),0" "$KEL" jump
 cur="$(tmux list-windows -t '=keltest' -F '#{window_active} #{window_id}' | awk '$1==1 {print $2}')"
 ok "  ...and wraps round to the first"          '[ "$cur" = "$DW" ]'
+# then what else needs you: an API error ranks with waiting; a finished agent
+# you have not seen comes only once nothing waits
+printf 'error %s\n' "$(( $(date +%s) - 60 ))" > "$STATE/$CW.state"
+tmux select-window -t "$DW"
+TMUX="$TMUX_TMPDIR/tmux-$(id -u)/default,$(tmux display-message -p '#{pid}'),0" "$KEL" jump
+cur="$(tmux list-windows -t '=keltest' -F '#{window_active} #{window_id}' | awk '$1==1 {print $2}')"
+ok "  ...an errored agent is next, like a waiting one" '[ "$cur" = "$CW" ]'
+printf 'done %s\n' "$(( $(date +%s) + 5 ))" > "$STATE/$CW.state"
+tmux select-window -t "$DW"
+TMUX="$TMUX_TMPDIR/tmux-$(id -u)/default,$(tmux display-message -p '#{pid}'),0" "$KEL" jump
+cur="$(tmux list-windows -t '=keltest' -F '#{window_active} #{window_id}' | awk '$1==1 {print $2}')"
+ok "  ...a finished one waits while another waits" '[ "$cur" = "$DW" ]'
+rm -f "$STATE/$DW.state"
+TMUX="$TMUX_TMPDIR/tmux-$(id -u)/default,$(tmux display-message -p '#{pid}'),0" "$KEL" jump
+cur="$(tmux list-windows -t '=keltest' -F '#{window_active} #{window_id}' | awk '$1==1 {print $2}')"
+ok "  ...and is next once none does"            '[ "$cur" = "$CW" ]'
 release_client
 rm -f "$STATE/$CW.state"
 now=$(date +%s)
@@ -1543,7 +1559,7 @@ git init -q -b main "$UR" && git -C "$UR" -c user.email=t@t -c user.name=t commi
 git -C "$UR" remote add origin "$UO" && git -C "$UR" push -q origin main
 ( cd "$UR" && "$KEL" new up -w --agent 'sleep 9999' >/dev/null 2>&1 )
 UWT="$(jq -r .cwd "$SESSIONS/unpushed/up.json" 2>/dev/null)"
-git -C "$UWT" -c user.email=t@t -c user.name=t commit -q --allow-empty -m "only here"
+[ -d "$UWT" ] && git -C "$UWT" -c user.email=t@t -c user.name=t commit -q --allow-empty -m "only here"
 out="$("$KEL" kill unpushed/up 2>&1)"
 ok "a worktree whose commits are on no remote is refused" '[[ "$out" == *refusing* ]] && [ -n "$(window_of unpushed up)" ]'
 ok "  ...naming the commit at risk"       '[[ "$out" == *"only here"* ]]'
@@ -1558,12 +1574,15 @@ git -C "$MR" remote add origin "$MO" && git -C "$MR" push -q origin main
 git -C "$MR" remote set-url origin "https://github.com/example/merged.git"
 git -C "$MR" remote set-url --push origin "$MO"
 ( cd "$MR" && "$KEL" new mp -w --agent 'sleep 9999' >/dev/null 2>&1 )
-MWT="$(jq -r .cwd "$SESSIONS/merged/mp.json" 2>/dev/null)"
-git -C "$MWT" -c user.email=t@t -c user.name=t commit -q --allow-empty -m "in pr"
+MWT="$(jq -r .cwd "$SESSIONS/merged-pr/mp.json" 2>/dev/null)"
+# never `git -C ""`: with no worktree it commits into whatever checkout the
+# suite runs from, and it once did — into kelsier itself, on every run
+[ -d "$MWT" ] && git -C "$MWT" -c user.email=t@t -c user.name=t commit -q --allow-empty -m "in pr"
+ok "the merged-PR worktree holds its own commit"  '[ -d "$MWT" ] && [ "$(git -C "$MWT" log -1 --format=%s)" = "in pr" ]'
 MP_HEAD="$(git -C "$MWT" rev-parse HEAD)"
 mkdir -p "$STATE/pr-cache"
 printf '[{"sha":"%s","merged":true,"state":"closed"}]\n' "$MP_HEAD" > "$STATE/pr-cache/example__merged.sha.json"
-out="$("$KEL" kill merged/mp 2>&1)"
+out="$("$KEL" kill merged-pr/mp 2>&1)"
 ok "a worktree in a merged PR is safe to kill without -f" '[[ "$out" == *killed* ]]'
 
 # a worktree directory removed by hand (rm -rf, a file manager) BEFORE kill
@@ -1622,12 +1641,29 @@ hook "$P" Notification agent_needs_input "which?"
 ok "agent_needs_input -> waiting"                   '[ "$(state_of a)" = waiting ]'
 hook "$P" Notification some_type_from_the_future "?"
 ok "an unknown type falls back to waiting"          '[ "$(state_of a)" = waiting ]'
+hook "$P" UserPromptSubmit
+printf '%s' "{\"session_id\":\"s\",\"cwd\":\"$WORK\",\"hook_event_name\":\"StopFailure\",\"error\":\"rate_limit\",\"last_assistant_message\":\"API Error: Rate limit reached\"}" \
+  | TMUX_PANE="$P" "$KEL" hook StopFailure
+ok "a turn ended by an API error -> error, not working" '[ "$(state_of a)" = error ]'
+ok "  ...naming the error"                          'grep -q "Rate limit reached" "$STATE/$P.state"'
+ok "  ...and the fleet reports it, alive"           '[ "$("$KEL" _fleet | jq -r ".agents[] | select(.name==\"a\") | .state")" = error ]'
+hook "$P" UserPromptSubmit
+ok "  ...until the next prompt"                     '[ "$(state_of a)" = working ]'
+hook "$P" Notification permission_prompt "allow?"
 tooluse() { printf '%s' "{\"session_id\":\"s\",\"cwd\":\"$WORK\",\"hook_event_name\":\"PostToolUse\",\"tool_name\":\"$2\",\"tool_input\":{\"command\":\"ls\"}}" | TMUX_PANE="$1" "$KEL" hook PostToolUse; }
 tooluse "$P" Bash
 ok "a tool run after a wait -> working"             '[ "$(state_of a)" = working ]'
 hook "$P" Stop
 tooluse "$P" Bash
 ok "  ...but a tool never wakes a finished agent"   '[ "$(state_of a)" = done ]'
+# the fast path at the top of bin/kel: a tool call with nothing to do leaves
+# before kel loads, and anything that has something to do still gets there
+traced() { printf '%s' "{\"session_id\":\"s\",\"cwd\":\"$WORK\",\"hook_event_name\":\"PostToolUse\",\"tool_name\":\"$2\",\"tool_input\":{}}" | TMUX_PANE="$1" bash -x "$KEL" hook PostToolUse 2>&1 | grep -c '^+'; }
+ok "a tool call with nobody waiting leaves before kel loads" '[ "$(traced "$P" Read)" -lt 40 ]'
+ok "  ...but an edit takes the full path"           '[ "$(traced "$P" Edit)" -gt 100 ]'
+hook "$P" Notification permission_prompt "allow?"
+ok "  ...and so does any tool while an agent waits" '[ "$(traced "$P" Read)" -gt 100 ]'
+ok "  ...which ends the wait"                       '[ "$(state_of a)" = working ]'
 
 section "dead agents are detected at read time"
 reset

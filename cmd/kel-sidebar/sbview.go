@@ -569,6 +569,8 @@ func stateLook(state *string, unseen bool) (dot, colour string) {
 		return "○", dim
 	case "throttled":
 		return "◌", purple
+	case "error":
+		return "●", red
 	case "dead":
 		return "✕", red
 	case "idle":
@@ -793,6 +795,9 @@ func shortNote(n string) string {
 	if t := strings.TrimPrefix(n, "Claude needs your permission to use "); t != n {
 		return "allow " + strings.TrimSuffix(t, ".") + "?"
 	}
+	if t := strings.TrimPrefix(n, "API Error: "); t != n {
+		return t
+	}
 	if strings.HasPrefix(n, "Claude is waiting for your input") {
 		return "your input"
 	}
@@ -816,6 +821,8 @@ func agentAge(a fleet.Agent, now int64) (age, chipText, chipFg, chipBg string) {
 	switch *a.State {
 	case "waiting":
 		return age, "needs you", yellow, yellowBg
+	case "error":
+		return age, "error", red, redBg
 	case "dead":
 		return age, "dead", red, redBg
 	case "throttled":
@@ -1116,7 +1123,8 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 		// what it waits for is the point of a waiting agent: always shown,
 		// readable, not grey (Orca shows "awaiting permission"; kel had the
 		// exact text all along)
-		if a.agent.State != nil && *a.agent.State == "waiting" && a.agent.Note != nil && *a.agent.Note != "" {
+		// and an API error says which: rate limit, overloaded, auth
+		if a.agent.State != nil && (*a.agent.State == "waiting" || *a.agent.State == "error") && a.agent.Note != nil && *a.agent.Note != "" {
 			rows = append(rows, pre+mid+truncate(shortNote(*a.agent.Note), avail)+reset)
 		}
 		if id == v.sel {
@@ -1476,7 +1484,7 @@ var sbActions = []sbAct{
 	{"w", "worktree"},
 	{"|", "split right"},
 	{"-", "split down"},
-	{"`", "waiting"},
+	{"`", "needs you"},
 	{"u", "usage"},
 	{"v", "PRs"},
 	{";", "command"},

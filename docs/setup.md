@@ -192,7 +192,7 @@ AppleScript as arguments, never as code. Try it with `kel _notify`.
 `config.toml` (or the matching `KEL_*` env var):
 
 ```toml
-notify         = "waiting"        # states worth it: add "done" to hear when one finishes
+notify         = "waiting error"  # states worth it: add "done" to hear when one finishes
 notify_bell    = "on"             # "off" for no bell
 notify_desktop = "on"             # "off" for no desktop notification
 notify_cmd     = ""               # your own script instead (title, body)
