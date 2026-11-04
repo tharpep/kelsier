@@ -1252,3 +1252,29 @@ func TestHoverChainKeepsPlace(t *testing.T) {
 	at(y+1, "usage-charts") // back up
 	at(y, "dashboard")
 }
+
+// A done agent you have seen is warm while its prompt cache lives, cold
+// after; an undated or unseen one is never drawn warm.
+func TestWarmDone(t *testing.T) {
+	now := int64(1_000_000)
+	done, idle := "done", "idle"
+	at := func(ago int64) *float64 { f := float64(now - ago); return &f }
+	cases := []struct {
+		a    fleet.Agent
+		ttl  int64
+		want bool
+	}{
+		{fleet.Agent{State: &done, StateSince: at(60)}, 300, true},
+		{fleet.Agent{State: &done, StateSince: at(600)}, 300, false},
+		{fleet.Agent{State: &done, StateSince: at(600)}, 3600, true},
+		{fleet.Agent{State: &done}, 300, false},
+		{fleet.Agent{State: &done, StateSince: at(60), Unseen: true}, 300, false},
+		{fleet.Agent{State: &idle, StateSince: at(60)}, 300, false},
+		{fleet.Agent{State: &done, StateSince: at(60)}, 0, true}, // unset: five minutes
+	}
+	for i, c := range cases {
+		if got := warm(c.a, now, c.ttl); got != c.want {
+			t.Errorf("case %d: warm = %v, want %v", i, got, c.want)
+		}
+	}
+}

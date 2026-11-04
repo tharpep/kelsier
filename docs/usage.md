@@ -125,7 +125,10 @@ in two sections:
 - **`agents`** — every agent, grouped under the repo it works in, in a fixed
   order: repos by name, agents in the order their windows were made. A state
   change moves a dot or a chip, never a row. A dot per state (amber waiting, cyan
-  working, green finished-and-not-yet-looked-at, grey idle or seen, violet
+  working, green finished-and-not-yet-looked-at, a green `○` finished and seen
+  but still cheap to resume (its prompt cache is warm: `cache_ttl`, five
+  minutes by default, `3600` for the one-hour cache), grey idle or seen and
+  cold, violet
   throttled, red `●` error, red `✕` dead, grey `?` unknown) and how long,
   right-aligned. A state that needs a word gets a chip: `needs you`, `done`,
   `error`, `dead`, `quota`. A waiting agent shows what it waits for (`allow

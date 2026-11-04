@@ -43,6 +43,7 @@ type uiState struct {
 	// its strip opens above it: the pointer came down past a strip that
 	// closes, and the entry must not slide up from under it
 	stripAbove bool
+	cacheTTL   int64 // seconds a finished agent's prompt cache stays warm
 	prefix   string // the tmux prefix in words ("Ctrl-b"), for hints
 	restore  bool   // a previous workspace waits to be restored
 }
@@ -128,6 +129,7 @@ type sbView struct {
 	hoverX               int
 	hoverID              string
 	stripAbove           bool
+	cacheTTL             int64
 	restore              bool
 	menu                 *sbMenu // open over the rows, or nil
 }
@@ -224,7 +226,7 @@ func spaceKey(p fleet.Pane) (key, label string) {
 }
 
 func buildView(doc fleet.Doc, ui uiState) sbView {
-	v := sbView{sel: ui.sel, filter: ui.filter, focused: ui.focused, hover: ui.hover, hoverX: ui.hoverX, hoverID: ui.hoverID, stripAbove: ui.stripAbove,
+	v := sbView{sel: ui.sel, filter: ui.filter, focused: ui.focused, hover: ui.hover, hoverX: ui.hoverX, hoverID: ui.hoverID, stripAbove: ui.stripAbove, cacheTTL: ui.cacheTTL,
 		restore: ui.restore}
 	if doc.Panes == nil {
 		v.unknown = true
@@ -1094,6 +1096,9 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 		id := agentID(a.key)
 		r := lineRef{id: id, kind: "agent"}
 		d, c := stateLook(a.agent.State, a.agent.Unseen)
+		if warm(a.agent, now, v.cacheTTL) {
+			c = green // seen, and cheap to resume: its cache is still warm
+		}
 		if quietFor(a.agent, now) > 0 {
 			d, c = "◌", dim // not heard from: no state colour it has not earned
 		}
@@ -1709,4 +1714,22 @@ func wrapWords(text string, w, n int) []string {
 		r = []rune(strings.TrimLeft(string(r[cut:]), " "))
 	}
 	return out
+}
+
+// defaultCacheTTL is Claude Code's prompt cache lifetime, five minutes.
+const defaultCacheTTL = 300
+
+// warm reports a done agent you have seen whose prompt cache is still warm:
+// it stopped less than ttl seconds ago, so resuming it is cheap. kel cannot
+// see the cache, so the ttl is a setting (cache_ttl). An agent with no
+// state_since cannot be dated and is never warm (invariant 3).
+func warm(a fleet.Agent, now, ttl int64) bool {
+	if ttl <= 0 {
+		ttl = defaultCacheTTL
+	}
+	if a.State == nil || *a.State != "done" || a.Unseen || a.StateSince == nil {
+		return false
+	}
+	ago := now - int64(*a.StateSince)
+	return ago >= 0 && ago < ttl
 }
