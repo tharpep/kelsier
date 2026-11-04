@@ -864,9 +864,21 @@ func (m sbModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// the entry under the pointer, read from the frame as drawn, so the
 		// pointer can move onto its button strip and keep it
 		_, drawn := renderView(m.view(), m.width, m.height, time.Now().Unix())
+		old := m.ui.hoverID
 		m.ui.hover, m.ui.hoverX, m.ui.hoverID = msg.Y+1, msg.X, ""
 		if msg.Y >= 0 && msg.Y < len(drawn) && len(rowButtons(drawn[msg.Y].kind)) > 0 {
 			m.ui.hoverID = drawn[msg.Y].id
+		}
+		if m.ui.hoverID != old {
+			// a strip inserted above the pointer closes now, lifting what is
+			// under it by a row: the new strip opens above its entry instead,
+			// in the old one's place, and the entry stays under the pointer
+			m.ui.stripAbove = false
+			for i := 0; i < msg.Y && i < len(drawn); i++ {
+				if drawn[i].inserted {
+					m.ui.stripAbove = true
+				}
+			}
 		}
 		if m.menu != nil {
 			_, refs := renderView(m.view(), m.width, m.height, time.Now().Unix())

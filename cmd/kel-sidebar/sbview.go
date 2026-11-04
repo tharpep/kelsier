@@ -40,6 +40,9 @@ type uiState struct {
 	hover    int    // screen line under the pointer, plus one; 0 = none
 	hoverX   int    // and its column
 	hoverID  string // the entry it is on, its button strip included
+	// its strip opens above it: the pointer came down past a strip that
+	// closes, and the entry must not slide up from under it
+	stripAbove bool
 	prefix   string // the tmux prefix in words ("Ctrl-b"), for hints
 	restore  bool   // a previous workspace waits to be restored
 }
@@ -124,6 +127,7 @@ type sbView struct {
 	hover                int
 	hoverX               int
 	hoverID              string
+	stripAbove           bool
 	restore              bool
 	menu                 *sbMenu // open over the rows, or nil
 }
@@ -139,6 +143,8 @@ type lineRef struct {
 	right string // that action, drawn — kept here so the hover can mark it
 	from  int    // a click left of this column hits nothing
 	hits  []hit  // buttons drawn on the line, while the pointer is on it
+	// a button strip inserted between rows, moving the rows under it
+	inserted bool
 	text  string // a choices line as drawn, without colour, for hintKey
 }
 
@@ -218,7 +224,7 @@ func spaceKey(p fleet.Pane) (key, label string) {
 }
 
 func buildView(doc fleet.Doc, ui uiState) sbView {
-	v := sbView{sel: ui.sel, filter: ui.filter, focused: ui.focused, hover: ui.hover, hoverX: ui.hoverX, hoverID: ui.hoverID,
+	v := sbView{sel: ui.sel, filter: ui.filter, focused: ui.focused, hover: ui.hover, hoverX: ui.hoverX, hoverID: ui.hoverID, stripAbove: ui.stripAbove,
 		restore: ui.restore}
 	if doc.Panes == nil {
 		v.unknown = true
@@ -1352,6 +1358,8 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 			inBlock := last >= 0 && strings.HasPrefix(body[last].s, raised) && strings.Trim(stripANSI(body[last].s), " ▌") == ""
 			if inBlock {
 				at = last
+			} else if v.stripAbove {
+				at = first
 			}
 			if first >= 0 && at >= 0 && at <= len(body) {
 				fc := lifted
@@ -1363,6 +1371,7 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 					st.s = fill(lead(id)+st.s[1:], w, raised)
 					body[at] = st
 				} else {
+					st.ref.inserted = true
 					// between the entry and the one below, pushing the rest
 					// down while hovered: the author did not want it over
 					// the next agent. A blank row above the foot pays for it
