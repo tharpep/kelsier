@@ -298,8 +298,9 @@ the sidebar's colours.
 ## The quota line, and tmux's bar
 
 **tmux's bar runs along the bottom of the window**, on the sidebar's own
-surface: what belongs to no agent on the left, what waits on you and the clock
-on the right.
+surface, with a blank row above it for room: what belongs to no agent on the
+left, what waits on you and the clock on the right. While an agent waits, the
+banner takes that blank row; only its `↵ go` and `✕` are clickable.
 
 ```
   5h ━━━━━━━━ 58% (1h20m)   7d 41% · $24.10          ▐needs you▌ docs 6m +1   14:32

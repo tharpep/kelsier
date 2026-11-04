@@ -1750,6 +1750,7 @@ ok "\$KEL_NOTIFY selects which states do"   '[ "$(grep -c . "$NLOG")" = 1 ]'
 AW="$(window_of api-gw a)"
 ok "a waiting agent puts up the banner, above the bar" '[ "$(tmux show-options -v -t "=keltest:" status)" = 2 ] && [ -n "$(tmux show-options -v -t "=keltest:" status-format[1])" ] && [[ "$(tmux show-options -v -t "=keltest:" status-format[0])" == *"a#[nobold,fg=colour252] is waiting"* ]]'
 ok "  ...the sidebar hint once, on the bar, not on the banner too (#22)" '[[ "$(tmux show-options -v -t "=keltest:" status-format[0])" == *"@kel-bar-lead-blank"* ]] && [[ "$(tmux show-options -v -t "=keltest:" status-format[0])" != *"{E:@kel-bar-lead}"* ]]'
+ok "  ...and only ↵ go and ✕ are clickable, not the message under the prompt" '[[ "$(tmux show-options -v -t "=keltest:" status-format[0])" != *"bgo]#[fg=colour214,bold] ●"* ]] && [[ "$(tmux show-options -v -t "=keltest:" status-format[0])" == *"range=user|bgo]"*"↵ go"* ]]'
 ok "  ...its text printed, never run as a format" '[[ "$(tmux show-options -v -t "=keltest:" status-format[0])" == *"##(touch pwned)"* ]]'
 hook "$P" UserPromptSubmit
 # "is waiting" alone let a bug through: an emptied banner file once drew
