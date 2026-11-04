@@ -13,7 +13,7 @@ import (
 	"strings"
 )
 
-// triageRank puts the row you must deal with first at the top.
+// triageRank orders states by urgency: a space shows its most urgent agent's.
 func triageRank(state *string) int {
 	if state == nil {
 		return 5

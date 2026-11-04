@@ -1130,16 +1130,17 @@ ok "the sidebar draws spaces, then agents"       'sbtext "$SP" | grep -qx "  spa
 ok "  ...the worktree as a space of its own"     '[ "$(sbtext "$SP" | grep -c "api-gw")" -ge 2 ]'
 ok "  ...and selects with a bar, not inverse video" '! tmux capture-pane -e -p -t "$SP" | grep -q "\[7m" && sbtext "$SP" | grep -q "▌"'
 
-tmux send-keys -t "$SP" j
+# a fixed order: wt's window was made first, so it sits above main1
+tmux send-keys -t "$SP" k
 wait_until '[ "$(jq -r .selected "$STATE/sidebar.json" 2>/dev/null)" = "a:$(userpane "$WTW")" ]'
-ok "j moves the shared cursor"                   '[ "$(jq -r .selected "$STATE/sidebar.json")" = "a:$(userpane "$WTW")" ]'
+ok "k moves the shared cursor"                   '[ "$(jq -r .selected "$STATE/sidebar.json")" = "a:$(userpane "$WTW")" ]'
 tmux send-keys -t "$SP" Enter
 wait_until '[ "$(active_win)" = "$WTW" ]'
 ok "enter jumps to the agent's window"          '[ "$(active_win)" = "$WTW" ]'
 
-# enter on a space header row jumps to that space's window
-tmux send-keys -t "$SP" k
-wait_until '[[ "$(jq -r .selected "$STATE/sidebar.json" 2>/dev/null)" == s:* ]]' 50
+# enter on a space header row jumps to that space's window: k up to the
+# repo's own row, the first entry, so pressing past it is harmless
+wait_until 'tmux send-keys -t "$SP" k; [[ "$(jq -r .selected "$STATE/sidebar.json" 2>/dev/null)" == s:*/api-gw ]]' 50
 tmux send-keys -t "$SP" Enter
 wait_until '[ "$(active_win)" = "$MW" ]' 50
 ok "enter on a space header row jumps to that space's window" '[ "$(active_win)" = "$MW" ]'
@@ -1150,8 +1151,13 @@ tmux select-window -t "$WTW"
 SW="$(sbpane "$WTW")"
 wait_until 'sbtext "$SW" | grep -q agents'
 wait_until '[ "$(active_win)" = "$WTW" ]' 50
-[ "$(jq -r .selected "$STATE/sidebar.json" 2>/dev/null)" = "a:$(userpane "$WTW")" ] || tmux send-keys -t "$SW" j
-wait_until '[ "$(jq -r .selected "$STATE/sidebar.json" 2>/dev/null)" = "a:$(userpane "$WTW")" ]' 50
+# down to wt, one key at a time, each one landing before the next
+for _ in 1 2 3 4 5 6 7 8; do
+  cur="$(jq -r .selected "$STATE/sidebar.json" 2>/dev/null)"
+  [ "$cur" = "a:$(userpane "$WTW")" ] && break
+  tmux send-keys -t "$SW" j
+  wait_until '[ "$(jq -r .selected "$STATE/sidebar.json" 2>/dev/null)" != "$cur" ]' 30
+done
 tmux send-keys -t "$SW" x
 wait_until 'sbtext "$SW" | grep -q "kill wt?"'
 ok "x asks before killing, and says how to answer" 'sbtext "$SW" | grep -q "kill wt?" && sbtext "$SW" | grep -q "y yes · n no"'

@@ -312,6 +312,10 @@ in any terminal:
 - **One line per entry**, herdr's way (*revised 2026-11-03*; two lines
   until then): the name on the left, its branch or age right-aligned and
   dim. Agents sit under a dim heading naming their repo.
+- **Rows never move on their own** (*2026-11-03*): repos by name, as spaces
+  are, agents by window index. Sorting by urgency moved the row under the
+  pointer whenever a state changed; chips, the banner and `` prefix ` `` carry
+  urgency instead.
 - **The selection is a raised block**, opencode's way: a lighter fill with a
   blank row above and below, the accent bar down its whole height, and the
   entry's detail inside it — context and cost, what it is doing, subagents;

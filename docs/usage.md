@@ -122,8 +122,9 @@ in two sections:
   remote, so the pile is not mistaken for clutter). Worktrees with an agent,
   or the one you are in, stay listed. `enter` or a click on that row opens the
   list (`− worktrees` closes it); the choice is saved with the other folds.
-- **`agents`** — who needs you, grouped under the repo each works in, the
-  repo with the most urgent agent first: a dot per state (amber waiting, cyan
+- **`agents`** — every agent, grouped under the repo it works in, in a fixed
+  order: repos by name, agents in the order their windows were made. A state
+  change moves a dot or a chip, never a row. A dot per state (amber waiting, cyan
   working, green finished-and-not-yet-looked-at, grey idle or seen, violet
   throttled, red `●` error, red `✕` dead, grey `?` unknown) and how long,
   right-aligned. A state that needs a word gets a chip: `needs you`, `done`,

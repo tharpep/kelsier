@@ -284,33 +284,20 @@ func buildView(doc fleet.Doc, ui uiState) sbView {
 		}
 		v.agents = append(v.agents, sbAgent{wid: wid, pane: pane, key: key, agent: a, current: wid == curWid, repo: repo, shared: len(byWin[wid]) > 1})
 	}
-	// triage order: waiting first, longest-waiting first within a state
+	// a fixed order: repos by name, as spaces are, and agents in the order
+	// their windows were made. State changes a row's dot and chip, never its
+	// place — rows that moved under the pointer were the author's complaint
+	// (2026-11-03); what needs you is the chips', the banner's and `'s job
 	sort.SliceStable(v.agents, func(i, j int) bool {
-		ai, aj := v.agents[i].agent, v.agents[j].agent
-		ri, rj := triageRank(ai.State), triageRank(aj.State)
-		if ai.Unseen {
-			ri = 2 // a finished agent you have not looked at outranks idle and seen-done
+		ai, aj := v.agents[i], v.agents[j]
+		if ai.repo != aj.repo {
+			return ai.repo < aj.repo
 		}
-		if aj.Unseen {
-			rj = 2
+		if xi, xj := f(ai.agent.Index), f(aj.agent.Index); xi != xj {
+			return xi < xj
 		}
-		if ri != rj {
-			return ri < rj
-		}
-		if si, sj := f(ai.StateSince), f(aj.StateSince); si != sj {
-			return si < sj
-		}
-		return ai.Name < aj.Name
+		return ai.agent.Name < aj.agent.Name
 	})
-	// then grouped under their repo, the groups in the order of their most
-	// urgent agent, so a waiting agent's repo still comes first
-	rank := map[string]int{}
-	for i, a := range v.agents {
-		if _, ok := rank[a.repo]; !ok {
-			rank[a.repo] = i
-		}
-	}
-	sort.SliceStable(v.agents, func(i, j int) bool { return rank[v.agents[i].repo] < rank[v.agents[j].repo] })
 
 	idx := map[string]int{}
 	for _, p := range *doc.Panes {

@@ -136,10 +136,9 @@ func TestSidebarView(t *testing.T) {
 	for _, a := range v.agents {
 		names = append(names, a.agent.Name)
 	}
-	// grouped under their repo, the groups in the order of their most urgent
-	// agent; triage order within a group
-	if got := strings.Join(names, " "); got != "fix-auth kelsier docs usage-charts dashboard spike rate-limits gateway" {
-		t.Errorf("agents in triage order: got %s", got)
+	// a fixed order: repos by name, agents in the order their windows were made
+	if got := strings.Join(names, " "); got != "gateway rate-limits kelsier fix-auth docs dashboard usage-charts spike" {
+		t.Errorf("agents in a fixed order: got %s", got)
 	}
 	if v.sel != "a:@1" {
 		t.Errorf("default selection: got %q, want the current agent", v.sel)
@@ -277,10 +276,11 @@ func TestSidebarKeys(t *testing.T) {
 	if m.view().sel != "a:@1" {
 		t.Fatalf("start: %q", m.view().sel)
 	}
-	press("k")
-	// fix-auth's background agent sits between it and kelsier
+	press("j")
+	press("j")
+	// kelsier, then fix-auth, then fix-auth's background agent under it
 	if sel := m.view().sel; sel != "b:bg1" {
-		t.Errorf("k from kelsier: %q, want fix-auth's background agent above it", sel)
+		t.Errorf("j j from kelsier: %q, want fix-auth's background agent", sel)
 	}
 	if sbLoadShared().Selected != "b:bg1" {
 		t.Error("the cursor is not shared through sidebar.json")
@@ -420,7 +420,7 @@ func TestShortNote(t *testing.T) {
 }
 
 // An agent whose turn ended on an API error is red, says error, says why,
-// and sorts with the agents waiting on you.
+// and stays where it was in the list.
 func TestErrorAgent(t *testing.T) {
 	doc := loadFixture(t, "fifteen-three-repos")
 	st, note := "error", "API Error: Rate limit reached"
@@ -430,8 +430,11 @@ func TestErrorAgent(t *testing.T) {
 		}
 	}
 	v := buildView(doc, uiState{})
-	if v.agents[0].agent.Name != "gateway" && v.agents[1].agent.Name != "gateway" {
-		t.Errorf("an errored agent's repo does not lead: %s, %s", v.agents[0].agent.Name, v.agents[1].agent.Name)
+	before := buildView(loadFixture(t, "fifteen-three-repos"), uiState{})
+	for i := range v.agents {
+		if v.agents[i].agent.Name != before.agents[i].agent.Name {
+			t.Fatalf("an errored agent moved the list: %d is %s, was %s", i, v.agents[i].agent.Name, before.agents[i].agent.Name)
+		}
 	}
 	out, _ := renderView(v, 32, 0, 0)
 	if !strings.Contains(out, red+"●") || !strings.Contains(plain(out), " error ") || !strings.Contains(plain(out), "Rate limit reached") {
