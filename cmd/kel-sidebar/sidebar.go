@@ -92,6 +92,8 @@ type sbModel struct {
 
 	pending tea.Cmd // a command activate() started, returned by the caller
 
+	menu *sbMenu // open over the rows: kel's, from the header, or an entry's
+
 	termBg, termFg *rgb // the terminal's colours, once it has answered
 	fixedBg        bool // KEL_SIDEBAR_BG names the background: nothing to ask
 }
@@ -444,6 +446,7 @@ func tickAfter(visible bool) tea.Cmd {
 
 func (m sbModel) view() sbView {
 	v := buildView(m.doc, m.ui)
+	v.menu = m.menu
 	ask := func(title, colour, hint string) {
 		v.promptTitle, v.promptColour, v.hint2 = title, colour, hint
 	}
@@ -849,10 +852,61 @@ func (m sbModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.MouseMotionMsg:
 		m.ui.hover, m.ui.hoverX = msg.Y+1, msg.X
+		if m.menu != nil {
+			_, refs := renderView(m.view(), m.width, m.height, time.Now().Unix())
+			if msg.Y >= 0 && msg.Y < len(refs) && strings.HasPrefix(refs[msg.Y].id, "mi:") {
+				for i, it := range m.menu.items {
+					if "mi:"+it.key == refs[msg.Y].id {
+						m.menu.sel = i
+					}
+				}
+			}
+		}
 
 	case tea.MouseClickMsg:
 		m.ui.focused = true
+		_, refs := renderView(m.view(), m.width, m.height, time.Now().Unix())
+		hit := func() lineRef {
+			if msg.Y >= 0 && msg.Y < len(refs) {
+				return refs[msg.Y]
+			}
+			return lineRef{}
+		}()
+		if m.menu != nil {
+			// an item is its key, pressed; anywhere else closes the menu
+			m.menu = nil
+			if k := strings.TrimPrefix(hit.id, "mi:"); k != hit.id && msg.Button == tea.MouseLeft {
+				return m.press(k)
+			}
+			return m, nil
+		}
+		if msg.Button == tea.MouseRight {
+			// an entry's own menu, at the row clicked
+			switch hit.kind {
+			case "agent", "space", "pane", "bg":
+				m.ui.sel = hit.id
+				m.saveShared()
+				if t, items := entryMenu(m.view()); len(items) > 0 {
+					m.menu = &sbMenu{title: t, items: items, y: msg.Y + 1}
+				}
+			}
+			return m, nil
+		}
 		if msg.Button != tea.MouseLeft {
+			return m, nil
+		}
+		if hit.kind == "menu" {
+			switch hit.at(msg.X) {
+			case "menu:new":
+				m.menu = &sbMenu{title: "New", items: newMenu(), y: msg.Y + 1}
+			case "menu:kel":
+				m.menu = &sbMenu{title: "kel", items: kelMenu(m.view()), y: msg.Y + 1}
+			case "open:help":
+				m.help = true
+			case "open:settings":
+				dir := filepath.Dir(kelConfigPath())
+				return m, runKel(dir, nil, "_panel", "editor", dir, "kel settings")
+			}
 			return m, nil
 		}
 		if m.help { // the keys list: a key clicked is pressed; elsewhere closes it
@@ -864,7 +918,6 @@ func (m sbModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		}
-		_, refs := renderView(m.view(), m.width, m.height, time.Now().Unix())
 		if msg.Y >= 0 && msg.Y < len(refs) && refs[msg.Y].kind == "hint2" && m.cands == "" {
 			// a prompt's choices: whichever word was clicked is that key;
 			// past the last one is anywhere else
@@ -880,12 +933,8 @@ func (m sbModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.mode, m.input = modeNormal, ""
 		}
 		if msg.Y >= 0 && msg.Y < len(refs) && refs[msg.Y].kind == "action" {
-			// an action is its key, pressed — the half of the line clicked
-			k := strings.TrimPrefix(refs[msg.Y].at(msg.X), "act:")
-			if k == "enter" {
-				return m.key(tea.KeyPressMsg{Code: tea.KeyEnter})
-			}
-			return m.key(tea.KeyPressMsg{Code: rune(k[0]), Text: k})
+			// an action is its key, pressed: the waiting alarm's `
+			return m.press(strings.TrimPrefix(refs[msg.Y].at(msg.X), "act:"))
 		}
 		if msg.Y >= 0 && msg.Y < len(refs) && refs[msg.Y].id != "" {
 			m.ui.sel = refs[msg.Y].id
@@ -924,10 +973,46 @@ func (m sbModel) withShared() uiState {
 	return ui
 }
 
+// press is a key pressed by name, as a menu item or a click presses it.
+func (m sbModel) press(k string) (tea.Model, tea.Cmd) {
+	if k == "enter" {
+		return m.key(tea.KeyPressMsg{Code: tea.KeyEnter})
+	}
+	return m.key(tea.KeyPressMsg{Code: rune(k[0]), Text: k})
+}
+
+// kelConfigPath is the user's config.toml, where Settings opens.
+func kelConfigPath() string {
+	if d := os.Getenv("XDG_CONFIG_HOME"); d != "" {
+		return filepath.Join(d, "kel", "config.toml")
+	}
+	h, _ := os.UserHomeDir()
+	return filepath.Join(h, ".config", "kel", "config.toml")
+}
+
 func (m sbModel) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	k := msg.String()
 	m.msg = ""
 	m.ui.focused = true
+	if m.menu != nil {
+		// the arrows walk it, enter chooses, esc or any other key closes it
+		switch k {
+		case "up", "k":
+			m.menu.sel = (m.menu.sel + len(m.menu.items) - 1) % len(m.menu.items)
+			return m, nil
+		case "down", "j":
+			m.menu.sel = (m.menu.sel + 1) % len(m.menu.items)
+			return m, nil
+		case "enter":
+			it := m.menu.items[m.menu.sel]
+			m.menu = nil
+			return m.press(it.key)
+		}
+		m.menu = nil
+		if k == "esc" {
+			return m, nil
+		}
+	}
 
 	switch m.mode {
 	case modeQuit:
@@ -1406,7 +1491,6 @@ func runSidebar(once bool) {
 		if out, err := exec.Command("tmux", "display-message", "-p", "-t", m.myPane, "#{window_id}").Output(); err == nil {
 			m.ui.myWindow = strings.TrimSpace(string(out))
 		}
-		m.ui.barHint = true
 	}
 	m.ui.prefix = prefixWords()
 	m.checkVisible()

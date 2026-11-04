@@ -173,7 +173,7 @@ func TestSidebarLineRefs(t *testing.T) {
 			t.Errorf("line %d %q maps to %+v", i, l, refs[i])
 		}
 	}
-	if !strings.Contains(lines[len(lines)-1], "Ctrl-b then space") {
+	if !strings.Contains(lines[len(lines)-1], "Settings") {
 		t.Error("the footer is not pinned to the last line")
 	}
 }
@@ -201,46 +201,6 @@ func TestParseVisible(t *testing.T) {
 	}
 }
 
-// The footer: how to get in while unfocused; the selection's keys once in.
-func TestSidebarHint(t *testing.T) {
-	doc := loadFixture(t, "fifteen-three-repos")
-	foot := func(ui uiState, w int) string {
-		out, _ := renderView(buildView(doc, ui), w, 30, 0)
-		l := strings.Split(plain(out), "\n")
-		return l[len(l)-1]
-	}
-	// someone waits: the unfocused footer is the alarm, which names its key
-	// and still jumps on a click
-	if got := foot(uiState{}, 32); got != "  1 waiting · Ctrl-b then `" {
-		t.Errorf("unfocused footer with one waiting: %q", got)
-	}
-	out, refs := renderView(buildView(loadFixture(t, "one-agent"), uiState{}), 32, 30, 0)
-	if l := strings.Split(plain(out), "\n"); l[len(l)-1] != "  click, or Ctrl-b then space" {
-		t.Errorf("unfocused footer: %q", l[len(l)-1])
-	}
-	out, refs = renderView(buildView(doc, uiState{}), 32, 30, 0)
-	_ = out
-	if r := refs[len(refs)-1]; r.kind != "action" || r.id != "act:`" {
-		t.Errorf("the alarm does not jump: %+v", r)
-	}
-	if got := foot(uiState{focused: true}, 32); !strings.HasPrefix(got, "  e edit · p plan · x kill") {
-		t.Errorf("agent footer: %q", got)
-	}
-	if got := foot(uiState{focused: true, sel: spaceID("/home/me/code/api-gw")}, 32); !strings.HasPrefix(got, "  f files · g git · e edit") {
-		t.Errorf("space footer: %q", got)
-	}
-	if got := foot(uiState{focused: true, sel: "%7", expanded: map[string]bool{"/home/me/code/api-gw": true}}, 40); !strings.Contains(got, "o open") {
-		t.Errorf("server footer: %q", got)
-	}
-	for w := 1; w <= 40; w++ {
-		if got := foot(uiState{focused: true}, w); len([]rune(got)) > w {
-			t.Errorf("width %d: footer %q overflows", w, got)
-		}
-	}
-	if got := foot(uiState{focused: true}, 40); !strings.HasSuffix(got, "· ?") {
-		t.Errorf("with room, the footer ends in ?: %q", got)
-	}
-}
 
 func TestSummarise(t *testing.T) {
 	refusal := "\x1b[1;33mkel\x1b[0m refusing to kill 'x' — the worktree has work that isn't safe to lose:\n" +
@@ -362,37 +322,6 @@ func TestSidebarKeys(t *testing.T) {
 	}
 }
 
-// The actions group sits at the foot when there is room, and a click on one
-// is its key: Q asks to quit.
-func TestSidebarActions(t *testing.T) {
-	t.Setenv("XDG_STATE_HOME", t.TempDir())
-	m := sbModel{doc: loadFixture(t, "one-agent"), width: 32, height: 30, visible: true}
-	out, refs := renderView(m.view(), 32, 30, 0)
-	if !strings.Contains(plain(out), "\n  kel\n") {
-		t.Fatalf("no kel actions at 32x30:\n%s", plain(out))
-	}
-	y, x := -1, 2
-	for i, r := range refs {
-		if r.id == "act:q" {
-			y = i
-		}
-		if r.id2 == "act:q" {
-			y, x = i, r.split+2
-		}
-	}
-	if y < 0 {
-		t.Fatal("no q action line")
-	}
-	nm, _ := m.Update(tea.MouseClickMsg{X: x, Y: y, Button: tea.MouseLeft})
-	if nm.(sbModel).mode != modeQuit {
-		t.Error("a click on Q did not ask to quit")
-	}
-	// no room, no actions: fifteen agents fill a short sidebar
-	out, _ = renderView(buildView(loadFixture(t, "fifteen-three-repos"), uiState{}), 32, 20, 0)
-	if strings.Contains(plain(out), "actions") {
-		t.Error("actions shown with no room for them")
-	}
-}
 
 // A main checkout is named by its directory, not its window's group.
 func TestSidebarSpaceLabel(t *testing.T) {
@@ -604,8 +533,8 @@ func TestWorktreesNest(t *testing.T) {
 			}
 			// kelsier folds its idle worktrees; old-ui is selectable only open
 			ui := uiState{focused: true, sel: spaceID(s.key), expanded: map[string]bool{wtKey("/home/me/code/kelsier"): true}}
-			if h := hint(buildView(loadFixture(t, "worktrees"), ui), 40); !strings.HasPrefix(h, "s sweep") {
-				t.Errorf("a merged worktree's hint: %q", h)
+			if _, acts := entryMenu(buildView(loadFixture(t, "worktrees"), ui)); len(acts) < 2 || acts[1].key != "s" {
+				t.Errorf("a merged worktree's menu does not lead with sweep: %+v", acts)
 			}
 		case "fix-auth":
 			if s.closed || s.title() != "kelsier/fix-auth" {
@@ -770,35 +699,6 @@ func TestPromptClickOff(t *testing.T) {
 	}
 }
 
-// The action grid: each half of a line is its own button.
-func TestActionGrid(t *testing.T) {
-	t.Setenv("XDG_STATE_HOME", t.TempDir())
-	m := sbModel{doc: loadFixture(t, "one-agent"), width: 32, height: 30, visible: true, ui: uiState{focused: true}}
-	out, refs := renderView(m.view(), 32, 30, 0)
-	y := -1
-	for i, r := range refs {
-		if r.id == "act:n" {
-			y = i
-		}
-	}
-	if y < 0 || refs[y].id2 != "act:w" {
-		t.Fatalf("no n|w line:\n%s", plain(out))
-	}
-	nm, _ := m.Update(tea.MouseClickMsg{X: 20, Y: y, Button: tea.MouseLeft})
-	if nm.(sbModel).mode != modeNewWorktree {
-		t.Error("a click on the right half did not press w")
-	}
-	nm, _ = m.Update(tea.MouseClickMsg{X: 2, Y: y, Button: tea.MouseLeft})
-	if nm.(sbModel).mode != modeNew {
-		t.Error("a click on the left half did not press n")
-	}
-	// hover marks the half under the pointer
-	m.ui.hover, m.ui.hoverX = y+1, 20
-	out, _ = renderView(m.view(), 32, 30, 0)
-	if l := strings.Split(plain(out), "\n")[y]; !strings.Contains(l, "▏ w") || strings.HasPrefix(l, "▏") {
-		t.Errorf("hover on the right half: %q", l)
-	}
-}
 
 // A working agent says what it is doing; its tag is the repo it stands in.
 func TestAgentDoing(t *testing.T) {
@@ -888,8 +788,8 @@ func TestSidebarRelaunchDeadAgent(t *testing.T) {
 	if !hasRelaunch {
 		t.Errorf("dead agent actions missing R relaunch: %+v", actsDead)
 	}
-	if h := hint(vDead, 40); !strings.Contains(h, "R relaunch") {
-		t.Errorf("dead agent hint missing R relaunch: %q", h)
+	if _, acts := entryMenu(vDead); len(acts) < 2 || acts[1].key != "R" {
+		t.Errorf("a dead agent's menu does not lead with relaunch: %+v", acts)
 	}
 
 	// a:@1 is live ("kelsier")
@@ -921,66 +821,20 @@ func TestSidebarRelaunchDeadAgent(t *testing.T) {
 		t.Error("pressing R on live agent should not return a tea.Cmd")
 	}
 
-	// clicking R in the action grid triggers relaunch
-	out, refs := renderView(m.view(), 32, 30, 0)
-	_ = out
-	y, x := -1, 2
-	for i, r := range refs {
-		if r.id == "act:R" {
-			y = i
-		}
-		if r.id2 == "act:R" {
-			y, x = i, r.split+2
-		}
-	}
-	if y < 0 {
-		t.Fatal("no R action in grid refs")
-	}
-	nmClick, cmdClick := m.Update(tea.MouseClickMsg{X: x, Y: y, Button: tea.MouseLeft})
+	// right-click the dead agent, then Relaunch in its menu
+	nm, _ = m.Update(tea.MouseClickMsg{X: 4, Y: rowOf(t, m, m.ui.sel), Button: tea.MouseRight})
+	m = nm.(sbModel)
+	nmClick, cmdClick := m.Update(tea.MouseClickMsg{X: 4, Y: rowOf(t, m, "mi:R"), Button: tea.MouseLeft})
 	if nmClick.(sbModel).msg != "relaunching crashed…" {
-		t.Errorf("clicking R: got msg %q", nmClick.(sbModel).msg)
+		t.Errorf("Relaunch in the menu: got msg %q", nmClick.(sbModel).msg)
 	}
 	if cmdClick == nil {
-		t.Error("clicking R did not return a tea.Cmd")
+		t.Error("Relaunch in the menu did not return a tea.Cmd")
 	}
 }
 
-func TestStickyHeadersAndResponsiveGrid(t *testing.T) {
+func TestStickyHeaders(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
-
-	// 1. Responsive Action Grid
-	oneDoc := loadFixture(t, "one-agent")
-	vOne := buildView(oneDoc, uiState{focused: true})
-
-	// At h=20 (< 24), action grid collapses to preserve entries
-	out20, refs20 := renderView(vOne, 32, 20, 0)
-	hasActionGrid20 := false
-	for _, r := range refs20 {
-		if strings.HasPrefix(r.id, "act:") {
-			hasActionGrid20 = true
-			break
-		}
-	}
-	if hasActionGrid20 {
-		t.Errorf("expected action grid to collapse at h=20, but found act: refs")
-	}
-	lines20 := strings.Split(plain(out20), "\n")
-	if lastLine := lines20[len(lines20)-1]; !strings.Contains(lastLine, "· ?") && !strings.Contains(lastLine, "e edit") {
-		t.Errorf("expected compact footer at h=20, got: %q", lastLine)
-	}
-
-	// At h=30 (>= 24), action grid is rendered when room permits
-	_, refs30 := renderView(vOne, 32, 30, 0)
-	hasActionGrid30 := false
-	for _, r := range refs30 {
-		if strings.HasPrefix(r.id, "act:") {
-			hasActionGrid30 = true
-			break
-		}
-	}
-	if !hasActionGrid30 {
-		t.Errorf("expected action grid at h=30 for one-agent")
-	}
 
 	// 2. Sticky Section Headers
 	fifteenDoc := loadFixture(t, "fifteen-three-repos")
@@ -989,8 +843,8 @@ func TestStickyHeadersAndResponsiveGrid(t *testing.T) {
 	vSpike := buildView(fifteenDoc, uiState{focused: true, sel: "a:@8"})
 	outSpike, _ := renderView(vSpike, 32, 16, 0)
 	linesSpike := strings.Split(plain(outSpike), "\n")
-	if len(linesSpike) == 0 || linesSpike[0] != "  Agents" {
-		t.Errorf("sticky header for scrolled agents: want agents at line 0, got %q", linesSpike[0])
+	if len(linesSpike) < 3 || linesSpike[2] != "  Agents" {
+		t.Errorf("sticky header for scrolled agents: want Agents under the header, got %q", linesSpike[2])
 	}
 	if !strings.Contains(plain(outSpike), "spike") {
 		t.Errorf("selected agent spike was scrolled off screen")
@@ -1000,8 +854,8 @@ func TestStickyHeadersAndResponsiveGrid(t *testing.T) {
 	vSpace := buildView(fifteenDoc, uiState{focused: true, sel: spaceID("/home/me/code/web-dashboard")})
 	outSpace, _ := renderView(vSpace, 32, 16, 0)
 	linesSpace := strings.Split(plain(outSpace), "\n")
-	if len(linesSpace) == 0 || linesSpace[0] != "  Spaces" {
-		t.Errorf("sticky header for scrolled spaces: want spaces at line 0, got %q", linesSpace[0])
+	if len(linesSpace) < 3 || linesSpace[2] != "  Spaces" {
+		t.Errorf("sticky header for scrolled spaces: want Spaces under the header, got %q", linesSpace[2])
 	}
 }
 
@@ -1068,4 +922,109 @@ func keepPalette(t *testing.T) {
 		baseBg, baseFg, base, dim, mid, faint, raised = bb, bf, b, d, m, f, r
 		yellowBg, redBg, greenBg, purpleBg = y, rd, g, p
 	})
+}
+
+// rowOf is the screen row whose entry is id.
+func rowOf(t *testing.T, m sbModel, id string) int {
+	t.Helper()
+	_, refs := renderView(m.view(), m.width, m.height, 0)
+	for i, r := range refs {
+		if r.id == id || r.id2 == id {
+			return i
+		}
+	}
+	t.Fatalf("no row for %q", id)
+	return -1
+}
+
+// The foot is Settings and Help, each a click, focused or not; while an
+// agent waits and the keyboard is elsewhere it is the alarm, which jumps.
+func TestSidebarFooter(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	doc := loadFixture(t, "one-agent")
+	for _, ui := range []uiState{{}, {focused: true}} {
+		out, refs := renderView(buildView(doc, ui), 32, 30, 0)
+		l := strings.Split(plain(out), "\n")
+		last, r := l[len(l)-1], refs[len(refs)-1]
+		if !strings.HasPrefix(last, "  ≡ Settings") || !strings.HasSuffix(last, "? Help") {
+			t.Errorf("footer: %q", last)
+		}
+		if r.at(4) != "open:settings" || r.at(29) != "open:help" || r.at(0) != "" {
+			t.Errorf("footer clicks: %+v", r)
+		}
+	}
+	m := sbModel{doc: doc, width: 32, height: 30, visible: true}
+	nm, _ := m.Update(tea.MouseClickMsg{X: 29, Y: 29, Button: tea.MouseLeft})
+	if !nm.(sbModel).help {
+		t.Error("Help did not open the keys")
+	}
+	out, refs := renderView(buildView(loadFixture(t, "fifteen-three-repos"), uiState{}), 32, 30, 0)
+	l := strings.Split(plain(out), "\n")
+	if l[len(l)-1] != "  1 waiting · Ctrl-b then `" || refs[len(refs)-1].id != "act:`" {
+		t.Errorf("the alarm: %q %+v", l[len(l)-1], refs[len(refs)-1])
+	}
+	for w := 1; w <= 40; w++ {
+		out, _ := renderView(buildView(doc, uiState{}), w, 30, 0)
+		l := strings.Split(plain(out), "\n")
+		if len([]rune(l[len(l)-1])) > w {
+			t.Errorf("width %d: footer %q overflows", w, l[len(l)-1])
+		}
+	}
+}
+
+// The header's + and ⋯ open kel's menus; an item clicked is its key, and a
+// click anywhere else closes the menu without doing anything.
+func TestKelMenus(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	m := sbModel{doc: loadFixture(t, "one-agent"), width: 32, height: 30, visible: true}
+	_, refs := renderView(m.view(), 32, 30, 0)
+	if refs[0].kind != "menu" || refs[0].at(2) != "" {
+		t.Fatalf("header: %+v", refs[0])
+	}
+	open := func(x int) sbModel {
+		nm, _ := m.Update(tea.MouseClickMsg{X: x, Y: 0, Button: tea.MouseLeft})
+		return nm.(sbModel)
+	}
+	nw := open(refs[0].from + 2)
+	if nw.menu == nil || nw.menu.title != "New" {
+		t.Fatalf("+ New opened %+v", nw.menu)
+	}
+	nm, _ := nw.Update(tea.MouseClickMsg{X: 4, Y: rowOf(t, nw, "mi:w"), Button: tea.MouseLeft})
+	if got := nm.(sbModel); got.mode != modeNewWorktree || got.menu != nil {
+		t.Errorf("Agent in a worktree: mode %v, menu %+v", got.mode, got.menu)
+	}
+	kl := open(refs[0].split + 1)
+	if kl.menu == nil || kl.menu.title != "kel" {
+		t.Fatalf("⋯ opened %+v", kl.menu)
+	}
+	nm, _ = kl.Update(tea.MouseClickMsg{X: 4, Y: rowOf(t, kl, "mi:q"), Button: tea.MouseLeft})
+	if nm.(sbModel).mode != modeQuit {
+		t.Error("Quit kel did not ask to quit")
+	}
+	nm, _ = kl.Update(tea.MouseClickMsg{X: 4, Y: 28, Button: tea.MouseLeft})
+	if got := nm.(sbModel); got.menu != nil || got.mode != modeNormal {
+		t.Errorf("a click outside: menu %+v mode %v", got.menu, got.mode)
+	}
+	// the keyboard walks it too: down, enter
+	nm, _ = kl.key(tea.KeyPressMsg{Code: tea.KeyDown})
+	nm, _ = nm.(sbModel).key(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if nm.(sbModel).menu != nil {
+		t.Error("enter did not choose")
+	}
+}
+
+// A right-click on an entry selects it and opens its own menu there.
+func TestEntryMenu(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	m := sbModel{doc: loadFixture(t, "fifteen-three-repos"), width: 32, height: 40, visible: true}
+	y := rowOf(t, m, "a:@2")
+	nm, _ := m.Update(tea.MouseClickMsg{X: 4, Y: y, Button: tea.MouseRight})
+	m = nm.(sbModel)
+	if m.ui.sel != "a:@2" || m.menu == nil || m.menu.title != "fix-auth" || m.menu.y != y+1 {
+		t.Fatalf("right-click fix-auth: sel %q menu %+v", m.ui.sel, m.menu)
+	}
+	nm, _ = m.Update(tea.MouseClickMsg{X: 4, Y: rowOf(t, m, "mi:x"), Button: tea.MouseLeft})
+	if got := nm.(sbModel); got.mode != modeKill || got.target != "a:@2" {
+		t.Errorf("Kill: mode %v target %q", got.mode, got.target)
+	}
 }

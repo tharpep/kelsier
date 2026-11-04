@@ -41,7 +41,6 @@ type uiState struct {
 	hoverX   int    // and its column
 	prefix   string // the tmux prefix in words ("Ctrl-b"), for hints
 	restore  bool   // a previous workspace waits to be restored
-	barHint  bool
 }
 
 type sbSpace struct {
@@ -55,12 +54,12 @@ type sbSpace struct {
 	current    bool
 	open       bool
 	// phase 2: a repo's worktrees nest under it (fleet.Repo)
-	parent  string      // the main checkout's key, for a linked worktree
-	land    *fleet.Land // a linked worktree's land state; nil = not known
-	closed  bool        // no pane stands here: known from git, not tmux
-	missing bool        // a worktree whose directory is gone
-	agents  int         // agents working in this checkout
-	repo    string      // the repo's name, for a worktree whose label is its branch
+	parent     string      // the main checkout's key, for a linked worktree
+	land       *fleet.Land // a linked worktree's land state; nil = not known
+	closed     bool        // no pane stands here: known from git, not tmux
+	missing    bool        // a worktree whose directory is gone
+	agents     int         // agents working in this checkout
+	repo       string      // the repo's name, for a worktree whose label is its branch
 	folded     bool
 	wtFold     bool
 	wtOpen     bool
@@ -125,9 +124,9 @@ type sbView struct {
 	hoverX               int
 	prefix               string
 	restore              bool
-	barHint              bool
 	waiting              int // agents blocked on you, and since when the oldest
 	waitSince            int64
+	menu                 *sbMenu // open over the rows, or nil
 }
 
 // lineRef says which entry a screen line belongs to — what a click hits.
@@ -139,11 +138,21 @@ type lineRef struct {
 	id2   string
 	split int
 	right string // that action, drawn — kept here so the hover can mark it
+	from  int    // a click left of this column hits nothing
 	text  string // a choices line as drawn, without colour, for hintKey
+}
+
+// line is one screen line and what a click on it hits.
+type line struct {
+	s   string
+	ref lineRef
 }
 
 // at is the entry a click at column x hits.
 func (r lineRef) at(x int) string {
+	if x < r.from {
+		return ""
+	}
 	if r.id2 != "" && x >= r.split {
 		return r.id2
 	}
@@ -203,7 +212,7 @@ func spaceKey(p fleet.Pane) (key, label string) {
 
 func buildView(doc fleet.Doc, ui uiState) sbView {
 	v := sbView{sel: ui.sel, filter: ui.filter, focused: ui.focused, hover: ui.hover, hoverX: ui.hoverX,
-		prefix: ui.prefix, restore: ui.restore, barHint: ui.barHint}
+		prefix: ui.prefix, restore: ui.restore}
 	for _, a := range doc.Agents {
 		if a.WindowID != nil && a.State != nil && *a.State == "waiting" {
 			v.waiting++
@@ -867,19 +876,6 @@ func wrapHint(h string, w int) []string {
 	return append(out, truncate(cur, w))
 }
 
-// keys styles a hint ("e edit · p plan · ?"): each key bright, its word dim.
-func keys(h string) string {
-	parts := strings.Split(h, " · ")
-	for i, p := range parts {
-		k, rest, _ := strings.Cut(p, " ")
-		if rest != "" {
-			rest = " " + rest
-		}
-		parts[i] = bold + k + reset + dim + rest + reset
-	}
-	return strings.Join(parts, dim+" · "+reset)
-}
-
 func visWidth(s string) int { return len([]rune(stripANSI(s))) }
 
 // spread sets right flush against the right edge, one column in, after left.
@@ -919,10 +915,6 @@ func fitPair(name string, right int, avail int) (nameW, rightW int) {
 func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 	if w <= 0 && h <= 0 {
 		w = 32
-	}
-	type line struct {
-		s   string
-		ref lineRef
 	}
 	var body []line
 	add := func(s string, r lineRef) { body = append(body, line{s, r}) }
@@ -1187,47 +1179,17 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 		one(bid, lineRef{id: bid, kind: "bg"}, spread(lead(bid)+" "+bc+bd+reset+" "+truncate(b.Name, lw), right, w))
 	}
 
-	// The bottom is what you can do, as keys you can also click: first to
-	// the selected entry, under its name, then kel's own. The author found a
-	// one-line hint cut short and a flat list of keys hard to organise in
-	// their head; this mirrors the screen — select a thing, its verbs show.
-	// The same keys as everywhere, shown where they apply (invariant 6).
-	// two to a line, each half its own button: seven rows of actions under
-	// a space were most of the sidebar
-	cell := func(a sbAct, cw int) string {
-		k := a.key
-		if k == "enter" {
-			k = "↵"
+	// the top: kel, and its two menus. Mouse first (2026-11-04): what the key
+	// grid at the foot listed is in these menus and in each entry's own,
+	// right-click, with its key beside it — learned by using the mouse
+	var head []line
+	if w >= 16 {
+		right := button("+ New") + " " + button("⋯")
+		from := w - 1 - visWidth(right)
+		head = []line{
+			{spread("  "+bold+"kel"+reset, right, w), lineRef{kind: "menu", id: "menu:new", id2: "menu:kel", from: from, split: from + visWidth(button("+ New")) + 1}},
+			{"", lineRef{}},
 		}
-		return "  " + bold + k + reset + " " + dim + pad(truncate(a.label, cw-4), cw-4) + reset
-	}
-	grid := func(list []sbAct) []line {
-		cw := w / 2
-		var out []line
-		for i := 0; i < len(list); i += 2 {
-			l := line{s: cell(list[i], cw), ref: lineRef{id: "act:" + list[i].key, kind: "action"}}
-			if i+1 < len(list) {
-				l.ref.right = cell(list[i+1], w-cw)
-				l.ref.id2, l.ref.split = "act:"+list[i+1].key, cw
-			}
-			out = append(out, l)
-		}
-		return out
-	}
-	var selActs, kelActs []line
-	if h > 0 {
-		if what, name, list := selActions(v); len(list) > 0 {
-			selActs = append(selActs, line{in + dim + what + " " + reset + truncate(name, w-len(what)-3), lineRef{}})
-			selActs = append(selActs, grid(list)...)
-		}
-		kelActs = append(kelActs, line{label("kel"), lineRef{}})
-		list := sbActions
-		if v.restore {
-			// one line at startup was the only mention: until it is used, the
-			// previous workspace stays one click away
-			list = append([]sbAct{{"b", "restore"}}, list...)
-		}
-		kelActs = append(kelActs, grid(list)...)
 	}
 
 	// the tail: a prompt — what it asks, what you type, how to answer — or
@@ -1268,10 +1230,10 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 	}
 	// scroll so the selected entry is on screen; the bottom is pinned
 	if h > 0 {
-		room := h - max(len(tail), 1)
-		if v.barHint && len(tail) == 0 {
-			room = h
+		if len(tail) == 0 {
+			tail = append(tail, footerLine(w, in))
 		}
+		room := h - len(tail) - len(head)
 		if room < 0 {
 			room = 0
 		}
@@ -1335,67 +1297,34 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 				body = body[:room]
 			}
 		}
-		// both groups when they fit under the lists, a blank line around
-		// each; else the selection's alone; else neither, and the footer
-		// names the keys instead
-		var acts []line
-		if h >= 24 && room >= 18 {
-			switch {
-			case len(selActs) > 0 && len(body)+1+len(selActs)+1+len(kelActs)+1 <= room:
-				acts = append(append(append(acts, selActs...), line{"", lineRef{}}), kelActs...)
-			case len(selActs) == 0 && len(body)+1+len(kelActs)+1 <= room:
-				acts = kelActs
-			case len(selActs) > 0 && len(body)+1+len(selActs)+1 <= room:
-				acts = selActs
-			}
-		}
-		if len(tail) == 0 && !(v.barHint && (!v.focused || len(acts) > 0)) {
-			switch {
-			case !v.focused:
-				tail = append(tail, line{in + dim + truncate("click, or "+v.prefix+" then space", w-2) + reset, lineRef{}})
-			case len(acts) > 0:
-				tail = append(tail, line{in + dim + truncate("esc back to your pane", w-2) + reset, lineRef{}})
-			default:
-				tail = append(tail, line{in + keys(truncate(hint(v, w-2), w-2)), lineRef{}})
-			}
-		}
-		if len(tail) > 0 && room == h && len(body) >= room {
-			body = body[:room-1]
-		}
-		gap := 0
-		if len(tail) > 0 {
-			gap = 1
-		}
-		if len(acts) > 0 {
-			for len(body)+len(acts)+gap < room {
-				body = append(body, line{"", lineRef{}})
-			}
-			body = append(body, acts...)
-			if len(tail) > 0 {
-				body = append(body, line{"", lineRef{}})
-			}
-		}
 		for len(body) < room {
 			body = append(body, line{"", lineRef{}})
 		}
 	} else if len(tail) == 0 {
-		h := truncate(hint(v, w-2), w-2)
-		if v.focused {
-			h = keys(h)
-		} else {
-			h = dim + h + reset
-		}
-		tail = append(tail, line{in + h, lineRef{}})
+		tail = append(tail, footerLine(w, in))
 	}
+	body = append(head, body...)
 	if h != 1 || len(body) == 0 {
 		body = append(body, tail...)
 	}
 	if h > 0 && len(body) > h {
 		body = body[:h]
 	}
+	// an open menu draws over the rows, at the row it was opened from
+	if v.menu != nil {
+		box := menuLines(*v.menu, w)
+		y := v.menu.y
+		if h > 0 && y+len(box) > h {
+			y = max(0, h-len(box))
+		}
+		for len(body) < y+len(box) {
+			body = append(body, line{"", lineRef{}})
+		}
+		copy(body[y:], box)
+	}
 	// hover: the entry under the pointer gets a dim bar where the selection's
 	// would be, so what a click would hit is visible before the click
-	if v.hover > 0 && v.hover <= len(body) {
+	if v.hover > 0 && v.hover <= len(body) && v.menu == nil && body[v.hover-1].ref.kind != "menu" {
 		hl := body[v.hover-1]
 		if hl.ref.id2 != "" && v.hoverX >= hl.ref.split {
 			body[v.hover-1].ref.right = dim + "▏" + reset + hl.ref.right[1:]
@@ -1423,79 +1352,8 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 	return b.String(), refs
 }
 
-// hint is the footer for the selected entry: its keys, most useful first, as
-// many as fit, then `?` for the rest when there is room.
-func hint(v sbView, w int) string {
-	if !v.focused {
-		// how to get in, in words: the author did not know "prefix" was Ctrl-b
-		// "Ctrl-b space, or click" read as one chord plus a click: the
-		// prefix is pressed and let go, then the key
-		return "click, or " + v.prefix + " then space"
-	}
-	var keys []string
-	switch {
-	case strings.HasPrefix(v.sel, "a:"):
-		// enter is the one key everybody tries; the room goes to the rest
-		keys = []string{"e edit", "p plan", "x kill", "r rename", "enter"}
-		for _, a := range v.agents {
-			if agentID(a.key) == v.sel && a.agent.State != nil && *a.agent.State == "dead" {
-				keys = append([]string{"R relaunch"}, keys...)
-				break
-			}
-		}
-	case strings.HasPrefix(v.sel, "w:"):
-		keys = []string{"enter", "n new", "w worktree"}
-	case strings.HasPrefix(v.sel, "s:"):
-		keys = []string{"f files", "g git", "e edit", "d diff", "n new", "t shell", "c claude", "G prs"}
-		for _, s := range v.spaces {
-			if spaceID(s.key) == v.sel && s.land != nil && s.land.Code == "merged" && s.closed {
-				keys = append([]string{"s sweep"}, keys...) // what it is there for
-			}
-		}
-	default: // a pane
-		keys = []string{"f files", "g git", "e edit", "enter"}
-		for _, s := range v.spaces {
-			for _, p := range s.panes {
-				if p.PaneID == v.sel && p.Kind == "server" {
-					keys = []string{"o open", "f files", "g git", "enter"}
-				}
-			}
-		}
-	}
-	out := ""
-	for _, k := range keys {
-		next := k
-		if out != "" {
-			next = out + " · " + k
-		}
-		if len([]rune(next))+len([]rune(" · ?")) > w && out != "" {
-			break
-		}
-		out = next
-	}
-	if len([]rune(out))+len([]rune(" · ?")) <= w {
-		out += " · ?"
-	}
-	return out
-}
-
 // sbAct is a key and what it does, shown at the foot and clickable.
 type sbAct struct{ key, label string }
-
-// sbActions are kel's own: they do not depend on the selection. No capital
-// letters — the author asked for none, shift is one key too many.
-var sbActions = []sbAct{
-	{"n", "new agent"},
-	{"w", "worktree"},
-	{"|", "split right"},
-	{"-", "split down"},
-	{"`", "needs you"},
-	{"u", "usage"},
-	{"v", "PRs"},
-	{";", "command"},
-	{"?", "keys"},
-	{"q", "quit"},
-}
 
 // selActions are the selected entry's verbs, under what it is and its name
 // — "agent kelsier", "space kelsier": the two often share a name.
@@ -1601,4 +1459,84 @@ func repoLabel(doc fleet.Doc, root string) string {
 		}
 	}
 	return filepath.Base(root)
+}
+
+// sbMenu is a menu drawn over the sidebar's rows: kel's two from the header,
+// or an entry's own from a right-click.
+type sbMenu struct {
+	title string
+	items []sbAct
+	y     int // the row it opens at
+	sel   int // the item under the pointer or the arrow keys
+}
+
+// newMenu holds what makes something.
+func newMenu() []sbAct {
+	return []sbAct{{"n", "New agent"}, {"w", "Agent in a worktree"}, {"|", "Split right"}, {"-", "Split down"}}
+}
+
+// kelMenu holds kel's own: what the key grid's kel half was.
+func kelMenu(v sbView) []sbAct {
+	acts := []sbAct{{"`", "Next that needs you"}, {"u", "Usage"}, {"v", "Pull requests"}, {";", "Run a kel command"}}
+	if v.restore {
+		acts = append(acts, sbAct{"b", "Restore last workspace"})
+	}
+	return append(acts, sbAct{"?", "All keys"}, sbAct{"q", "Quit kel"})
+}
+
+// entryMenu holds the selected entry's own verbs, as selActions lists them.
+func entryMenu(v sbView) (string, []sbAct) {
+	_, name, acts := selActions(v)
+	out := []sbAct{{"enter", "Go to it"}}
+	for _, a := range acts {
+		if a.key == "enter" {
+			continue
+		}
+		out = append(out, sbAct{a.key, strings.ToUpper(a.label[:1]) + a.label[1:]})
+	}
+	return name, out
+}
+
+// menuLines draws a menu one column in from each edge, boxed, each item with
+// its key on the right; the item under the pointer is lit.
+func menuLines(mn sbMenu, w int) []line {
+	mw := min(w-2, 30)
+	if mw < 10 {
+		return nil
+	}
+	bg, edge := raised, faint
+	row := func(s string, r lineRef) line { return line{" " + fill(s, mw, bg), r} }
+	t := truncate(mn.title, mw-6)
+	out := []line{row(edge+"┌ "+reset+bold+t+reset+" "+edge+strings.Repeat("─", max(0, mw-4-len([]rune(t))))+"┐"+reset, lineRef{kind: "menuitem"})}
+	for i, it := range mn.items {
+		k := it.key
+		if k == "enter" {
+			k = "↵"
+		}
+		lbl := truncate(it.label, mw-8)
+		c := ""
+		if it.key == "q" || it.key == "x" {
+			c = red
+		}
+		ln := spread(edge+"│"+reset+" "+c+lbl+reset, dim+k+reset+" "+edge+"│"+reset, mw+1)
+		if i == mn.sel {
+			ln = edge + "│" + reset + accent + "›" + reset + c + bold + lbl + reset
+			ln = spread(ln, dim+k+reset+" "+edge+"│"+reset, mw+1)
+		}
+		out = append(out, row(ln, lineRef{id: "mi:" + it.key, kind: "menuitem"}))
+	}
+	return append(out, row(edge+"└"+strings.Repeat("─", max(0, mw-2))+"┘"+reset, lineRef{kind: "menuitem"}))
+}
+
+// button is a clickable word on a lifted fill, rounded like a chip.
+func button(t string) string {
+	return lifted.fg() + "▐" + reset + lifted.bg() + baseFg.fg() + t + reset + lifted.fg() + "▌" + reset
+}
+
+// footerLine is the foot of the sidebar: Settings on the left, Help on the
+// right, each a click.
+func footerLine(w int, in string) line {
+	right := dim + "? " + reset + "Help"
+	left := in + dim + "≡ " + reset + "Settings"
+	return line{spread(left, right, w), lineRef{kind: "menu", id: "open:settings", id2: "open:help", from: len([]rune(in)), split: w - 1 - visWidth(right)}}
 }

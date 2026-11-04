@@ -135,27 +135,26 @@ in two sections:
   its last tool call, read from the tail of Claude Code's own transcript —
   and its subagents.
 
-At the foot, when there is room, two groups of keys you can also click, two to
-a line:
+**Mouse first.** The top line is `kel` with two buttons:
 
 ```
-agent kelsier                       space kelsier
- e edit file     p plan              f files         g git
- r rename        x kill              d diff          e nvim
-                                     t shell         c claude
-kel                                  v PRs
- n new agent     w worktree
- | split right   - split down
- ` waiting       u usage
- v PRs           ; command
- ? keys          q quit
+  kel               ▐+ New▌ ▐⋯▌
 ```
 
-The first is **what you can do to the selected thing** — an agent, a space or
-worktree, a pane — under what it is and its name; the second is **kel's own**
-(`b restore` joins it while a previous workspace waits). No key needs shift.
-Hovering shows which half a click would hit. `|` and `-` split the pane you
-were in — right or below, at its directory — and put you in the new shell.
+`+ New` opens a menu of what makes something: a new agent, an agent in a
+worktree, split right, split down. `⋯` opens kel's own: next that needs you,
+usage, pull requests, a kel command, restore (while a previous workspace
+waits), all keys, quit. **Right-click any space, agent or pane** for its own
+menu, everything it can do: an agent's has go to it, edit last file, plan,
+cards, rename, kill, zoom, own window, and relaunch when it is dead. Every
+item shows its key on the right, so the keys are there when you want them,
+learned by using the mouse. A menu closes on esc or a click outside it; the
+arrows and enter walk it too. `|` and `-` split the pane you were in, right
+or below, at its directory, and put you in the new shell.
+
+The foot reads `≡ Settings` and `? Help`. Settings opens kel's config folder
+in the editor popup; Help lists every key. While an agent waits and the
+keyboard is elsewhere, the foot is the waiting alarm instead.
 
 **The keyboard gets into the sidebar only on purpose:** `Ctrl-b then space`, or
 a click. Moving between panes (`Ctrl-b o`, `Ctrl-b ←`, vim-tmux-navigator's
