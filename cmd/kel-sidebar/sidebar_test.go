@@ -1042,8 +1042,8 @@ func TestEntryMenu(t *testing.T) {
 	}
 }
 
-// The entry under the pointer hangs its buttons in a strip just under it,
-// keeping its own line whole; the pointer can move onto the strip; a button
+// The entry under the pointer opens a strip of its buttons between it and the
+// next entry, hiding nothing; the pointer can move onto the strip; a button
 // clicked acts on that entry, whatever was selected, and ⋯ opens its menu.
 func TestRowButtons(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
@@ -1067,6 +1067,18 @@ func TestRowButtons(t *testing.T) {
 	}
 	if !strings.Contains(head, "fix-auth") || !strings.Contains(head, "needs you") {
 		t.Errorf("the hovered entry's own line changed: %q", head)
+	}
+	// it covers nothing: every row of the frame without it is still there,
+	// in order, and it sits between the entry (and its children) and the next
+	after, _ := renderView(m.view(), 32, 0, 0)
+	for _, l := range []string{"fix-auth · bg", "docs", "allow Bash?"} {
+		if !strings.Contains(plain(after), l) {
+			t.Errorf("hovering hid %q", l)
+		}
+	}
+	al := strings.Split(plain(after), "\n")
+	if !strings.Contains(al[sy-1], "fix-auth · bg") || !strings.Contains(al[sy+1], "docs") {
+		t.Errorf("strip not between fix-auth's rows and the next agent:\n%s\n%s\n%s", al[sy-1], al[sy], al[sy+1])
 	}
 	nm, _ = m.Update(tea.MouseMotionMsg{X: r.hits[1].x0, Y: sy})
 	m = nm.(sbModel)

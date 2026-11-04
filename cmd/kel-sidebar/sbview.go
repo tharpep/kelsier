@@ -1341,16 +1341,19 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 					last = i
 				}
 			}
+			// an agent's background children hang under it: the strip goes
+			// after them
+			for last >= 0 && last+1 < len(body) && body[last+1].ref.kind == "bg" {
+				last++
+			}
 			at := last + 1
 			// the selection's raised block has an empty row at its foot:
 			// the strip goes there, inside the block, covering nothing
 			inBlock := last >= 0 && strings.HasPrefix(body[last].s, raised) && strings.Trim(stripANSI(body[last].s), " ▌") == ""
 			if inBlock {
 				at = last
-			} else if at >= len(body) || body[at].ref.kind == "menu" || (h > 0 && at >= h-1) {
-				at = first - 1
 			}
-			if first >= 0 && at >= 0 && at < len(body) {
+			if first >= 0 && at >= 0 && at <= len(body) {
 				fc := lifted
 				if inBlock {
 					fc = lifted.mix(rgb{255, 255, 255}, 0.10) // on the block's own lift
@@ -1358,8 +1361,26 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 				st := buttonStrip(id, kind, rowButtons(kind), w, fc)
 				if inBlock {
 					st.s = fill(lead(id)+st.s[1:], w, raised)
+					body[at] = st
+				} else {
+					// between the entry and the one below, pushing the rest
+					// down while hovered: the author did not want it over
+					// the next agent. A blank row above the foot pays for it
+					body = append(body[:at], append([]line{st}, body[at:]...)...)
+					if h > 0 && len(body) > h {
+						drop := -1
+						for i := len(body) - len(tail) - 1; i > at; i-- {
+							if body[i].s == "" && body[i].ref.id == "" {
+								drop = i
+								break
+							}
+						}
+						if drop < 0 {
+							drop = len(body) - len(tail) - 1
+						}
+						body = append(body[:drop], body[drop+1:]...)
+					}
 				}
-				body[at] = st
 			}
 		}
 	}
