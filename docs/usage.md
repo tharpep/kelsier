@@ -148,7 +148,10 @@ waits), all keys, quit. **Right-click any space, agent or pane** for its own
 menu, everything it can do: an agent's has go to it, edit last file, plan,
 cards, rename, kill, zoom, own window, and relaunch when it is dead. Every
 item shows its key on the right, so the keys are there when you want them,
-learned by using the mouse. A menu closes on esc or a click outside it; the
+learned by using the mouse. **The row under the pointer shows buttons** in
+place of its age and chip: `Diff · Files · ⋯` on an agent, `Files · Git · ⋯`
+on a space or pane; a click acts on that row, and `⋯` opens its menu, for a
+trackpad with no right button. A menu closes on esc or a click outside it; the
 arrows and enter walk it too. `|` and `-` split the pane you were in, right
 or below, at its directory, and put you in the new shell.
 

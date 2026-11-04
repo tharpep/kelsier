@@ -1028,3 +1028,30 @@ func TestEntryMenu(t *testing.T) {
 		t.Errorf("Kill: mode %v target %q", got.mode, got.target)
 	}
 }
+
+// The row under the pointer shows its buttons; one clicked acts on that row,
+// whatever was selected, and ⋯ opens its menu.
+func TestRowButtons(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	m := sbModel{doc: loadFixture(t, "fifteen-three-repos"), width: 32, height: 40, visible: true}
+	y := rowOf(t, m, "a:@2")
+	nm, _ := m.Update(tea.MouseMotionMsg{X: 4, Y: y})
+	m = nm.(sbModel)
+	out, refs := renderView(m.view(), 32, 40, 0)
+	if l := strings.Split(plain(out), "\n")[y]; !strings.Contains(l, "Diff") || !strings.Contains(l, "fix-auth") || strings.Contains(l, "needs you") {
+		t.Fatalf("hovered row: %q", l)
+	}
+	if len(refs[y].hits) != 3 || refs[y].hits[2].key != "menu" {
+		t.Fatalf("hits: %+v", refs[y].hits)
+	}
+	files := refs[y].hits[1]
+	nm, cmd := m.Update(tea.MouseClickMsg{X: files.x0 + 1, Y: y, Button: tea.MouseLeft})
+	if nm.(sbModel).ui.sel != "a:@2" || cmd == nil {
+		t.Errorf("Files: sel %q, cmd %v", nm.(sbModel).ui.sel, cmd)
+	}
+	dots := refs[y].hits[2]
+	nm, _ = m.Update(tea.MouseClickMsg{X: dots.x0, Y: y, Button: tea.MouseLeft})
+	if mn := nm.(sbModel).menu; mn == nil || mn.title != "fix-auth" {
+		t.Errorf("⋯ opened %+v", mn)
+	}
+}

@@ -895,6 +895,20 @@ func (m sbModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.Button != tea.MouseLeft {
 			return m, nil
 		}
+		for _, b := range hit.hits {
+			if msg.X >= b.x0 && msg.X < b.x1 {
+				// a row's button: on that row, whatever was selected
+				m.ui.sel = hit.id
+				m.saveShared()
+				if b.key == "menu" {
+					if ti, items := entryMenu(m.view()); len(items) > 0 {
+						m.menu = &sbMenu{title: ti, items: items, y: msg.Y + 1}
+					}
+					return m, nil
+				}
+				return m.press(b.key)
+			}
+		}
 		if hit.kind == "menu" {
 			switch hit.at(msg.X) {
 			case "menu:new":

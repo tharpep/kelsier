@@ -139,7 +139,15 @@ type lineRef struct {
 	split int
 	right string // that action, drawn — kept here so the hover can mark it
 	from  int    // a click left of this column hits nothing
+	hits  []hit  // buttons drawn on the line, while the pointer is on it
 	text  string // a choices line as drawn, without colour, for hintKey
+}
+
+// hit is a button on a line: columns [x0, x1) press key ("menu" opens the
+// entry's own menu).
+type hit struct {
+	x0, x1 int
+	key    string
 }
 
 // line is one screen line and what a click on it hits.
@@ -1322,6 +1330,19 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 		}
 		copy(body[y:], box)
 	}
+	// the entry under the pointer shows its buttons on its first line, in
+	// place of its age and chip: what a click on it can do, at a glance
+	if v.hover > 0 && v.hover <= len(body) && v.menu == nil {
+		if id, kind := body[v.hover-1].ref.id, body[v.hover-1].ref.kind; id != "" && len(rowButtons(kind)) > 0 {
+			for i, l := range body {
+				if l.ref.id != id || strings.TrimSpace(stripANSI(l.s)) == "" || strings.TrimSpace(stripANSI(l.s)) == "▌" {
+					continue
+				}
+				body[i] = withButtons(l, rowButtons(kind), w)
+				break
+			}
+		}
+	}
 	// hover: the entry under the pointer gets a dim bar where the selection's
 	// would be, so what a click would hit is visible before the click
 	if v.hover > 0 && v.hover <= len(body) && v.menu == nil && body[v.hover-1].ref.kind != "menu" {
@@ -1539,4 +1560,82 @@ func footerLine(w int, in string) line {
 	right := dim + "? " + reset + "Help"
 	left := in + dim + "≡ " + reset + "Settings"
 	return line{spread(left, right, w), lineRef{kind: "menu", id: "open:settings", id2: "open:help", from: len([]rune(in)), split: w - 1 - visWidth(right)}}
+}
+
+// rowButtons are the buttons an entry of a kind shows under the pointer.
+func rowButtons(kind string) []sbAct {
+	switch kind {
+	case "agent":
+		return []sbAct{{"d", "Diff"}, {"f", "Files"}, {"menu", "⋯"}}
+	case "space", "pane":
+		return []sbAct{{"f", "Files"}, {"g", "Git"}, {"menu", "⋯"}}
+	}
+	return nil
+}
+
+// withButtons cuts a line short of its right edge and draws the buttons
+// there, recording where each one is for a click.
+func withButtons(l line, btns []sbAct, w int) line {
+	var drawn string
+	var hits []hit
+	bw := 0
+	for _, b := range btns {
+		bw += len([]rune(b.label)) + 2
+	}
+	x := w - 1 - bw
+	if x < 8 {
+		return l
+	}
+	for _, b := range btns {
+		n := len([]rune(b.label)) + 2
+		hits = append(hits, hit{x, x + n, b.key})
+		drawn += button(b.label)
+		x += n
+	}
+	// keep the row's name, up to the gap before its age and chip: those are
+	// what the buttons stand in for
+	room := w - 1 - bw - 1
+	plain := []rune(strings.TrimRight(stripANSI(l.s), " "))
+	name := len(plain)
+	for i := 4; i+1 < len(plain); i++ {
+		if plain[i] == ' ' && plain[i+1] == ' ' {
+			name = i
+			break
+		}
+	}
+	left := truncateStyled(l.s, room)
+	if name <= room {
+		left = cutStyled(l.s, name)
+	}
+	lifted := strings.HasPrefix(l.s, raised)
+	l.s = left + strings.Repeat(" ", max(0, w-1-bw-visWidth(left))) + drawn
+	if lifted {
+		l.s = fill(l.s, w, raised)
+	}
+	l.ref.hits = hits
+	return l
+}
+
+// cutStyled keeps the first n visible columns of a line holding colour
+// codes, with no ellipsis: what is cut is not part of what it shows.
+func cutStyled(s string, n int) string {
+	var b strings.Builder
+	vis, esc := 0, false
+	for _, c := range s {
+		switch {
+		case c == '\x1b':
+			esc = true
+		case esc:
+			if c == 'm' {
+				esc = false
+			}
+		default:
+			if vis == n {
+				return b.String() + reset
+			}
+			vis++
+		}
+		b.WriteRune(c)
+	}
+	return b.String()
 }
