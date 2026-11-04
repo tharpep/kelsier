@@ -41,27 +41,82 @@ func f(p *float64) float64 {
 	return *p
 }
 
-// kel's own theme (spec.md §5d), the same on every machine. The surface the
-// sidebar sits on is the pane's tmux style (KEL_SIDEBAR_STYLE in bin/kel);
-// these must stay readable on it.
 const (
-	reset  = "\x1b[0m"
-	bold   = "\x1b[1m"
-	dim    = "\x1b[38;2;107;107;116m"
-	mid    = "\x1b[38;2;161;161;170m"
-	faint  = "\x1b[38;2;85;85;94m"
+	reset = "\x1b[0m"
+	bold  = "\x1b[1m"
+)
+
+// The state colours are kel's, the same on every theme.
+const (
 	yellow = "\x1b[38;2;245;167;66m"
 	red    = "\x1b[38;2;242;114;127m"
 	cyan   = "\x1b[38;2;86;212;221m"
 	green  = "\x1b[38;2;95;211;141m"
 	purple = "\x1b[38;2;180;140;242m"
-
-	raised   = "\x1b[48;2;29;29;34m"
-	yellowBg = "\x1b[48;2;46;34;16m"
-	redBg    = "\x1b[48;2;49;21;25m"
-	greenBg  = "\x1b[48;2;18;41;27m"
-	purpleBg = "\x1b[48;2;36;27;54m"
 )
+
+// The surfaces and text greys are built from the terminal's own background
+// and foreground (applyPalette, spec.md §5d), so the sidebar wears the
+// theme's hue. These are the values until the terminal answers, and what the
+// golden frames are drawn with: kel's fixed dark, measured against a black
+// terminal.
+var (
+	baseBg   = rgb{0x13, 0x13, 0x16}
+	baseFg   = rgb{0xe6, 0xe6, 0xe9}
+	base     = baseFg.fg() + baseBg.bg()
+	dim      = rgb{107, 107, 116}.fg()
+	mid      = rgb{161, 161, 170}.fg()
+	faint    = rgb{85, 85, 94}.fg()
+	raised   = rgb{29, 29, 34}.bg()
+	yellowBg = rgb{46, 34, 16}.bg()
+	redBg    = rgb{49, 21, 25}.bg()
+	greenBg  = rgb{18, 41, 27}.bg()
+	purpleBg = rgb{36, 27, 54}.bg()
+)
+
+type rgb struct{ r, g, b uint8 }
+
+func (c rgb) fg() string  { return fmt.Sprintf("\x1b[38;2;%d;%d;%dm", c.r, c.g, c.b) }
+func (c rgb) bg() string  { return fmt.Sprintf("\x1b[48;2;%d;%d;%dm", c.r, c.g, c.b) }
+func (c rgb) hex() string { return fmt.Sprintf("#%02x%02x%02x", c.r, c.g, c.b) }
+
+// mix is c moved toward o by t (0 = c, 1 = o).
+func (c rgb) mix(o rgb, t float64) rgb {
+	m := func(a, b uint8) uint8 { return uint8(float64(a) + (float64(b)-float64(a))*t + 0.5) }
+	return rgb{m(c.r, o.r), m(c.g, o.g), m(c.b, o.b)}
+}
+
+func (c rgb) dark() bool { return 0.2126*float64(c.r)+0.7152*float64(c.g)+0.0722*float64(c.b) < 128 }
+
+func parseHex(s string) (rgb, bool) {
+	var c rgb
+	if len(s) != 7 || s[0] != '#' {
+		return c, false
+	}
+	_, err := fmt.Sscanf(s[1:], "%02x%02x%02x", &c.r, &c.g, &c.b)
+	return c, err == nil
+}
+
+// applyPalette builds every surface and grey from the terminal's background
+// and foreground: the sidebar a shade darker than the panes beside it, the
+// selection a shade lighter on a dark theme (darker on a light one), the
+// greys between the text and the surface.
+func applyPalette(term, text rgb) {
+	black, white := rgb{}, rgb{255, 255, 255}
+	surface, lift := term.mix(black, 0.22), term.mix(white, 0.08)
+	if !term.dark() {
+		surface, lift = term.mix(black, 0.04), term.mix(black, 0.10)
+	}
+	baseBg, baseFg = surface, text
+	base = text.fg() + surface.bg()
+	mid = text.mix(surface, 0.30).fg()
+	dim = text.mix(surface, 0.50).fg()
+	faint = text.mix(surface, 0.64).fg()
+	raised = lift.bg()
+	chip := func(c rgb) string { return c.mix(surface, 0.80).bg() }
+	yellowBg, redBg = chip(rgb{245, 167, 66}), chip(rgb{242, 114, 127})
+	greenBg, purpleBg = chip(rgb{95, 211, 141}), chip(rgb{180, 140, 242})
+}
 
 // humanizeSecs matches bin/kel's helper: 45s, 6m, 1h05m.
 func humanizeSecs(s int64) string {

@@ -261,8 +261,9 @@ see `setup.md` §5b to change either. Hidden sidebars do no work of their own (B
 seconds and at once when an agent changes state. `kel sidebar off` removes it
 everywhere (and new windows get none) until `kel sidebar on`; `sidebar =
 "off"` in config disables it outright; `sidebar_width` sets the width and
-`sidebar_style` its colours (kel's own by default, `fg=#e6e6e9,bg=#131316`;
-`"default"` for the terminal's own).
+`sidebar_bg` the background its colours are built from: by default it asks
+the terminal, and a terminal that does not answer (WezTerm on WSL) needs
+`sidebar_bg = "#1e1e2e"`, your theme's background.
 
 ## Groups
 

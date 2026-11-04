@@ -20,7 +20,8 @@
 # sidebar      = "on"           # the pane on the left of every kel window
                                 # ("off" here, or `kel sidebar off` for now)
 # sidebar_width = 32            # identical in every window
-# sidebar_style = "bg=colour16"  # its background; "default" for the terminal's
+# sidebar_bg   = "#1e1e2e"      # the background its colours are built from, for a
+#                               # terminal that does not answer kel's query (WezTerm on WSL)
 
 [notify]
 # notify_bell    = "on"            # the terminal's bell: a flash on the Mac, a sound or

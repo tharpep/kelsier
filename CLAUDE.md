@@ -85,6 +85,7 @@ change; migrate old records in `migrate_meta`.
 | `pr-cache/<owner>__<repo>.sha.json` | every PR's head commit, merged and state, from `gh` (paged), plus `.at` with the fetch epoch. Keyed by commit, not branch: a local branch need not be called what its PR's head is |
 | `sidebar.json` | `{selected: <entry id>, expanded: {<space key>: bool}}` — the sidebar's cursor (`s:<space>`, `a:<window id>` or a pane id) and the spaces opened or folded by hand, shared so every window's sidebar shows the same thing |
 | `sidebar-cache.json` | the last fleet document the visible sidebar loaded, so a sidebar just shown draws at once, before git is asked anything |
+| `palette` | `<bg> <fg>` as `#rrggbb`: the terminal's colours as a sidebar last heard them, so a new sidebar draws in them at once |
 | `quota` | `<5h%> <5h reset> <7d%> <7d reset> <spend%> <spend reset> <epoch seen>`, space-separated; `-1` = not reported, `0` reset = not given. Written by `kel statusline` only from a payload carrying rate limits; `kel-fleet` reads it as `quota`, nulling a figure whose window reset or that is older than its window |
 | `<window-id>.seen` | one epoch: when the window was last shown. `kel-fleet` reads it for `unseen` on a `done` agent (no file = unseen); the shown sidebar writes it for its own window |
 | `<pane-id>.edit` | two lines: the path the window's agent last edited, then its first changed line. Written by the `PostToolUse` hook (on every tool since 2026-10-21; only edits write this), read by `kel _panel edit` |

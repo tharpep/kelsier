@@ -165,7 +165,8 @@ before code.
 `test/sidebar-frames.sh`, approved, and held as golden files (rewrite with
 `go test ./cmd/kel-sidebar -run Golden -update` only after looking). Judged live
 too: the first background, `colour234`, read as grey and became true black
-(`sidebar_style`).
+(`sidebar_style`, replaced on 2026-11-04 by surfaces built from the
+terminal's own colours, `sidebar_bg`).
 - fixture fleet documents (none, one agent, fifteen across three repos, a
   60-character branch, unknown context, a dead agent, servers with ports)
 - the `spaces` / `agents` layout and the visual language (`spec.md` §5d),

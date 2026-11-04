@@ -1021,3 +1021,51 @@ func TestStickyHeaderNamesTheShownSection(t *testing.T) {
 		}
 	}
 }
+
+// The sidebar's surfaces come from the terminal's colours: on a navy theme it
+// is a darker navy, the selection a lighter one, never a neutral grey.
+func TestPaletteFollowsTheTerminal(t *testing.T) {
+	keepPalette(t)
+	navy := rgb{0x1e, 0x1e, 0x2e}
+	applyPalette(navy, rgb{0xcd, 0xd6, 0xf4})
+	if !(baseBg.r < navy.r && baseBg.b < navy.b && baseBg.b > baseBg.r) {
+		t.Errorf("surface %s is not a darker navy than %s", baseBg.hex(), navy.hex())
+	}
+	if raised != navy.mix(rgb{255, 255, 255}, 0.08).bg() {
+		t.Errorf("selection is not a lighter shade of the terminal's background")
+	}
+	light := rgb{0xef, 0xf1, 0xf5}
+	applyPalette(light, rgb{0x4c, 0x4f, 0x69})
+	if baseBg.dark() || raised != light.mix(rgb{}, 0.10).bg() {
+		t.Errorf("a light theme gets a dark sidebar: %s", baseBg.hex())
+	}
+}
+
+// Every cell of a frame carries the sidebar's own colours, out to the width
+// and down to the height, so none shows the terminal's through.
+func TestPaintFrameCoversEveryCell(t *testing.T) {
+	out := paintFrame("ab\n"+dim+"c"+reset+"d", 6, 4)
+	lines := strings.Split(out, "\n")
+	if len(lines) != 4 {
+		t.Fatalf("%d lines, want 4", len(lines))
+	}
+	for i, l := range lines {
+		if !strings.HasPrefix(l, base) || visWidth(l) != 6 {
+			t.Errorf("line %d not painted to width: %q", i, l)
+		}
+		if strings.Contains(strings.TrimSuffix(l, reset), reset) && !strings.Contains(l, reset+base) {
+			t.Errorf("line %d drops to the terminal's colours after a reset: %q", i, l)
+		}
+	}
+}
+
+// keepPalette puts the colours back as they were, so the golden frames do not
+// depend on which test ran first.
+func keepPalette(t *testing.T) {
+	bb, bf, b, d, m, f, r := baseBg, baseFg, base, dim, mid, faint, raised
+	y, rd, g, p := yellowBg, redBg, greenBg, purpleBg
+	t.Cleanup(func() {
+		baseBg, baseFg, base, dim, mid, faint, raised = bb, bf, b, d, m, f, r
+		yellowBg, redBg, greenBg, purpleBg = y, rd, g, p
+	})
+}

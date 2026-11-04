@@ -158,14 +158,10 @@ SELF="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)/$(basename "${BA
 # commands worth re-running per pane on restore (agents handled separately)
 KEL_RESTORE_CMDS="${KEL_RESTORE_CMDS:-nvim vim hx nano lazygit lazydocker htop btop k9s}"
 KEL_SIDEBAR_WIDTH="${KEL_SIDEBAR_WIDTH:-32}"      # identical in every window (spec.md §5c)
-# the sidebar's own surface, so it reads as chrome rather than a pane in a
-# box (spec.md §5a, §5d): kel's theme, by RGB, the same on every machine —
-# a shade above a dark terminal's background, as opencode raises its panels.
-# The foreground is set too, or a light theme's dark text lands on it. Never a
-# 16–21 palette index: base16-style themes repurpose those (WezTerm's
-# Catppuccin made colour16 peach). tmux maps RGB to the nearest palette entry
-# on a terminal without it. "default" gives it the terminal's own colours.
-KEL_SIDEBAR_STYLE="${KEL_SIDEBAR_STYLE:-fg=#e6e6e9,bg=#131316}"
+# the sidebar paints itself, in surfaces built from the terminal's own colours
+# (kel-sidebar asks; spec.md §5d). sidebar_bg = "#rrggbb" names the background
+# to build from instead, for a terminal that does not answer.
+KEL_SIDEBAR_BG="${KEL_SIDEBAR_BG:-}"
 SIDEBAR_OFF="$STATE_DIR/sidebar-off"              # `kel sidebar off`, persisted
 
 # guarded: an unconditional mkdir -p of three existing dirs measured ~10ms,
@@ -510,9 +506,8 @@ sidebar_ensure() { # wid
   # stderr goes to sidebar-fail.log: four sidebars split cleanly and then died
   # (2026-10-20), and tmux reports nothing about a pane whose process exits.
   tmux if-shell -F -t "$wid" '#{?#{P:#{?@kel-sidebar,1,}},,1}' \
-    "split-window -hbdf -l $KEL_SIDEBAR_WIDTH -t '$wid' -c '#{pane_current_path}' -e 'KEL_BIN=$SELF' \"exec '$KEL_SIDEBAR_BIN' 2>>'$STATE_DIR/sidebar-fail.log'\" ; set-option -p -t '$wid.{top-left}' @kel-sidebar 1" \
+    "split-window -hbdf -l $KEL_SIDEBAR_WIDTH -t '$wid' -c '#{pane_current_path}' -e 'KEL_BIN=$SELF' -e 'KEL_SIDEBAR_BG=$KEL_SIDEBAR_BG' \"exec '$KEL_SIDEBAR_BIN' 2>>'$STATE_DIR/sidebar-fail.log'\" ; set-option -p -t '$wid.{top-left}' @kel-sidebar 1" \
     2>/dev/null || true
-  sidebar_style "$wid"
   banner_apply
 }
 
@@ -524,15 +519,6 @@ sidebar_width_opts() {
        set-option -g @kel-hint-blank "$(printf '%*s' "$w" '')" 2>/dev/null
 }
 
-# per-pane styles are tmux 3.1+; below that the sidebar just wears the
-# terminal's background, so a failure here is ignored, not reported
-sidebar_style() { # wid
-  local id
-  id="$(sidebar_pane "$1")"
-  [ -n "$id" ] || return 0
-  tmux set-option -p -t "$id" window-style "$KEL_SIDEBAR_STYLE" \; \
-       set-option -p -t "$id" window-active-style "$KEL_SIDEBAR_STYLE" 2>/dev/null || true
-}
 
 # nudge every sidebar to look again (SIGUSR1); each decides for itself, with
 # one cheap tmux call, whether it is the visible one.  On every state hook too,
@@ -2866,8 +2852,7 @@ cmd_reload() {
         || tmux set-option -p -t "$id" @kel-ready "" 2>/dev/null || true
 
       # Respawn the pane with the new binary
-      tmux respawn-pane -k -t "$id" -e "KEL_BIN=$SELF" "exec '$KEL_SIDEBAR_BIN' 2>>'$STATE_DIR/sidebar-fail.log'" 2>/dev/null || true
-      [ -n "$wid" ] && sidebar_style "$wid"
+      tmux respawn-pane -k -t "$id" -e "KEL_BIN=$SELF" -e "KEL_SIDEBAR_BG=$KEL_SIDEBAR_BG" "exec '$KEL_SIDEBAR_BIN' 2>>'$STATE_DIR/sidebar-fail.log'" 2>/dev/null || true
       reloaded=$((reloaded + 1))
     done < <(tmux list-panes -a -F '#{@kel-sidebar} #{pane_id} #{window_id}' 2>/dev/null || true)
   fi

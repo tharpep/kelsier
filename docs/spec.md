@@ -302,10 +302,20 @@ at. M2's frame — a repo name, one inverse-video row, a key hint — is the
 baseline it improves on. The rules, most of which are why herdr looks at home
 in any terminal:
 
-- **kel's own theme, by RGB** (*revised 2026-11-03*; this rule said "the
-  terminal's 16 ANSI colours, never hex" until then). The sidebar looks the
-  same on all three machines. Its surface and default foreground are the
-  pane's tmux style, so a light terminal theme cannot put dark text on it.
+- **Surfaces from the terminal's own colours** (*revised 2026-11-04*; "the
+  terminal's 16 ANSI colours, never hex" until 2026-11-03, then a fixed
+  `#131316`, which on the author's Catppuccin navy sat as a black strip). The
+  sidebar asks the terminal for its background and foreground (OSC 10/11) and
+  builds every surface and grey from them: the sidebar a shade darker than
+  the panes, the selection a shade lighter, the chips the state colour sunk
+  into the surface. State colours stay kel's. It paints every cell itself,
+  because the pane must carry no tmux style: tmux answers the query with a
+  pane's own background when it has one, and with the terminal's (learned at
+  attach) only for a pane a client is showing — so a hidden sidebar asks again
+  when shown. The answer is cached in `palette` and published to tmux as
+  `@kel-surface` for the bar under the sidebar. **WezTerm on WSL never
+  answers** (ConPTY sits between them), so `sidebar_bg = "#rrggbb"` names the
+  background to build from instead.
 - **Colour means state, and nothing else.** One colour per state (waiting,
   working, done-unseen, throttled, dead); everything else is the default
   foreground, bold, or dim. A colour that does not mean a state is noise.

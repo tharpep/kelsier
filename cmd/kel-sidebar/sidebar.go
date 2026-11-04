@@ -24,6 +24,7 @@ package main
 // the sidebar never re-implements a refusal.
 
 import (
+	"image/color"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -90,6 +91,9 @@ type sbModel struct {
 	help   bool
 
 	pending tea.Cmd // a command activate() started, returned by the caller
+
+	termBg, termFg *rgb // the terminal's colours, once it has answered
+	fixedBg        bool // KEL_SIDEBAR_BG names the background: nothing to ask
 }
 
 // ---------------------------------------------------------------- state dir
@@ -97,6 +101,93 @@ type sbModel struct {
 func sbStatePath(name string) string { return filepath.Join(fleet.StateDir(), name) }
 
 func sbStateFile() string { return sbStatePath("sidebar.json") }
+
+// ---------------------------------------------------------------- palette
+
+// The sidebar wears the terminal's theme: it asks the terminal for its
+// colours and builds its surfaces from them (applyPalette). tmux answers only
+// for a pane a client is showing, with the colours it learned from the
+// terminal — so a hidden sidebar asks again when shown, and the pane must
+// carry no background of its own, or that would be the answer. The last
+// answer is kept in `palette`, so a new sidebar draws in it at once.
+
+var lastPalette string
+
+// loadPalette applies KEL_SIDEBAR_BG when it names a colour, else the cached
+// answer. It reports whether the colour is fixed.
+func loadPalette() bool {
+	if c, ok := parseHex(os.Getenv("KEL_SIDEBAR_BG")); ok {
+		applyPalette(c, textFor(c))
+		return true
+	}
+	if b, err := os.ReadFile(sbStatePath("palette")); err == nil {
+		if f := strings.Fields(string(b)); len(f) == 2 {
+			bg, ok1 := parseHex(f[0])
+			fg, ok2 := parseHex(f[1])
+			if ok1 && ok2 {
+				applyPalette(bg, fg)
+				lastPalette = f[0] + " " + f[1]
+			}
+		}
+	}
+	return false
+}
+
+// textFor is the text colour for a background no foreground was given for.
+func textFor(bg rgb) rgb {
+	if bg.dark() {
+		return rgb{0xe6, 0xe6, 0xe9}
+	}
+	return rgb{0x1e, 0x1e, 0x24}
+}
+
+func toRGB(c color.Color) rgb {
+	r, g, b, _ := c.RGBA()
+	return rgb{uint8(r >> 8), uint8(g >> 8), uint8(b >> 8)}
+}
+
+func (m sbModel) askColours() tea.Cmd {
+	if m.fixedBg {
+		return nil
+	}
+	return tea.Batch(tea.RequestBackgroundColor, tea.RequestForegroundColor)
+}
+
+// repaint applies what the terminal answered, and shares it: the cache for
+// the next sidebar, @kel-surface for tmux's bar under the sidebar.
+func (m sbModel) repaint() {
+	if m.termBg == nil {
+		return
+	}
+	fg := textFor(*m.termBg)
+	if m.termFg != nil {
+		fg = *m.termFg
+	}
+	applyPalette(*m.termBg, fg)
+	p := m.termBg.hex() + " " + fg.hex()
+	if p == lastPalette {
+		return
+	}
+	lastPalette = p
+	_ = os.MkdirAll(fleet.StateDir(), 0o700)
+	fleet.WriteAtomic(sbStatePath("palette"), []byte(p+"\n"))
+	_ = exec.Command("tmux", "set-option", "-g", "@kel-surface", baseBg.hex()).Run()
+}
+
+// paintFrame gives every cell of a frame the sidebar's own colours: each
+// line, padded to the width, and blank lines to the height. A reset inside a
+// line would drop to the terminal's colours, so each one takes them up again.
+func paintFrame(s string, w, h int) string {
+	lines := strings.Split(s, "\n")
+	for len(lines) < h {
+		lines = append(lines, "")
+	}
+	for i, l := range lines {
+		pad := strings.Repeat(" ", max(0, w-visWidth(l)))
+		lines[i] = base + strings.ReplaceAll(l, reset, reset+base) + pad + reset
+	}
+	return strings.Join(lines, "\n")
+}
 
 // sbShared is the view state every window's sidebar shares (spec.md §5):
 // the cursor and which spaces have been opened or closed by hand.
@@ -674,7 +765,7 @@ func (m sbModel) browse() (sbModel, tea.Cmd) {
 
 // ---------------------------------------------------------------- update
 
-func (m sbModel) Init() tea.Cmd { return tickAfter(m.visible) }
+func (m sbModel) Init() tea.Cmd { return tea.Batch(tickAfter(m.visible), m.askColours()) }
 
 func (m sbModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
@@ -687,6 +778,16 @@ func (m sbModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Batch(m.loadCmd(), tickAfter(true)) // the one tick chain
 		}
 		return m, tickAfter(false)
+
+	case tea.BackgroundColorMsg:
+		c := toRGB(msg.Color)
+		m.termBg = &c
+		m.repaint()
+
+	case tea.ForegroundColorMsg:
+		c := toRGB(msg.Color)
+		m.termFg = &c
+		m.repaint()
 
 	case sbWake:
 		was := m.visible
@@ -702,7 +803,7 @@ func (m sbModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.ui = m.withShared()
 			m.markSeen()
-			return m, tea.Batch(m.loadCmd(), tickAfter(true))
+			return m, tea.Batch(m.loadCmd(), tickAfter(true), m.askColours())
 		}
 		return m, m.loadCmd()
 
@@ -1282,7 +1383,7 @@ func (m sbModel) render() string {
 }
 
 func (m sbModel) View() tea.View {
-	v := tea.NewView(m.render())
+	v := tea.NewView(paintFrame(m.render(), m.width, m.height))
 	v.AltScreen = true
 	// all motion, not just with a button down: hover needs the pointer's
 	// position when nothing is pressed
@@ -1292,8 +1393,13 @@ func (m sbModel) View() tea.View {
 }
 
 func runSidebar(once bool) {
-	m := sbModel{myPane: os.Getenv("TMUX_PANE")}
+	m := sbModel{myPane: os.Getenv("TMUX_PANE"), fixedBg: loadPalette()}
 	if m.myPane != "" {
+		// the pane wears no style of its own: tmux would give that as the
+		// terminal's background. kel up to v0.10 set one on every sidebar
+		_ = exec.Command("tmux", "set-option", "-pu", "-t", m.myPane, "window-style", ";",
+			"set-option", "-pu", "-t", m.myPane, "window-active-style", ";",
+			"set-option", "-g", "@kel-surface", baseBg.hex()).Run()
 		// the window this sidebar sits in is current to it, whatever the
 		// fleet document's idea of the client's window — with no client
 		// attached there is none
