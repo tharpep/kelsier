@@ -100,10 +100,15 @@ kel_config_read() {   # file
     [ -n "${line##*=*}" ] && continue
     local key="${line%%=*}" val="${line#*=}"
     key="${key%%[[:space:]]*}"
-    val="${val%%#*}"
-    val="${val#"${val%%[![:space:]]*}"}"; val="${val%"${val##*[![:space:]]}"}"
-    val="${val%\"}"; val="${val#\"}"
-    val="${val%\'}"; val="${val#\'}"
+    # a quoted value runs to its closing quote, so a # inside it is the
+    # value's ("#1e1e2e"); only an unquoted value loses a trailing # comment
+    val="${val#"${val%%[![:space:]]*}"}"
+    case "$val" in
+      \"*) val="${val#\"}"; val="${val%%\"*}" ;;
+      \'*) val="${val#\'}"; val="${val%%\'*}" ;;
+      \#*) val='' ;;
+      *)  val="${val%%[[:space:]]#*}"; val="${val%"${val##*[![:space:]]}"}" ;;
+    esac
     case "$key" in ''|*[!a-z0-9_]*) continue ;; esac
     local up=''
     case "$key" in *) up="$(printf '%s' "$key" | tr '[:lower:]' '[:upper:]')" ;; esac
@@ -153,14 +158,10 @@ SELF="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)/$(basename "${BA
 # commands worth re-running per pane on restore (agents handled separately)
 KEL_RESTORE_CMDS="${KEL_RESTORE_CMDS:-nvim vim hx nano lazygit lazydocker htop btop k9s}"
 KEL_SIDEBAR_WIDTH="${KEL_SIDEBAR_WIDTH:-32}"      # identical in every window (spec.md §5c)
-# the sidebar's own surface, so it reads as chrome rather than a pane in a
-# box (spec.md §5a, §5d): kel's theme, by RGB, the same on every machine —
-# a shade above a dark terminal's background, as opencode raises its panels.
-# The foreground is set too, or a light theme's dark text lands on it. Never a
-# 16–21 palette index: base16-style themes repurpose those (WezTerm's
-# Catppuccin made colour16 peach). tmux maps RGB to the nearest palette entry
-# on a terminal without it. "default" gives it the terminal's own colours.
-KEL_SIDEBAR_STYLE="${KEL_SIDEBAR_STYLE:-fg=#e6e6e9,bg=#131316}"
+# the sidebar paints itself, in surfaces built from the terminal's own colours
+# (kel-sidebar asks; spec.md §5d). sidebar_bg = "#rrggbb" names the background
+# to build from instead, for a terminal that does not answer.
+KEL_SIDEBAR_BG="${KEL_SIDEBAR_BG:-}"
 SIDEBAR_OFF="$STATE_DIR/sidebar-off"              # `kel sidebar off`, persisted
 
 # guarded: an unconditional mkdir -p of three existing dirs measured ~10ms,
@@ -505,29 +506,17 @@ sidebar_ensure() { # wid
   # stderr goes to sidebar-fail.log: four sidebars split cleanly and then died
   # (2026-10-20), and tmux reports nothing about a pane whose process exits.
   tmux if-shell -F -t "$wid" '#{?#{P:#{?@kel-sidebar,1,}},,1}' \
-    "split-window -hbdf -l $KEL_SIDEBAR_WIDTH -t '$wid' -c '#{pane_current_path}' -e 'KEL_BIN=$SELF' \"exec '$KEL_SIDEBAR_BIN' 2>>'$STATE_DIR/sidebar-fail.log'\" ; set-option -p -t '$wid.{top-left}' @kel-sidebar 1" \
+    "split-window -hbdf -l $KEL_SIDEBAR_WIDTH -t '$wid' -c '#{pane_current_path}' -e 'KEL_BIN=$SELF' -e 'KEL_SIDEBAR_BG=$KEL_SIDEBAR_BG' \"exec '$KEL_SIDEBAR_BIN' 2>>'$STATE_DIR/sidebar-fail.log'\" ; set-option -p -t '$wid.{top-left}' @kel-sidebar 1" \
     2>/dev/null || true
-  sidebar_style "$wid"
   banner_apply
 }
 
 sidebar_width_opts() {
   local w="$KEL_SIDEBAR_WIDTH"
   tmux set-option -g @kel-sidebar-width "$w" \; \
-       set-option -g @kel-hint-out "$(printf '%-*.*s' "$w" "$w" "click, or $(prefix_words) then space")" \; \
-       set-option -g @kel-hint-in "$(printf '%-*.*s' "$w" "$w" "esc back to your pane")" \; \
        set-option -g @kel-hint-blank "$(printf '%*s' "$w" '')" 2>/dev/null
 }
 
-# per-pane styles are tmux 3.1+; below that the sidebar just wears the
-# terminal's background, so a failure here is ignored, not reported
-sidebar_style() { # wid
-  local id
-  id="$(sidebar_pane "$1")"
-  [ -n "$id" ] || return 0
-  tmux set-option -p -t "$id" window-style "$KEL_SIDEBAR_STYLE" \; \
-       set-option -p -t "$id" window-active-style "$KEL_SIDEBAR_STYLE" 2>/dev/null || true
-}
 
 # nudge every sidebar to look again (SIGUSR1); each decides for itself, with
 # one cheap tmux call, whether it is the visible one.  On every state hook too,
@@ -2414,15 +2403,20 @@ banner_apply() {
   name="${name//#/##}"; text="${text//#/##}"
   [ "${#text}" -gt 80 ] && text="${text:0:79}…"
   # The row keeps the bar's lead for alignment, blank: the sidebar hint is
-  # the bar's, and on both rows it read twice (#22).
+  # the bar's, and on both rows it read twice (#22). Only ↵ go and ✕ are
+  # clickable: the message itself sits under the agent's prompt, and a click
+  # meant for the prompt jumped to the waiting agent (2026-11-04).
   # `↵ go` is what a click does; the key is named beside it so the banner
   # teaches it too (the sidebar's footer says the same).  ` is a prefix key:
   # two presses, so "then" — `Ctrl-b \`` read as one chord (2026-10-16).
-  local bar; bar="$(tmux show-options -gv 'status-format[0]' 2>/dev/null)"
+  # the bar is kel.conf's second line; with no kel.conf (the suite), tmux's
+  # own first
+  local bar; bar="$(tmux show-options -gv 'status-format[1]' 2>/dev/null)"
+  [ -n "$bar" ] || bar="$(tmux show-options -gv 'status-format[0]' 2>/dev/null)"
   tmux set-option -t "$t" status 2 \; \
        set-option -u -t "$t" status-position \; \
        set-option -t "$t" status-format[1] "$bar" \; \
-       set-option -t "$t" status-format[0] "#[align=left,bg=default]#{E:@kel-bar-lead-blank}#[range=user|bgo]#[fg=colour214,bold] ● $name#[nobold,fg=colour252] $word${text:+#[fg=colour245] — $text}$more #[norange]#[align=right]#[range=user|bgo]#[fg=colour255,bold] ↵ go #[nobold,fg=colour240]or $(prefix_words) then \` #[norange]#[range=user|bx]#[fg=colour245] ✕ #[norange]" \
+       set-option -t "$t" status-format[0] "#[align=left]#{E:@kel-bar-lead-blank}#[fg=colour214,bold] ● $name#[nobold,fg=colour252] $word${text:+#[fg=colour245] — $text}$more #[align=right]#[range=user|bgo]#[fg=colour255,bold] ↵ go #[nobold,fg=colour240]or $(prefix_words) then \` #[norange]#[range=user|bx]#[fg=colour245] ✕ #[norange]" \
        2>/dev/null
 }
 
@@ -2461,6 +2455,7 @@ popup() {
          set-option -t "=$name:" status on \; \
          set-option -t "=$name:" status-style "bg=default,fg=colour245" \; \
          set-option -t "=$name:" status-left-length 60 \; \
+         set-option -t "=$name:" status-format[0] "#[align=left]#{T:status-left}" \; \
          set-option -t "=$name:" status-left "#[range=user|close]#[fg=colour255,bold] ✕ close #[norange]#[fg=colour240] or $(prefix_words) then q" \; \
          set-option -t "=$name:" status-right "" \; \
          set-option -t "=$name:" window-status-format "" \; \
@@ -2861,8 +2856,7 @@ cmd_reload() {
         || tmux set-option -p -t "$id" @kel-ready "" 2>/dev/null || true
 
       # Respawn the pane with the new binary
-      tmux respawn-pane -k -t "$id" -e "KEL_BIN=$SELF" "exec '$KEL_SIDEBAR_BIN' 2>>'$STATE_DIR/sidebar-fail.log'" 2>/dev/null || true
-      [ -n "$wid" ] && sidebar_style "$wid"
+      tmux respawn-pane -k -t "$id" -e "KEL_BIN=$SELF" -e "KEL_SIDEBAR_BG=$KEL_SIDEBAR_BG" "exec '$KEL_SIDEBAR_BIN' 2>>'$STATE_DIR/sidebar-fail.log'" 2>/dev/null || true
       reloaded=$((reloaded + 1))
     done < <(tmux list-panes -a -F '#{@kel-sidebar} #{pane_id} #{window_id}' 2>/dev/null || true)
   fi
@@ -3011,53 +3005,54 @@ cmd_status_line() {
     def dur: floor | if . < 60 then "\(.)s"
                      elif . < 3600 then "\(. / 60 | floor)m"
                      else "\(. / 3600 | floor)h\((. % 3600) / 60 | floor | tostring | if length < 2 then "0" + . else . end)m" end;
-    # full blocks, not ▓: in the author'"'"'s terminal font ▓ and ░ were the same
-    # grey, so 23% read as a solid bar. Claude'"'"'s row already used █/░.
-    def heat: if . >= 90 then "#[fg=colour167,bold]" elif . >= 70 then "#[fg=colour179]" else "" end;
-    def sep: "#[fg=colour240]  │  #[default]";
-    def dot: "#[fg=colour240] · #[default]";
+    # kel'"'"'s state colours, by RGB like the sidebar'"'"'s; the bar wears the
+    # sidebar'"'"'s surface (status-style, set by kel-sidebar)
+    def heat: if . >= 90 then "#[fg=#f2727f,bold]" elif . >= 70 then "#[fg=#f5a742]" else "#[fg=#5fd38d]" end;
+    def tag: "#[fg=#7f7f8a]" + . + "#[default] ";
+    def dot: "#[fg=#55555e] · #[default]";
+    # a thin meter, eight cells of a line: the author found blocks heavy
+    def meter: ((. + 6) / 12.5 | floor | if . > 8 then 8 else . end) as $f
+      | heat + ([range(0; $f)] | map("━") | join("")) + "#[fg=#3a3a44]" + ([range($f; 8)] | map("━") | join("")) + "#[default]";
     now as $now
     | (.quota // null) as $q
     | ( if $q == null then null else
           [ ( $q.five_hour // null | if . == null then empty
-              elif .pct == null then "#[fg=colour238]█████#[default] ?"
-              else (.pct | floor) as $p | ((($p + 19) / 20) | floor | if . > 5 then 5 else . end) as $f
-                # a solid grey track, not ░: in the authors font ░ is a
-                # checkerboard, busy beside the filled part
-                | ($p | heat) + ([range(0; $f)] | map("█") | join(""))
-                  + "#[fg=colour238]" + ([range($f; 5)] | map("█") | join("")) + "#[default]"
-                  + ($p | heat) + " \($p)%#[default]"
-                  + (if (.resets_at // 0) > $now then "#[fg=colour245] (\(.resets_at - $now | dur))#[default]" else "" end)
+              elif .pct == null then ("5h" | tag) + "#[fg=#3a3a44]━━━━━━━━#[default] ?"
+              else (.pct | floor) as $p
+                | ("5h" | tag) + ($p | meter) + " \($p)%"
+                  + (if (.resets_at // 0) > $now then "#[fg=#7f7f8a] (\(.resets_at - $now | dur))#[default]" else "" end)
               end ),
             ( $q.seven_day // null | if . == null then empty
-              elif .pct == null then "wk ?"
-              else (.pct | floor) as $p | ($p | heat) + "wk \($p)%#[default]" end ),
+              elif .pct == null then ("7d" | tag) + "?"
+              else (.pct | floor) as $p | ("7d" | tag) + (if $p >= 70 then ($p | heat) else "" end) + "\($p)%#[default]" end ),
             ( $q.spend // null | if . == null or .pct == null or .pct < 50 then empty
-              else (.pct | floor) as $p | ($p | heat) + "spend \($p)%#[default]" end ) ]
-          | if length == 0 then null else "#[fg=colour245]claude#[default] " + join(dot) end
+              else (.pct | floor) as $p | ("spend" | tag) + ($p | heat) + "\($p)%#[default]" end ) ]
+          | if length == 0 then null else join("   ") end
         end ) as $quota
     | [ .agents[] | select(.window_id != null and .state != "dead") ] as $live
     | [ $live[] | select(.state == "waiting") ] as $wait
     | ( [ $live[] | .context.cost_usd // empty ] | add // 0 ) as $cost
-    | ( if ($live | length) == 0 then "#[fg=colour245]no agents#[default]"
-        else
-          [ ( if ($wait | length) == 0 or $sb == 1 then empty
-              else "#[range=user|jump]#[fg=colour214,bold]\($wait | length) waiting"
-                   + ( [ $wait[] | .state_since // empty ] | min
-                       | if . == null then "" else " \($now - . | dur)" end )
-                   + "#[default]#[norange]" end ),
-            ( if $cost > 0 then "$" + ($cost * 100 | round / 100 | tostring
-                                       | if test("\\.") then (if test("\\.[0-9]$") then . + "0" else . end) else . + ".00" end)
-              else empty end ) ]
-          | if length == 0 then (if $sb == 1 then null else "#[fg=colour245]nothing waiting#[default]" end) else join(dot) end
-        end ) as $fleet
+    | ( if ($live | length) == 0 then "#[fg=#7f7f8a]no agents#[default]"
+        elif $cost > 0 then "#[fg=#a1a1aa]$" + ($cost * 100 | round / 100 | tostring
+                             | if test("\\.") then (if test("\\.[0-9]$") then . + "0" else . end) else . + ".00" end) + "#[default]"
+        else null end ) as $fleet
     | ( .here // null | if . == null then null else
           .group + ( .git // null | if . == null then ""
                      else dot + (.branch // "detached")
                           + (if (.ahead // 0) > 0 then " ↑\(.ahead)" else "" end)
                           + (if (.dirty // 0) > 0 then " ●\(.dirty)" else "" end) end )
         end ) as $here
-    | [ $quota, $fleet, $here ] | map(select(. != null and . != "")) | join(sep)
+    # what waits on you, on the right: a chip that jumps there, the one home
+    # of the waiting alarm (the sidebar'"'"'s foot is Settings and Help)
+    | ( if ($wait | length) == 0 then "" else
+          ($wait | sort_by(.state_since // 0) | .[0]) as $w
+          | "#[align=right]#[range=user|jump]#[fg=#3a2c1c]▐#[bg=#3a2c1c,fg=#f5a742]needs you#[default]#[fg=#3a2c1c]▌#[default] "
+            + $w.name
+            + ( if ($w.state_since // null) == null then "" else "#[fg=#7f7f8a] \($now - $w.state_since | dur)#[default]" end )
+            + ( if ($wait | length) > 1 then "#[fg=#7f7f8a] +\(($wait | length) - 1)#[default]" else "" end )
+            + "#[norange]   "
+        end ) as $right
+    | ([ $quota, $fleet, $here ] | map(select(. != null and . != "")) | join(dot)) + $right
   ' 2>/dev/null | tr -d '\n'
 }
 
@@ -4236,7 +4231,7 @@ main() {
     _fleet)       fleet_json "$@" ;;
     _menus)       menus_click ;;
     _copy)        copy_stdin ;;
-    _cfgdump)     printf 'ctx_warn=%s notify=%s group=%s\n' "${KEL_CTX_WARN:-}" "${KEL_NOTIFY:-}" "${KEL_GROUP:-}" ;;
+    _cfgdump)     printf 'ctx_warn=%s notify=%s group=%s sidebar_bg=%s\n' "${KEL_CTX_WARN:-}" "${KEL_NOTIFY:-}" "${KEL_GROUP:-}" "${KEL_SIDEBAR_BG:-}" ;;
     statusline)   cmd_statusline ;;                # hot path — skip migrate
     jump)         cmd_jump ;;
     ''|attach)    migrate_meta; cmd_attach ;;

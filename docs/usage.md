@@ -122,39 +122,50 @@ in two sections:
   remote, so the pile is not mistaken for clutter). Worktrees with an agent,
   or the one you are in, stay listed. `enter` or a click on that row opens the
   list (`− worktrees` closes it); the choice is saved with the other folds.
-- **`agents`** — who needs you, grouped under the repo each works in, the
-  repo with the most urgent agent first: a dot per state (amber waiting, cyan
+- **`agents`** — every agent, grouped under the repo it works in, in a fixed
+  order: repos by name, agents in the order their windows were made. A state
+  change moves a dot or a chip, never a row. A dot per state (amber waiting, cyan
   working, green finished-and-not-yet-looked-at, grey idle or seen, violet
   throttled, red `●` error, red `✕` dead, grey `?` unknown) and how long,
   right-aligned. A state that needs a word gets a chip: `needs you`, `done`,
   `error`, `dead`, `quota`. A waiting agent shows what it waits for (`allow
   Bash?`); one whose turn ended on an API error shows which (`Rate limit
-  reached`). The selected agent
-  opens to its context % and cost, what it is doing — `editing sbview.go`,
-  its last tool call, read from the tail of Claude Code's own transcript —
-  and its subagents.
+  reached`). Every working agent shows what it is doing in a faint line
+  under it — `editing sbview.go`, its last tool call, read from the tail of
+  Claude Code's own transcript. The selected agent also opens to its context
+  % and cost, and its subagents.
 
-At the foot, when there is room, two groups of keys you can also click, two to
-a line:
+**Mouse first.** The top line is `kel` with two buttons:
 
 ```
-agent kelsier                       space kelsier
- e edit file     p plan              f files         g git
- r rename        x kill              d diff          e nvim
-                                     t shell         c claude
-kel                                  v PRs
- n new agent     w worktree
- | split right   - split down
- ` waiting       u usage
- v PRs           ; command
- ? keys          q quit
+  kel               ▐+ New▌ ▐⋯▌
 ```
 
-The first is **what you can do to the selected thing** — an agent, a space or
-worktree, a pane — under what it is and its name; the second is **kel's own**
-(`b restore` joins it while a previous workspace waits). No key needs shift.
-Hovering shows which half a click would hit. `|` and `-` split the pane you
-were in — right or below, at its directory — and put you in the new shell.
+`+ New` opens a menu of what makes something: a new agent, an agent in a
+worktree, split right, split down. `⋯` opens kel's own: next that needs you,
+usage, pull requests, a kel command, restore (while a previous workspace
+waits), all keys, quit. **Right-click any space, agent or pane** for its own
+menu, everything it can do: an agent's has go to it, edit last file, plan,
+cards, rename, kill, zoom, own window, and relaunch when it is dead. Every
+item shows its key on the right, so the keys are there when you want them,
+learned by using the mouse. **The entry under the pointer opens a strip of
+buttons between it and the next entry**, the rows below moving down one while
+it is hovered (inside the selection's block when it is the selected one):
+`Diff · Files · ⋯` on an agent, `Files · Git · ⋯` on a space or pane. It hides
+nothing, and stays while the pointer moves onto it. A click acts on that entry,
+and `⋯` opens its menu, for a trackpad with no right button. A menu closes on esc or a click outside it; the
+arrows and enter walk it too. `|` and `-` split the pane you were in, right
+or below, at its directory, and put you in the new shell.
+
+The foot reads `≡ Settings` and `? Help`; anything clickable lights up under
+the pointer. **Settings** replaces the lists with kel's options as switches,
+steppers and choices: which states notify you and how (bell, desktop,
+banner), the sidebar's width and background (from the terminal, or fixed),
+the context warning, PR lookups and how often. Each click writes your
+`config.toml` at once, keeping its comments; width refits every sidebar, and
+a background change restarts them. The agent command and worktree folder are
+shown, and `Open config.toml` edits the rest. `‹ Back` or esc returns. Help
+lists every key.
 
 **The keyboard gets into the sidebar only on purpose:** `Ctrl-b then space`, or
 a click. Moving between panes (`Ctrl-b o`, `Ctrl-b ←`, vim-tmux-navigator's
@@ -193,9 +204,7 @@ one-line answer comes back as a message, a longer one in a popup.
 
 Each entry is one line. The selection stands on a lighter block with a blue
 `▌` down its side and its detail inside; where you are is the name in bold. A
-doubtful `working` reads `quiet 2h` in grey italic. The footer reads `click, or Ctrl-b then space` until the sidebar
-has the keyboard — or, while an agent waits on you, `1 waiting 6m · Ctrl-b
-then \`` in yellow, which a click also jumps — then shows the keys for whatever is selected (`e edit · p plan · x kill · ?` on an agent) — `?` lists them all, and a click on a bold key there runs it.
+doubtful `working` reads `quiet 2h` in grey italic.
 
 | key | |
 |---|---|
@@ -260,8 +269,9 @@ see `setup.md` §5b to change either. Hidden sidebars do no work of their own (B
 seconds and at once when an agent changes state. `kel sidebar off` removes it
 everywhere (and new windows get none) until `kel sidebar on`; `sidebar =
 "off"` in config disables it outright; `sidebar_width` sets the width and
-`sidebar_style` its colours (kel's own by default, `fg=#e6e6e9,bg=#131316`;
-`"default"` for the terminal's own).
+`sidebar_bg` the background its colours are built from: by default it asks
+the terminal, and a terminal that does not answer (WezTerm on WSL) needs
+`sidebar_bg = "#1e1e2e"`, your theme's background.
 
 ## Groups
 
@@ -287,28 +297,23 @@ the sidebar's colours.
 
 ## The quota line, and tmux's bar
 
-**tmux's bar runs along the bottom of the window, right of the sidebar** —
-its first columns are the sidebar's black and border, so the sidebar runs to
-the bottom: what belongs to no agent, with the clock alone on the right.
+**tmux's bar runs along the bottom of the window**, on the sidebar's own
+surface, with half a row of room above it (a `▄` line in the bar's colour):
+what belongs to no agent on the left, what waits on you and the clock on the
+right. While an agent waits, the banner takes that line; only its `↵ go` and
+`✕` are clickable.
 
 ```
-claude ███░░ 58% (1h20m) · wk 41%  │  $24.10                        14:32
-```
-
-With the sidebar off it also carries the waiting count and where the pane you
-are in stands:
-
-```
-claude ███░░ 58% (1h20m) · wk 41%  │  1 waiting 6m · $24.10  │  kelsier · main
+  5h ━━━━━━━━ 58% (1h20m)   7d 41% · $24.10          ▐needs you▌ docs 6m +1   14:32
 ```
 
 | segment | |
 |---|---|
-| `claude ███`‹grey›`██ 58% (1h20m)` | the 5-hour quota and when it resets; `░░░░░ ?` once it has reset since it was last seen, never the old figure |
-| `wk 41%` | the weekly quota (`wk ?` when stale) |
+| `5h ━━━━━━━━ 58% (1h20m)` | the 5-hour quota as a thin meter (green, amber from 70%, red from 90%) and when it resets; an empty meter and `?` once it has reset since it was last seen, never the old figure |
+| `7d 41%` | the weekly quota (`7d ?` when stale) |
 | `spend 61%` | the spend limit, from 50% only |
-| `1 waiting 6m` | only while the sidebar is off: agents blocked on you, and the longest wait; `nothing waiting` when none are |
 | `$24.10` | the cost of the agents open right now |
+| `▐needs you▌ docs 6m +1` | the agent that has waited on you longest, how long, and how many more; a click jumps there. Absent when none waits |
 | `kelsier · fix-auth ↑2 ●3` | only while the sidebar is off: where the pane you are in stands |
 
 No quota shows until a session has reported one — an API-key session never

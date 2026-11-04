@@ -131,7 +131,7 @@ the bash that remains.
 │                          │                      │                   │
 │ e edit · p plan · ?      │                      │                   │
 ├──────────────────────────┴──────────────────────────────────────────┤
-│ claude ███░░ 58% (1h20m) · wk 41%  │  1 waiting 6m · $24.10          │
+│ 5h ━━━━━━━━ 58% (1h20m)   7d 41% · $24.10    ▐needs you▌ docs 6m   14:32 │
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -281,8 +281,8 @@ where it already is** — which is exactly what a sidebar per window does.
 | sections | *built (M3).* **`spaces` above `agents`** (§5), after herdr, replacing the single repo → worktree → pane tree |
 | mouse | *built (M3).* **First-class.** A click selects and jumps; the wheel scrolls; every gesture a key does on a row, a click can reach. Bubble Tea v2 reports mouse events; tmux passes them to the pane under the pointer with `mouse on`, which kel's config already sets |
 | done, until seen | *built (M3).* **`done` stays loud until you have looked at the agent**, then quietens — herdr's semantics, and what makes the dots worth reading. A **flag on `done`, not a new state**: the notifications and every reader that matches on state are untouched (`kel jump` reads the flag since 2026-11-03). When "looked at" happened is recorded from the window-change event the sidebar already receives (§9) |
-| footer | *built 2026-10-15, after daily use.* **The keys for what is selected, and only while the sidebar has the keyboard.** The author did not want to remember keys and did not want a busier sidebar, so the one footer line teaches them: an agent shows `e edit · p plan · x kill · ?`, a space `f files · g git · d diff · ?`, a server `o open · …`, as many as fit, then `?` for the rest; `enter` is left out as the key everybody tries. Without the keyboard it reads `click, or Ctrl-b then space` — how to get in, with "then" because `Ctrl-b space` read as one chord (2026-10-16) — or, while an agent waits, `1 waiting 6m · Ctrl-b then \``, the alarm tmux's bar used to carry — it names the key rather than the click (2026-10-19) because a click teaches nothing, and `` ` `` is a prefix key, so two presses; clicking it still jumps. Focus comes from the terminal's focus events (kel sets `focus-events on`), else `#{pane_active}` on each tick, and any key or click proves it |
-| actions | *built 2026-10-15, after daily use.* **The keys that do not depend on the selection, at the foot of the sidebar, clickable** — `n` new agent · `w` worktree agent · `t` shell · `Q` quit · `?` all keys. Only when the lists leave room; the same keys as everywhere, so one surface still (invariant 6). The author found the lower half empty and the keys hard to recall. *Revised 2026-10-16:* two grids, two keys to a line — the selected thing's verbs under what it is and its name, then kel's own — so the keys sit where they apply; no key needs shift (`q` quit, `v` PRs, `b` restore). *2026-10-21:* `|` split right and `-` split down join kel's own — the author wanted to click a pane into being. They split the pane you were in (tmux's last pane) at its directory, and the new shell takes the keyboard, as `prefix |` / `-` do. Dividers between your panes drag as tmux's do |
+| footer | *built 2026-10-15, after daily use.* **The keys for what is selected, and only while the sidebar has the keyboard.** The author did not want to remember keys and did not want a busier sidebar, so the one footer line teaches them: an agent shows `e edit · p plan · x kill · ?`, a space `f files · g git · d diff · ?`, a server `o open · …`, as many as fit, then `?` for the rest; `enter` is left out as the key everybody tries. Without the keyboard it reads `click, or Ctrl-b then space` — how to get in, with "then" because `Ctrl-b space` read as one chord (2026-10-16) — or, while an agent waits, `1 waiting 6m · Ctrl-b then \``, the alarm tmux's bar used to carry — it names the key rather than the click (2026-10-19) because a click teaches nothing, and `` ` `` is a prefix key, so two presses; clicking it still jumps. Focus comes from the terminal's focus events (kel sets `focus-events on`), else `#{pane_active}` on each tick, and any key or click proves it *Replaced 2026-11-04:* see actions. |
+| actions | *built 2026-10-15, after daily use.* **The keys that do not depend on the selection, at the foot of the sidebar, clickable** — `n` new agent · `w` worktree agent · `t` shell · `Q` quit · `?` all keys. Only when the lists leave room; the same keys as everywhere, so one surface still (invariant 6). The author found the lower half empty and the keys hard to recall. *Revised 2026-10-16:* two grids, two keys to a line — the selected thing's verbs under what it is and its name, then kel's own — so the keys sit where they apply; no key needs shift (`q` quit, `v` PRs, `b` restore). *2026-10-21:* `|` split right and `-` split down join kel's own — the author wanted to click a pane into being. They split the pane you were in (tmux's last pane) at its directory, and the new shell takes the keyboard, as `prefix |` / `-` do. Dividers between your panes drag as tmux's do *Replaced 2026-11-04:* mouse first — the header's `+ New` and `⋯` menus and each entry's right-click menu hold what the grid and the key footer listed, each item with its key; the foot is `≡ Settings · ? Help`. The author found the grid prioritised keys over clicking. |
 | `kel>` prompt | *built 2026-10-15.* **`prefix k`** runs a typed kel command from wherever you are — the author asked where kel commands are meant to be typed when every pane is an agent. A one-line answer is a message, a longer one a popup, never view-mode on your pane |
 | visual language | *built (M3).* §5d. Settled on rendered frames, approved by the author, before M3 was wired to live data; the background was true black (`#000000` — `colour16` was the first try, but base16-style themes such as Catppuccin repurpose palette slot 16 as an accent), the author's call after `colour234` read as grey. *Revised 2026-11-03:* kel's own theme on a `#131316` surface, one line per entry, chosen from three mockups (current, opencode-style, herdr-style) |
 
@@ -302,29 +302,43 @@ at. M2's frame — a repo name, one inverse-video row, a key hint — is the
 baseline it improves on. The rules, most of which are why herdr looks at home
 in any terminal:
 
-- **kel's own theme, by RGB** (*revised 2026-11-03*; this rule said "the
-  terminal's 16 ANSI colours, never hex" until then). The sidebar looks the
-  same on all three machines. Its surface and default foreground are the
-  pane's tmux style, so a light terminal theme cannot put dark text on it.
+- **Surfaces from the terminal's own colours** (*revised 2026-11-04*; "the
+  terminal's 16 ANSI colours, never hex" until 2026-11-03, then a fixed
+  `#131316`, which on the author's Catppuccin navy sat as a black strip). The
+  sidebar asks the terminal for its background and foreground (OSC 10/11) and
+  builds every surface and grey from them: the sidebar a shade darker than
+  the panes, the selection a shade lighter, the chips the state colour sunk
+  into the surface. State colours stay kel's. It paints every cell itself,
+  because the pane must carry no tmux style: tmux answers the query with a
+  pane's own background when it has one, and with the terminal's (learned at
+  attach) only for a pane a client is showing — so a hidden sidebar asks again
+  when shown. The answer is cached in `palette` and published to tmux as
+  `@kel-surface` for the bar under the sidebar. **WezTerm on WSL never
+  answers** (ConPTY sits between them), so `sidebar_bg = "#rrggbb"` names the
+  background to build from instead.
 - **Colour means state, and nothing else.** One colour per state (waiting,
   working, done-unseen, throttled, dead); everything else is the default
   foreground, bold, or dim. A colour that does not mean a state is noise.
 - **One line per entry**, herdr's way (*revised 2026-11-03*; two lines
   until then): the name on the left, its branch or age right-aligned and
   dim. Agents sit under a dim heading naming their repo.
+- **Rows never move on their own** (*2026-11-03*): repos by name, as spaces
+  are, agents by window index. Sorting by urgency moved the row under the
+  pointer whenever a state changed; chips, the banner and `` prefix ` `` carry
+  urgency instead.
 - **The selection is a raised block**, opencode's way: a lighter fill with a
   blank row above and below, the accent bar down its whole height, and the
   entry's detail inside it — context and cost, what it is doing, subagents;
   for a space, its ports and agent count. A waiting agent's reason shows
   whether or not it is selected.
 - **A chip names a state that needs a word**: `needs you`, `done` (unseen),
-  `dead`, `quota`, `blocked`, on a dark fill of the state's colour. Calm
+  `dead`, `quota`, `blocked`, on a dark fill of the state's colour, with half-block ends (`▐needs you▌`) so it reads rounded. Calm
   states are a dot and an age.
 - **One accent for the selected entry**, and it is not inverse video.
 - **Dots, not words, for state.** A chip appears only beside the dot, never
   as the only signal.
 - **Whitespace, not box-drawing.** No borders inside the sidebar; sections are
-  separated by a blank line and a dim lowercase label (`spaces`, `agents`).
+  separated by a blank line and a dim label (`Spaces`, `Agents`; lowercase until 2026-11-04). Repo groups under `Agents` are a blank row apart, each headed by its name and agent count.
 - **Chrome, not a box** — the sidebar's background and border come from tmux
   per-pane styles (§5a), so it reads as part of the window, the way herdr's
   does.
@@ -477,7 +491,7 @@ the second (`status-format[1]`, copied from the global `status-format[0]`).
 tmux's bar always spans the client, so it cannot start right of the sidebar;
 it looks as if it does — both lines lead with `@kel-bar-lead`, the sidebar's
 width in its black (`@kel-sidebar-pad`) and the divider, while the window has
-a sidebar and is not zoomed (the author, 2026-10-21). The strip carries the sidebar's own hint — `click, or Ctrl-b then space`, or `esc back to your pane` while the sidebar is the active pane — so the sidebar gives that line to its lists.
+a sidebar and is not zoomed (the author, 2026-10-21). *Since 2026-11-04 the bar is kel's own `status-format[0]` on the sidebar's surface (kel-sidebar sets `status-style` when it publishes its palette), with no hint in it: the mouse-first sidebar needs none. The banner row keeps a blank lead of the sidebar's width.*
 
 **When the sidebar is hidden, the bar takes location back.** Hiding is one
 global gesture (`kel sidebar off`, which leaves `sidebar-off` in the state
@@ -508,6 +522,8 @@ Opus 5.5 · ████░░ 36% ctx · $10.65
   written either way — it is the account's, wherever it was observed.
 
 ### 7b. tmux's bottom bar  ·  *built (M4)*
+
+*Redesigned 2026-11-04, from the mockups:* `5h ━━━━━━━━ 58% (1h20m)   7d 41% · $24.10` on the left, a thin meter with labels in place of `claude ███░░` and `wk`; on the right `▐needs you▌ <agent> 6m +N`, a chip that jumps there, then the clock. The waiting alarm lives here only, so the sidebar's foot stays `Settings · Help`; `nothing waiting` went with it. The bar wears the sidebar's surface. What follows is the M4 design it grew from.
 
 ```
 claude ███░░ 58% (1h20m) · wk 41%  │  1 waiting 6m · $24.10

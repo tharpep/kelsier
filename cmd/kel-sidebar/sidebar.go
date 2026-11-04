@@ -24,6 +24,7 @@ package main
 // the sidebar never re-implements a refusal.
 
 import (
+	"image/color"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -90,6 +91,14 @@ type sbModel struct {
 	help   bool
 
 	pending tea.Cmd // a command activate() started, returned by the caller
+
+	menu *sbMenu // open over the rows: kel's, from the header, or an entry's
+
+	settings bool // the settings screen, in place of the lists
+	setSel   int  // its row the keyboard is on
+
+	termBg, termFg *rgb // the terminal's colours, once it has answered
+	fixedBg        bool // KEL_SIDEBAR_BG names the background: nothing to ask
 }
 
 // ---------------------------------------------------------------- state dir
@@ -97,6 +106,100 @@ type sbModel struct {
 func sbStatePath(name string) string { return filepath.Join(fleet.StateDir(), name) }
 
 func sbStateFile() string { return sbStatePath("sidebar.json") }
+
+// ---------------------------------------------------------------- palette
+
+// The sidebar wears the terminal's theme: it asks the terminal for its
+// colours and builds its surfaces from them (applyPalette). tmux answers only
+// for a pane a client is showing, with the colours it learned from the
+// terminal — so a hidden sidebar asks again when shown, and the pane must
+// carry no background of its own, or that would be the answer. The last
+// answer is kept in `palette`, so a new sidebar draws in it at once.
+
+var lastPalette string
+
+// loadPalette applies KEL_SIDEBAR_BG when it names a colour, else the cached
+// answer. It reports whether the colour is fixed.
+func loadPalette() bool {
+	if c, ok := parseHex(os.Getenv("KEL_SIDEBAR_BG")); ok {
+		applyPalette(c, textFor(c))
+		return true
+	}
+	if b, err := os.ReadFile(sbStatePath("palette")); err == nil {
+		if f := strings.Fields(string(b)); len(f) == 2 {
+			bg, ok1 := parseHex(f[0])
+			fg, ok2 := parseHex(f[1])
+			if ok1 && ok2 {
+				applyPalette(bg, fg)
+				lastPalette = f[0] + " " + f[1]
+			}
+		}
+	}
+	return false
+}
+
+// textFor is the text colour for a background no foreground was given for.
+func textFor(bg rgb) rgb {
+	if bg.dark() {
+		return rgb{0xe6, 0xe6, 0xe9}
+	}
+	return rgb{0x1e, 0x1e, 0x24}
+}
+
+func toRGB(c color.Color) rgb {
+	r, g, b, _ := c.RGBA()
+	return rgb{uint8(r >> 8), uint8(g >> 8), uint8(b >> 8)}
+}
+
+func (m sbModel) askColours() tea.Cmd {
+	if m.fixedBg {
+		return nil
+	}
+	return tea.Batch(tea.RequestBackgroundColor, tea.RequestForegroundColor)
+}
+
+// repaint applies what the terminal answered, and shares it: the cache for
+// the next sidebar, @kel-surface for tmux's bar under the sidebar.
+func (m sbModel) repaint() {
+	if m.termBg == nil {
+		return
+	}
+	fg := textFor(*m.termBg)
+	if m.termFg != nil {
+		fg = *m.termFg
+	}
+	applyPalette(*m.termBg, fg)
+	p := m.termBg.hex() + " " + fg.hex()
+	if p == lastPalette {
+		return
+	}
+	lastPalette = p
+	_ = os.MkdirAll(fleet.StateDir(), 0o700)
+	fleet.WriteAtomic(sbStatePath("palette"), []byte(p+"\n"))
+	publishSurface()
+}
+
+// publishSurface gives tmux the sidebar's surface: @kel-surface for the lead
+// under the sidebar, and the bar's own style, so the bar is one band with it.
+func publishSurface() {
+	_ = exec.Command("tmux", "set-option", "-g", "@kel-surface", baseBg.hex(), ";",
+		"set-option", "-g", "status-style", "bg="+baseBg.hex()+",fg="+baseFg.mix(baseBg, 0.30).hex()).Run()
+}
+
+// paintFrame gives every cell of a frame the sidebar's own colours: each
+// line, padded to the width, and blank lines to the height. A reset inside a
+// line would drop to the terminal's colours, so each one takes them up again.
+func paintFrame(s string, w, h int) string {
+	lines := strings.Split(s, "\n")
+	for len(lines) < h {
+		lines = append(lines, "")
+	}
+	for i, l := range lines {
+		pad := strings.Repeat(" ", max(0, w-visWidth(l)))
+		lines[i] = base + strings.ReplaceAll(l, reset, reset+base) + pad + reset
+	}
+	return strings.Join(lines, "\n")
+}
 
 // sbShared is the view state every window's sidebar shares (spec.md §5):
 // the cursor and which spaces have been opened or closed by hand.
@@ -353,6 +456,7 @@ func tickAfter(visible bool) tea.Cmd {
 
 func (m sbModel) view() sbView {
 	v := buildView(m.doc, m.ui)
+	v.menu = m.menu
 	ask := func(title, colour, hint string) {
 		v.promptTitle, v.promptColour, v.hint2 = title, colour, hint
 	}
@@ -674,7 +778,7 @@ func (m sbModel) browse() (sbModel, tea.Cmd) {
 
 // ---------------------------------------------------------------- update
 
-func (m sbModel) Init() tea.Cmd { return tickAfter(m.visible) }
+func (m sbModel) Init() tea.Cmd { return tea.Batch(tickAfter(m.visible), m.askColours()) }
 
 func (m sbModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
@@ -687,6 +791,16 @@ func (m sbModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Batch(m.loadCmd(), tickAfter(true)) // the one tick chain
 		}
 		return m, tickAfter(false)
+
+	case tea.BackgroundColorMsg:
+		c := toRGB(msg.Color)
+		m.termBg = &c
+		m.repaint()
+
+	case tea.ForegroundColorMsg:
+		c := toRGB(msg.Color)
+		m.termFg = &c
+		m.repaint()
 
 	case sbWake:
 		was := m.visible
@@ -702,7 +816,7 @@ func (m sbModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.ui = m.withShared()
 			m.markSeen()
-			return m, tea.Batch(m.loadCmd(), tickAfter(true))
+			return m, tea.Batch(m.loadCmd(), tickAfter(true), m.askColours())
 		}
 		return m, m.loadCmd()
 
@@ -747,11 +861,84 @@ func (m sbModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case tea.MouseMotionMsg:
-		m.ui.hover, m.ui.hoverX = msg.Y+1, msg.X
+		// the entry under the pointer, read from the frame as drawn, so the
+		// pointer can move onto its button strip and keep it
+		_, drawn := renderView(m.view(), m.width, m.height, time.Now().Unix())
+		m.ui.hover, m.ui.hoverX, m.ui.hoverID = msg.Y+1, msg.X, ""
+		if msg.Y >= 0 && msg.Y < len(drawn) && len(rowButtons(drawn[msg.Y].kind)) > 0 {
+			m.ui.hoverID = drawn[msg.Y].id
+		}
+		if m.menu != nil {
+			_, refs := renderView(m.view(), m.width, m.height, time.Now().Unix())
+			if msg.Y >= 0 && msg.Y < len(refs) && strings.HasPrefix(refs[msg.Y].id, "mi:") {
+				for i, it := range m.menu.items {
+					if "mi:"+it.key == refs[msg.Y].id {
+						m.menu.sel = i
+					}
+				}
+			}
+		}
 
 	case tea.MouseClickMsg:
 		m.ui.focused = true
+		if m.settings {
+			return m.settingsClick(msg)
+		}
+		_, refs := renderView(m.view(), m.width, m.height, time.Now().Unix())
+		hit := func() lineRef {
+			if msg.Y >= 0 && msg.Y < len(refs) {
+				return refs[msg.Y]
+			}
+			return lineRef{}
+		}()
+		if m.menu != nil {
+			// an item is its key, pressed; anywhere else closes the menu
+			m.menu = nil
+			if k := strings.TrimPrefix(hit.id, "mi:"); k != hit.id && msg.Button == tea.MouseLeft {
+				return m.press(k)
+			}
+			return m, nil
+		}
+		if msg.Button == tea.MouseRight {
+			// an entry's own menu, at the row clicked
+			switch hit.kind {
+			case "agent", "space", "pane", "bg":
+				m.ui.sel = hit.id
+				m.saveShared()
+				if t, items := entryMenu(m.view()); len(items) > 0 {
+					m.menu = &sbMenu{title: t, items: items, y: msg.Y + 1}
+				}
+			}
+			return m, nil
+		}
 		if msg.Button != tea.MouseLeft {
+			return m, nil
+		}
+		for _, b := range hit.hits {
+			if msg.X >= b.x0 && msg.X < b.x1 {
+				// a row's button: on that row, whatever was selected
+				m.ui.sel = hit.id
+				m.saveShared()
+				if b.key == "menu" {
+					if ti, items := entryMenu(m.view()); len(items) > 0 {
+						m.menu = &sbMenu{title: ti, items: items, y: msg.Y + 1}
+					}
+					return m, nil
+				}
+				return m.press(b.key)
+			}
+		}
+		if hit.kind == "menu" {
+			switch hit.at(msg.X) {
+			case "menu:new":
+				m.menu = &sbMenu{title: "New", items: newMenu(), y: msg.Y + 1}
+			case "menu:kel":
+				m.menu = &sbMenu{title: "kel", items: kelMenu(m.view()), y: msg.Y + 1}
+			case "open:help":
+				m.help = true
+			case "open:settings":
+				m.settings, m.setSel = true, 1
+			}
 			return m, nil
 		}
 		if m.help { // the keys list: a key clicked is pressed; elsewhere closes it
@@ -763,7 +950,6 @@ func (m sbModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		}
-		_, refs := renderView(m.view(), m.width, m.height, time.Now().Unix())
 		if msg.Y >= 0 && msg.Y < len(refs) && refs[msg.Y].kind == "hint2" && m.cands == "" {
 			// a prompt's choices: whichever word was clicked is that key;
 			// past the last one is anywhere else
@@ -779,12 +965,8 @@ func (m sbModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.mode, m.input = modeNormal, ""
 		}
 		if msg.Y >= 0 && msg.Y < len(refs) && refs[msg.Y].kind == "action" {
-			// an action is its key, pressed — the half of the line clicked
-			k := strings.TrimPrefix(refs[msg.Y].at(msg.X), "act:")
-			if k == "enter" {
-				return m.key(tea.KeyPressMsg{Code: tea.KeyEnter})
-			}
-			return m.key(tea.KeyPressMsg{Code: rune(k[0]), Text: k})
+			// an action is its key, pressed: the waiting alarm's `
+			return m.press(strings.TrimPrefix(refs[msg.Y].at(msg.X), "act:"))
 		}
 		if msg.Y >= 0 && msg.Y < len(refs) && refs[msg.Y].id != "" {
 			m.ui.sel = refs[msg.Y].id
@@ -823,10 +1005,40 @@ func (m sbModel) withShared() uiState {
 	return ui
 }
 
+// press is a key pressed by name, as a menu item or a click presses it.
+func (m sbModel) press(k string) (tea.Model, tea.Cmd) {
+	if k == "enter" {
+		return m.key(tea.KeyPressMsg{Code: tea.KeyEnter})
+	}
+	return m.key(tea.KeyPressMsg{Code: rune(k[0]), Text: k})
+}
+
 func (m sbModel) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	k := msg.String()
 	m.msg = ""
 	m.ui.focused = true
+	if m.settings {
+		return m.settingsKey(k)
+	}
+	if m.menu != nil {
+		// the arrows walk it, enter chooses, esc or any other key closes it
+		switch k {
+		case "up", "k":
+			m.menu.sel = (m.menu.sel + len(m.menu.items) - 1) % len(m.menu.items)
+			return m, nil
+		case "down", "j":
+			m.menu.sel = (m.menu.sel + 1) % len(m.menu.items)
+			return m, nil
+		case "enter":
+			it := m.menu.items[m.menu.sel]
+			m.menu = nil
+			return m.press(it.key)
+		}
+		m.menu = nil
+		if k == "esc" {
+			return m, nil
+		}
+	}
 
 	switch m.mode {
 	case modeQuit:
@@ -1242,6 +1454,10 @@ var sbHelp = [][2]string{
 }
 
 func (m sbModel) render() string {
+	if m.settings {
+		s, _ := renderSettings(readConfig(kelConfigPath()), m.width, m.height, m.setSel, m.ui.hover, m.ui.hoverX)
+		return s
+	}
 	if m.help {
 		var b strings.Builder
 		b.WriteString(dim + truncate("keys", m.width) + reset + "\n")
@@ -1282,7 +1498,7 @@ func (m sbModel) render() string {
 }
 
 func (m sbModel) View() tea.View {
-	v := tea.NewView(m.render())
+	v := tea.NewView(paintFrame(m.render(), m.width, m.height))
 	v.AltScreen = true
 	// all motion, not just with a button down: hover needs the pointer's
 	// position when nothing is pressed
@@ -1292,15 +1508,19 @@ func (m sbModel) View() tea.View {
 }
 
 func runSidebar(once bool) {
-	m := sbModel{myPane: os.Getenv("TMUX_PANE")}
+	m := sbModel{myPane: os.Getenv("TMUX_PANE"), fixedBg: loadPalette()}
 	if m.myPane != "" {
+		// the pane wears no style of its own: tmux would give that as the
+		// terminal's background. kel up to v0.10 set one on every sidebar
+		_ = exec.Command("tmux", "set-option", "-pu", "-t", m.myPane, "window-style", ";",
+			"set-option", "-pu", "-t", m.myPane, "window-active-style").Run()
+		publishSurface()
 		// the window this sidebar sits in is current to it, whatever the
 		// fleet document's idea of the client's window — with no client
 		// attached there is none
 		if out, err := exec.Command("tmux", "display-message", "-p", "-t", m.myPane, "#{window_id}").Output(); err == nil {
 			m.ui.myWindow = strings.TrimSpace(string(out))
 		}
-		m.ui.barHint = true
 	}
 	m.ui.prefix = prefixWords()
 	m.checkVisible()
@@ -1633,4 +1853,111 @@ func completeBranch(in, dir string) (string, string) {
 		names = append(names[:6], "…")
 	}
 	return common, strings.Join(names, " ")
+}
+
+// ---------------------------------------------------------------- settings
+
+// setting changes one setting and applies it: the width refits every
+// sidebar; the background restarts them, since each was started with it.
+func (m sbModel) setting(name, how string) (tea.Model, tea.Cmd) {
+	switch name {
+	case "open":
+		dir := filepath.Dir(kelConfigPath())
+		return m, runKel(dir, nil, "_panel", "editor", dir, "kel settings")
+	case "back":
+		m.settings = false
+		return m, nil
+	}
+	bg := "#1e1e2e"
+	if m.termBg != nil {
+		bg = m.termBg.hex()
+	} else if f := strings.Fields(lastPalette); len(f) == 2 {
+		bg = f[0]
+	}
+	refit, err := applySetting(kelConfigPath(), name, how, bg)
+	if err != nil {
+		m.msg, m.msgBad = err.Error(), true
+		return m, nil
+	}
+	if !refit {
+		return m, nil
+	}
+	if name == "sidebar_bg" {
+		return m, runKelSaying("background changed", "", nil, "reload")
+	}
+	return m, runKel("", nil, "_sidebar", "fit")
+}
+
+// settingRow is the setting on screen row y, if any.
+func (m sbModel) settingRow(y int) (setRow, bool) {
+	rows := settingRows(readConfig(kelConfigPath()))
+	if i := y - 2; i >= 0 && i < len(rows) && rows[i].settable() {
+		return rows[i], true
+	}
+	return setRow{}, false
+}
+
+func (m sbModel) settingsClick(msg tea.MouseClickMsg) (tea.Model, tea.Cmd) {
+	if msg.Button != tea.MouseLeft {
+		return m, nil
+	}
+	_, refs := renderSettings(readConfig(kelConfigPath()), m.width, m.height, m.setSel, m.ui.hover, m.ui.hoverX)
+	if msg.Y < 0 || msg.Y >= len(refs) {
+		return m, nil
+	}
+	r := refs[msg.Y]
+	if r.kind == "menu" {
+		switch r.at(msg.X) {
+		case "open:settings":
+			m.settings = false
+		case "open:help":
+			m.settings, m.help = false, true
+		}
+		return m, nil
+	}
+	for _, h := range r.hits {
+		if msg.X < h.x0 || msg.X >= h.x1 {
+			continue
+		}
+		if _, ok := m.settingRow(msg.Y); ok {
+			m.setSel = msg.Y - 2
+		}
+		return m.setting(strings.TrimPrefix(r.id, "set:"), h.key)
+	}
+	return m, nil
+}
+
+func (m sbModel) settingsKey(k string) (tea.Model, tea.Cmd) {
+	rows := settingRows(readConfig(kelConfigPath()))
+	move := func(d int) {
+		for i := m.setSel + d; i >= 0 && i < len(rows); i += d {
+			if rows[i].settable() {
+				m.setSel = i
+				return
+			}
+		}
+	}
+	switch k {
+	case "esc", "q":
+		m.settings = false
+	case "down", "j":
+		move(1)
+	case "up", "k":
+		move(-1)
+	case "left", "h", "right", "l", "enter", "space":
+		if m.setSel < 0 || m.setSel >= len(rows) || !rows[m.setSel].settable() {
+			return m, nil
+		}
+		how := "toggle"
+		switch {
+		case k == "left" || k == "h":
+			how = "dec"
+		case rows[m.setSel].kind == setStep:
+			how = "inc"
+		case rows[m.setSel].kind == setButton:
+			return m.setting("open", "")
+		}
+		return m.setting(rows[m.setSel].name, how)
+	}
+	return m, nil
 }

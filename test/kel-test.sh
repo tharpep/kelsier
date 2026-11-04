@@ -581,6 +581,8 @@ rm -f "$WORK/repos/api-gw/.kel/config.toml"
 ok "sections, comments and spacing"      '[[ "$(CFG "$CH")" == *"ctx_warn=42"* ]]'
 printf 'nonsense line with no equals\nBAD_KEY = 1\nctx_warn = 7\n' > "$CH/.config/kel/config.toml"
 ok "junk lines are skipped, not fatal"   '[[ "$(CFG "$CH")" == *"ctx_warn=7"* ]]'
+printf 'sidebar_bg = "#1e1e2e"   # Catppuccin\n' > "$CH/.config/kel/config.toml"
+ok "a # inside a quoted value is the value's, not a comment" '[[ "$(CFG "$CH")" == *"sidebar_bg=#1e1e2e"* ]]'
 ok "the shipped example parses"          'HOME="$CH" XDG_CONFIG_HOME="$CH/.config" bash -c "mkdir -p $CH/.config/kel && cp $HERE/../examples/config.toml $CH/.config/kel/config.toml && cd $CH && \"$KEL\" _cfgdump" >/dev/null'
 
 section "kel config (v0.9: it had no path into it at all before this)"
@@ -697,12 +699,12 @@ tmux kill-session -t '=keltest/legacy'
 # waiting alarm, live cost — and where you stand only while the sidebar is off
 bar() { TMUX="$TMUX_TMPDIR/tmux-$(id -u)/default,$(tmux display-message -p '#{pid}'),0" "$KEL" status-line | sed 's/#\[[^]]*\]//g'; }
 ok "the bar no longer lists windows"            '[[ "$(bar)" != *docs* ]] && [[ "$(bar)" != *handmade* ]]'
-ok "  ...shows no quota no session reported"    '[[ "$(bar)" != *claude* ]] && [[ "$(bar)" != *%* ]]'
-ok "  ...and says when nothing waits"           '[[ "$(bar)" == *"nothing waiting"* ]]'
+ok "  ...shows no quota no session reported"    '[[ "$(bar)" != *5h* ]] && [[ "$(bar)" != *%* ]]'
+ok "  ...and no needs-you chip when nothing waits" '[[ "$(bar)" != *"needs you"* ]]'
 DW="$(window_of api-gw docs)"
 printf 'waiting %s\n' "$(( $(date +%s) - 400 ))" > "$STATE/$DW.state"
-ok "one waiting agent, and for how long"        '[[ "$(bar)" == *"1 waiting 6m"* ]]'
-ok "  ...a click target that jumps there"        '[[ "$(TMUX="$TMUX_TMPDIR/tmux-$(id -u)/default,$(tmux display-message -p "#{pid}"),0" "$KEL" status-line)" == *"#[range=user|jump]"*"1 waiting"*"#[norange]"* ]]'
+ok "one waiting agent, named, and for how long"  '[[ "$(bar)" == *"needs you▌ docs 6m"* ]]'
+ok "  ...a click target that jumps there"        '[[ "$(TMUX="$TMUX_TMPDIR/tmux-$(id -u)/default,$(tmux display-message -p "#{pid}"),0" "$KEL" status-line)" == *"#[range=user|jump]"*"needs you"*"#[norange]"* ]]'
 # kel jump (prefix `): the next waiting agent after the window you are in,
 # wrapping round — read from the fleet document, so the same dead check and
 # state the sidebar shows
@@ -737,13 +739,13 @@ rm -f "$STATE/$CW.state"
 now=$(date +%s)
 printf '58 %s 41 %s 12 0 %s\n' "$((now + 5400))" "$((now + 300000))" "$now" > "$STATE/quota"
 rawbar() { TMUX="$TMUX_TMPDIR/tmux-$(id -u)/default,$(tmux display-message -p '#{pid}'),0" "$KEL" status-line; }
-ok "quota: 5h as a bar with its reset, then the week" '[[ "$(bar)" == *"claude █████ 58% (1h"* ]] && [[ "$(rawbar)" == *"███#[fg=colour238]██#[default]"* ]] && [[ "$(bar)" == *"wk 41%"* ]]'
+ok "quota: 5h as a meter with its reset, then the week" '[[ "$(bar)" == *"5h ━━━━━━━━ 58% (1h"* ]] && [[ "$(rawbar)" == *"━━━━━#[fg=#3a3a44]━━━#[default]"* ]] && [[ "$(bar)" == *"7d 41%"* ]]'
 ok "  ...spend only from 50%"                   '[[ "$(bar)" != *spend* ]]'
 printf '58 %s 41 %s 61 0 %s\n' "$((now + 5400))" "$((now + 300000))" "$now" > "$STATE/quota"
 ok "  ...and then it shows"                     '[[ "$(bar)" == *"spend 61%"* ]]'
 printf '58 %s 41 %s -1 0 %s\n' "$((now - 60))" "$((now + 300000))" "$now" > "$STATE/quota"
-ok "a 5h window that has reset reads unknown, not 58%" '[[ "$(rawbar)" == *"#[fg=colour238]█████#[default] ?"* ]] && [[ "$(bar)" != *58%* ]]'
-ok "  ...while the week still shows"            '[[ "$(bar)" == *"wk 41%"* ]]'
+ok "a 5h window that has reset reads unknown, not 58%" '[[ "$(rawbar)" == *"#[fg=#3a3a44]━━━━━━━━#[default] ?"* ]] && [[ "$(bar)" != *58%* ]]'
+ok "  ...while the week still shows"            '[[ "$(bar)" == *"7d 41%"* ]]'
 ok "no location while the sidebar shows"        '[[ "$(bar)" != *main* ]]'
 # "focused" needs a client: with none attached tmux has no pane to name
 : > "$STATE/sidebar-off"
@@ -1126,20 +1128,21 @@ hold_client 40
 tmux select-window -t "$MW"; "$KEL" _sidebar wake
 SP="$(sbpane "$MW")"
 wait_until 'sbtext "$SP" | grep -q "wt"' 50
-ok "the sidebar draws spaces, then agents"       'sbtext "$SP" | grep -qx "  spaces" && sbtext "$SP" | grep -qx "  agents"'
+ok "the sidebar draws spaces, then agents"       'sbtext "$SP" | grep -qx "  Spaces" && sbtext "$SP" | grep -qx "  Agents"'
 ok "  ...the worktree as a space of its own"     '[ "$(sbtext "$SP" | grep -c "api-gw")" -ge 2 ]'
 ok "  ...and selects with a bar, not inverse video" '! tmux capture-pane -e -p -t "$SP" | grep -q "\[7m" && sbtext "$SP" | grep -q "▌"'
 
-tmux send-keys -t "$SP" j
+# a fixed order: wt's window was made first, so it sits above main1
+tmux send-keys -t "$SP" k
 wait_until '[ "$(jq -r .selected "$STATE/sidebar.json" 2>/dev/null)" = "a:$(userpane "$WTW")" ]'
-ok "j moves the shared cursor"                   '[ "$(jq -r .selected "$STATE/sidebar.json")" = "a:$(userpane "$WTW")" ]'
+ok "k moves the shared cursor"                   '[ "$(jq -r .selected "$STATE/sidebar.json")" = "a:$(userpane "$WTW")" ]'
 tmux send-keys -t "$SP" Enter
 wait_until '[ "$(active_win)" = "$WTW" ]'
 ok "enter jumps to the agent's window"          '[ "$(active_win)" = "$WTW" ]'
 
-# enter on a space header row jumps to that space's window
-tmux send-keys -t "$SP" k
-wait_until '[[ "$(jq -r .selected "$STATE/sidebar.json" 2>/dev/null)" == s:* ]]' 50
+# enter on a space header row jumps to that space's window: k up to the
+# repo's own row, the first entry, so pressing past it is harmless
+wait_until 'tmux send-keys -t "$SP" k; [[ "$(jq -r .selected "$STATE/sidebar.json" 2>/dev/null)" == s:*/api-gw ]]' 50
 tmux send-keys -t "$SP" Enter
 wait_until '[ "$(active_win)" = "$MW" ]' 50
 ok "enter on a space header row jumps to that space's window" '[ "$(active_win)" = "$MW" ]'
@@ -1148,10 +1151,15 @@ ok "enter on a space header row jumps to that space's window" '[ "$(active_win)"
 tmux select-window -t "$WTW"
 "$KEL" _sidebar wake
 SW="$(sbpane "$WTW")"
-wait_until 'sbtext "$SW" | grep -q agents'
+wait_until 'sbtext "$SW" | grep -q Agents'
 wait_until '[ "$(active_win)" = "$WTW" ]' 50
-[ "$(jq -r .selected "$STATE/sidebar.json" 2>/dev/null)" = "a:$(userpane "$WTW")" ] || tmux send-keys -t "$SW" j
-wait_until '[ "$(jq -r .selected "$STATE/sidebar.json" 2>/dev/null)" = "a:$(userpane "$WTW")" ]' 50
+# down to wt, one key at a time, each one landing before the next
+for _ in 1 2 3 4 5 6 7 8; do
+  cur="$(jq -r .selected "$STATE/sidebar.json" 2>/dev/null)"
+  [ "$cur" = "a:$(userpane "$WTW")" ] && break
+  tmux send-keys -t "$SW" j
+  wait_until '[ "$(jq -r .selected "$STATE/sidebar.json" 2>/dev/null)" != "$cur" ]' 30
+done
 tmux send-keys -t "$SW" x
 wait_until 'sbtext "$SW" | grep -q "kill wt?"'
 ok "x asks before killing, and says how to answer" 'sbtext "$SW" | grep -q "kill wt?" && sbtext "$SW" | grep -q "y yes · n no"'
@@ -1177,7 +1185,7 @@ ok "n names and starts an agent, in that space's repo" '[ -n "$(window_of api-gw
 sbdiag "$SW" "$f0"
 wait_until '[ "$(active_win)" = "$(window_of api-gw fresh)" ]' 50
 tmux select-window -t "$WTW"; "$KEL" _sidebar wake
-wait_until 'sbtext "$SW" | grep -q agents'
+wait_until 'sbtext "$SW" | grep -q Agents'
 f0=$fail
 tmux send-keys -t "$SW" n
 wait_until 'sbtext "$SW" | grep -q "^  new agent in "'
@@ -1189,7 +1197,7 @@ ok "  ...and n, enter needs no name"      '[ -n "$(window_of api-gw api-gw-1)" ]
 SPW="$(window_of api-gw api-gw-1)"
 tmux select-window -t "$SPW"; "$KEL" _sidebar wake
 SW2="$(sbpane "$SPW")"
-wait_until 'sbtext "$SW2" | grep -q agents'
+wait_until 'sbtext "$SW2" | grep -q Agents'
 tmux select-pane -t "$(userpane "$SPW")"; tmux select-pane -t "$SW2"
 tmux send-keys -t "$SW2" n
 wait_until 'sbtext "$SW2" | grep -q "^  new agent in "'
@@ -1742,6 +1750,7 @@ ok "\$KEL_NOTIFY selects which states do"   '[ "$(grep -c . "$NLOG")" = 1 ]'
 AW="$(window_of api-gw a)"
 ok "a waiting agent puts up the banner, above the bar" '[ "$(tmux show-options -v -t "=keltest:" status)" = 2 ] && [ -n "$(tmux show-options -v -t "=keltest:" status-format[1])" ] && [[ "$(tmux show-options -v -t "=keltest:" status-format[0])" == *"a#[nobold,fg=colour252] is waiting"* ]]'
 ok "  ...the sidebar hint once, on the bar, not on the banner too (#22)" '[[ "$(tmux show-options -v -t "=keltest:" status-format[0])" == *"@kel-bar-lead-blank"* ]] && [[ "$(tmux show-options -v -t "=keltest:" status-format[0])" != *"{E:@kel-bar-lead}"* ]]'
+ok "  ...and only ↵ go and ✕ are clickable, not the message under the prompt" '[[ "$(tmux show-options -v -t "=keltest:" status-format[0])" != *"bgo]#[fg=colour214,bold] ●"* ]] && [[ "$(tmux show-options -v -t "=keltest:" status-format[0])" == *"range=user|bgo]"*"↵ go"* ]]'
 ok "  ...its text printed, never run as a format" '[[ "$(tmux show-options -v -t "=keltest:" status-format[0])" == *"##(touch pwned)"* ]]'
 hook "$P" UserPromptSubmit
 # "is waiting" alone let a bug through: an emptied banner file once drew
