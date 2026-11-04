@@ -1748,6 +1748,7 @@ hook "$P" UserPromptSubmit
 # "● is" from a blank line, which contains no "is waiting".  Check the bar
 # itself is gone, not just one phrase.
 ok "  ...and takes it down when the agent moves on" '[ ! -s "$STATE/banner" ] && [ -z "$(tmux show-options -v -t "=keltest:" status-format[0] 2>/dev/null)" ] && [ -z "$(tmux show-options -v -t "=keltest:" status 2>/dev/null)" ]'
+ok "  ...leaving no empty status-format behind, which blanks the bar" '! tmux show-options -t "=keltest:" | grep -q "^status-format"'
 NEW api-gw b
 hold_client 20
 tmux select-window -t "$(window_of api-gw b)"

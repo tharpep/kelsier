@@ -2398,8 +2398,11 @@ banner_apply() {
   # when the agent moves on".
   n="$(grep -c . "$BANNER" 2>/dev/null || true)"
   if [ "${n:-0}" -eq 0 ]; then
-    tmux set-option -u -t "$t" status-position \; set-option -u -t "$t" status-format[0] \; \
-         set-option -u -t "$t" status-format[1] \; set-option -u -t "$t" status 2>/dev/null
+    # the whole array, never its indexes: unsetting [0] and [1] leaves an
+    # empty session-level status-format that overrides the global one, and
+    # the bar drew blank after every banner came down
+    tmux set-option -u -t "$t" status-position \; set-option -u -t "$t" status-format \; \
+         set-option -u -t "$t" status 2>/dev/null
     return 0
   fi
   line="$(tail -1 "$BANNER")"
