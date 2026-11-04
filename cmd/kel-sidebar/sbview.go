@@ -1131,10 +1131,13 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 		if a.agent.State != nil && (*a.agent.State == "waiting" || *a.agent.State == "error") && a.agent.Note != nil && *a.agent.Note != "" {
 			rows = append(rows, pre+mid+truncate(shortNote(*a.agent.Note), avail)+reset)
 		}
+		// what it is doing now, from Claude Code's transcript (backlog #40):
+		// on every working agent, the author found it the most useful line;
+		// quieter off the selection, where a terminal cannot make it smaller
+		working := a.agent.Doing != nil && a.agent.State != nil && *a.agent.State == "working"
 		if id == v.sel {
 			rows = append(rows, pre+mid+truncate(agentFacts(a.agent), avail)+reset)
-			// what it is doing now, from Claude Code's transcript (backlog #40)
-			if a.agent.Doing != nil && a.agent.State != nil && *a.agent.State == "working" {
+			if working {
 				rows = append(rows, pre+dim+italic+truncate(*a.agent.Doing, avail)+reset)
 			}
 			// subagents: the Task-tool helpers this agent has running
@@ -1146,6 +1149,9 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 				}
 				rows = append(rows, pre+dim+"└"+reset+" "+sc+sd+reset+" "+dim+truncate(sl, avail-4)+reset)
 			}
+		}
+		if working && id != v.sel {
+			rows = append(rows, pre+faint+italic+truncate(*a.agent.Doing, avail)+reset)
 		}
 		if a.agent.Cards != nil && a.agent.Cards.Unseen && a.agent.Cards.Latest != nil {
 			latest := a.agent.Cards.Latest

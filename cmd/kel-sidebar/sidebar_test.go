@@ -709,6 +709,18 @@ func TestAgentDoing(t *testing.T) {
 	if !strings.Contains(plain(out), "   editing sbview.go") {
 		t.Errorf("no doing line:\n%s", plain(out))
 	}
+	// and on a working agent that is not selected, quieter, in faint
+	doc = loadFixture(t, "fifteen-three-repos")
+	st := "working"
+	for i := range doc.Agents {
+		if doc.Agents[i].Name == "usage-charts" {
+			doc.Agents[i].Doing, doc.Agents[i].State = sp("running the tests"), &st
+		}
+	}
+	out, _ = renderView(buildView(doc, uiState{sel: "a:@1"}), 32, 0, 0)
+	if !strings.Contains(out, faint+italic+"running the tests") {
+		t.Errorf("an unselected working agent shows no doing line:\n%s", plain(out))
+	}
 }
 
 func sp(s string) *string { return &s }

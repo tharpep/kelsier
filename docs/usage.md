@@ -130,10 +130,10 @@ in two sections:
   right-aligned. A state that needs a word gets a chip: `needs you`, `done`,
   `error`, `dead`, `quota`. A waiting agent shows what it waits for (`allow
   Bash?`); one whose turn ended on an API error shows which (`Rate limit
-  reached`). The selected agent
-  opens to its context % and cost, what it is doing — `editing sbview.go`,
-  its last tool call, read from the tail of Claude Code's own transcript —
-  and its subagents.
+  reached`). Every working agent shows what it is doing in a faint line
+  under it — `editing sbview.go`, its last tool call, read from the tail of
+  Claude Code's own transcript. The selected agent also opens to its context
+  % and cost, and its subagents.
 
 **Mouse first.** The top line is `kel` with two buttons:
 
