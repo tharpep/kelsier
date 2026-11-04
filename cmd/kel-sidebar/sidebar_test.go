@@ -402,12 +402,19 @@ func TestSidebarHover(t *testing.T) {
 		}
 	}
 	out, _ := renderView(buildView(doc, uiState{hover: y + 1}), 32, 40, 0)
-	if !strings.Contains(strings.Split(out, "\n")[y], "▏") {
-		t.Errorf("hovered line has no hover bar: %q", plain(strings.Split(out, "\n")[y]))
+	soft := lifted.mix(baseBg, 0.25).bg()
+	if !strings.HasPrefix(strings.Split(out, "\n")[y], soft) {
+		t.Errorf("hovered line is not lifted: %q", plain(strings.Split(out, "\n")[y]))
 	}
-	// its two lines and the button strip hung under them
-	if strings.Count(out, "▏") != 3 {
-		t.Errorf("hover marks the whole entry (2 lines and its strip), got %d", strings.Count(out, "▏"))
+	// its two lines and the button strip hung under them, one lifted unit
+	lit := 0
+	for _, l := range strings.Split(out, "\n") {
+		if strings.HasPrefix(l, soft) {
+			lit++
+		}
+	}
+	if lit != 3 {
+		t.Errorf("hover lifts the whole entry (2 lines and its strip), got %d", lit)
 	}
 }
 
@@ -1193,7 +1200,7 @@ func TestHoverKeepsTheEntryInPlace(t *testing.T) {
 					if strings.Trim(lines[i], " ▌") == "" {
 						continue // a block's foot row: the selected strip's place
 					}
-					if i >= len(hl) || string([]rune(hl[i])[1:]) != string([]rune(lines[i])[1:]) {
+					if i >= len(hl) || strings.TrimRight(string([]rune(hl[i])[1:]), " ") != strings.TrimRight(string([]rune(lines[i])[1:]), " ") {
 						t.Errorf("%s h=%d: hovering row %d (%s) moved row %d:\n was %q", filepath.Base(f), h, y, r.id, i, lines[i])
 						break
 					}

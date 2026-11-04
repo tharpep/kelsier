@@ -1366,7 +1366,7 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 				if inBlock {
 					fc = lifted.mix(rgb{255, 255, 255}, 0.10) // on the block's own lift
 				}
-				st := buttonStrip(id, kind, rowButtons(kind), w, fc)
+				st := buttonStrip(id, kind, rowButtons(kind), w, fc, at == first && !inBlock)
 				if inBlock {
 					st.s = fill(lead(id)+st.s[1:], w, raised)
 					body[at] = st
@@ -1388,6 +1388,16 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 							drop = len(body) - len(tail) - 1
 						}
 						body = append(body[:drop], body[drop+1:]...)
+					}
+					// the entry and its strip share one soft lift, so the
+					// strip reads as that entry's whether it opens above or
+					// below it (above when the pointer came down past a
+					// closing strip: the author read it as the agent above's)
+					soft := lifted.mix(baseBg, 0.25)
+					for i, l := range body {
+						if l.ref.id == id {
+							body[i].s = fill(l.s, w, soft.bg())
+						}
 					}
 				}
 			}
@@ -1650,9 +1660,13 @@ func rowButtons(kind string) []sbAct {
 
 // buttonStrip is a line of an entry's buttons, hung under it, recording
 // where each one is for a click.
-func buttonStrip(id, kind string, btns []sbAct, w int, fillc rgb) line {
+func buttonStrip(id, kind string, btns []sbAct, w int, fillc rgb, above bool) line {
 	x := 6
-	s := "    " + faint + "└ " + reset
+	elbow := "└ "
+	if above {
+		elbow = "┌ " // pointing down at its entry
+	}
+	s := "    " + faint + elbow + reset
 	var hits []hit
 	for _, b := range btns {
 		n := len([]rune(b.label)) + 2
