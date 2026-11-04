@@ -854,7 +854,13 @@ func (m sbModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case tea.MouseMotionMsg:
-		m.ui.hover, m.ui.hoverX = msg.Y+1, msg.X
+		// the entry under the pointer, read from the frame as drawn, so the
+		// pointer can move onto its button strip and keep it
+		_, drawn := renderView(m.view(), m.width, m.height, time.Now().Unix())
+		m.ui.hover, m.ui.hoverX, m.ui.hoverID = msg.Y+1, msg.X, ""
+		if msg.Y >= 0 && msg.Y < len(drawn) && len(rowButtons(drawn[msg.Y].kind)) > 0 {
+			m.ui.hoverID = drawn[msg.Y].id
+		}
 		if m.menu != nil {
 			_, refs := renderView(m.view(), m.width, m.height, time.Now().Unix())
 			if msg.Y >= 0 && msg.Y < len(refs) && strings.HasPrefix(refs[msg.Y].id, "mi:") {

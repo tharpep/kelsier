@@ -405,8 +405,9 @@ func TestSidebarHover(t *testing.T) {
 	if !strings.Contains(strings.Split(out, "\n")[y], "▏") {
 		t.Errorf("hovered line has no hover bar: %q", plain(strings.Split(out, "\n")[y]))
 	}
-	if strings.Count(out, "▏") != 2 {
-		t.Errorf("hover marks the whole entry (2 lines), got %d", strings.Count(out, "▏"))
+	// its two lines and the button strip hung under them
+	if strings.Count(out, "▏") != 3 {
+		t.Errorf("hover marks the whole entry (2 lines and its strip), got %d", strings.Count(out, "▏"))
 	}
 }
 
@@ -1029,28 +1030,42 @@ func TestEntryMenu(t *testing.T) {
 	}
 }
 
-// The row under the pointer shows its buttons; one clicked acts on that row,
-// whatever was selected, and ⋯ opens its menu.
+// The entry under the pointer hangs its buttons in a strip just under it,
+// keeping its own line whole; the pointer can move onto the strip; a button
+// clicked acts on that entry, whatever was selected, and ⋯ opens its menu.
 func TestRowButtons(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	m := sbModel{doc: loadFixture(t, "fifteen-three-repos"), width: 32, height: 40, visible: true}
 	y := rowOf(t, m, "a:@2")
 	nm, _ := m.Update(tea.MouseMotionMsg{X: 4, Y: y})
 	m = nm.(sbModel)
-	out, refs := renderView(m.view(), 32, 40, 0)
-	if l := strings.Split(plain(out), "\n")[y]; !strings.Contains(l, "Diff") || !strings.Contains(l, "fix-auth") || strings.Contains(l, "needs you") {
-		t.Fatalf("hovered row: %q", l)
+	strip := func() (int, lineRef, string) {
+		out, refs := renderView(m.view(), 32, 40, 0)
+		for i, r := range refs {
+			if len(r.hits) > 0 {
+				return i, r, strings.Split(plain(out), "\n")[y]
+			}
+		}
+		t.Fatal("no button strip")
+		return 0, lineRef{}, ""
 	}
-	if len(refs[y].hits) != 3 || refs[y].hits[2].key != "menu" {
-		t.Fatalf("hits: %+v", refs[y].hits)
+	sy, r, head := strip()
+	if r.id != "a:@2" || len(r.hits) != 3 || r.hits[2].key != "menu" || sy == y {
+		t.Fatalf("strip at %d: %+v", sy, r)
 	}
-	files := refs[y].hits[1]
-	nm, cmd := m.Update(tea.MouseClickMsg{X: files.x0 + 1, Y: y, Button: tea.MouseLeft})
+	if !strings.Contains(head, "fix-auth") || !strings.Contains(head, "needs you") {
+		t.Errorf("the hovered entry's own line changed: %q", head)
+	}
+	nm, _ = m.Update(tea.MouseMotionMsg{X: r.hits[1].x0, Y: sy})
+	m = nm.(sbModel)
+	if sy2, r2, _ := strip(); sy2 != sy || r2.id != "a:@2" {
+		t.Errorf("moving onto the strip moved it: row %d %+v", sy2, r2)
+	}
+	nm, cmd := m.Update(tea.MouseClickMsg{X: r.hits[1].x0 + 1, Y: sy, Button: tea.MouseLeft})
 	if nm.(sbModel).ui.sel != "a:@2" || cmd == nil {
 		t.Errorf("Files: sel %q, cmd %v", nm.(sbModel).ui.sel, cmd)
 	}
-	dots := refs[y].hits[2]
-	nm, _ = m.Update(tea.MouseClickMsg{X: dots.x0, Y: y, Button: tea.MouseLeft})
+	nm, _ = m.Update(tea.MouseClickMsg{X: r.hits[2].x0, Y: sy, Button: tea.MouseLeft})
 	if mn := nm.(sbModel).menu; mn == nil || mn.title != "fix-auth" {
 		t.Errorf("⋯ opened %+v", mn)
 	}

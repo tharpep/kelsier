@@ -39,6 +39,7 @@ type uiState struct {
 	focused  bool   // the keyboard is in this sidebar
 	hover    int    // screen line under the pointer, plus one; 0 = none
 	hoverX   int    // and its column
+	hoverID  string // the entry it is on, its button strip included
 	prefix   string // the tmux prefix in words ("Ctrl-b"), for hints
 	restore  bool   // a previous workspace waits to be restored
 }
@@ -122,6 +123,7 @@ type sbView struct {
 	focused              bool
 	hover                int
 	hoverX               int
+	hoverID              string
 	prefix               string
 	restore              bool
 	waiting              int // agents blocked on you, and since when the oldest
@@ -219,7 +221,7 @@ func spaceKey(p fleet.Pane) (key, label string) {
 }
 
 func buildView(doc fleet.Doc, ui uiState) sbView {
-	v := sbView{sel: ui.sel, filter: ui.filter, focused: ui.focused, hover: ui.hover, hoverX: ui.hoverX,
+	v := sbView{sel: ui.sel, filter: ui.filter, focused: ui.focused, hover: ui.hover, hoverX: ui.hoverX, hoverID: ui.hoverID,
 		prefix: ui.prefix, restore: ui.restore}
 	for _, a := range doc.Agents {
 		if a.WindowID != nil && a.State != nil && *a.State == "waiting" {
@@ -1330,16 +1332,50 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 		}
 		copy(body[y:], box)
 	}
-	// the entry under the pointer shows its buttons on its first line, in
-	// place of its age and chip: what a click on it can do, at a glance
+	// the entry under the pointer shows its buttons in a strip just under it,
+	// over the line below, like a tooltip: the entry keeps its name, age and
+	// chip, and nothing moves (the author, 2026-11-04). The strip carries the
+	// entry's id, so the pointer can move onto it without it closing
 	if v.hover > 0 && v.hover <= len(body) && v.menu == nil {
-		if id, kind := body[v.hover-1].ref.id, body[v.hover-1].ref.kind; id != "" && len(rowButtons(kind)) > 0 {
-			for i, l := range body {
-				if l.ref.id != id || strings.TrimSpace(stripANSI(l.s)) == "" || strings.TrimSpace(stripANSI(l.s)) == "▌" {
-					continue
-				}
-				body[i] = withButtons(l, rowButtons(kind), w)
+		id, kind := v.hoverID, ""
+		if id == "" {
+			id = body[v.hover-1].ref.id
+		}
+		for _, l := range body {
+			if l.ref.id == id {
+				kind = l.ref.kind
 				break
+			}
+		}
+		if id != "" && len(rowButtons(kind)) > 0 {
+			first, last := -1, -1
+			for i, l := range body {
+				if l.ref.id == id && len(l.ref.hits) == 0 {
+					if first < 0 {
+						first = i
+					}
+					last = i
+				}
+			}
+			at := last + 1
+			// the selection's raised block has an empty row at its foot:
+			// the strip goes there, inside the block, covering nothing
+			inBlock := last >= 0 && strings.HasPrefix(body[last].s, raised) && strings.Trim(stripANSI(body[last].s), " ▌") == ""
+			if inBlock {
+				at = last
+			} else if at >= len(body) || body[at].ref.kind == "menu" || (h > 0 && at >= h-1) {
+				at = first - 1
+			}
+			if first >= 0 && at >= 0 && at < len(body) {
+				fc := lifted
+				if inBlock {
+					fc = lifted.mix(rgb{255, 255, 255}, 0.10) // on the block's own lift
+				}
+				st := buttonStrip(id, kind, rowButtons(kind), w, fc)
+				if inBlock {
+					st.s = fill(lead(id)+st.s[1:], w, raised)
+				}
+				body[at] = st
 			}
 		}
 	}
@@ -1598,69 +1634,21 @@ func rowButtons(kind string) []sbAct {
 	return nil
 }
 
-// withButtons cuts a line short of its right edge and draws the buttons
-// there, recording where each one is for a click.
-func withButtons(l line, btns []sbAct, w int) line {
-	var drawn string
+// buttonStrip is a line of an entry's buttons, hung under it, recording
+// where each one is for a click.
+func buttonStrip(id, kind string, btns []sbAct, w int, fillc rgb) line {
+	x := 6
+	s := "    " + faint + "└ " + reset
 	var hits []hit
-	bw := 0
-	for _, b := range btns {
-		bw += len([]rune(b.label)) + 2
-	}
-	x := w - 1 - bw
-	if x < 8 {
-		return l
-	}
 	for _, b := range btns {
 		n := len([]rune(b.label)) + 2
-		hits = append(hits, hit{x, x + n, b.key})
-		drawn += button(b.label)
-		x += n
-	}
-	// keep the row's name, up to the gap before its age and chip: those are
-	// what the buttons stand in for
-	room := w - 1 - bw - 1
-	plain := []rune(strings.TrimRight(stripANSI(l.s), " "))
-	name := len(plain)
-	for i := 4; i+1 < len(plain); i++ {
-		if plain[i] == ' ' && plain[i+1] == ' ' {
-			name = i
+		if x+n > w-1 {
 			break
 		}
+		hits = append(hits, hit{x, x + n, b.key})
+		s += buttonIn(b.label, fillc)
+		x += n
 	}
-	left := truncateStyled(l.s, room)
-	if name <= room {
-		left = cutStyled(l.s, name)
-	}
-	lifted := strings.HasPrefix(l.s, raised)
-	l.s = left + strings.Repeat(" ", max(0, w-1-bw-visWidth(left))) + drawn
-	if lifted {
-		l.s = fill(l.s, w, raised)
-	}
-	l.ref.hits = hits
-	return l
+	return line{s, lineRef{id: id, kind: kind, hits: hits}}
 }
 
-// cutStyled keeps the first n visible columns of a line holding colour
-// codes, with no ellipsis: what is cut is not part of what it shows.
-func cutStyled(s string, n int) string {
-	var b strings.Builder
-	vis, esc := 0, false
-	for _, c := range s {
-		switch {
-		case c == '\x1b':
-			esc = true
-		case esc:
-			if c == 'm' {
-				esc = false
-			}
-		default:
-			if vis == n {
-				return b.String() + reset
-			}
-			vis++
-		}
-		b.WriteRune(c)
-	}
-	return b.String()
-}
