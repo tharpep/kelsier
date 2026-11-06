@@ -222,20 +222,29 @@ func describeTool(name string, in map[string]any) string {
 	return strings.ToLower(name)
 }
 
-// withDoing fills Agent.Doing for every working agent whose session is known.
-func withDoing(doc *Doc) {
-	for i := range doc.Agents {
-		a := &doc.Agents[i]
-		if a.State == nil || *a.State != "working" {
-			continue
-		}
+// transcriptPaths is each agent's transcript, "" when it has none, by Agents index.
+func transcriptPaths(doc *Doc) []string {
+	paths := make([]string, len(doc.Agents))
+	for i, a := range doc.Agents {
 		sid := ""
 		if a.Claude != nil {
 			sid = a.Claude.SessionID
 		} else if a.ClaudeSession != nil {
 			sid = *a.ClaudeSession
 		}
-		if d := doingOf(transcriptOf(sid)); d != "" {
+		paths[i] = transcriptOf(sid)
+	}
+	return paths
+}
+
+// withDoing fills Agent.Doing for every working agent, paths[i] for Agents[i].
+func withDoing(doc *Doc, paths []string) {
+	for i := range doc.Agents {
+		a := &doc.Agents[i]
+		if a.State == nil || *a.State != "working" {
+			continue
+		}
+		if d := doingOf(paths[i]); d != "" {
 			a.Doing = sp(d)
 		}
 	}

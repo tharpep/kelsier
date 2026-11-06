@@ -37,10 +37,18 @@ func TestTitle(t *testing.T) {
 		t.Error("a missing file has no title")
 	}
 
-	// a first line longer than the first read is found by reading further
-	long := strings.Repeat("x", int(titleHeads[0]))
+	long := strings.Repeat("x", titleHead)
 	write(snap, `{"type":"user","message":{"content":"<system-reminder>`+long+`</system-reminder>"}}`, real)
-	if got := titleOf(f); got != "Go to PR 30, review, begin phase 1." {
-		t.Errorf("past the first read: %q", got)
+	if got := titleOf(f); got != "" {
+		t.Errorf("a prompt past the head has no title: %q", got)
+	}
+
+	write(snap, `{"type":"user","message":{"content":"\u001b[2J\u001b]0;pwn\u0007hi\r\b there\ttab"}}`)
+	if got := titleOf(f); got != "[2J ]0;pwn hi there tab" {
+		t.Errorf("controls: %q", got)
+	}
+	write(snap, `{"type":"user","message":{"content":"\u001b\u0007\t \r"}}`)
+	if got := titleOf(f); got != "" {
+		t.Errorf("only controls: %q", got)
 	}
 }

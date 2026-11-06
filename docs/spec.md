@@ -343,8 +343,7 @@ in any terminal:
   `+N more`, which jumps to the oldest one not shown. The agents below keep their fixed order; this list is the one place
   urgency orders anything, and it holds no row long enough to be aimed at.
 - **One summary line under every agent, chosen by its state** (*2026-11-05*):
-  working, what it is doing; waiting, the reason in the bright grey and, dim
-  after it, the command the note quotes; error, the error text in red; done or
+  working, what it is doing; waiting, the reason in the bright grey; error, the error text in red; done or
   idle, the session's **title** — the first real prompt, first line only. A
   state with nothing known has no line, never a placeholder (invariant 3);
   subagent and background children stay. The selected block opens with the
@@ -377,8 +376,8 @@ in any terminal:
 - **Nerd Font glyphs only as an option**, with a plain-Unicode default. They
   break on half the machines you SSH into, and an unknown glyph renders as a
   box — a guess displayed as a fact, in miniature.
-- **Unknown is its own look** (invariant 3): dim `?`, never a plausible
-  default.
+- **Unknown is its own look** (invariant 3): a grey `?` for the dot and dim
+  `unknown` for the age, never a plausible default.
 - *Revised 2026-10-15, from the author's screenshots:* the `›` marker went —
   `▌›○` was three marks before a name — and "you are here" is the name in
   bold, others regular. The state word on an agent's second line carries its
@@ -850,9 +849,12 @@ macOS, cached 10 s. Unknowns stay null: no ports scan means `ports: null`, not
 `agents[].title` *(2026-11-05)* is the first prompt typed in the agent's
 session: the first line of the first `user` entry in Claude Code's transcript
 whose text does not start with `<` (slash-command echoes, caveats, reminders),
-is not blank and is not `isMeta`. It is read from the transcript's head, a few
-KB to a megabyte at most, on the `--panes` path only, and kept nowhere; null
-for an agent with no Claude transcript (Antigravity, opencode).
+is not blank and is not `isMeta`. Every control character in it, ESC and tab
+included, becomes a space, so a pasted escape sequence cannot reach the
+terminal. It is read from the first 128 KB of the transcript, on the `--panes`
+path only; a prompt that starts past that has no title. It lives in the fleet
+document, so the sidebar's `sidebar-cache.json` (0600) holds it too. Null for
+an agent with no Claude transcript (Antigravity, opencode).
 
 `--dirty` is opt-in because `git status` per worktree is the expensive part
 and the bar never shows it.
