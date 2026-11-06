@@ -1127,7 +1127,7 @@ SB3="$(tmux list-panes -t "$THW" -F '#{@kel-sidebar} #{pane_id}' | awk '$1==1 {p
 alt() { tmux display -p -t "$1" '#{alternate_on}'; }
 hold_client 40
 tmux select-window -t "$SBW"; "$KEL" _sidebar wake
-wait_until '[ "$(alt "$SB1")" = 1 ] && [ "$(alt "$SB2")" = 0 ] && [ "$(alt "$SB3")" = 0 ] && tmux capture-pane -p -t "$SB3" | grep -q Spaces' 150
+wait_until '[ "$(alt "$SB1")" = 1 ] && [ "$(alt "$SB2")" = 0 ] && [ "$(alt "$SB3")" = 0 ] && tmux capture-pane -p -t "$SB3" | grep -q Spaces && tmux capture-pane -p -t "$SB3" | grep -q kel' 150
 ok "the shown sidebar is on the alternate screen, hidden ones are not" \
    '[ "$(alt "$SB1")" = 1 ] && [ "$(alt "$SB2")" = 0 ] && [ "$(alt "$SB3")" = 0 ]'
 ok "  ...and a paused pane still shows the last frame" \
