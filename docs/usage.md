@@ -72,7 +72,7 @@ kel restore [<n>]      bring back a previous workspace — windows, splits,
                        (--no-resume: start each agent fresh)
 kel restore --list     the last five saved workspaces, newest first
 kel prune [-f]         discard dead agent records (and their worktrees)
-kel doctor             check the machine; every failure prints its fix
+kel doctor             check the machine; every failure prints its fix; counts kept popup sessions
 kel config             edit config.toml (seeded from the example, once)
 kel update             fast-forward the clone kel runs from, then re-run
                        install.sh. Refuses on a dirty tree, detached HEAD,
