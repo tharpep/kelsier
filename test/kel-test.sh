@@ -1770,6 +1770,18 @@ permreq "$P" Task ""
 ok "a tool with no argument has a bare note"          '[ "$(cut -d" " -f3- "$STATE/$P.state")" = "allow Task?" ]'
 permreq "$P" Bash $'ls\x1b[31m\x07'
 ok "control characters are stripped from the note"    '[ "$(cut -d" " -f3- "$STATE/$P.state")" = "allow Bash? ls[31m" ]'
+hookm() { printf '%s' "{\"session_id\":\"s\",\"cwd\":\"$WORK\",\"hook_event_name\":\"UserPromptSubmit\",\"permission_mode\":\"$2\"}" | TMUX_PANE="$1" "$KEL" hook UserPromptSubmit; }
+hookm "$P" plan
+ok "a payload's permission_mode is written beside the state"  '[ "$(cat "$STATE/$P.mode")" = plan ]'
+ok "  ...0600"                                                '[ "$(perl -e "printf q(%o), (stat shift)[2] & 07777" "$STATE/$P.mode")" = 600 ]'
+ok "  ...and the fleet reports it on the agent"               '[ "$("$KEL" _fleet | jq -r ".agents[] | select(.name==\"a\") | .mode")" = plan ]'
+hookm "$P" default
+ok "  ...and the default mode removes the file"               '[ ! -e "$STATE/$P.mode" ]'
+hookm "$P" acceptEdits
+printf 'plan\n' > "$STATE/%998.mode"
+"$KEL" ls >/dev/null
+ok "  ...a .mode for a gone pane is pruned, a live one kept"  '[ ! -e "$STATE/%998.mode" ] && [ -e "$STATE/$P.mode" ]'
+rm -f "$STATE/$P.mode"
 hook "$P" Stop
 # the fast path at the top of bin/kel: a tool call with nothing to do leaves
 # before kel loads, and anything that has something to do still gets there

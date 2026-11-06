@@ -61,6 +61,7 @@ type Agent struct {
 	Title   *string    `json:"title,omitempty"`
 	Context *Context   `json:"context"`
 	Cards   *PaneCards `json:"cards,omitempty"`
+	Mode    *string    `json:"mode"`
 	// Unseen marks a `done` the user has not looked at since it finished: the
 	// state is newer than the epoch in <window-id>.seen, which the sidebar
 	// writes when the window is shown (spec.md §9). No .seen file means never
@@ -609,6 +610,7 @@ func Load(o Options) Doc {
 		withClaude(&doc, sd, ps)
 		withAgy(&doc)
 		withCards(&doc, sd, stalePanes)
+		withMode(&doc, sd, stalePanes)
 		paths := transcriptPaths(&doc)
 		withDoing(&doc, paths)
 		withTitle(&doc, paths)
@@ -616,6 +618,7 @@ func Load(o Options) Doc {
 	} else {
 		withAgy(&doc)
 		withCards(&doc, sd, stalePanes)
+		withMode(&doc, sd, stalePanes)
 	}
 	return doc
 }
