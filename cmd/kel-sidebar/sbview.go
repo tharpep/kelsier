@@ -39,11 +39,8 @@ type uiState struct {
 	focused  bool   // the keyboard is in this sidebar
 	hover    int    // screen line under the pointer, plus one; 0 = none
 	hoverX   int    // and its column
-	hoverID  string // the entry it is on, its button strip included
-	// its strip opens above it: the pointer came down past a strip that
-	// closes, and the entry must not slide up from under it
-	stripAbove bool
-	cacheTTL   int64 // seconds a finished agent's prompt cache stays warm
+	hoverID  string // the entry it is on
+	cacheTTL int64  // seconds a finished agent's prompt cache stays warm
 	prefix   string // the tmux prefix in words ("Ctrl-b"), for hints
 	restore  bool   // a previous workspace waits to be restored
 }
@@ -128,7 +125,6 @@ type sbView struct {
 	hover                int
 	hoverX               int
 	hoverID              string
-	stripAbove           bool
 	cacheTTL             int64
 	restore              bool
 	menu                 *sbMenu // open over the rows, or nil
@@ -144,9 +140,7 @@ type lineRef struct {
 	split int
 	right string // that action, drawn — kept here so the hover can mark it
 	from  int    // a click left of this column hits nothing
-	hits  []hit  // buttons drawn on the line, while the pointer is on it
-	// a button strip inserted between rows, moving the rows under it
-	inserted bool
+	hits  []hit  // buttons drawn on the line
 	text  string // a choices line as drawn, without colour, for hintKey
 }
 
@@ -226,7 +220,7 @@ func spaceKey(p fleet.Pane) (key, label string) {
 }
 
 func buildView(doc fleet.Doc, ui uiState) sbView {
-	v := sbView{sel: ui.sel, filter: ui.filter, focused: ui.focused, hover: ui.hover, hoverX: ui.hoverX, hoverID: ui.hoverID, stripAbove: ui.stripAbove, cacheTTL: ui.cacheTTL,
+	v := sbView{sel: ui.sel, filter: ui.filter, focused: ui.focused, hover: ui.hover, hoverX: ui.hoverX, hoverID: ui.hoverID, cacheTTL: ui.cacheTTL,
 		restore: ui.restore}
 	if doc.Panes == nil {
 		v.unknown = true
@@ -952,6 +946,7 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 		if id != v.sel {
 			for _, s := range rows {
 				add(s, r)
+				r.hits = nil
 			}
 			return
 		}
@@ -959,7 +954,45 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 		for _, s := range rows {
 			add(fill(s, w, raised), r)
 		}
-		add(fill(lead(id), w, raised), r)
+		foot := line{fill(lead(id), w, raised), r}
+		if btns := rowButtons(r.kind); len(btns) > 0 {
+			st := buttonStrip(id, r.kind, btns, w, lifted.mix(rgb{255, 255, 255}, 0.10))
+			foot = line{fill(lead(id)+st.s[1:], w, raised), st.ref}
+		}
+		add(foot.s, foot.ref)
+	}
+	// the entry under the pointer shows its buttons inline, in place of its
+	// detail. A strip is never inserted, because an inserted row moved the
+	// rows above the pointer (the author, 2026-11-05). The selection's block
+	// carries its own strip, so only a selected row without one draws them
+	inline := func(id, kind string, used int, block bool) (string, int, []hit) {
+		if v.hover == 0 || v.menu != nil || id != v.hoverID || (id == v.sel && block) {
+			return "", -1, nil
+		}
+		btns := rowButtons(kind)
+		bw := func() (n int) {
+			for _, b := range btns {
+				n += len([]rune(b.label)) + 2
+			}
+			return
+		}
+		for len(btns) > 1 && used+4+bw()+2 > w {
+			btns = btns[1:]
+		}
+		fc := lifted
+		if id == v.sel {
+			fc = lifted.mix(rgb{255, 255, 255}, 0.10)
+		}
+		x := w - 1 - bw()
+		var hits []hit
+		var sb strings.Builder
+		for _, b := range btns {
+			n := len([]rune(b.label)) + 2
+			hits = append(hits, hit{x, x + n, b.key})
+			sb.WriteString(buttonIn(b.label, fc))
+			x += n
+		}
+		return sb.String(), max(w-used-bw()-2, 1), hits
 	}
 	one := func(id string, r lineRef, s string) {
 		if id == v.sel {
@@ -1004,6 +1037,10 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 			if d != "" && len([]rune(s.label))+2+dw > av {
 				lw = max(av-2-dw, 8)
 			}
+			btns, bn, hits := inline(id, "space", 5, false)
+			if bn >= 0 {
+				lw = bn
+			}
 			lbl := truncate(s.label, lw)
 			if s.closed {
 				lbl = dim + lbl + reset
@@ -1013,6 +1050,9 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 			if room := av - visWidth(lbl) - 2; d != "" && room > 0 {
 				right = truncateStyled(d, room)
 			}
+			if bn >= 0 {
+				right, r.hits = btns, hits
+			}
 			one(id, r, spread(left, right, w))
 			indent = "  "
 		} else {
@@ -1021,6 +1061,9 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 			right := ""
 			if rw > 0 {
 				right = dim + truncate(pos, rw) + reset
+			}
+			if btns, bn, hits := inline(id, "space", 4, true); bn >= 0 {
+				right, lw, r.hits = btns, bn, hits
 			}
 			rows := []string{spread(lead(id)+" "+dot+" "+weight(truncate(s.label, lw), s.current), right, w)}
 			if id == v.sel {
@@ -1045,13 +1088,19 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 		for _, p := range s.panes {
 			pr := lineRef{id: p.PaneID, kind: "pane"}
 			lw := max(w-7-len(indent), 0)
-			lbl := truncate(paneLabel(p), lw)
+			btns, bn, hits := inline(p.PaneID, "pane", 6+len(indent), false)
+			nw := lw
+			if bn >= 0 {
+				nw, pr.hits = bn, hits
+			}
+			lbl := truncate(paneLabel(p), nw)
 			if seen[paneLabel(p)] > 1 && p.WindowName != "" {
-				if room := lw - len([]rune(lbl)) - 3; room > 0 {
+				if room := nw - len([]rune(lbl)) - 3; room > 0 {
 					lbl += dim + " · " + truncate(p.WindowName, room) + reset
 				}
 			}
-			one(p.PaneID, pr, lead(p.PaneID)+"   "+indent+paneGlyph(p.Kind)+" "+weight(lbl, p.Current))
+			one(p.PaneID, pr, spread(lead(p.PaneID)+"   "+indent+paneGlyph(p.Kind)+" "+weight(lbl, p.Current), btns, w))
+			pr.hits = nil
 			if p.Cards != nil && p.Cards.Unseen && p.Cards.Latest != nil {
 				latest := p.Cards.Latest
 				col := dim
@@ -1118,6 +1167,9 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 			default:
 				right = ""
 			}
+		}
+		if btns, bn, hits := inline(id, "agent", 4, true); bn >= 0 {
+			right, lw, r.hits = btns, bn, hits
 		}
 		rows := []string{spread(lead(id)+" "+c+d+reset+" "+weight(truncate(a.agent.Name, lw), a.current), right, w)}
 		pre := lead(id) + "   "
@@ -1327,87 +1379,6 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 		}
 		copy(body[y:], box)
 	}
-	// the entry under the pointer shows its buttons in a strip just under it,
-	// over the line below, like a tooltip: the entry keeps its name, age and
-	// chip, and nothing moves (the author, 2026-11-04). The strip carries the
-	// entry's id, so the pointer can move onto it without it closing
-	if v.hover > 0 && v.hover <= len(body) && v.menu == nil {
-		id, kind := v.hoverID, ""
-		if id == "" {
-			id = body[v.hover-1].ref.id
-		}
-		for _, l := range body {
-			if l.ref.id == id {
-				kind = l.ref.kind
-				break
-			}
-		}
-		if id != "" && len(rowButtons(kind)) > 0 {
-			first, last := -1, -1
-			for i, l := range body {
-				if l.ref.id == id && len(l.ref.hits) == 0 {
-					if first < 0 {
-						first = i
-					}
-					last = i
-				}
-			}
-			// an agent's background children hang under it: the strip goes
-			// after them
-			for last >= 0 && last+1 < len(body) && body[last+1].ref.kind == "bg" {
-				last++
-			}
-			at := last + 1
-			// the selection's raised block has an empty row at its foot:
-			// the strip goes there, inside the block, covering nothing
-			inBlock := last >= 0 && strings.HasPrefix(body[last].s, raised) && strings.Trim(stripANSI(body[last].s), " ▌") == ""
-			if inBlock {
-				at = last
-			} else if v.stripAbove {
-				at = first
-			}
-			if first >= 0 && at >= 0 && at <= len(body) {
-				fc := lifted
-				if inBlock {
-					fc = lifted.mix(rgb{255, 255, 255}, 0.10) // on the block's own lift
-				}
-				st := buttonStrip(id, kind, rowButtons(kind), w, fc, at == first && !inBlock)
-				if inBlock {
-					st.s = fill(lead(id)+st.s[1:], w, raised)
-					body[at] = st
-				} else {
-					st.ref.inserted = true
-					// between the entry and the one below, pushing the rest
-					// down while hovered: the author did not want it over
-					// the next agent. A blank row above the foot pays for it
-					body = append(body[:at], append([]line{st}, body[at:]...)...)
-					if h > 0 && len(body) > h {
-						drop := -1
-						for i := len(body) - len(tail) - 1; i > at; i-- {
-							if body[i].s == "" && body[i].ref.id == "" {
-								drop = i
-								break
-							}
-						}
-						if drop < 0 {
-							drop = len(body) - len(tail) - 1
-						}
-						body = append(body[:drop], body[drop+1:]...)
-					}
-					// the entry and its strip share one soft lift, so the
-					// strip reads as that entry's whether it opens above or
-					// below it (above when the pointer came down past a
-					// closing strip: the author read it as the agent above's)
-					soft := lifted.mix(baseBg, 0.25)
-					for i, l := range body {
-						if l.ref.id == id {
-							body[i].s = fill(l.s, w, soft.bg())
-						}
-					}
-				}
-			}
-		}
-	}
 	// hover: the entry under the pointer gets a dim bar where the selection's
 	// would be, so what a click would hit is visible before the click
 	if v.hover > 0 && v.hover <= len(body) && v.menu == nil && body[v.hover-1].ref.kind != "menu" {
@@ -1415,9 +1386,16 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 		if hl.ref.id2 != "" && v.hoverX >= hl.ref.split {
 			body[v.hover-1].ref.right = dim + "▏" + reset + hl.ref.right[1:]
 		} else if id := hl.ref.id; id != "" && id != v.sel {
+			soft := lifted.mix(baseBg, 0.25).bg()
 			for i, l := range body {
-				if l.ref.id == id && strings.HasPrefix(l.s, " ") {
+				if l.ref.id != id {
+					continue
+				}
+				if strings.HasPrefix(l.s, " ") {
 					body[i].s = dim + "▏" + reset + l.s[1:]
+				}
+				if len(rowButtons(l.ref.kind)) > 0 {
+					body[i].s = fill(body[i].s, w, soft)
 				}
 			}
 		}
@@ -1652,7 +1630,7 @@ func (v sbView) hoverOn(ref lineRef, y int) string {
 	return ref.at(v.hoverX)
 }
 
-// rowButtons are the buttons an entry of a kind shows under the pointer.
+// rowButtons are the buttons an entry of a kind shows: inline under the pointer, in the foot of its block when selected.
 func rowButtons(kind string) []sbAct {
 	switch kind {
 	case "agent":
@@ -1663,15 +1641,11 @@ func rowButtons(kind string) []sbAct {
 	return nil
 }
 
-// buttonStrip is a line of an entry's buttons, hung under it, recording
-// where each one is for a click.
-func buttonStrip(id, kind string, btns []sbAct, w int, fillc rgb, above bool) line {
+// buttonStrip is the line of an entry's buttons in the foot of its block,
+// recording where each one is for a click.
+func buttonStrip(id, kind string, btns []sbAct, w int, fillc rgb) line {
 	x := 6
-	elbow := "└ "
-	if above {
-		elbow = "┌ " // pointing down at its entry
-	}
-	s := "    " + faint + elbow + reset
+	s := "    " + faint + "└ " + reset
 	var hits []hit
 	for _, b := range btns {
 		n := len([]rune(b.label)) + 2
