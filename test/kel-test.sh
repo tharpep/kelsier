@@ -710,7 +710,7 @@ ok "  ...and no needs-you chip when nothing waits" '[[ "$(bar)" != *"needs you"*
 DW="$(window_of api-gw docs)"
 printf 'waiting %s\n' "$(( $(date +%s) - 400 ))" > "$STATE/$DW.state"
 ok "one waiting agent, named, and for how long"  '[[ "$(bar)" == *"needs you▌ docs 6m"* ]]'
-ok "  ...a click target that jumps there"        '[[ "$(TMUX="$TMUX_TMPDIR/tmux-$(id -u)/default,$(tmux display-message -p "#{pid}"),0" "$KEL" status-line)" == *"#[range=user|jump]"*"needs you"*"#[norange]"* ]]'
+ok "  ...a click target that jumps there, name and age inside it"        '[[ "$(TMUX="$TMUX_TMPDIR/tmux-$(id -u)/default,$(tmux display-message -p "#{pid}"),0" "$KEL" status-line)" == *"#[range=user|jump]"*"needs you"*" docs"*"6m"*"#[norange]"* ]]'
 # kel jump (prefix `): the next waiting agent after the window you are in,
 # wrapping round — read from the fleet document, so the same dead check and
 # state the sidebar shows
@@ -1847,7 +1847,7 @@ wait_until 'grep -q "pwned" "$KEL_TEST_TMUX_LOG" && [ "$(tmux show-options -v -t
 AW="$(window_of api-gw a)"
 ok "a waiting agent puts up the banner, above the bar" '[ "$(tmux show-options -v -t "=keltest:" status)" = 2 ] && [ -n "$(tmux show-options -v -t "=keltest:" status-format[1])" ] && [[ "$(tmux show-options -v -t "=keltest:" status-format[0])" == *"a#[nobold,fg=colour252] is waiting"* ]]'
 ok "  ...the sidebar hint once, on the bar, not on the banner too (#22)" '[[ "$(tmux show-options -v -t "=keltest:" status-format[0])" == *"@kel-bar-lead-blank"* ]] && [[ "$(tmux show-options -v -t "=keltest:" status-format[0])" != *"{E:@kel-bar-lead}"* ]]'
-ok "  ...and only ↵ go and ✕ are clickable, not the message under the prompt" '[[ "$(tmux show-options -v -t "=keltest:" status-format[0])" != *"bgo]#[fg=colour214,bold] ●"* ]] && [[ "$(tmux show-options -v -t "=keltest:" status-format[0])" == *"range=user|bgo]"*"↵ go"* ]]'
+ok "  ...and the whole message is clickable, ↵ go too, but not ✕" '[[ "$(tmux show-options -v -t "=keltest:" status-format[0])" == *"range=user|bgo]#[fg=colour214,bold] ●"* ]] && [[ "$(tmux show-options -v -t "=keltest:" status-format[0])" == *"range=user|bgo]"*"↵ go"* ]] && [[ "$(tmux show-options -v -t "=keltest:" status-format[0])" == *"#[norange]#[range=user|bx]#[fg=colour245] ✕ #[norange]" ]]'
 ok "  ...its text printed, never run as a format" '[[ "$(tmux show-options -v -t "=keltest:" status-format[0])" == *"##(touch pwned)"* ]]'
 ok "  ...the message line carries it doubled: a bare #( would run in the server" 'grep -q "display-message.*##(touch pwned)" "$KEL_TEST_TMUX_LOG" && ! sed "s/##//g" "$KEL_TEST_TMUX_LOG" | grep -q "#("'
 unset KEL_TEST_TMUX_LOG

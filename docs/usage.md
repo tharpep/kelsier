@@ -271,7 +271,7 @@ idle comes from Claude Code itself where it can say.
 
 When an agent starts waiting and you are looking elsewhere, **a banner opens
 above tmux's bar** — `● pr52 is waiting — Claude needs your
-permission to use Bash   ↵ go  or Ctrl-b then \`  ✕`, with `+1 more` when several are. Click it
+permission to use Bash   ↵ go  or Ctrl-b then \`  ✕`, with `+1 more` when several are. Click anywhere on its words
 (or `↵ go`, or the key it names) to go there; `✕` dismisses it. It also leaves by itself when you
 visit that agent or the agent moves on; it is never shown for the agent you
 are looking at. `notify_banner = "off"` turns it off. kel also rings your
@@ -311,8 +311,8 @@ the sidebar's colours.
 **tmux's bar runs along the bottom of the window**, on the sidebar's own
 surface, with half a row of room above it (a `▄` line in the bar's colour):
 what belongs to no agent on the left, what waits on you and the clock on the
-right. While an agent waits, the banner takes that line; only its `↵ go` and
-`✕` are clickable.
+right. While an agent waits, the banner takes that line; all of it but `✕`
+is a click that jumps.
 
 ```
   5h ━━━━━━━━ 58% (1h20m)   7d 41% · $24.10          ▐needs you▌ docs 6m +1   14:32
@@ -324,7 +324,7 @@ right. While an agent waits, the banner takes that line; only its `↵ go` and
 | `7d 41%` | the weekly quota (`7d ?` when stale) |
 | `spend ━━━━━━━━ 61%` | the spend limit as the same thin meter, with its reset when known, from 50% (`quota_from` in config; `0` shows it always) |
 | `$24.10` | the cost of the agents open right now |
-| `▐needs you▌ docs 6m +1` | the agent that has waited on you longest, how long, and how many more; a click jumps there. Absent when none waits |
+| `▐needs you▌ docs 6m +1` | the agent that has waited on you longest, how long, and how many more; a click on any of it jumps there. Absent when none waits |
 | `kelsier · fix-auth ↑2 ●3` | only while the sidebar is off: where the pane you are in stands |
 
 No quota shows until a session has reported one — an API-key session never

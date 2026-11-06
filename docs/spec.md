@@ -554,7 +554,7 @@ Opus 5.5 · ████░░ 36% ctx · $10.65
 
 ### 7b. tmux's bottom bar  ·  *built (M4)*
 
-*Redesigned 2026-11-04, from the mockups:* `5h ━━━━━━━━ 58% (1h20m)   7d 41% · $24.10` on the left, a thin meter with labels in place of `claude ███░░` and `wk`; on the right `▐needs you▌ <agent> 6m +N`, a chip that jumps there, then the clock. The waiting alarm lives here only, so the sidebar's foot stays `Settings · Help`; `nothing waiting` went with it. The bar wears the sidebar's surface. What follows is the M4 design it grew from.
+*Redesigned 2026-11-04, from the mockups:* `5h ━━━━━━━━ 58% (1h20m)   7d 41% · $24.10` on the left, a thin meter with labels in place of `claude ███░░` and `wk`; on the right `▐needs you▌ <agent> 6m +N`, one click target that jumps there, chip, name, age and count, then the clock. The waiting alarm lives here only, so the sidebar's foot stays `Settings · Help`; `nothing waiting` went with it. The bar wears the sidebar's surface. What follows is the M4 design it grew from.
 
 ```
 claude ███░░ 58% (1h20m) · wk 41%  │  1 waiting 6m · $24.10

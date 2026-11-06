@@ -2422,13 +2422,6 @@ banner_apply() {
   # # is doubled: tmux must print it, never read it as a format
   name="${name//#/##}"; text="${text//#/##}"
   [ "${#text}" -gt 80 ] && text="${text:0:79}…"
-  # The row keeps the bar's lead for alignment, blank: the sidebar hint is
-  # the bar's, and on both rows it read twice (#22). Only ↵ go and ✕ are
-  # clickable: the message itself sits under the agent's prompt, and a click
-  # meant for the prompt jumped to the waiting agent (2026-11-04).
-  # `↵ go` is what a click does; the key is named beside it so the banner
-  # teaches it too (the sidebar's footer says the same).  ` is a prefix key:
-  # two presses, so "then" — `Ctrl-b \`` read as one chord (2026-10-16).
   # the bar is kel.conf's second line; with no kel.conf (the suite), tmux's
   # own first
   local bar; bar="$(tmux show-options -gv 'status-format[1]' 2>/dev/null)"
@@ -2436,7 +2429,7 @@ banner_apply() {
   tmux set-option -t "$t" status 2 \; \
        set-option -u -t "$t" status-position \; \
        set-option -t "$t" status-format[1] "$bar" \; \
-       set-option -t "$t" status-format[0] "#[align=left]#{E:@kel-bar-lead-blank}#[fg=colour214,bold] ● $name#[nobold,fg=colour252] $word${text:+#[fg=colour245] — $text}$more #[align=right]#[range=user|bgo]#[fg=colour255,bold] ↵ go #[nobold,fg=colour240]or $(prefix_words) then \` #[norange]#[range=user|bx]#[fg=colour245] ✕ #[norange]" \
+       set-option -t "$t" status-format[0] "#[align=left]#{E:@kel-bar-lead-blank}#[range=user|bgo]#[fg=colour214,bold] ● $name#[nobold,fg=colour252] $word${text:+#[fg=colour245] — $text}$more #[norange]#[align=right]#[range=user|bgo]#[fg=colour255,bold] ↵ go #[nobold,fg=colour240]or $(prefix_words) then \` #[norange]#[range=user|bx]#[fg=colour245] ✕ #[norange]" \
        2>/dev/null
 }
 
