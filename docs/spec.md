@@ -1083,6 +1083,8 @@ missing.
 | `allow-passthrough on` | Neovim OSC 52 clipboard through tmux |
 | clone level with its upstream | `kel update` has something to apply |
 
+Not a probe: one `popups:` line counts the kept `_kelpop_*` sessions by the command each runs (`popups: 3 kept sessions (yazi ×2, nvim ×1)`, *2026-11-06*), because a reopened yazi or nvim stays alive and each idle one is a cost worth knowing.
+
 The upstream probe does **not** fetch. A probe that needs the network is one
 people stop running.
 

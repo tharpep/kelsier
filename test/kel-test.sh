@@ -649,6 +649,10 @@ ok "doctor caches the same schema"       '[ "$(jq -Sr "keys | join(\",\")" "$XDG
 # `set -o pipefail` would then fail this test even though the hint was printed
 dout="$(PATH="$WORK/nogh:$PATH" "$KEL" doctor 2>&1 || true)"
 ok "  ...and a failed probe prints a fix" '[[ "$dout" == *"gh auth login"* ]]'
+tmux new-session -d -s _kelpop_doc1 'sleep 9999'; tmux new-session -d -s _kelpop_doc2 'sleep 9998'
+dout="$("$KEL" doctor 2>&1 || true)"
+tmux kill-session -t =_kelpop_doc1; tmux kill-session -t =_kelpop_doc2
+ok "doctor counts the kept popup sessions by what they run" '[[ "$dout" == *"popups: 2 kept sessions (sleep ×2)"* ]]'
 
 # the completion scripts' own jq filters, run against a real document.
 # These broke silently in v0.6 (bare array -> {generated_at,current,agents})
