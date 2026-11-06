@@ -75,6 +75,7 @@ change; migrate old records in `migrate_meta`.
 |---|---|
 | `sessions/<group>/<name>.json` | one record per managed agent. Keyed by group **and** name — two repos can each have a `docs`. Carries `window_id` and, since M7, `pane_id` |
 | `<pane-id>.state` | `<state> <epoch> <note>` — one line, atomic write. A waiting note is `allow <tool>? <arg>` from `PermissionRequest`, which a later `Notification` does not overwrite |
+| `<pane-id>.mode` | the agent's `permission_mode` (`plan`, `acceptEdits`…), from any hook payload that carries it; absent while the mode is `default`. 0600, atomic. `kel-fleet` reads it as the agent's `mode` |
 | `<pane-id>.ctx` | `<pct> <cost> <in_tokens> <ctx_size> <rate_5h> <epoch> <model>`, tab-separated |
 | `snapshot.json` | full workspace shape, format v2 since v0.10: `{version:2, saved_at, saved_epoch, last, windows:[{name, group, layout, panes:[{cwd,cmd,agent?}]}]}` (`agent` is the pane's `@kel-agent`, M7). `.prev` keeps one generation. Restore still reads v1 (`groups` keyed by group) |
 | `snapshots/<epoch>.json` | previous workspaces, archived by `kel` before a fresh start so the hooks cannot overwrite them; newest five kept |

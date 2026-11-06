@@ -678,6 +678,8 @@ with the payload on stdin:
 | `PostToolUse`, every tool | `working`, only from `waiting` (*2026-10-21*) — see below. On `Edit` / `Write` / `MultiEdit` also: |
 | | *built (M5).* no change — records the last file the agent touched and its first changed line (`tool_response.structuredPatch[0].newStart`), for `e` (§5f). *Built (M6):* a write under `~/.claude/plans/` is the session's plan, recorded as `<pane-id>.plan` instead |
 
+Every payload carries `permission_mode`. A hook that sees one writes it to `<pane-id>.mode` unless it is `default`, which removes the file, and the fleet document reports it as the agent's `mode` (*2026-11-06*). The `PostToolUse` fast path leaves before reading it, so a mode changed mid-turn shows from the next prompt, stop or wait.
+
 The `PostToolUse` entry was wired with a **matcher limited to those tools**,
 because it fires after every tool call — the agent's hottest path (invariant
 5). *Unmatched since 2026-10-21:* answering a waiting agent — a permission

@@ -467,7 +467,7 @@ rm_agent_state() { # key...
   local k
   for k in "$@"; do
     [ -n "$k" ] && rm -f "$STATE_DIR/$k.state" "$STATE_DIR/$k.ctx" "$STATE_DIR/$k.edit" \
-      "$STATE_DIR/$k.plan" "$STATE_DIR/$k.view" "$STATE_DIR/$k.subs" "$STATE_DIR/$k.cards" "$STATE_DIR/$k.cards-seen"
+      "$STATE_DIR/$k.plan" "$STATE_DIR/$k.view" "$STATE_DIR/$k.subs" "$STATE_DIR/$k.cards" "$STATE_DIR/$k.cards-seen" "$STATE_DIR/$k.mode"
   done
   return 0
 }
@@ -842,7 +842,7 @@ prune_state() {
   local live f wid panes pane
   live="$(tmux list-windows -a -F '#{window_id}' 2>/dev/null; tmux list-panes -a -F '#{pane_id}' 2>/dev/null)"
   [ -n "$live" ] || return 0
-  for f in "$STATE_DIR"/*.state "$STATE_DIR"/*.ctx "$STATE_DIR"/*.seen "$STATE_DIR"/*.edit "$STATE_DIR"/*.plan "$STATE_DIR"/*.view "$STATE_DIR"/*.subs "$STATE_DIR"/*.cards "$STATE_DIR"/*.cards-seen "$STATE_DIR"/*.refit; do
+  for f in "$STATE_DIR"/*.state "$STATE_DIR"/*.ctx "$STATE_DIR"/*.seen "$STATE_DIR"/*.edit "$STATE_DIR"/*.plan "$STATE_DIR"/*.view "$STATE_DIR"/*.subs "$STATE_DIR"/*.cards "$STATE_DIR"/*.cards-seen "$STATE_DIR"/*.mode "$STATE_DIR"/*.refit; do
     [ -e "$f" ] || continue
     wid="${f##*/}"; wid="${wid%.*}"
     if ! printf '%s\n' "$live" | grep -qxF "$wid"; then
@@ -3975,6 +3975,15 @@ cmd_hook_agy() {
   esac
 }
 
+hook_mode() { # pane mode
+  case "$2" in
+    '') ;;
+    default) rm -f "$STATE_DIR/$1.mode" ;;
+    *) local t; t="$(mktemp "$STATE_DIR/.${1#%}.XXXXXX" 2>/dev/null)" || return 0
+       printf '%s\n' "$2" > "$t" && mv -f "$t" "$STATE_DIR/$1.mode" ;;
+  esac
+}
+
 cmd_hook() {
   local event="${1:-}"
   if [ "$event" = "agy" ]; then
@@ -3985,17 +3994,17 @@ cmd_hook() {
   command -v tmux >/dev/null 2>&1 || exit 0
   # one jq pass, one field per line — never `IFS=$'\t' read`, which folds runs
   # of tab into a single delimiter and shifts everything after an empty field
-  local payload evt sid cwd tool ntype ntext
+  local payload evt sid cwd tool ntype pmode ntext
   payload="${KEL_HOOK_PAYLOAD-$(cat 2>/dev/null || true)}"
   if printf '%s' "$payload" | jq -e 'has("conversationId")' >/dev/null 2>&1; then
     cmd_hook_agy "$event" <<< "$payload"
     return
   fi
   {
-    read -r evt; read -r sid; read -r cwd; read -r tool; read -r ntype; read -r ntext
+    read -r evt; read -r sid; read -r cwd; read -r tool; read -r ntype; read -r pmode; read -r ntext
   } < <(printf '%s' "$payload" | jq -r '[
       (.hook_event_name  // ""), (.session_id       // ""), (.cwd // ""),
-      (.tool_name // ""), (.notification_type // ""),
+      (.tool_name // ""), (.notification_type // ""), (.permission_mode // ""),
       # Claude Code sends the words as .message (hooks docs, Notification);
       # kel read .notification_text, which it never sends — so no real agent
       # ever showed why it waited, only the test fixtures (2026-10-17)
@@ -4026,6 +4035,7 @@ cmd_hook() {
   local wid; wid="$(tmux display-message -p -t "$pane" '#{window_id}' 2>/dev/null || true)"
   [ -z "$wid" ] && exit 0
   local prev; prev="$(state_of "$pane")"   # for the transition test below
+  hook_mode "$pane" "$pmode"
 
   if [ -n "$sid" ] && [ "$event" != SessionEnd ]; then
     local mr m mg mn
@@ -4086,7 +4096,7 @@ cmd_hook() {
       tmux refresh-client -S 2>/dev/null || true
       exit 0 ;;
     SessionEnd)
-      rm -f "$STATE_DIR/$pane.state" "$STATE_DIR/$pane.ctx"
+      rm -f "$STATE_DIR/$pane.state" "$STATE_DIR/$pane.ctx" "$STATE_DIR/$pane.mode"
       [ "$(agent_pane "$wid")" = "$pane" ] && rm -f "$STATE_DIR/$wid.state" "$STATE_DIR/$wid.ctx"
       tmux set-option -pu -t "$pane" @kel-state 2>/dev/null
       paint_state "$wid" ''

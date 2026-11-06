@@ -256,6 +256,8 @@ made fresh each time. Outside a popup `Ctrl-b q` is tmux's usual
 the footer (`kel doctor` lists them as optional). The browser is `$BROWSER`,
 else `open` / `xdg-open` / `wslview`, else Windows' `start` from WSL.
 
+`kel _fleet` reports each agent's permission mode (`plan`, `acceptEdits`, `bypassPermissions`…) as `mode`, null for the default; the sidebar does not show it yet.
+
 A finished agent stays green until its window has been shown; after that it
 dims. A waiting agent says what it waits for — `waiting 6m · allow Bash? git push origin main` — the command, or the file an edit names, cut to 80 characters. An
 agent kel has heard nothing from for half an hour while "working" reads
