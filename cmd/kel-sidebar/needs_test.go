@@ -180,8 +180,8 @@ func TestUnknownAgentSaysNoHooks(t *testing.T) {
 	out, _ := renderView(buildView(loadFixture(t, "unknowns"), uiState{}), 32, 0, 0)
 	for _, l := range strings.Split(plain(out), "\n") {
 		if strings.Contains(l, "nostate") {
-			if !strings.HasPrefix(l, "  ? nostate") || !strings.HasSuffix(strings.TrimRight(l, " "), "no hooks") {
-				t.Errorf("an agent kel has no hooks for: %q", l)
+			if !strings.HasPrefix(l, "  ? nostate") || !strings.HasSuffix(strings.TrimRight(l, " "), "unknown") {
+				t.Errorf("an agent with no state should read unknown: %q", l)
 			}
 			return
 		}

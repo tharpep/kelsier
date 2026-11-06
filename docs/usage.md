@@ -135,8 +135,8 @@ scrolls; more than four needing you fold into `+N more`.
   minutes by default, `3600` for the one-hour cache), grey idle or seen and
   cold, violet
   throttled, red `●` error, red `✕` dead, grey `?` unknown) and how long,
-  right-aligned; an agent kel has no hooks for (opencode) reads dim `no hooks`
-  there and keeps a grey `?`. A state that needs a word gets a chip: `needs
+  right-aligned; an agent with no state (opencode, or a restored session before
+  its first hook) reads dim `unknown` there and keeps a grey `?`. A state that needs a word gets a chip: `needs
   you`, `done`, `error`, `dead`, `quota`. **Every agent has one line under it,
   chosen by its state:** working, what it is doing (`editing sbview.go`, its last
   tool call, from the tail of Claude Code's own transcript); waiting, what it

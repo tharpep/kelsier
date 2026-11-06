@@ -349,9 +349,9 @@ in any terminal:
   state with nothing known has no line, never a placeholder (invariant 3);
   subagent and background children stay. The selected block opens with the
   title in full (two lines at most) above the context line, which leads with the
-  model's name when known (`Opus 5.5 · 36% · $10.65`). An agent whose state kel
-  cannot know (no hooks, as opencode) shows dim `no hooks` where the age
-  would be, and its dot stays `?`.
+  model's name when known (`Opus 5.5 · 36% · $10.65`). An agent with no state (opencode,
+  or a restored session before its first hook) shows dim `unknown` where the
+  age would be, and its dot stays `?`; never a cause kel cannot know.
 - **The selection is a raised block**, opencode's way: a lighter fill with a
   blank row above and below, the accent bar down its whole height, and the
   entry's detail inside it — context and cost, what it is doing, subagents;
