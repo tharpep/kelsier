@@ -2458,12 +2458,12 @@ banner_apply() {
 # terminal, and the suite has only control-mode clients, which cannot show
 # one. Everything up to the draw still runs for real.
 popup() {
-  local dir="$1" title="$2"; shift 2
+  local dir="$1" title="${2//#/##}"; shift 2
   if [ -n "${KEL_POPUP_TRACE:-}" ]; then
     printf '%s\t%s\t%s\n' "$dir" "$title" "$*" >> "$KEL_POPUP_TRACE"
     return 0
   fi
-  local cmd='' a name sock="${TMUX%%,*}"
+  local cmd='' a name sock="${TMUX%%,*}" tdir="${dir//#/##}"
   for a in "$@"; do cmd="$cmd $(printf '%q' "$a")"; done
   cmd="${cmd# }"
   name="_kelpop_$(printf '%s|%s' "$dir" "$1" | cksum | cut -d' ' -f1)"
@@ -2471,7 +2471,7 @@ popup() {
   # `=name:` with the colon where a pane is the target (set-option): without
   # it tmux reads `=name` as a pane and finds no such session
   if ! tmux has-session -t "=$name" 2>/dev/null; then
-    tmux new-session -d -s "$name" -c "$dir" "$cmd" \; \
+    tmux new-session -d -s "$name" -c "$tdir" "$cmd" \; \
          set-option -t "=$name:" status on \; \
          set-option -t "=$name:" status-style "bg=default,fg=colour245" \; \
          set-option -t "=$name:" status-left-length 60 \; \
@@ -2495,7 +2495,7 @@ popup() {
   # Claude's, and the title must name the key that actually closes it
   local pk; pk="$(prefix_words)"
   title="${title//prefix q/$pk then q}"
-  local -a opt=( -EE -w "${KEL_POPUP_W:-90%}" -h "${KEL_POPUP_H:-85%}" -d "$dir" -T " $title " )
+  local -a opt=( -EE -w "${KEL_POPUP_W:-90%}" -h "${KEL_POPUP_H:-85%}" -d "$tdir" -T " $title " )
   tmux_at_least 3 3 && opt+=( -b rounded )            # border styles are 3.3+
   [ -n "${TMUX_PANE:-}" ] && opt+=( -t "$TMUX_PANE" )
   # the inner client is this same server's; $TMUX unset, or tmux refuses to
@@ -3186,8 +3186,6 @@ repaint_all() {   # fleet-json
 # = off silence either. Paths are stat'ed, never `command -v`'d, on WSL: a
 # lookup walks every /mnt/c dir on PATH (CLAUDE.md, traps).
 notify() {   # title body
-  # the body is Claude Code's words, the agent quoting a command back, and
-  # display-message expands formats: a `#(…)` in it would run in the server
   local body="${2//#/##}"
   tmux display-message "${1//#/##} — $body" 2>/dev/null || true
   case "${KEL_NOTIFY_BELL:-on}" in off|0|no|false) ;; *) notify_bell ;; esac
