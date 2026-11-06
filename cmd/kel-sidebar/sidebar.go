@@ -75,6 +75,7 @@ const (
 )
 
 type sbModel struct {
+	frame         *[]lineRef
 	doc           fleet.Doc
 	ui            uiState
 	width, height int
@@ -258,7 +259,7 @@ func parseVisible(s string) (visible, active bool) {
 	return visible, visible && len(f) > 2 && f[2] == "1"
 }
 
-func probeVisible(pane string) (visible, focused bool) {
+var probeVisible = func(pane string) (visible, focused bool) {
 	if pane == "" {
 		return true, false // not in tmux (--once, a test): draw as if seen
 	}
@@ -268,6 +269,16 @@ func probeVisible(pane string) (visible, focused bool) {
 		return false, false
 	}
 	return parseVisible(string(out))
+}
+
+func (m *sbModel) clearHover() { m.ui.hover, m.ui.hoverX, m.ui.hoverID = 0, 0, "" }
+
+func (m sbModel) lastRefs() []lineRef {
+	if m.frame != nil {
+		return *m.frame
+	}
+	_, refs := renderView(m.view(), m.width, m.height, time.Now().Unix())
+	return refs
 }
 
 func (m *sbModel) checkVisible() {
@@ -838,7 +849,11 @@ func (m sbModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case sbTick:
+		was := m.visible
 		m.checkVisible()
+		if was && !m.visible {
+			m.clearHover()
+		}
 		if m.visible {
 			return m, tea.Batch(m.loadCmd(), tickAfter()) // the one tick chain
 		}
@@ -858,6 +873,9 @@ func (m sbModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		was := m.visible
 		m.checkVisible()
 		if !m.visible {
+			if was {
+				m.clearHover()
+			}
 			return m, m.pause()
 		}
 		if !was {
@@ -905,7 +923,7 @@ func (m sbModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.ui.focused = true
 	case tea.BlurMsg:
 		m.ui.focused = false
-		m.ui.hover = 0
+		m.clearHover()
 		// leaving the sidebar ends a prompt, as clicking elsewhere does
 		if m.mode == modeFilter {
 			m.mode, m.input = modeNormal, ""
@@ -914,32 +932,15 @@ func (m sbModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case tea.MouseMotionMsg:
-		// the entry under the pointer, read from the frame as drawn, so the
-		// pointer can move onto its button strip and keep it
-		_, drawn := renderView(m.view(), m.width, m.height, time.Now().Unix())
-		old := m.ui.hoverID
+		refs := m.lastRefs()
 		m.ui.hover, m.ui.hoverX, m.ui.hoverID = msg.Y+1, msg.X, ""
-		if msg.Y >= 0 && msg.Y < len(drawn) && len(rowButtons(drawn[msg.Y].kind)) > 0 {
-			m.ui.hoverID = drawn[msg.Y].id
+		if msg.Y >= 0 && msg.Y < len(refs) && len(rowButtons(refs[msg.Y].kind)) > 0 {
+			m.ui.hoverID = refs[msg.Y].id
 		}
-		if m.ui.hoverID != old {
-			// a strip inserted above the pointer closes now, lifting what is
-			// under it by a row: the new strip opens above its entry instead,
-			// in the old one's place, and the entry stays under the pointer
-			m.ui.stripAbove = false
-			for i := 0; i < msg.Y && i < len(drawn); i++ {
-				if drawn[i].inserted {
-					m.ui.stripAbove = true
-				}
-			}
-		}
-		if m.menu != nil {
-			_, refs := renderView(m.view(), m.width, m.height, time.Now().Unix())
-			if msg.Y >= 0 && msg.Y < len(refs) && strings.HasPrefix(refs[msg.Y].id, "mi:") {
-				for i, it := range m.menu.items {
-					if "mi:"+it.key == refs[msg.Y].id {
-						m.menu.sel = i
-					}
+		if m.menu != nil && msg.Y >= 0 && msg.Y < len(refs) && strings.HasPrefix(refs[msg.Y].id, "mi:") {
+			for i, it := range m.menu.items {
+				if "mi:"+it.key == refs[msg.Y].id {
+					m.menu.sel = i
 				}
 			}
 		}
@@ -1519,9 +1520,14 @@ var sbHelp = [][2]string{
 }
 
 func (m sbModel) render() string {
+	out, _ := m.draw()
+	return out
+}
+
+func (m sbModel) draw() (string, []lineRef) {
 	if m.settings {
 		s, _ := renderSettings(readConfig(kelConfigPath()), m.width, m.height, m.setSel, m.ui.hover, m.ui.hoverX)
-		return s
+		return s, nil
 	}
 	if m.help {
 		var b strings.Builder
@@ -1556,14 +1562,17 @@ func (m sbModel) render() string {
 			b.WriteString(lead + kc + truncate(pad(k, 8), m.width-1) + reset + dim + truncate(h[1], m.width-9) + reset + "\n")
 		}
 		b.WriteString(dim + truncate("click a bold key to run it", m.width) + reset)
-		return b.String()
+		return b.String(), nil
 	}
-	out, _ := renderView(m.view(), m.width, m.height, time.Now().Unix())
-	return out
+	return renderView(m.view(), m.width, m.height, time.Now().Unix())
 }
 
 func (m sbModel) View() tea.View {
-	v := tea.NewView(paintFrame(m.render(), m.width, m.height))
+	out, refs := m.draw()
+	if m.frame != nil {
+		*m.frame = refs
+	}
+	v := tea.NewView(paintFrame(out, m.width, m.height))
 	v.AltScreen = true
 	// all motion, not just with a button down: hover needs the pointer's
 	// position when nothing is pressed
@@ -1573,7 +1582,7 @@ func (m sbModel) View() tea.View {
 }
 
 func runSidebar(once bool) {
-	m := sbModel{myPane: os.Getenv("TMUX_PANE"), fixedBg: loadPalette()}
+	m := sbModel{myPane: os.Getenv("TMUX_PANE"), fixedBg: loadPalette(), frame: new([]lineRef)}
 	m.ui.cacheTTL = cacheTTL()
 	if m.myPane != "" {
 		// the pane wears no style of its own: tmux would give that as the

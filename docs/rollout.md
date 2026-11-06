@@ -316,6 +316,14 @@ the `TodoWrite` design was stale, and the plan turned out to need no new hook.
   agents. Separately, outside the repo: the author's nvim gained LSP for Go
   (gopls), Python (basedpyright + ruff) and TypeScript (TS 7's own `tsc
   --lsp`), treesitter parsers and diffview, and `EDITOR=nvim`
+- *hover buttons inline (2026-11-05):* the strip a hovered entry opened
+  between itself and the next moved rows (above the pointer when a strip
+  closed over a spacer, header or the footer; the last agent when the body
+  overflowed). The buttons now replace the hovered row's detail, the selected
+  entry's block carries them permanently, and the sidebar reads the pointer
+  from the frame `View` drew. A property test walks the pointer over every
+  fixture and asserts no row changes entry or text but the hovered ones; a
+  hidden sidebar drops its hover (`spec.md` §5c, actions)
 - *the second look at herdr and Orca (2026-10-15):* notifications by default
   (bell + Windows toast / osascript / notify-send), the reason a waiting agent
   waits on its row (`allow Bash?`), `working?` for an agent silent half an hour,

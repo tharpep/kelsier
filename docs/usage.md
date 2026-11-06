@@ -151,12 +151,12 @@ waits), all keys, quit. **Right-click any space, agent or pane** for its own
 menu, everything it can do: an agent's has go to it, edit last file, plan,
 cards, rename, kill, zoom, own window, and relaunch when it is dead. Every
 item shows its key on the right, so the keys are there when you want them,
-learned by using the mouse. **The entry under the pointer opens a strip of
-buttons between it and the next entry**, the rows below moving down one while
-it is hovered (inside the selection's block when it is the selected one):
-`Diff · Files · ⋯` on an agent, `Files · Git · ⋯` on a space or pane. It hides
-nothing, and stays while the pointer moves onto it. A click acts on that entry,
-and `⋯` opens its menu, for a trackpad with no right button. A menu closes on esc or a click outside it; the
+learned by using the mouse. **The entry under the pointer shows its buttons on its own row**, in place of
+its age, branch or chip, and its name shortens to make room: `Diff · Files · ⋯`
+on an agent, `Files · Git · ⋯` on a space or pane. Nothing is inserted, so no
+row moves. The selected entry carries the same buttons permanently, in the
+foot of its raised block, pointer or not. A click acts on that entry, and `⋯`
+opens its menu, for a trackpad with no right button. A menu closes on esc or a click outside it; the
 arrows and enter walk it too. `|` and `-` split the pane you were in, right
 or below, at its directory, and put you in the new shell.
 
