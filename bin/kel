@@ -2781,7 +2781,7 @@ paste_read() {
   [ "$(uname -s)" = Darwin ] && { pbpaste 2>/dev/null; return $?; }
   local ps=/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe
   if [ -n "${WSL_DISTRO_NAME:-}" ] && [ -x "$ps" ]; then
-    "$ps" -NoProfile -Command Get-Clipboard -Raw 2>/dev/null | tr -d '\r'
+    "$ps" -NoProfile -Command Get-Clipboard -Raw 2>/dev/null | tr -d '\r' | perl -0pe 's/\n\z//'
     return "${PIPESTATUS[0]}"
   fi
   local c
@@ -4068,11 +4068,11 @@ cmd_hook() {
        # StopFailure: the API error that ended the turn, as Claude Code showed it
        elif .hook_event_name == "StopFailure" then (.last_assistant_message // .error // "")
        elif .hook_event_name == "PermissionRequest" then
-         ((.tool_input // {}) as $i
-          | (if .tool_name == "Bash" then (($i.command // "") | tostring | split("\n")[0])
+         (((.tool_input | objects) // {}) as $i
+          | (if .tool_name == "Bash" then (($i.command // "" | tostring | split("\n")[0]) // "")
              elif (.tool_name | IN("Edit", "Write", "Read")) then ($i.file_path // "" | tostring)
              else "" end
-            | gsub("[\u0000-\u001f\u007f]"; "") | .[0:80]) as $arg
+            | gsub("[\u0000-\u001f\u007f-\u009f]"; "") | .[0:80]) as $arg
           | "allow " + (.tool_name // "") + "?" + (if $arg == "" then "" else " " + $arg end))
        else "" end)
     ] | .[] | tostring | gsub("[\n\t]"; " ")' 2>/dev/null)
@@ -4165,7 +4165,7 @@ cmd_hook() {
   if [ "$event" = Notification ] && [ "$prev" = waiting ] && [ "$state" = waiting ]; then
     read -r _ _ oldnote < "$STATE_DIR/$pane.state" 2>/dev/null || true
     case "$oldnote" in
-      "$ntext"*) keep=1 ;;
+      "$ntext"*) [ -n "$ntext" ] && keep=1 ;;
       "allow "*) [ "$ntype" = permission_prompt ] && keep=1 ;;
     esac
   fi
