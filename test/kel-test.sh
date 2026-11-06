@@ -2233,6 +2233,23 @@ ok "enter copies too (Ctrl-b [ , select, enter)" \
    "grep -q 'bind -T copy-mode *Enter send -X copy-pipe-and-cancel' '$HERE/../tmux/kel.conf'"
 ok "a double-click outside copy mode copies through kel" \
    "grep -q '^bind -n DoubleClick1Pane.*kel. _copy' '$HERE/../tmux/kel.conf'"
+# middle-click: the binding runs kel _paste, which reads the clipboard the way
+# _copy writes it. Stubs stand in for the real tools; WSL_DISTRO_NAME is unset
+# so a WSL box does not reach powershell.exe.
+ok "middle-click pastes through kel, bracketed, and never leaves output for view-mode" \
+   "grep -q '^bind -n MouseDown2Pane.*kel. _paste .#{pane_id}. >/dev/null 2>&1' '$HERE/../tmux/kel.conf'"
+mkdir -p "$WORK/pastebin"
+printf '#!/bin/sh\nprintf pasted-by-kel\n' > "$WORK/pastebin/wl-paste"; cp "$WORK/pastebin/wl-paste" "$WORK/pastebin/pbpaste"
+chmod +x "$WORK/pastebin/wl-paste" "$WORK/pastebin/pbpaste"
+PW="$(tmux new-window -d -P -F '#{pane_id}' -t "=keltest:" 'cat')"
+env -u WSL_DISTRO_NAME PATH="$WORK/pastebin:$PATH" "$KEL" _paste "$PW"
+wait_until 'tmux capture-pane -p -t "$PW" | grep -q pasted-by-kel'
+ok "_paste puts the clipboard tool's output into the pane" 'tmux capture-pane -p -t "$PW" | grep -q pasted-by-kel'
+ok "  ...and leaves no buffer behind" '! tmux list-buffers -F "#{buffer_name}" | grep -qx kel-paste'
+: > "$WORK/paste.log"
+KEL_TEST_TMUX_LOG="$WORK/paste.log" KEL_PASTE_CMD=true "$KEL" _paste "$PW"
+ok "  ...an empty clipboard says so in a message, pastes nothing" 'grep -q "display-message.*clipboard is empty" "$WORK/paste.log"'
+tmux kill-window -t "$PW"
 # the wheel down once ran `copy-mode -e` at the live view: it entered copy
 # mode without moving, so the pane stopped updating while looking unchanged
 ok "the wheel down never enters copy mode" \
