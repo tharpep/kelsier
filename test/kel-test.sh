@@ -1835,6 +1835,8 @@ ok "a waiting agent puts up the banner, above the bar" '[ "$(tmux show-options -
 ok "  ...the sidebar hint once, on the bar, not on the banner too (#22)" '[[ "$(tmux show-options -v -t "=keltest:" status-format[0])" == *"@kel-bar-lead-blank"* ]] && [[ "$(tmux show-options -v -t "=keltest:" status-format[0])" != *"{E:@kel-bar-lead}"* ]]'
 ok "  ...and only ↵ go and ✕ are clickable, not the message under the prompt" '[[ "$(tmux show-options -v -t "=keltest:" status-format[0])" != *"bgo]#[fg=colour214,bold] ●"* ]] && [[ "$(tmux show-options -v -t "=keltest:" status-format[0])" == *"range=user|bgo]"*"↵ go"* ]]'
 ok "  ...its text printed, never run as a format" '[[ "$(tmux show-options -v -t "=keltest:" status-format[0])" == *"##(touch pwned)"* ]]'
+sleep 0.5
+ok "  ...nor by the message line: no file was touched" '! [ -e pwned ] && ! [ -e "$WORK/pwned" ]'
 hook "$P" UserPromptSubmit
 # "is waiting" alone let a bug through: an emptied banner file once drew
 # "● is" from a blank line, which contains no "is waiting".  Check the bar

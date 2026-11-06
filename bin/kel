@@ -2069,7 +2069,7 @@ cmd_prompt() { # 'args'
   # not look. A longer one is a popup either way
   if [ "$(printf '%s\n' "$out" | grep -c .)" -le 1 ]; then
     if [ -n "${KEL_PROMPT_PRINT:-}" ]; then printf '%s\n' "${out:-done}"
-    else tmux display-message "kel ${args[*]}: ${out:-done}$( [ $rc = 0 ] || printf ' (failed)')"; fi
+    else out="${out//#/##}"; tmux display-message "kel ${args[*]}: ${out:-done}$( [ $rc = 0 ] || printf ' (failed)')"; fi
   else
     local f="$STATE_DIR/prompt.out"
     printf '%s\n' "$out" > "$f"
@@ -3116,8 +3116,8 @@ cmd_jump() {
 
   # say where you landed and how long it has been sitting — the jump is
   # otherwise silent, and "which one was that?" is the next question
-  case "${ep:-}" in ''|*[!0-9]*) tmux display-message "→ $label" ;;
-    *) tmux display-message "→ $label  ($st $(humanize_secs $(( $(date +%s) - ${ep%.*} ))))" ;;
+  case "${ep:-}" in ''|*[!0-9]*) tmux display-message "→ ${label//#/##}" ;;
+    *) tmux display-message "→ ${label//#/##}  ($st $(humanize_secs $(( $(date +%s) - ${ep%.*} ))))" ;;
   esac
 }
 
@@ -3186,7 +3186,10 @@ repaint_all() {   # fleet-json
 # = off silence either. Paths are stat'ed, never `command -v`'d, on WSL: a
 # lookup walks every /mnt/c dir on PATH (CLAUDE.md, traps).
 notify() {   # title body
-  tmux display-message "$1 — $2" 2>/dev/null || true
+  # the body is Claude Code's words, the agent quoting a command back, and
+  # display-message expands formats: a `#(…)` in it would run in the server
+  local body="${2//#/##}"
+  tmux display-message "${1//#/##} — $body" 2>/dev/null || true
   case "${KEL_NOTIFY_BELL:-on}" in off|0|no|false) ;; *) notify_bell ;; esac
   # Backgrounded, and deliberately not with setsid — macOS has no setsid.  A
   # hook is synchronous: Claude Code waits for it, and a PowerShell toast
