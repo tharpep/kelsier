@@ -1110,7 +1110,7 @@ SB3="$(tmux list-panes -t "$THW" -F '#{@kel-sidebar} #{pane_id}' | awk '$1==1 {p
 alt() { tmux display -p -t "$1" '#{alternate_on}'; }
 hold_client 40
 tmux select-window -t "$SBW"; "$KEL" _sidebar wake
-wait_until '[ "$(alt "$SB1")" = 1 ] && [ "$(alt "$SB2")" = 0 ] && [ "$(alt "$SB3")" = 0 ]' 80
+wait_until '[ "$(alt "$SB1")" = 1 ] && [ "$(alt "$SB2")" = 0 ] && [ "$(alt "$SB3")" = 0 ] && tmux capture-pane -p -t "$SB3" | grep -q Spaces' 150
 ok "the shown sidebar is on the alternate screen, hidden ones are not" \
    '[ "$(alt "$SB1")" = 1 ] && [ "$(alt "$SB2")" = 0 ] && [ "$(alt "$SB3")" = 0 ]'
 ok "  ...and a paused pane still shows the last frame" \
@@ -1207,7 +1207,7 @@ MW="$(window_of api-gw main1)"
 hold_client 40
 tmux select-window -t "$MW"; "$KEL" _sidebar wake
 SP="$(sbpane "$MW")"
-wait_until 'sbtext "$SP" | grep -q "wt"' 50
+wait_until 'sbtext "$SP" | grep -q "wt" && sbtext "$SP" | grep -qx "  Agents"' 150
 ok "the sidebar draws spaces, then agents"       'sbtext "$SP" | grep -qx "  Spaces" && sbtext "$SP" | grep -qx "  Agents"'
 ok "  ...the worktree as a space of its own"     '[ "$(sbtext "$SP" | grep -c "api-gw")" -ge 2 ]'
 ok "  ...and selects with a bar, not inverse video" '! tmux capture-pane -e -p -t "$SP" | grep -q "\[7m" && sbtext "$SP" | grep -q "▌"'
