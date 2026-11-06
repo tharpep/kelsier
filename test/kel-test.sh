@@ -1316,6 +1316,11 @@ UP="$(userpane "$MW")"; tmux select-pane -t "$UP"
 "$KEL" _sidebar focus "$MW"   # what prefix Space passes: the window it was pressed in
 ok "_sidebar focus puts the keyboard in the sidebar" '[ "$(tmux display -p -t "$MW" "#{pane_id}")" = "$SP" ]'
 f0=$fail
+tmux send-keys -t "$SP" /
+wait_until 'sbtext "$SP" | grep -q "filter by name"' 100
+ok "  ...which takes a key before esc is sent" 'sbtext "$SP" | grep -q "filter by name"'
+tmux send-keys -t "$SP" Escape
+wait_until '! sbtext "$SP" | grep -q "filter by name"' 100
 tmux send-keys -t "$SP" Escape
 wait_until '[ "$(tmux display -p -t "$MW" "#{pane_id}")" = "$UP" ]'
 ok "  ...and esc returns to your pane"           '[ "$(tmux display -p -t "$MW" "#{pane_id}")" = "$UP" ]'
