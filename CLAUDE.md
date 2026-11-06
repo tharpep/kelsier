@@ -142,7 +142,9 @@ before anything else sees the panes. Six lookups had to change for M2 (the
 dead check twice, `kel new`'s and relaunch's send-keys, restore's first pane,
 `resolve_pane`'s cwd match). A sidebar sets a second pane option,
 `@kel-ready`, once it can take `wake`'s SIGUSR1 — whose default is to exit,
-and a new binary's first macOS launch is slow — and wake signals only those.
+and a new binary's first macOS launch is slow — and wake signals only those, and
+only the shown one (`_sidebar wake all` for every one; `KEL_WAKE_TRACE` records
+the panes signalled).
 
 **Read it through `fleet_json`, never by re-deriving.** `kel _fleet [--dirty]
 [--land] [--pr]` — that is, `kel-fleet` — turns all of the above into one JSON

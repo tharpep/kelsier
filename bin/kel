@@ -518,15 +518,19 @@ sidebar_width_opts() {
 }
 
 
-# nudge every sidebar to look again (SIGUSR1); each decides for itself, with
-# one cheap tmux call, whether it is the visible one.  On every state hook too,
-# so it must stay one listing (invariant 5).  Only a sidebar marked @kel-ready:
-# the signal kills one still starting (backlog #41).
-sidebar_wake() {
-  local ready pid
-  tmux list-panes -a -F '#{@kel-ready} #{pane_pid}' 2>/dev/null \
-  | while read -r ready pid; do
-      [ "$ready" = 1 ] && kill -USR1 "$pid" 2>/dev/null
+# nudge the shown sidebar to look again (SIGUSR1): the one whose window is
+# active in an attached session.  A hidden one catches up by its own 10 s poll,
+# and `all` wakes those too.  On every state hook, so it must stay one listing
+# (invariant 5).  Only a sidebar marked @kel-ready: the signal kills one still
+# starting (backlog #41).  KEL_WAKE_TRACE records the panes it signals.
+sidebar_wake() { # [all]
+  local ready pid pane active attached
+  tmux list-panes -a -F '#{@kel-ready} #{pane_pid} #{pane_id} #{window_active} #{session_attached}' 2>/dev/null \
+  | while read -r ready pid pane active attached; do
+      [ "$ready" = 1 ] || continue
+      [ "${1:-}" = all ] || { [ "$active" = 1 ] && [ "${attached:-0}" -gt 0 ]; } || continue
+      [ -n "${KEL_WAKE_TRACE:-}" ] && printf '%s\n' "$pane" >> "$KEL_WAKE_TRACE"
+      kill -USR1 "$pid" 2>/dev/null
     done
   [ -n "${TMUX:-}" ] && tmux refresh-client -S 2>/dev/null || true
   return 0
@@ -4239,12 +4243,12 @@ main() {
     _own)         own_window "${1:-}" ;;
     _sidebar)     case "${1:-}" in
                     ensure) sidebar_ensure "${2:-}" ;;
-                    wake)   sidebar_wake ;;
+                    wake)   sidebar_wake "${2:-}" ;;
                     heal)   sidebar_heal ;;
                     fit)    sidebar_fit ;;
                     reap)   sidebar_reap ;;
                     focus)  sidebar_focus "${2:-}" ;;
-                    *)      die "kel _sidebar ensure|wake|heal|fit|reap|focus" ;;
+                    *)      die "kel _sidebar ensure|wake [all]|heal|fit|reap|focus" ;;
                   esac ;;
     doctor)       cmd_doctor "$@" ;;
     config)       cmd_config ;;

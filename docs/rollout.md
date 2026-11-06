@@ -295,6 +295,14 @@ the `TodoWrite` design was stale, and the plan turned out to need no new hook.
   footer now shows the selection's keys, and `prefix space` when unfocused),
   and trapped in vim inside yazi — so every popup now hosts a small tmux
   session where `prefix q` always closes it (`spec.md` §5c, "the panel")
+- *idle sidebars (2026-11-05):* 12 windows, one client, idle: the 12
+  sidebars used 30% of one core over 10 s (author's measurement). Wake now
+  signals the shown sidebar only (it was every sidebar, each forking `tmux
+  display-message`), and a hidden sidebar pauses its Program (`tea.Exec`
+  releases the terminal and stops the frame ticker) until its 10 s probe or a
+  wake finds it shown. Isolated server, one shown and three hidden sidebars,
+  `/proc` utime+stime over 10 s: 18 ticks before for three hidden sidebars
+  (~1% of a core each), 0-1 after
 - *the look (2026-11-03):* kel's own truecolor theme on a `#131316`
   surface, one line per entry with the detail right-aligned, agents grouped
   by repo, state chips, and the selection a raised block — herdr's layout

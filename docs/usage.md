@@ -268,7 +268,7 @@ permission to use Bash   ↵ go  or Ctrl-b then \`  ✕`, with `+1 more` when se
 visit that agent or the agent moves on; it is never shown for the agent you
 are looking at. `notify_banner = "off"` turns it off. kel also rings your
 terminal's bell and shows a desktop notification (a Windows toast on WSL) —
-see `setup.md` §5b to change either. Hidden sidebars do no work of their own (Bubble Tea still wakes 30 times a second, ~0.4% of a core each); the one you can see refreshes every two
+see `setup.md` §5b to change either. Hidden sidebars do no work of their own; the one you can see refreshes every two
 seconds and at once when an agent changes state. `kel sidebar off` removes it
 everywhere (and new windows get none) until `kel sidebar on`; `sidebar =
 "off"` in config disables it outright; `sidebar_width` sets the width and
