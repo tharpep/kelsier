@@ -110,7 +110,8 @@ in two sections, and above them **`Needs you`** while anything does: a row for
 each agent that is waiting, errored, or finished and not yet looked at, the
 longest-waiting first (`● fix-auth  allow Bash?  6m`). A row is a pointer: click
 it or press `enter` and you are at that agent, and its own row below is
-selected. Nothing needs you, no section.
+selected. Nothing needs you, no section. Needs you stays pinned while the list
+scrolls; more than four needing you fold into `+N more`.
 
 - **`spaces`** — where things are: one entry per repo checkout or worktree,
   with its branch, `↑` unpushed / `↓` behind, `●` uncommitted files and the
