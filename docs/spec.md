@@ -669,7 +669,8 @@ with the payload on stdin:
 |---|---|
 | `SessionStart` | `idle` |
 | `UserPromptSubmit` | `working` |
-| `Notification` | by `notification_type` — below |
+| `PermissionRequest` | `waiting`, the note `allow <tool>? <arg>`: the first line of a Bash command, or the path an Edit / Write / Read names, control characters stripped, cut to 80 characters (*2026-11-06*) |
+| `Notification` | by `notification_type` — below. A `permission_prompt` for a wait that `PermissionRequest` already noted keeps that richer note |
 | `Stop` | `done` |
 | `SessionEnd` | state file removed |
 | `PreCompact` | no change — increments `compactions` |

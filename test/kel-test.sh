@@ -1758,6 +1758,19 @@ ok "a tool run after a wait -> working"             '[ "$(state_of a)" = working
 hook "$P" Stop
 tooluse "$P" Bash
 ok "  ...but a tool never wakes a finished agent"   '[ "$(state_of a)" = done ]'
+permreq() { jq -nc --arg c "$3" --arg t "$2" '{session_id:"s",cwd:"'"$WORK"'",hook_event_name:"PermissionRequest",tool_name:$t,tool_input:(if $t == "Bash" then {command:$c} elif $t == "Task" then {} else {file_path:$c} end)}' | TMUX_PANE="$1" "$KEL" hook PermissionRequest; }
+permreq "$P" Bash $'git push origin main\nsecond line'
+ok "a PermissionRequest waits, the note carrying the command" '[ "$(state_of a)" = waiting ] && [ "$(cut -d" " -f3- "$STATE/$P.state")" = "allow Bash? git push origin main" ]'
+hook "$P" Notification permission_prompt "Claude needs your permission to use Bash"
+ok "  ...and the Notification for the same wait keeps it"  '[ "$(cut -d" " -f3- "$STATE/$P.state")" = "allow Bash? git push origin main" ]'
+ok "  ...and the fleet reports it as the note"            '[ "$("$KEL" _fleet | jq -r ".agents[] | select(.name==\"a\") | .note")" = "allow Bash? git push origin main" ]'
+permreq "$P" Edit "/src/$(printf 'x%.0s' $(seq 100))"
+ok "an edit asks about its file, cut to 80 characters" '[ "$(cut -d" " -f5 "$STATE/$P.state" | tr -d "\n" | wc -c | tr -d " ")" = 80 ]'
+permreq "$P" Task ""
+ok "a tool with no argument has a bare note"          '[ "$(cut -d" " -f3- "$STATE/$P.state")" = "allow Task?" ]'
+permreq "$P" Bash $'ls\x1b[31m\x07'
+ok "control characters are stripped from the note"    '[ "$(cut -d" " -f3- "$STATE/$P.state")" = "allow Bash? ls[31m" ]'
+hook "$P" Stop
 # the fast path at the top of bin/kel: a tool call with nothing to do leaves
 # before kel loads, and anything that has something to do still gets there
 traced() { printf '%s' "{\"session_id\":\"s\",\"cwd\":\"$WORK\",\"hook_event_name\":\"PostToolUse\",\"tool_name\":\"$2\",\"tool_input\":{}}" | TMUX_PANE="$1" bash -x "$KEL" hook PostToolUse 2>&1 | grep -c '^+'; }

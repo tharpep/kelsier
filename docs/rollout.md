@@ -467,6 +467,7 @@ the `TodoWrite` design was stale, and the plan turned out to need no new hook.
   taking it over at the top. Next, planned with the author: agents tracked per
   pane, so an agent can be a split.
 - *sidebar fit loop (2026-11-05, #33):* a window shorter than its client read its sidebar as `moved`, and `fit` re-made it about 3.5 times a second. `fit` now reads "docked" as within one row of the window height too (the border status line), and re-makes a window's sidebar at most once per 30 s (`<window-id>.refit`); the trigger was not reproduced.
+- *polish batch, hooks and bash (2026-11-06):* a `PermissionRequest` hook writes the waiting note as `allow <tool>? <arg>`, and the later `Notification` for the same wait no longer overwrites it. Timestamped state writes were skipped: Claude Code runs hooks synchronously, so there is no ordering race to guard.
 
 **M7 — agents as panes**  ·  *planned 2026-10-21 with the author*
 

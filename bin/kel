@@ -4002,6 +4002,13 @@ cmd_hook() {
       (if .hook_event_name == "Notification" then (.message // .notification_text // "")
        # StopFailure: the API error that ended the turn, as Claude Code showed it
        elif .hook_event_name == "StopFailure" then (.last_assistant_message // .error // "")
+       elif .hook_event_name == "PermissionRequest" then
+         ((.tool_input // {}) as $i
+          | (if .tool_name == "Bash" then (($i.command // "") | tostring | split("\n")[0])
+             elif (.tool_name | IN("Edit", "Write", "Read")) then ($i.file_path // "" | tostring)
+             else "" end
+            | gsub("[\u0000-\u001f\u007f]"; "") | .[0:80]) as $arg
+          | "allow " + (.tool_name // "") + "?" + (if $arg == "" then "" else " " + $arg end))
        else "" end)
     ] | .[] | tostring | gsub("[\n\t]"; " ")' 2>/dev/null)
   [ -n "$event" ] || event="$evt"
@@ -4036,6 +4043,7 @@ cmd_hook() {
   case "$event" in
     SessionStart)     state=idle ;;
     UserPromptSubmit) state=working ;;
+    PermissionRequest) state=waiting ;;
     Notification)
       # Not every notification means "blocked on you".  Mapping all of them to
       # `waiting` made `prefix \`` jump to agents that were merely sitting idle
@@ -4087,10 +4095,19 @@ cmd_hook() {
       exit 0 ;;
     *) exit 0 ;;
   esac
-  local tmp
-  tmp="$(mktemp "$STATE_DIR/.${pane#%}.XXXXXX" 2>/dev/null)" || exit 0
-  printf '%s %s %s\n' "$state" "$(date +%s)" "$ntext" > "$tmp"
-  mv -f "$tmp" "$STATE_DIR/$pane.state"
+  local tmp keep=0 oldnote
+  if [ "$event" = Notification ] && [ "$prev" = waiting ] && [ "$state" = waiting ]; then
+    read -r _ _ oldnote < "$STATE_DIR/$pane.state" 2>/dev/null || true
+    case "$oldnote" in
+      "$ntext"*) keep=1 ;;
+      "allow "*) [ "$ntype" = permission_prompt ] && keep=1 ;;
+    esac
+  fi
+  if [ "$keep" = 0 ]; then
+    tmp="$(mktemp "$STATE_DIR/.${pane#%}.XXXXXX" 2>/dev/null)" || exit 0
+    printf '%s %s %s\n' "$state" "$(date +%s)" "$ntext" > "$tmp"
+    mv -f "$tmp" "$STATE_DIR/$pane.state"
+  fi
   tmux set-option -p -t "$pane" @kel-state "$state" 2>/dev/null
   [ "$(agent_pane "$wid")" = "$pane" ] && rm -f "$STATE_DIR/$wid.state"
   if [ -n "$sid" ]; then
