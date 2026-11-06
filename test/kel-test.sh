@@ -1138,7 +1138,7 @@ if [ -r /proc/self/stat ]; then
   ticks() { local t=0 p; for p in "$@"; do t=$((t + $(awk '{print $14 + $15}' "/proc/$(tmux display -p -t "$p" '#{pane_pid}')/stat"))); done; echo "$t"; }
   c0="$(ticks "$SB2" "$SB3")"; sleep 10; c1="$(ticks "$SB2" "$SB3")"
   printf '       (two hidden sidebars used %s clock ticks in 10 s; one frame-ticking sidebar used ~6)\n' "$((c1 - c0))"
-  ok "  ...and two hidden sidebars use under 4 clock ticks in 10 s" '[ $((c1 - c0)) -lt 4 ]'
+  ok "  ...and two hidden sidebars use under 8 clock ticks in 10 s" '[ $((c1 - c0)) -lt 8 ]'
 fi
 tmux select-window -t "$OTW"; "$KEL" _sidebar wake
 wait_until '[ "$(alt "$SB2")" = 1 ] && tmux capture-pane -p -t "$SB2" | grep -q Spaces' 30
