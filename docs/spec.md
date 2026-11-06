@@ -728,9 +728,10 @@ and lets it correct the hooks where they cannot know: `working` + idle →
 listed (`bg`), nested under the top agent of the same name — Claude Code does
 not say which agent dispatched one — and `enter` opens one with `claude
 attach` in a popup. Unreadable (no claude, a timeout) is null: hooks alone.
-The cache is read at once whatever its age: past 10 s it starts a detached
-`kel-fleet --refresh-claude-agents` (a new session, no `setsid` binary; at most
-one per 5 s) that rewrites it, so a load never waits on the node start. A
+The cache is read at once whatever its age: past 10 s it starts a refresh that
+rewrites it: a detached `kel-fleet --refresh-claude-agents` (a new session, no
+`setsid` binary), or a goroutine inside the sidebar, which loads in-process;
+at most one per 5 s, so a load never waits on the node start. A
 session list is therefore up to about 15 s old, not 10 s; the fleet document
 carries no age field, and a cache past 60 s is treated as unreadable. Only a
 missing cache (the first run) is read inline.
