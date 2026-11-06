@@ -753,18 +753,17 @@ func TestAgentMode(t *testing.T) {
 	doc.Agents[0].Name = "a-long-agent-name-that-cannot-fit"
 	doc.Agents[0].Mode = sp("bypassPermissions")
 	out, _ = renderView(buildView(doc, uiState{}), 28, 0, 0)
-	row := strings.Split(plain(out), "\n")
-	found := false
-	for _, l := range row {
-		if strings.Contains(l, "a-long") {
-			found = true
-			if !strings.Contains(l, "… bypass") || visWidth(l) > 28 {
-				t.Errorf("the name should truncate to keep the mode: %q", l)
-			}
-		}
+	bare := doc
+	bare.Agents = append([]fleet.Agent(nil), doc.Agents...)
+	bare.Agents[0].Mode = nil
+	outBare, _ := renderView(buildView(bare, uiState{}), 28, 0, 0)
+	if plain(out) != plain(outBare) {
+		t.Errorf("a name that cannot fit whole must lose the mode, not width:\n%s\nwant\n%s", plain(out), plain(outBare))
 	}
-	if !found {
-		t.Errorf("no agent row:\n%s", plain(out))
+	doc = loadFixture(t, "fifteen-three-repos")
+	out, _ = renderView(buildView(doc, uiState{}), 32, 0, 0)
+	if !strings.Contains(plain(out), "● fix-auth ") || strings.Contains(plain(out), "fix-a…") && strings.Contains(plain(out), "plan") {
+		t.Errorf("name, age and chip come before the mode:\n%s", plain(out))
 	}
 }
 

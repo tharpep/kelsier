@@ -1311,8 +1311,8 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 			if bn < 0 {
 				budget = max(lw, avail-2-visWidth(right))
 			}
-			if n := len([]rune(a.agent.Name)); budget-extra >= min(n, 4) {
-				nameW = min(n, budget-extra)
+			if n := len([]rune(a.agent.Name)); n <= lw && n+extra <= budget {
+				nameW = n
 			} else {
 				mw = ""
 			}
