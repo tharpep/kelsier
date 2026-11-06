@@ -1310,8 +1310,12 @@ sbdiag "$SW" "$f0"
 # jumping to the window it made, just after the window exists — wait for that
 # jump, or it can land after the select below and take the client with it
 wait_until '[ "$(active_win)" = "$(window_of api-gw api-gw-1)" ]' 50
+# a sidebar with no attached client reads itself hidden and pauses, so keys
+# sent to it wait in the pty: hold a client for the whole block
+hold_client 40
 tmux select-window -t "$MW"; "$KEL" _sidebar wake
-wait_until '[ "$(tmux display -p -t "$SP" "#{alternate_on}")" = 1 ]' 30
+wait_until '[ "$(tmux display -p -t "$SP" "#{alternate_on}")" = 1 ]' 100
+ok "a shown sidebar with a client attached is awake" '[ "$(tmux display -p -t "$SP" "#{alternate_on}")" = 1 ]'
 UP="$(userpane "$MW")"; tmux select-pane -t "$UP"
 "$KEL" _sidebar focus "$MW"   # what prefix Space passes: the window it was pressed in
 ok "_sidebar focus puts the keyboard in the sidebar" '[ "$(tmux display -p -t "$MW" "#{pane_id}")" = "$SP" ]'
@@ -1325,6 +1329,7 @@ tmux send-keys -t "$SP" Escape
 wait_until '[ "$(tmux display -p -t "$MW" "#{pane_id}")" = "$UP" ]'
 ok "  ...and esc returns to your pane"           '[ "$(tmux display -p -t "$MW" "#{pane_id}")" = "$UP" ]'
 sbdiag "$SP" "$f0"
+release_client
 
 # done until seen: finished while you were elsewhere stays loud until shown
 hook "$(userpane "$WTW")" Stop
