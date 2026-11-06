@@ -49,6 +49,7 @@
 #   kel _notify [title] [body] fire kel's notification (bell + desktop) — to try it
 #   kel _click <range> ...     a click on a status line: close a popup, jump
 #   kel _copy                  stdin to the system clipboard (copy-mode pipes here)
+#   kel _paste <pane>          the system clipboard into a pane (middle-click)
 set -uo pipefail
 
 # The hook that fires after every tool call, cut short. Bash parses a script
@@ -2773,6 +2774,46 @@ copy_stdin() {
   return 0
 }
 
+# kel _paste PANE — the system clipboard into PANE, bracketed: middle-click.
+# Invariant 4 holds: the click is the user's gesture, not kel typing.
+paste_read() {
+  if [ -n "${KEL_PASTE_CMD:-}" ]; then sh -c "$KEL_PASTE_CMD" 2>/dev/null; return $?; fi
+  [ "$(uname -s)" = Darwin ] && { pbpaste 2>/dev/null; return $?; }
+  local ps=/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe
+  if [ -n "${WSL_DISTRO_NAME:-}" ] && [ -x "$ps" ]; then
+    "$ps" -NoProfile -Command Get-Clipboard -Raw 2>/dev/null | tr -d '\r'
+    return "${PIPESTATUS[0]}"
+  fi
+  local c
+  for c in wl-paste xclip xsel; do
+    command -v "$c" >/dev/null 2>&1 || continue
+    case "$c" in
+      xclip) xclip -selection clipboard -o 2>/dev/null ;;
+      xsel)  xsel --clipboard --output     2>/dev/null ;;
+      *)     "$c"                          2>/dev/null ;;
+    esac
+    return $?
+  done
+  return 127
+}
+
+cmd_paste() { # pane
+  local pane="${1:-}" tmp rc
+  [ -n "$pane" ] || return 0
+  tmp="$(mktemp "${TMPDIR:-/tmp}/kel-paste.XXXXXX")" || return 0
+  paste_read > "$tmp"; rc=$?
+  if [ "$rc" = 127 ]; then
+    tmux display-message "kel: no clipboard tool to paste from (set KEL_PASTE_CMD)" 2>/dev/null
+  elif [ ! -s "$tmp" ]; then
+    tmux display-message "kel: the clipboard is empty" 2>/dev/null
+  else
+    tmux load-buffer -b kel-paste - < "$tmp" 2>/dev/null \
+      && tmux paste-buffer -p -d -b kel-paste -t "$pane" 2>/dev/null
+  fi
+  rm -f "$tmp"
+  return 0
+}
+
 # --------------------------------------------------------------------------
 # kel config   — edit config.toml, seeded from the shipped example
 # --------------------------------------------------------------------------
@@ -4297,6 +4338,7 @@ main() {
     _fleet)       fleet_json "$@" ;;
     _menus)       menus_click ;;
     _copy)        copy_stdin ;;
+    _paste)       cmd_paste "$@" ;;
     _cfgdump)     printf 'ctx_warn=%s notify=%s group=%s sidebar_bg=%s\n' "${KEL_CTX_WARN:-}" "${KEL_NOTIFY:-}" "${KEL_GROUP:-}" "${KEL_SIDEBAR_BG:-}" ;;
     statusline)   cmd_statusline ;;                # hot path — skip migrate
     jump)         cmd_jump ;;
