@@ -176,7 +176,7 @@ func agentIDs(v sbView) []string {
 	return ids
 }
 
-func TestUnknownAgentSaysNoHooks(t *testing.T) {
+func TestAgentWithNoStateReadsUnknown(t *testing.T) {
 	out, _ := renderView(buildView(loadFixture(t, "unknowns"), uiState{}), 32, 0, 0)
 	for _, l := range strings.Split(plain(out), "\n") {
 		if strings.Contains(l, "nostate") {
@@ -212,14 +212,13 @@ func TestSelectedBlockCarriesTitleAndModel(t *testing.T) {
 	}
 }
 
-func TestSplitNote(t *testing.T) {
-	for in, want := range map[string][2]string{
-		"Claude needs your permission to use Bash":                   {"allow Bash?", ""},
-		"Claude needs your permission to use Bash: go test ./... -v": {"allow Bash?", "go test ./... -v"},
-		"API Error: Rate limit reached":                              {"Rate limit reached", ""},
+func TestShortNoteAndModel(t *testing.T) {
+	for in, want := range map[string]string{
+		"Claude needs your permission to use Bash": "allow Bash?",
+		"API Error: Rate limit reached":            "Rate limit reached",
 	} {
-		if r, a := splitNote(in); r != want[0] || a != want[1] {
-			t.Errorf("%q: %q %q, want %q", in, r, a, want)
+		if got := shortNote(in); got != want {
+			t.Errorf("%q: %q, want %q", in, got, want)
 		}
 	}
 	m := "Opus 5.5 (1M context)"
@@ -247,16 +246,7 @@ func TestNeedsYouStaysPinnedWhileScrolled(t *testing.T) {
 
 func TestNeedsYouFoldsPastFour(t *testing.T) {
 	jumps := recordJumps(t)
-	m := needsModel(t, "fifteen-three-repos")
-	m.height = 30
-	for i := range m.doc.Agents {
-		a := &m.doc.Agents[i]
-		since, ok := map[string]float64{"docs": 100, "fix-auth": 200, "api-auth": 300, "gateway": 400, "kelsier": 500, "dashboard": 600}[a.Name]
-		if !ok {
-			continue
-		}
-		a.State, a.StateSince, a.Note, a.Unseen = sp("waiting"), &since, sp("Claude needs your permission to use Edit"), false
-	}
+	m := sixNeeding(t)
 	m.ui.sel = "a:@8"
 	out, refs := renderView(m.view(), m.width, m.height, 1792018800)
 	rows := strings.Split(plain(out), "\n")
@@ -273,5 +263,56 @@ func TestNeedsYouFoldsPastFour(t *testing.T) {
 	m = nm.(sbModel)
 	if refs[6].id != "q:@4" || len(*jumps) != 1 || (*jumps)[0] != "@4|%6" || m.ui.sel != "a:@4" {
 		t.Errorf("a click on +3 more jumps to the oldest one not shown (gateway): id %q jumps %v sel %q", refs[6].id, *jumps, m.ui.sel)
+	}
+}
+
+func sixNeeding(t *testing.T) sbModel {
+	m := needsModel(t, "fifteen-three-repos")
+	m.height = 30
+	for i := range m.doc.Agents {
+		a := &m.doc.Agents[i]
+		since, ok := map[string]float64{"docs": 100, "fix-auth": 200, "api-auth": 300, "gateway": 400, "kelsier": 500, "dashboard": 600}[a.Name]
+		if !ok {
+			continue
+		}
+		a.State, a.StateSince, a.Note, a.Unseen = sp("waiting"), &since, sp("Claude needs your permission to use Edit"), false
+	}
+	return m
+}
+
+func TestCursorIsAlwaysOnAVisibleRowPastTheFold(t *testing.T) {
+	jumps := recordJumps(t)
+	m := sixNeeding(t)
+	m.ui.sel = "q:@3"
+	for step := 0; step < 6; step++ {
+		sel := m.view().sel
+		if want := m.view().entryIDs[step]; sel != want {
+			t.Fatalf("step %d: sel %q, want %q", step, sel, want)
+		}
+		out, refs := renderView(m.view(), m.width, m.height, 1792018800)
+		shown := false
+		for i, r := range refs {
+			if r.id == sel && strings.Contains(strings.Split(out, "\n")[i], raised) {
+				shown = true
+			}
+		}
+		if !shown {
+			t.Errorf("step %d: %q has no raised row:\n%s", step, sel, plain(out))
+		}
+		nm, _ := m.Update(tea.KeyPressMsg{Code: 'j', Text: "j"})
+		m = nm.(sbModel)
+	}
+	m.ui.sel = "q:@6"
+	nm, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	m = nm.(sbModel)
+	if len(*jumps) != 1 || m.ui.sel != "a:@6" {
+		t.Errorf("enter on the selected hidden row: jumps %v sel %q", *jumps, m.ui.sel)
+	}
+}
+
+func TestPointerCursorFallsBackToItsAgent(t *testing.T) {
+	doc := loadFixture(t, "fifteen-three-repos")
+	if got := buildView(doc, uiState{sel: "q:@5"}).sel; got != "a:@5" {
+		t.Errorf("q: of an agent that left Needs you: %q", got)
 	}
 }

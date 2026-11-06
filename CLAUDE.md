@@ -83,7 +83,7 @@ change; migrate old records in `migrate_meta`.
 | `.waiting/<claude-session-id>` | empty; present while that session waits, so `PostToolUse` (every tool) can end the wait with no tmux call |
 | `doctor.json` | cached probe results |
 | `pr-cache/<owner>__<repo>.sha.json` | every PR's head commit, merged and state, from `gh` (paged), plus `.at` with the fetch epoch. Keyed by commit, not branch: a local branch need not be called what its PR's head is |
-| `sidebar.json` | `{selected: <entry id>, expanded: {<space key>: bool}}` — the sidebar's cursor (`s:<space>`, `a:<window id>` or a pane id) and the spaces opened or folded by hand, shared so every window's sidebar shows the same thing |
+| `sidebar.json` | `{selected: <entry id>, expanded: {<space key>: bool}}` — the sidebar's cursor (`s:<space>`, `a:<window id>`, `q:<window id>` for a Needs you pointer, or a pane id) and the spaces opened or folded by hand, shared so every window's sidebar shows the same thing |
 | `sidebar-cache.json` | the last fleet document the visible sidebar loaded, so a sidebar just shown draws at once, before git is asked anything |
 | `palette` | `<bg> <fg>` as `#rrggbb`: the terminal's colours as a sidebar last heard them, so a new sidebar draws in them at once |
 | `quota` | `<5h%> <5h reset> <7d%> <7d reset> <spend%> <spend reset> <epoch seen>`, space-separated; `-1` = not reported, `0` reset = not given. Written by `kel statusline` only from a payload carrying rate limits; `kel-fleet` reads it as `quota`, nulling a figure whose window reset or that is older than its window |

@@ -302,7 +302,7 @@
    "managed": true,
    "state": "waiting",
    "state_since": 1792018620,
-   "note": "Claude needs your permission to use Bash: go test ./internal/auth/... -run TestRefresh -count=1",
+   "note": "Claude needs your permission to use Bash",
    "isolation": "inplace",
    "branch": null,
    "repo": "/home/me/code/api-gw",

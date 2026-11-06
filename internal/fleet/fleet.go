@@ -609,8 +609,9 @@ func Load(o Options) Doc {
 		withClaude(&doc, sd, ps)
 		withAgy(&doc)
 		withCards(&doc, sd, stalePanes)
-		withDoing(&doc)
-		withTitle(&doc)
+		paths := transcriptPaths(&doc)
+		withDoing(&doc, paths)
+		withTitle(&doc, paths)
 		withRepos(&doc, sd, o.Worktrees)
 	} else {
 		withAgy(&doc)

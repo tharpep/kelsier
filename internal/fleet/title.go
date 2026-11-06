@@ -6,12 +6,10 @@ import (
 	"io"
 	"os"
 	"strings"
+	"unicode"
 )
 
-// A title cache on disk was rejected: the head read is a stat and a few KB,
-// and a cache could outlive the session it names.
-
-var titleHeads = []int64{16 << 10, 128 << 10, 1 << 20}
+const titleHead = 128 << 10
 
 type uline struct {
 	Type    string `json:"type"`
@@ -22,35 +20,20 @@ type uline struct {
 }
 
 // titleOf is the first prompt typed in the transcript at path, "" when none.
+// A longer head was rejected: every agent would pay for it on every load.
 func titleOf(path string) string {
 	f, err := os.Open(path)
 	if err != nil {
 		return ""
 	}
 	defer f.Close()
-	st, err := f.Stat()
+	buf, err := io.ReadAll(io.LimitReader(f, titleHead+1))
 	if err != nil {
 		return ""
 	}
-	for _, n := range titleHeads {
-		t, found := titleIn(f, st.Size(), n)
-		if found || n >= st.Size() {
-			return t
-		}
-	}
-	return ""
-}
-
-// titleIn reads the first n bytes; found is false when a longer read may differ.
-func titleIn(f *os.File, size, n int64) (string, bool) {
-	n = min(n, size)
-	buf := make([]byte, n)
-	if _, err := f.ReadAt(buf, 0); err != nil && err != io.EOF {
-		return "", true
-	}
 	lines := bytes.Split(buf, []byte("\n"))
-	if n < size {
-		lines = lines[:len(lines)-1] // the last is cut mid-line
+	if len(buf) > titleHead {
+		lines = lines[:len(lines)-1]
 	}
 	for _, raw := range lines {
 		var l uline
@@ -58,10 +41,19 @@ func titleIn(f *os.File, size, n int64) (string, bool) {
 			continue
 		}
 		if t := promptText(l.Message.Content); t != "" && !strings.HasPrefix(t, "<") {
-			return strings.TrimSpace(strings.SplitN(t, "\n", 2)[0]), true
+			return cleanTitle(strings.SplitN(t, "\n", 2)[0])
 		}
 	}
-	return "", n >= size
+	return ""
+}
+
+func cleanTitle(s string) string {
+	return strings.Join(strings.Fields(strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) {
+			return ' '
+		}
+		return r
+	}, s)), " ")
 }
 
 // promptText is a message's text: a string, or its text blocks joined.
@@ -86,18 +78,11 @@ func promptText(raw json.RawMessage) string {
 	return strings.TrimSpace(strings.Join(texts, "\n"))
 }
 
-// withTitle fills Agent.Title for every agent whose session is known.
-func withTitle(doc *Doc) {
+// withTitle fills Agent.Title from each agent's transcript, paths[i] for Agents[i].
+func withTitle(doc *Doc, paths []string) {
 	for i := range doc.Agents {
-		a := &doc.Agents[i]
-		sid := ""
-		if a.Claude != nil {
-			sid = a.Claude.SessionID
-		} else if a.ClaudeSession != nil {
-			sid = *a.ClaudeSession
-		}
-		if t := titleOf(transcriptOf(sid)); t != "" {
-			a.Title = sp(t)
+		if t := titleOf(paths[i]); t != "" {
+			doc.Agents[i].Title = sp(t)
 		}
 	}
 }

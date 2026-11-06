@@ -107,7 +107,7 @@ type sbAgent struct {
 type sbView struct {
 	spaces []sbSpace
 	agents []sbAgent
-	needs  []sbAgent // Needs you: pointers at agents that want a look, oldest first
+	needs  []sbAgent
 	// bg: background agents (`claude --bg`), each nested under the top agent
 	// of the same name when there is one — Claude Code does not say which
 	// agent dispatched it, and a same-named one is how the author makes them
@@ -499,8 +499,15 @@ func buildView(doc fleet.Doc, ui uiState) sbView {
 		v.entryIDs = append(v.entryIDs, bgID(b.ID))
 	}
 	if v.indexOf(v.sel) < 0 {
+		was := v.sel
 		v.sel = ""
+		if k, ok := strings.CutPrefix(was, "q:"); ok && v.indexOf(agentID(k)) >= 0 {
+			v.sel = agentID(k)
+		}
 		for _, a := range v.agents {
+			if v.sel != "" {
+				break
+			}
 			if a.current {
 				v.sel = agentID(a.key)
 			}
@@ -807,29 +814,23 @@ func quietFor(a fleet.Agent, now int64) int64 {
 	return now - int64(last)
 }
 
-func splitNote(n string) (reason, arg string) {
+func shortNote(n string) string {
 	n = strings.TrimSpace(strings.SplitN(strings.TrimSpace(n), "\n", 2)[0])
 	if t := strings.TrimPrefix(n, "Claude needs your permission to use "); t != n {
-		tool, arg, _ := strings.Cut(t, ": ")
-		return "allow " + strings.TrimSuffix(tool, ".") + "?", strings.TrimSpace(arg)
+		return "allow " + strings.TrimSuffix(t, ".") + "?"
 	}
 	if t := strings.TrimPrefix(n, "API Error: "); t != n {
-		return t, ""
+		return t
 	}
 	if strings.HasPrefix(n, "Claude is waiting for your input") {
-		return "your input", ""
+		return "your input"
 	}
-	return n, ""
-}
-
-func shortNote(n string) string {
-	r, _ := splitNote(n)
-	return r
+	return n
 }
 
 type summary struct {
-	text, arg, colour string
-	titled, wrap      bool
+	text, colour string
+	titled, wrap bool
 }
 
 func summaryOf(a fleet.Agent) summary {
@@ -846,11 +847,11 @@ func summaryOf(a fleet.Agent) summary {
 			return summary{text: *a.Doing, colour: dim, wrap: true}
 		}
 	case "waiting":
-		if r, arg := splitNote(note); r != "" {
-			return summary{text: r, arg: arg, colour: mid}
+		if r := shortNote(note); r != "" {
+			return summary{text: r, colour: mid}
 		}
 	case "error":
-		if r, _ := splitNote(note); r != "" {
+		if r := shortNote(note); r != "" {
 			return summary{text: r, colour: red}
 		}
 	case "done", "idle":
@@ -1296,11 +1297,7 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 				lines = append(lines, pre+sum.colour+l+reset)
 			}
 		case sum.text != "":
-			l := pre + sum.colour + truncate(sum.text, avail) + reset
-			if room := avail - len([]rune(sum.text)) - 2; sum.arg != "" && room > 3 {
-				l += "  " + dim + truncate(sum.arg, room) + reset
-			}
-			lines = []string{l}
+			lines = []string{pre + sum.colour + truncate(sum.text, avail) + reset}
 		}
 		rows = append(rows, lines...)
 		sums := len(lines)
@@ -1540,8 +1537,7 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 const needsPinned = 4
 
 // pinNeeds is the Needs you block as it stays above a scrolled list: its
-// header and at most four rows, the fourth becoming `+N more` for the oldest
-// one not shown. block is the header, the rows and the blank after them.
+// header and at most four rows, the fourth becoming `+N more`.
 func pinNeeds(block []line, v sbView, w int, in string, lead func(string) string) []line {
 	rows := block[1 : len(block)-1]
 	if len(rows) <= needsPinned {
@@ -1550,6 +1546,11 @@ func pinNeeds(block []line, v sbView, w int, in string, lead func(string) string
 	out := append([]line{block[0]}, rows[:needsPinned-1]...)
 	hidden := v.needs[needsPinned-1:]
 	id := needID(hidden[0].key)
+	for _, a := range hidden {
+		if needID(a.key) == v.sel {
+			id = v.sel
+		}
+	}
 	more := lead(id) + " " + yellow + fmt.Sprintf("+%d more", len(hidden)) + reset
 	if id == v.sel {
 		more = fill(more, w, raised)
