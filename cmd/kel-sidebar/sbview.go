@@ -868,7 +868,7 @@ func agentAge(a fleet.Agent, now int64) (age, chipText, chipFg string, chipBg rg
 		return dim + italic + "quiet " + humanizeSecs(q) + reset, "", "", rgb{}
 	}
 	if a.State == nil || *a.State == "" {
-		return dim + "no hooks" + reset, "", "", rgb{}
+		return dim + "unknown" + reset, "", "", rgb{}
 	}
 	if a.StateSince != nil {
 		age = dim + humanizeSecs(now-int64(*a.StateSince)) + reset

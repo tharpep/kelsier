@@ -332,7 +332,7 @@ the `TodoWrite` design was stale, and the plan turned out to need no new hook.
   the first real prompt of the session, read from the head of Claude Code's
   transcript into `title` on the fleet document (about 2 ms a transcript, cold).
   The selected block opens with the title in full and the model's name on the
-  context line, and an agent kel has no hooks for reads `no hooks` instead of
+  context line, and an agent with no state reads `unknown` instead of
   `?`. Frames first, then wired (`spec.md` §5d, §9c); the sweep test asserts one
   summary line per agent in every fixture
 - *the second look at herdr and Orca (2026-10-15):* notifications by default
