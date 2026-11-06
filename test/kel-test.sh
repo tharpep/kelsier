@@ -2178,6 +2178,14 @@ ok "the wheel down never enters copy mode" \
    "grep '^bind -n WheelDownPane' '$HERE/../tmux/kel.conf' | grep -vq copy-mode"
 ok "  ...and the wheel up scrolls as it enters" \
    "grep '^bind -n WheelUpPane' '$HERE/../tmux/kel.conf' | grep -q 'copy-mode -e.*scroll-up'"
+ok "the wheel over the bar binds nothing, the wheel in a pane still does" \
+  'S="$TMUX_TMPDIR/wheel.sock"
+   tmux -L wheelguard -S "$S" -f /dev/null new-session -d -s wheeltest 2>/dev/null
+   tmux -S "$S" source-file "$HERE/../tmux/kel.conf" 2>/dev/null
+   K="$(tmux -S "$S" list-keys -T root)"
+   tmux -S "$S" kill-server 2>/dev/null
+   ! printf "%s\n" "$K" | grep -qE "Wheel(Up|Down)Status" &&
+     printf "%s\n" "$K" | grep -q WheelUpPane && printf "%s\n" "$K" | grep -q WheelDownPane'
 
 section "cards: agents reporting to you (M8)"
 ok "kel card --schema outputs valid json schema" \
