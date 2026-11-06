@@ -1775,6 +1775,18 @@ ok "  ...and the Notification for the same wait keeps it"  '[ "$(cut -d" " -f3- 
 ok "  ...and the fleet reports it as the note"            '[ "$("$KEL" _fleet | jq -r ".agents[] | select(.name==\"a\") | .note")" = "allow Bash? git push origin main" ]'
 permreq "$P" Edit "/src/$(printf 'x%.0s' $(seq 100))"
 ok "an edit asks about its file, cut to 80 characters" '[ "$(cut -d" " -f5 "$STATE/$P.state" | tr -d "\n" | wc -c | tr -d " ")" = 80 ]'
+hook "$P" UserPromptSubmit
+permreq "$P" Bash 'git status'
+hook "$P" Notification agent_needs_input
+ok "an empty-message wait does not keep a stale allow note" '[ "$(state_of a)" = waiting ] && [ -z "$(cut -d" " -f3- "$STATE/$P.state")" ]'
+printf '{"session_id":"s","cwd":"%s","hook_event_name":"PermissionRequest","tool_name":"Bash","tool_input":null}' "$WORK" | TMUX_PANE="$P" "$KEL" hook PermissionRequest
+ok "a PermissionRequest with a null tool_input still lands, bare" '[ "$(cut -d" " -f3- "$STATE/$P.state")" = "allow Bash?" ]'
+permreq "$P" Bash ""
+ok "  ...and with an empty command" '[ "$(cut -d" " -f3- "$STATE/$P.state")" = "allow Bash?" ]'
+printf '{"session_id":"s","cwd":"%s","hook_event_name":"PermissionRequest","tool_name":"Bash","tool_input":{"command":"ls\u009b31m"}}' "$WORK" | TMUX_PANE="$P" "$KEL" hook PermissionRequest
+ok "  ...and C1 control characters are stripped" '[ "$(cut -d" " -f3- "$STATE/$P.state")" = "allow Bash? ls31m" ]'
+pr_out="$(printf '{"session_id":"s","cwd":"%s","hook_event_name":"PermissionRequest","tool_name":"Bash","tool_input":{"command":"ls"}}' "$WORK" | TMUX_PANE="$P" "$KEL" hook PermissionRequest 2>/dev/null)"; pr_rc=$?
+ok "a PermissionRequest hook prints nothing and exits 0 (exit 2 would deny)" '[ -z "$pr_out" ] && [ "$pr_rc" = 0 ]'
 permreq "$P" Task ""
 ok "a tool with no argument has a bare note"          '[ "$(cut -d" " -f3- "$STATE/$P.state")" = "allow Task?" ]'
 permreq "$P" Bash $'ls\x1b[31m\x07'
