@@ -208,6 +208,9 @@ workspace**: its own `TMUX_TMPDIR` (so its `tmux kill-server` cannot reach the
 default socket — it once killed a live workspace), its own `XDG_STATE_HOME`,
 and `KEL_SESSION=keltest`. Agents are faked with `sleep 9999`, so nothing
 reaches an API. Any test you add must keep all three.
+The shim pins `-S`, and a signal exits after cleanup. Never wrap the suite in
+`timeout` or run several copies on one machine: four copies took 17 minutes
+instead of 2, and the timeout kill is what leaked.
 
 **An attached client is testable after all:** `( sleep N ) | tmux -C attach`
 is a control-mode client with no terminal, holding the attach open as long as
@@ -356,6 +359,11 @@ with nothing in kel to assert against. Re-breaking an `unguarded` one is silent.
   experiment run from inside a kel pane without `-L` or `-S` reaches the real
   server; it killed the author's workspace on 2026-11-05. Use
   `tmux -L <label> -f /dev/null`, never a bare `kill-server`.
+- `[guarded]` **A removed `TMUX_TMPDIR` falls back to `/tmp`, the real socket.** tmux's
+  socket path is `$TMUX_TMPDIR:/tmp/`. A TERM ran `cleanup`, which deleted the dir and
+  left the script running, so every later call reached `/tmp/tmux-<uid>/default` and
+  `cleanup`'s `kill-server` aimed there too (2026-11-05). The shim pins `-S`; `shim_here`
+  stops the run.
 - `[unguarded]` **`prune_state` is not `kel prune`.** `cmd_prune` reaps dead
   *agents*; `prune_state` reaps orphaned state files and is called from `cmd_ls`
   and `cmd_attach`. A test that drives `kel prune` to exercise `prune_state`
