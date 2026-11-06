@@ -15,6 +15,7 @@ package main
 
 import (
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -106,6 +107,7 @@ type sbAgent struct {
 type sbView struct {
 	spaces []sbSpace
 	agents []sbAgent
+	needs  []sbAgent // Needs you: pointers at agents that want a look, oldest first
 	// bg: background agents (`claude --bg`), each nested under the top agent
 	// of the same name when there is one — Claude Code does not say which
 	// agent dispatched it, and a same-named one is how the author makes them
@@ -141,6 +143,7 @@ type lineRef struct {
 	right string // that action, drawn — kept here so the hover can mark it
 	from  int    // a click left of this column hits nothing
 	hits  []hit  // buttons drawn on the line
+	sum   bool   // an agent's summary line (spec §5d)
 	text  string // a choices line as drawn, without colour, for hintKey
 }
 
@@ -198,6 +201,7 @@ func bgLook(b fleet.Background) (dot, colour, word string) {
 	return "?", dim, "?"
 }
 func agentID(wid string) string { return "a:" + wid }
+func needID(key string) string  { return "q:" + key }
 
 // spaceKey groups a pane: its repo root (a linked worktree is its own root, so
 // each worktree is its own space), else its group label.
@@ -467,6 +471,10 @@ func buildView(doc fleet.Doc, ui uiState) sbView {
 			}
 		}
 	}
+	v.needs = needsYou(v.agents)
+	for _, a := range v.needs {
+		v.entryIDs = append(v.entryIDs, needID(a.key))
+	}
 	for _, s := range v.spaces {
 		if s.folded {
 			continue
@@ -532,6 +540,23 @@ func (v *sbView) applyFilter(q string) {
 		}
 	}
 	v.agents = as
+}
+
+func needsYou(agents []sbAgent) []sbAgent {
+	var out []sbAgent
+	for _, a := range agents {
+		if st := a.agent.State; st != nil && (*st == "waiting" || *st == "error" || (*st == "done" && a.agent.Unseen)) {
+			out = append(out, a)
+		}
+	}
+	since := func(a sbAgent) float64 {
+		if a.agent.StateSince == nil {
+			return math.MaxFloat64
+		}
+		return *a.agent.StateSince
+	}
+	sort.SliceStable(out, func(i, j int) bool { return since(out[i]) < since(out[j]) })
+	return out
 }
 
 func (v sbView) indexOf(id string) int {
@@ -782,20 +807,56 @@ func quietFor(a fleet.Agent, now int64) int64 {
 	return now - int64(last)
 }
 
-// shortNote turns Claude Code's notification text into the reason, short
-// enough for a 32-column line: what it is waiting for.
-func shortNote(n string) string {
-	n = strings.TrimSpace(n)
+func splitNote(n string) (reason, arg string) {
+	n = strings.TrimSpace(strings.SplitN(strings.TrimSpace(n), "\n", 2)[0])
 	if t := strings.TrimPrefix(n, "Claude needs your permission to use "); t != n {
-		return "allow " + strings.TrimSuffix(t, ".") + "?"
+		tool, arg, _ := strings.Cut(t, ": ")
+		return "allow " + strings.TrimSuffix(tool, ".") + "?", strings.TrimSpace(arg)
 	}
 	if t := strings.TrimPrefix(n, "API Error: "); t != n {
-		return t
+		return t, ""
 	}
 	if strings.HasPrefix(n, "Claude is waiting for your input") {
-		return "your input"
+		return "your input", ""
 	}
-	return n
+	return n, ""
+}
+
+func shortNote(n string) string {
+	r, _ := splitNote(n)
+	return r
+}
+
+type summary struct {
+	text, arg, colour string
+	titled, wrap      bool
+}
+
+func summaryOf(a fleet.Agent) summary {
+	if a.State == nil {
+		return summary{}
+	}
+	note := ""
+	if a.Note != nil {
+		note = *a.Note
+	}
+	switch *a.State {
+	case "working":
+		if a.Doing != nil && *a.Doing != "" {
+			return summary{text: *a.Doing, colour: dim, wrap: true}
+		}
+	case "waiting":
+		if r, arg := splitNote(note); r != "" {
+			return summary{text: r, arg: arg, colour: mid}
+		}
+	case "error":
+		if r, _ := splitNote(note); r != "" {
+			return summary{text: r, colour: red}
+		}
+	case "done", "idle":
+		return summary{titled: true}
+	}
+	return summary{}
 }
 
 // agentAge is the right edge of an agent's row: how long it has been in its
@@ -807,7 +868,7 @@ func agentAge(a fleet.Agent, now int64) (age, chipText, chipFg string, chipBg rg
 		return dim + italic + "quiet " + humanizeSecs(q) + reset, "", "", rgb{}
 	}
 	if a.State == nil || *a.State == "" {
-		return dim + "?" + reset, "", "", rgb{}
+		return dim + "no hooks" + reset, "", "", rgb{}
 	}
 	if a.StateSince != nil {
 		age = dim + humanizeSecs(now-int64(*a.StateSince)) + reset
@@ -843,7 +904,19 @@ func agentFacts(a fleet.Agent) string {
 	if a.Context.CostUSD != nil {
 		c = money(*a.Context.CostUSD)
 	}
+	if m := shortModel(a.Context.Model); m != "" {
+		return m + " · " + pct + " · " + c
+	}
 	return pct + " · " + c
+}
+
+var modelNote = regexp.MustCompile(`\s*\([^)]*\)\s*$`)
+
+func shortModel(m *string) string {
+	if m == nil {
+		return ""
+	}
+	return strings.TrimSpace(modelNote.ReplaceAllString(*m, ""))
 }
 
 // chip names a state on a fill of its colour, with half-block ends in that
@@ -942,17 +1015,22 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 	label := func(s string) string { return in + dim + truncate(s, w-2) + reset }
 	// the selected entry stands on a raised block, a blank row above and
 	// below, with its detail inside — opencode's way
-	entry := func(id string, r lineRef, rows []string) {
+	entry := func(id string, r lineRef, rows []string, sums int) {
+		marked := func(i int) lineRef {
+			rr := r
+			rr.sum = i >= 1 && i <= sums
+			return rr
+		}
 		if id != v.sel {
-			for _, s := range rows {
-				add(s, r)
+			for i, s := range rows {
+				add(s, marked(i))
 				r.hits = nil
 			}
 			return
 		}
 		add(fill(lead(id), w, raised), r)
-		for _, s := range rows {
-			add(fill(s, w, raised), r)
+		for i, s := range rows {
+			add(fill(s, w, raised), marked(i))
 		}
 		foot := line{fill(lead(id), w, raised), r}
 		if btns := rowButtons(r.kind); len(btns) > 0 {
@@ -1001,6 +1079,30 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 		add(s, r)
 	}
 
+	if len(v.needs) > 0 {
+		add(spread(in+yellow+truncate("Needs you", w-8)+reset, faint+fmt.Sprint(len(v.needs))+reset, w), lineRef{kind: "header"})
+		for _, a := range v.needs {
+			id := needID(a.key)
+			d, c := stateLook(a.agent.State, a.agent.Unseen)
+			reason := ""
+			if *a.agent.State == "done" {
+				reason = "done"
+			} else if a.agent.Note != nil {
+				reason = shortNote(*a.agent.Note)
+			}
+			age := ""
+			if a.agent.StateSince != nil {
+				age = humanizeSecs(now - int64(*a.agent.StateSince))
+			}
+			nw, rw := fitPair(a.agent.Name, len([]rune(reason)), max(avail-len([]rune(age))-1, 0))
+			left := lead(id) + " " + c + d + reset + " " + truncate(a.agent.Name, nw)
+			if rw > 0 {
+				left += "  " + mid + truncate(reason, rw) + reset
+			}
+			one(id, lineRef{id: id, kind: "need"}, spread(left, dim+age+reset, w))
+		}
+		add("", lineRef{})
+	}
 	add(label("Spaces"), lineRef{kind: "header"})
 	if v.unknown {
 		add("    "+dim+truncate("? panes unknown", w-4)+reset, lineRef{})
@@ -1073,7 +1175,7 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 					rows = append(rows, lead(id)+"   "+dim+truncate(more, avail)+reset)
 				}
 			}
-			entry(id, r, rows)
+			entry(id, r, rows, 0)
 		}
 		if !s.open {
 			summary()
@@ -1173,24 +1275,40 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 		}
 		rows := []string{spread(lead(id)+" "+c+d+reset+" "+weight(truncate(a.agent.Name, lw), a.current), right, w)}
 		pre := lead(id) + "   "
-		// what it waits for is the point of a waiting agent: always shown,
-		// readable, not grey (Orca shows "awaiting permission"; kel had the
-		// exact text all along)
-		// and an API error says which: rate limit, overloaded, auth
-		if a.agent.State != nil && (*a.agent.State == "waiting" || *a.agent.State == "error") && a.agent.Note != nil && *a.agent.Note != "" {
-			rows = append(rows, pre+mid+truncate(shortNote(*a.agent.Note), avail)+reset)
+		sel := id == v.sel
+		sum := summaryOf(a.agent)
+		title := ""
+		if t := a.agent.Title; t != nil {
+			title = *t
 		}
-		// what it is doing now, from Claude Code's transcript (backlog #40):
-		// on every working agent, the author found it the most useful line;
-		// quieter off the selection, where a terminal cannot make it smaller
-		working := a.agent.Doing != nil && a.agent.State != nil && *a.agent.State == "working"
-		if id == v.sel {
-			rows = append(rows, pre+mid+truncate(agentFacts(a.agent), avail)+reset)
-			if working {
-				for _, l := range wrapWords(*a.agent.Doing, avail, 2) {
-					rows = append(rows, pre+dim+italic+l+reset)
+		var lines []string
+		switch {
+		case sum.titled && title != "" && !sel:
+			lines = []string{pre + dim + truncate(title, avail) + reset}
+		case sum.titled && title != "":
+			for _, l := range wrapWords(title, avail, 2) {
+				lines = append(lines, pre+dim+l+reset)
+			}
+		case sum.text != "" && sel && sum.wrap:
+			for _, l := range wrapWords(sum.text, avail, 2) {
+				lines = append(lines, pre+sum.colour+l+reset)
+			}
+		case sum.text != "":
+			l := pre + sum.colour + truncate(sum.text, avail) + reset
+			if room := avail - len([]rune(sum.text)) - 2; sum.arg != "" && room > 3 {
+				l += "  " + dim + truncate(sum.arg, room) + reset
+			}
+			lines = []string{l}
+		}
+		rows = append(rows, lines...)
+		sums := len(lines)
+		if sel {
+			if title != "" && !sum.titled {
+				for _, l := range wrapWords(title, avail, 2) {
+					rows = append(rows, pre+dim+l+reset)
 				}
 			}
+			rows = append(rows, pre+mid+truncate(agentFacts(a.agent), avail)+reset)
 			// subagents: the Task-tool helpers this agent has running
 			for _, sub := range a.agent.Subagents {
 				sd, sc := subLook(sub.Status)
@@ -1201,11 +1319,6 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 				rows = append(rows, pre+dim+"└"+reset+" "+sc+sd+reset+" "+dim+truncate(sl, avail-4)+reset)
 			}
 		}
-		if working && id != v.sel {
-			for _, l := range wrapWords(*a.agent.Doing, avail, 2) {
-				rows = append(rows, pre+faint+italic+l+reset)
-			}
-		}
 		if a.agent.Cards != nil && a.agent.Cards.Unseen && a.agent.Cards.Latest != nil {
 			latest := a.agent.Cards.Latest
 			col := dim
@@ -1214,7 +1327,7 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 			}
 			rows = append(rows, pre+col+truncate("▸ "+latest.Kind+": "+latest.Title, avail)+reset)
 		}
-		entry(id, r, rows)
+		entry(id, r, rows, sums)
 		for _, b := range v.bgUnder[a.key] {
 			bd, bc, _ := bgLook(b)
 			bid := bgID(b.ID)
@@ -1312,13 +1425,6 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 				off = first
 			}
 			if off > 0 && room > 2 {
-				agentsIdx := -1
-				for i, l := range body {
-					if l.ref.kind == "header" && strings.Contains(l.s, "Agents") {
-						agentsIdx = i
-						break
-					}
-				}
 				// a section's own header, or the blank before it, starts
 				// the screen as it is; anything else gets its section's
 				// header pinned above it, the offset settled first so the
@@ -1341,11 +1447,13 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 				case starts(off):
 					body = body[off+1:]
 				default:
-					secName := "Spaces"
-					if agentsIdx >= 0 && off >= agentsIdx {
-						secName = "Agents"
+					pinned := label("Spaces")
+					for _, l := range body[:off] {
+						if l.ref.kind == "header" {
+							pinned = l.s
+						}
 					}
-					body = append([]line{{s: label(secName), ref: lineRef{kind: "header"}}}, body[off:]...)
+					body = append([]line{{s: pinned, ref: lineRef{kind: "header"}}}, body[off:]...)
 				}
 			} else {
 				body = body[off:]

@@ -71,7 +71,8 @@
     "at": 1792018795,
     "model": "Opus 5.5 (1M context)"
    },
-   "unseen": false
+   "unseen": false,
+   "title": "Update the changelog for the 0.9 release"
   }
  ],
  "panes": [

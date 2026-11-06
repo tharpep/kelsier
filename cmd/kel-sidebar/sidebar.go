@@ -328,7 +328,7 @@ func (m sbModel) pause() tea.Cmd {
 	return tea.Exec(w, func(error) tea.Msg { return sbWake{} })
 }
 
-func jump(wid, pane string) {
+var jump = func(wid, pane string) {
 	args := []string{"select-window", "-t", wid}
 	if pane != "" {
 		args = append(args, ";", "select-pane", "-t", pane)
@@ -660,6 +660,13 @@ func (m *sbModel) activate(id string) {
 	case strings.HasPrefix(id, "a:"):
 		if a, ok := m.agentOf(id); ok {
 			jump(a.wid, a.pane)
+		}
+	case strings.HasPrefix(id, "q:"):
+		aid := agentID(strings.TrimPrefix(id, "q:"))
+		if a, ok := m.agentOf(aid); ok {
+			jump(a.wid, a.pane)
+			m.ui.sel = aid
+			m.saveShared()
 		}
 	case strings.HasPrefix(id, "b:"):
 		// a background agent has no pane to jump to: open it, `claude

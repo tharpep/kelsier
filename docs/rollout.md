@@ -324,6 +324,17 @@ the `TodoWrite` design was stale, and the plan turned out to need no new hook.
   from the frame `View` drew. A property test walks the pointer over every
   fixture and asserts no row changes entry or text but the hovered ones; a
   hidden sidebar drops its hover (`spec.md` §5c, actions)
+- *design pass, milestone 1 (2026-11-05):* a `Needs you` section above
+  `Spaces`, present only while something waits: one pointer row per agent
+  that is `waiting`, `error` or `done` and unseen, the longest-waiting first,
+  each jumping to its agent's own row. Every agent now has one summary line
+  chosen by state (doing, reason, error, or the session's title); the title is
+  the first real prompt of the session, read from the head of Claude Code's
+  transcript into `title` on the fleet document (about 2 ms a transcript, cold).
+  The selected block opens with the title in full and the model's name on the
+  context line, and an agent kel has no hooks for reads `no hooks` instead of
+  `?`. Frames first, then wired (`spec.md` §5d, §9c); the sweep test asserts one
+  summary line per agent in every fixture
 - *the second look at herdr and Orca (2026-10-15):* notifications by default
   (bell + Windows toast / osascript / notify-send), the reason a waiting agent
   waits on its row (`allow Bash?`), `working?` for an agent silent half an hour,

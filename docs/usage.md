@@ -106,7 +106,11 @@ pane.
 ## The sidebar
 
 Every kel window has a 32-column pane on its left — the same in every window —
-in two sections:
+in two sections, and above them **`Needs you`** while anything does: a row for
+each agent that is waiting, errored, or finished and not yet looked at, the
+longest-waiting first (`● fix-auth  allow Bash?  6m`). A row is a pointer: click
+it or press `enter` and you are at that agent, and its own row below is
+selected. Nothing needs you, no section.
 
 - **`spaces`** — where things are: one entry per repo checkout or worktree,
   with its branch, `↑` unpushed / `↓` behind, `●` uncommitted files and the
@@ -130,13 +134,17 @@ in two sections:
   minutes by default, `3600` for the one-hour cache), grey idle or seen and
   cold, violet
   throttled, red `●` error, red `✕` dead, grey `?` unknown) and how long,
-  right-aligned. A state that needs a word gets a chip: `needs you`, `done`,
-  `error`, `dead`, `quota`. A waiting agent shows what it waits for (`allow
-  Bash?`); one whose turn ended on an API error shows which (`Rate limit
-  reached`). Every working agent shows what it is doing in a faint line
-  under it — `editing sbview.go`, its last tool call, read from the tail of
-  Claude Code's own transcript. The selected agent also opens to its context
-  % and cost, and its subagents.
+  right-aligned; an agent kel has no hooks for (opencode) reads dim `no hooks`
+  there and keeps a grey `?`. A state that needs a word gets a chip: `needs
+  you`, `done`, `error`, `dead`, `quota`. **Every agent has one line under it,
+  chosen by its state:** working, what it is doing (`editing sbview.go`, its last
+  tool call, from the tail of Claude Code's own transcript); waiting, what it
+  waits for (`allow Bash?`) and, dim after it, the command when the notice
+  quotes one; an API error, which (`Rate limit reached`); finished or idle, the
+  session's **title**, the first thing you typed to it, from the head of the same
+  transcript (none for an agent with no Claude transcript). Nothing known, no
+  line. The selected agent opens to its title in full, the model's name, context
+  % and cost (`Opus 5.5 · 36% · $10.65`), and its subagents.
 
 **Mouse first.** The top line is `kel` with two buttons:
 
