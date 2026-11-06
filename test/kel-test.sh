@@ -1491,7 +1491,7 @@ KEL_POPUP_TRACE="$WORK/poptitle" "$KEL" _panel files "$XD" 'api-gw/x#(touch p)' 
 ok "a popup's title is doubled, so a branch name is never run as a format" '[[ "$(cut -f2 "$WORK/poptitle")" == "yazi · api-gw/x##(touch p) · "* ]] && [ "$(cut -f1 "$WORK/poptitle")" = "$XD" ]'
 POP="$(tmux list-sessions -F '#{session_name}' | grep '^_kelpop_' | head -1)"
 ok "a popup's directory is doubled for tmux, which expands -c and -d" 'grep -q "new-session.* -c .*x##(touch p)" "$WORK/popdir.log"'
-ok "  ...so the hosted session opens in the real path" '[ "$(tmux display -p -t "=$POP:" "#{pane_current_path}")" = "$XD" ]'
+ok "  ...so the hosted session opens in the real path" '[ "$(tmux display -p -t "=$POP:" "#{pane_current_path}")" = "$(cd "$XD" && pwd -P)" ]'
 ok "  ...and no file was touched" '! [ -e p ] && ! [ -e "$WORK/p" ] && ! [ -e "$XD/p" ]'
 tmux kill-session -t "=$POP" 2>/dev/null
 printf '#!/bin/sh\nexit 0\n' > "$WORK/shim/yazi"
