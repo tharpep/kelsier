@@ -1008,14 +1008,35 @@ tmux select-layout -t "$LW" even-horizontal; "$KEL" _sidebar fit
 ok "fit pins a stretched sidebar back to its width"  "docked $LW"
 tmux select-layout -t "$LW" main-vertical; tmux rotate-window -t "$LW"; "$KEL" _sidebar fit
 ok "  ...re-docks one rotated off the left"       "docked $LW"
+rm -f "$STATE/$LW.refit"
 tmux swap-pane -s "$LA" -t "$(sidebar_of "$LW")"; "$KEL" _sidebar fit
 ok "  ...and one swapped with the agent"          "docked $LW"
 ok "  ...whose agent is the same pane, still running" '[ "$(tmux display -p -t "$LA" "#{window_id} #{pane_current_command}")" = "$LW sleep" ]'
+leftdocked() { tmux list-panes -t "$1" -F '#{@kel-sidebar}:#{pane_at_left}#{pane_at_top}#{pane_at_bottom}:#{pane_width}' | grep -qx "1:111:32"; }
+tmux set-option -w -t "$LW" window-size manual; tmux set-option -w -t "$LW" pane-border-status top; tmux resize-window -t "$LW" -y 12
+wait_until "leftdocked $LW"
+SB0="$(sidebar_of "$LW")"; PN0="$(tmux list-panes -t "$LW" | grep -c .)"
+rm -f "$STATE/$LW.refit"
+"$KEL" _sidebar fit; "$KEL" _sidebar fit
+ok "a window shorter than its client keeps its sidebar through fit" '[ "$(sidebar_of "$LW")" = "$SB0" ] && [ "$(tmux list-panes -t "$LW" | grep -c .)" = "$PN0" ]'
+rm -f "$STATE/$LW.refit"
+tmux swap-pane -s "$LA" -t "$SB0"; "$KEL" _sidebar fit
+ok "a sidebar swapped off the left is re-made once" '[ -n "$(sidebar_of "$LW")" ] && [ "$(sidebar_of "$LW")" != "$SB0" ] && leftdocked "$LW"'
+SB1="$(sidebar_of "$LW")"; "$KEL" _sidebar fit
+ok "  ...and a second fit leaves the new one alone" '[ "$(sidebar_of "$LW")" = "$SB1" ]'
+ok "  ...stamping the window's .refit with an epoch" '[ "$(grep -c "^[0-9][0-9]*$" "$STATE/$LW.refit")" = 1 ]'
+FL0="$(cat "$STATE/sidebar-fail.log" 2>/dev/null | grep -c .)"
+tmux swap-pane -s "$LA" -t "$SB1"; "$KEL" _sidebar fit
+ok "a second re-make inside thirty seconds is skipped" '[ "$(sidebar_of "$LW")" = "$SB1" ]'
+ok "  ...and logged once, naming the window" '[ "$(cat "$STATE/sidebar-fail.log" | grep -c .)" = $((FL0 + 1)) ] && tail -1 "$STATE/sidebar-fail.log" | grep -qF "$LW"'
+rm -f "$STATE/$LW.refit"; "$KEL" _sidebar fit
+tmux set-option -wu -t "$LW" window-size; tmux set-option -wu -t "$LW" pane-border-status; tmux resize-window -A -t "$LW"
 grep -E '^set-hook -g (window-layout-changed|pane-focus-in) ' "$HERE/../tmux/kel.conf" \
   | sed "s#\$HOME/.local/bin/kel#$KEL#g" > "$WORK/hooks.conf"
 tmux source-file "$WORK/hooks.conf"
 tmux set-option -g focus-events on
 ok "kel.conf wires the layout and focus hooks"    '[ "$(grep -c . "$WORK/hooks.conf")" = 2 ]'
+rm -f "$STATE/$LW.refit"
 tmux select-layout -t "$LW" main-vertical
 ok "  ...a layout change re-docks by itself"      "wait_until 'docked $LW'"
 ok "  ...rotate's keys re-dock too (it fires no layout hook)" '[ "$(grep -c "rotate-window.*_sidebar fit" "$HERE/../tmux/kel.conf")" = 2 ]'

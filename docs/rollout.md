@@ -439,6 +439,7 @@ the `TodoWrite` design was stale, and the plan turned out to need no new hook.
   Claude's row. The banner now stacks above the bar (`status 2`) instead of
   taking it over at the top. Next, planned with the author: agents tracked per
   pane, so an agent can be a split.
+- *sidebar fit loop (2026-11-05, #33):* a window shorter than its client read its sidebar as `moved`, and `fit` re-made it about 3.5 times a second. `fit` now reads "docked" as within one row of the window height too (the border status line), and re-makes a window's sidebar at most once per 30 s (`<window-id>.refit`); the trigger was not reproduced.
 
 **M7 — agents as panes**  ·  *planned 2026-10-21 with the author*
 

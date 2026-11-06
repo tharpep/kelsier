@@ -552,14 +552,30 @@ sidebar_heal() {
   return 0
 }
 
+sidebar_refit() { # wid -> 0 and stamps <wid>.refit, unless it was stamped under 30 s ago
+  local f="$STATE_DIR/$1.refit" now last tmp
+  now="$(date +%s)"
+  last="$(cat "$f" 2>/dev/null)"
+  case "$last" in ''|*[!0-9]*) last=0 ;; esac
+  [ $((now - last)) -ge 30 ] || return 1
+  tmp="$(mktemp "$STATE_DIR/.refit.XXXXXX" 2>/dev/null)" || return 0
+  printf '%s\n' "$now" > "$tmp" && mv -f "$tmp" "$f"
+  return 0
+}
+
 sidebar_fit() {
-  local flag id w wid pos
+  local flag id w wid zoomed l t b ph wh pos
   sidebar_width_opts
-  tmux list-panes -a -F '#{@kel-sidebar} #{pane_id} #{pane_width} #{window_id} #{?window_zoomed_flag,zoomed,#{?#{&&:#{pane_at_left},#{&&:#{pane_at_top},#{pane_at_bottom}}},docked,moved}}' 2>/dev/null \
-  | while read -r flag id w wid pos; do
+  tmux list-panes -a -F '#{@kel-sidebar} #{pane_id} #{pane_width} #{window_id} #{window_zoomed_flag} #{pane_at_left} #{pane_at_top} #{pane_at_bottom} #{pane_height} #{window_height}' 2>/dev/null \
+  | while read -r flag id w wid zoomed l t b ph wh; do
       [ "$flag" = 1 ] || continue
+      pos=moved
+      if [ "$zoomed" = 1 ]; then pos=zoomed
+      elif [ "$l" = 1 ] && [ "$t" = 1 ] && { [ "$b" = 1 ] || [ "$ph" -ge $((wh - 1)) ]; }; then pos=docked
+      fi
       case "$pos" in
-        moved)  tmux kill-pane -t "$id" 2>/dev/null; sidebar_ensure "$wid" ;;
+        moved)  sidebar_refit "$wid" || { printf 'fit: %s re-made under 30s ago, left alone\n' "$wid" >> "$STATE_DIR/sidebar-fail.log"; continue; }
+                tmux kill-pane -t "$id" 2>/dev/null; sidebar_ensure "$wid" ;;
         docked) [ "$w" != "$KEL_SIDEBAR_WIDTH" ] \
                   && tmux resize-pane -t "$id" -x "$KEL_SIDEBAR_WIDTH" 2>/dev/null ;;
       esac
@@ -822,7 +838,7 @@ prune_state() {
   local live f wid panes pane
   live="$(tmux list-windows -a -F '#{window_id}' 2>/dev/null; tmux list-panes -a -F '#{pane_id}' 2>/dev/null)"
   [ -n "$live" ] || return 0
-  for f in "$STATE_DIR"/*.state "$STATE_DIR"/*.ctx "$STATE_DIR"/*.seen "$STATE_DIR"/*.edit "$STATE_DIR"/*.plan "$STATE_DIR"/*.view "$STATE_DIR"/*.subs "$STATE_DIR"/*.cards "$STATE_DIR"/*.cards-seen; do
+  for f in "$STATE_DIR"/*.state "$STATE_DIR"/*.ctx "$STATE_DIR"/*.seen "$STATE_DIR"/*.edit "$STATE_DIR"/*.plan "$STATE_DIR"/*.view "$STATE_DIR"/*.subs "$STATE_DIR"/*.cards "$STATE_DIR"/*.cards-seen "$STATE_DIR"/*.refit; do
     [ -e "$f" ] || continue
     wid="${f##*/}"; wid="${wid%.*}"
     if ! printf '%s\n' "$live" | grep -qxF "$wid"; then

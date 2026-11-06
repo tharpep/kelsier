@@ -104,6 +104,7 @@ change; migrate old records in `migrate_meta`.
 | `prompt-history` | the last twenty commands typed at the sidebar's `;`, one per line |
 | `gh-dash.yml` | the config `v` writes for gh dash each time — every open space's repos; not the user's own |
 | `sidebar-fail.log` | a dying sidebar's own stderr (`kel-sidebar 2>>`), appended. Temporary: backlog #41 is fixed, and it goes once daily use stays quiet |
+| `<window-id>.refit` | one epoch: when `fit` last re-made that window's sidebar. `fit` re-makes at most one per window per 30 s and logs the skip to `sidebar-fail.log` (#33) |
 | `ports.json` | `{at, panes:{<pane pid>: [ports]}}` — the listening-port scan behind `_fleet --panes`, reused for 10 s |
 
 **The directory is `0700`.** The records carry repo paths, branch names and
@@ -335,6 +336,19 @@ with nothing in kel to assert against. Re-breaking an `unguarded` one is silent.
 - `[guarded]` **The suite's server has `focus-events` off**, because it skips
   kel.conf — a `pane-focus-in` hook never fires there until a test turns it
   on (and an attached client is focused, which `hold_client`'s is).
+- `[guarded]` **`pane_at_bottom` is false whenever the window is shorter than the
+  client, so a hook keyed on it can loop** (#33): `fit` read the sidebar as
+  `moved`, re-made it, and the re-make fired `window-layout-changed` again,
+  3.5 kills a second. `fit` now reads the sidebar as docked at left and top,
+  and at the bottom edge or within one row of the window's height — one row
+  because of the border status line (`pane-border-status top` in kel.conf
+  makes every pane one row shorter, so `pane_height == window_height` is never
+  true). The trigger was not reproduced in the suite; the proven guard is
+  `<window-id>.refit`, which caps re-making at once per 30 s.
+- `[principle]` **`$TMUX` beats `TMUX_TMPDIR` for socket resolution**, so an
+  experiment run from inside a kel pane without `-L` or `-S` reaches the real
+  server; it killed the author's workspace on 2026-11-05. Use
+  `tmux -L <label> -f /dev/null`, never a bare `kill-server`.
 - `[unguarded]` **`prune_state` is not `kel prune`.** `cmd_prune` reaps dead
   *agents*; `prune_state` reaps orphaned state files and is called from `cmd_ls`
   and `cmd_attach`. A test that drives `kel prune` to exercise `prune_state`
