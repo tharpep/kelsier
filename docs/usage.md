@@ -137,7 +137,9 @@ scrolls; more than four needing you fold into `+N more`.
   cold, violet
   throttled, red `●` error, red `✕` dead, grey `?` unknown) and how long,
   right-aligned; an agent with no state (opencode, or a restored session before
-  its first hook) reads dim `unknown` there and keeps a grey `?`. A state that needs a word gets a chip: `needs
+  its first hook) reads dim `unknown` there and keeps a grey `?`. An agent
+  not in the default permission mode carries it, faint, after its name:
+  `plan`, `edits`, `bypass`, `dontask`. A state that needs a word gets a chip: `needs
   you`, `done`, `error`, `dead`, `quota`. **Every agent has one line under it,
   chosen by its state:** working, what it is doing (`editing sbview.go`, its last
   tool call, from the tail of Claude Code's own transcript); waiting, what it

@@ -860,6 +860,25 @@ func summaryOf(a fleet.Agent) summary {
 	return summary{}
 }
 
+// modeWord is an agent's permission mode as the row shows it; the default
+// mode, which kel never writes, shows nothing.
+func modeWord(m *string) string {
+	if m == nil {
+		return ""
+	}
+	switch *m {
+	case "", "default":
+		return ""
+	case "acceptEdits":
+		return "edits"
+	case "bypassPermissions":
+		return "bypass"
+	case "dontAsk":
+		return "dontask"
+	}
+	return strings.ToLower(*m)
+}
+
 // agentAge is the right edge of an agent's row: how long it has been in its
 // state, and a chip naming the state when it is one that needs a word.
 // A `working` kel has not heard from reads "quiet", grey italic: kel is not
@@ -1273,10 +1292,29 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 				right = ""
 			}
 		}
-		if btns, bn, hits := inline(id, "agent", 4, true); bn >= 0 {
+		btns, bn, hits := inline(id, "agent", 4, true)
+		if bn >= 0 {
 			right, lw, r.hits = btns, bn, hits
 		}
-		rows := []string{spread(lead(id)+" "+c+d+reset+" "+weight(truncate(a.agent.Name, lw), a.current), right, w)}
+		mw := modeWord(a.agent.Mode)
+		nameW := lw
+		if mw != "" {
+			extra := len([]rune(mw)) + 1
+			budget := lw
+			if bn < 0 {
+				budget = max(lw, avail-2-visWidth(right))
+			}
+			if n := len([]rune(a.agent.Name)); budget-extra >= min(n, 4) {
+				nameW = min(n, budget-extra)
+			} else {
+				mw = ""
+			}
+		}
+		left := lead(id) + " " + c + d + reset + " " + weight(truncate(a.agent.Name, nameW), a.current)
+		if mw != "" {
+			left += " " + faint + mw + reset
+		}
+		rows := []string{spread(left, right, w)}
 		pre := lead(id) + "   "
 		sel := id == v.sel
 		sum := summaryOf(a.agent)
