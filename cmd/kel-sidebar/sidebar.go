@@ -791,7 +791,7 @@ func (m sbModel) panel(what string) (sbModel, tea.Cmd) {
 		// git calls, so it is asked for off the key path
 		m.mode, m.target, m.input = modeDiff, spaceID(sp.key), ""
 		return m, func() tea.Msg { return sbBase{fleet.BaseRef(dir)} }
-	case "edit", "plan", "cards":
+	case "edit", "plan", "cards", "history":
 		if what == "cards" {
 			key := ""
 			if a, ok := m.agentOf(m.view().sel); ok {
@@ -1355,6 +1355,9 @@ func (m sbModel) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, c
 	case "space", "l", "right", "h", "left":
 		v := m.view()
+		if k == "h" && strings.HasPrefix(v.sel, "a:") {
+			return m.panel("history")
+		}
 		for _, s := range v.spaces {
 			if spaceID(s.key) == v.sel {
 				open := k == "h" || k == "left" // h closes, l opens, space flips
@@ -1512,6 +1515,7 @@ var sbHelp = [][2]string{
 	{"#", "an agent"},
 	{"e", "edit its last file"},
 	{"p", "plan and tasks"},
+	{"h", "state history"},
 	{"i", "cards (agent report)"},
 	{"r", "rename"},
 	{"x", "kill"},
@@ -1901,7 +1905,7 @@ func helpKey(row string) string {
 		return ""
 	default:
 		switch f[0] {
-		case "/", "n", "w", "r", "x", "t", ";", "`", "s", "q", "f", "g", "d", "e", "o", "p", "c", "v", "u", "|", "-", "z", "m", "R", "i":
+		case "/", "n", "w", "r", "x", "t", ";", "`", "s", "q", "f", "g", "d", "e", "o", "p", "c", "v", "u", "|", "-", "z", "m", "R", "i", "h":
 			return f[0]
 		}
 	}

@@ -2355,6 +2355,35 @@ K api-gw kill ccard >/dev/null 2>&1
 ok "kel kill removes .cards and .cards-seen" \
    '[ ! -f "$STATE/$CP.cards" ] && [ ! -f "$STATE/$CP.cards-seen" ]'
 
+section "state history: every transition the hook writes"
+reset
+NEW api-gw hist
+HP="$(pane_of api-gw hist)"
+hook "$HP" UserPromptSubmit
+hook "$HP" Notification permission_prompt "allow Bash? $(printf 'x%.0s' $(seq 60))"
+hook "$HP" Stop
+ok "three hooks write three history lines, in order" \
+   '[ "$(awk "{printf \"%s \", \$3}" "$STATE/$HP.log")" = "working waiting done " ] && [ "$(grep -c . "$STATE/$HP.log")" = 3 ]'
+ok "  ...each <epoch> <event> <state> <note>"         'awk "NR==2 {exit !(\$1 ~ /^[0-9]+\$/ && \$2 == \"Notification\")}" "$STATE/$HP.log"'
+ok "  ...the note cut to 40 characters"               '[ "$(sed -n 2p "$STATE/$HP.log" | cut -d" " -f4- | tr -d "\n" | wc -c | tr -d " ")" = 40 ]'
+ok "  ...0600"                                        '[ "$(perl -e "printf q(%o), (stat shift)[2] & 07777" "$STATE/$HP.log")" = 600 ]'
+hook "$HP" Notification idle_prompt
+ok "  ...a hook that writes no state writes no line"  '[ "$(grep -c . "$STATE/$HP.log")" = 3 ]'
+export KEL_POPUP_TRACE="$WORK/hist-popups"; : > "$KEL_POPUP_TRACE"
+"$KEL" _panel history "$WORK/repos/api-gw" api-gw/hist "$HP" >/dev/null 2>&1
+ok "_panel history opens a popup titled for the agent" 'grep -q "history · api-gw/hist · prefix q closes" "$KEL_POPUP_TRACE"'
+ok "  ...newest first, with ages"                     '[ "$(sed -n 1p "$STATE/$HP.view" | awk "{print \$3, \$4}")" = "done Stop" ] && sed -n 3p "$STATE/$HP.view" | grep -q "^[0-9]*s ago *working *UserPromptSubmit"'
+ok "  ...and a pane with no history is refused"       '! "$KEL" _panel history "$WORK/repos/api-gw" t %9999 >/dev/null 2>&1'
+for i in $(seq 40); do hook "$HP" UserPromptSubmit; hook "$HP" Stop; done
+ok "the log is trimmed once past 40 lines, down to 20" '[ "$(grep -c . "$STATE/$HP.log")" -le 40 ] && [ "$(grep -c . "$STATE/$HP.log")" -ge 20 ] && [ "$(tail -n 1 "$STATE/$HP.log" | cut -d" " -f3)" = done ]'
+ok "  ...and still 0600"                              '[ "$(perl -e "printf q(%o), (stat shift)[2] & 07777" "$STATE/$HP.log")" = 600 ]'
+printf '1 Stop done\n' > "$STATE/%997.log"; echo x > "$STATE/sidebar-fail.log"
+"$KEL" ls >/dev/null
+ok "a .log for a gone pane is pruned, the sidebar's own log kept" '[ ! -e "$STATE/%997.log" ] && [ -e "$STATE/sidebar-fail.log" ]'
+K api-gw kill hist >/dev/null 2>&1
+ok "kel kill removes the history"                     '[ ! -e "$STATE/$HP.log" ]'
+unset KEL_POPUP_TRACE
+
 # ---------------------------------------------------------------- summary
 printf '\n'
 if [ "$fail" -eq 0 ]; then

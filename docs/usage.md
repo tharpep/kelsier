@@ -239,6 +239,7 @@ doubtful `working` reads `quiet 2h` in grey italic.
 | `e` on a space | nvim at that directory, kept between opens — your buffers are still there next time |
 | `t` | a plain shell window in the selected space — no agent |
 | `q` | quit kel, after `y`: saves the workspace, then closes it all; refuses while a worktree holds unsaved work |
+| `h` | the selected agent's last twenty state changes in a popup, newest first with ages (`2m ago  done  Stop`). On a space, `h` still closes it |
 | `p` | the selected agent's plan (from plan mode), then its task list — `✓` done, `▸` in progress, `·` pending, and what blocks what. Most sessions on newer models keep no task list; it says so. Rendered with glow when installed |
 | `i` | the selected entry's cards (reports from agents) in a popup, newest first — result, update, decision. Rendered with glow when installed |
 | `c` | the Claude Code configuration that applies to the selected space, in yazi, a tab per place: the repo's `CLAUDE.md`, its `.claude/`, the global `~/.claude` and the project's memory. To read and open — kel writes none of it |

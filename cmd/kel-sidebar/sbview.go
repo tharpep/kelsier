@@ -1630,7 +1630,7 @@ func selActions(v sbView) (string, string, []sbAct) {
 	case strings.HasPrefix(v.sel, "a:"):
 		for _, a := range v.agents {
 			if agentID(a.key) == v.sel {
-				acts := []sbAct{{"e", "edit file"}, {"p", "plan"}, {"i", "cards"}, {"r", "rename"}, {"x", "kill"}, {"z", "zoom"}}
+				acts := []sbAct{{"e", "edit file"}, {"p", "plan"}, {"h", "history"}, {"i", "cards"}, {"r", "rename"}, {"x", "kill"}, {"z", "zoom"}}
 				if a.agent.State != nil && *a.agent.State == "dead" {
 					acts = append([]sbAct{{"R", "relaunch"}}, acts...)
 				}

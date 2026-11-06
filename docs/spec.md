@@ -687,6 +687,8 @@ with the payload on stdin:
 | `PostToolUse`, every tool | `working`, only from `waiting` (*2026-10-21*) — see below. On `Edit` / `Write` / `MultiEdit` also: |
 | | *built (M5).* no change — records the last file the agent touched and its first changed line (`tool_response.structuredPatch[0].newStart`), for `e` (§5f). *Built (M6):* a write under `~/.claude/plans/` is the session's plan, recorded as `<pane-id>.plan` instead |
 
+Each transition the hook writes is also appended to `<pane-id>.log` as `<epoch> <event> <state> <note, first 40 characters>` (*2026-11-06*), kept to the last 20 lines (trimmed when it passes 40) and removed with the agent's other state. `h` in the sidebar, or its entry menu, shows it in a popup, newest first (`kel _panel history <dir> <title> <pane>`). The append is one `printf >>` and a line count in the shell's own memory, no fork: about 2.4 ms measured on WSL2, plus a trim fork-chain every twentieth transition, against a hook that already makes several tmux calls (invariant 5). `PostToolUse`'s fast path writes nothing, so it logs nothing.
+
 Every payload carries `permission_mode`. A hook that sees one writes it to `<pane-id>.mode` unless it is `default`, which removes the file, and the fleet document reports it as the agent's `mode` (*2026-11-06*). The `PostToolUse` fast path leaves before reading it, so a mode changed mid-turn shows from the next prompt, stop or wait.
 
 The `PostToolUse` entry was wired with a **matcher limited to those tools**,
