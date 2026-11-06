@@ -91,6 +91,7 @@ change; migrate old records in `migrate_meta`.
 | `<window-id>.seen` | one epoch: when the window was last shown. `kel-fleet` reads it for `unseen` on a `done` agent (no file = unseen); the shown sidebar writes it for its own window |
 | `<pane-id>.edit` | two lines: the path the window's agent last edited, then its first changed line. Written by the `PostToolUse` hook (on every tool since 2026-10-21; only edits write this), read by `kel _panel edit` |
 | `<pane-id>.plan` | two lines like `.edit`: the plan file a plan-mode `Write` under `$CLAUDE_CONFIG_DIR/plans/` named. The same hook, sorted by path |
+| `<pane-id>.transcript_path` / `.artifact_dir` | Antigravity: one line each, the transcript file and the artifact directory its hooks report. 0600, reaped with the pane's other files |
 | `<pane-id>.view` | what `p` last composed (plan, then tasks) for its popup; overwritten each time |
 | `<pane-id>.cards` | JSON lines of cards reported by agents (`kel card`), newest last, last 20 kept (spec §10a) |
 | `<pane-id>.cards-seen` | one epoch: when the pane's cards were last viewed via `i`. If `latest.at > seen`, cards are unseen |

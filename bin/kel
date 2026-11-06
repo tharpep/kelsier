@@ -463,11 +463,16 @@ window_state() { # wid -> the most urgent state among its agents
   printf '%s' "$best"
 }
 
+write_private() { # file content
+  ( umask 077; printf '%s' "$2" > "$1" ) && chmod 600 "$1"
+}
+
 rm_agent_state() { # key...
   local k
   for k in "$@"; do
     [ -n "$k" ] && rm -f "$STATE_DIR/$k.state" "$STATE_DIR/$k.ctx" "$STATE_DIR/$k.edit" \
-      "$STATE_DIR/$k.plan" "$STATE_DIR/$k.view" "$STATE_DIR/$k.subs" "$STATE_DIR/$k.cards" "$STATE_DIR/$k.cards-seen" "$STATE_DIR/$k.mode"
+      "$STATE_DIR/$k.plan" "$STATE_DIR/$k.view" "$STATE_DIR/$k.subs" "$STATE_DIR/$k.cards" "$STATE_DIR/$k.cards-seen" "$STATE_DIR/$k.mode" \
+      "$STATE_DIR/$k.transcript_path" "$STATE_DIR/$k.artifact_dir"
   done
   return 0
 }
@@ -842,7 +847,7 @@ prune_state() {
   local live f wid panes pane
   live="$(tmux list-windows -a -F '#{window_id}' 2>/dev/null; tmux list-panes -a -F '#{pane_id}' 2>/dev/null)"
   [ -n "$live" ] || return 0
-  for f in "$STATE_DIR"/*.state "$STATE_DIR"/*.ctx "$STATE_DIR"/*.seen "$STATE_DIR"/*.edit "$STATE_DIR"/*.plan "$STATE_DIR"/*.view "$STATE_DIR"/*.subs "$STATE_DIR"/*.cards "$STATE_DIR"/*.cards-seen "$STATE_DIR"/*.mode "$STATE_DIR"/*.refit; do
+  for f in "$STATE_DIR"/*.state "$STATE_DIR"/*.ctx "$STATE_DIR"/*.seen "$STATE_DIR"/*.edit "$STATE_DIR"/*.plan "$STATE_DIR"/*.view "$STATE_DIR"/*.subs "$STATE_DIR"/*.cards "$STATE_DIR"/*.cards-seen "$STATE_DIR"/*.mode "$STATE_DIR"/*.transcript_path "$STATE_DIR"/*.artifact_dir "$STATE_DIR"/*.refit; do
     [ -e "$f" ] || continue
     wid="${f##*/}"; wid="${wid%.*}"
     if ! printf '%s\n' "$live" | grep -qxF "$wid"; then
@@ -2926,7 +2931,7 @@ cmd_sync() {
     fi
 
     if [ -n "$bdir" ]; then
-      printf '%s' "$bdir" > "$STATE_DIR/$pane.artifact_dir"
+      write_private "$STATE_DIR/$pane.artifact_dir" "$bdir"
       for f in "$bdir"/*.md; do
         if [ -f "$f" ]; then
           printf '%s\n' "$f" > "$STATE_DIR/$pane.plan"
@@ -2935,7 +2940,7 @@ cmd_sync() {
       done
       local tr_path="$bdir/.system_generated/logs/transcript.jsonl"
       if [ -f "$tr_path" ]; then
-        printf '%s' "$tr_path" > "$STATE_DIR/$pane.transcript_path"
+        write_private "$STATE_DIR/$pane.transcript_path" "$tr_path"
         agy_update_ctx "$pane" "$tr_path" "auto"
       fi
     fi
@@ -3857,10 +3862,10 @@ cmd_hook_agy() {
   prev="$(state_of "$pane")"
 
   if [ -n "$art_dir" ]; then
-    printf '%s' "$art_dir" > "$STATE_DIR/$pane.artifact_dir"
+    write_private "$STATE_DIR/$pane.artifact_dir" "$art_dir"
   fi
   if [ -n "$tr_path" ]; then
-    printf '%s' "$tr_path" > "$STATE_DIR/$pane.transcript_path"
+    write_private "$STATE_DIR/$pane.transcript_path" "$tr_path"
   fi
 
   if [ -n "$sid" ]; then
