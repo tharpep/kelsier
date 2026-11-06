@@ -402,6 +402,11 @@ AGY_WID="$(tmux display-message -p -t "$AGY_PANE" '#{window_id}')"
 KEL_POPUP_NODRAW=1 "$KEL" _panel plan "$WORK" "agy-agent" "$AGY_WID" >/dev/null 2>&1 || true
 ok "agy plan popup composes view with artifact" 'grep -q "Implementation Plan" "$STATE/$AGY_PANE.view" 2>/dev/null'
 
+perm600() { [ "$(perl -e 'printf q(%o), (stat shift)[2] & 07777' "$1")" = 600 ]; }
+ok "agy's transcript_path and artifact_dir are written 0600" '[ -f "$STATE/$AGY_PANE.artifact_dir" ] && perm600 "$STATE/$AGY_PANE.artifact_dir" && [ -f "$STATE/$AGY_PANE.transcript_path" ] && perm600 "$STATE/$AGY_PANE.transcript_path"'
+printf '/gone' > "$STATE/%996.transcript_path"; printf '/gone' > "$STATE/%996.artifact_dir"
+"$KEL" ls >/dev/null
+ok "  ...and a stale pair for a gone pane is pruned"         '[ ! -e "$STATE/%996.transcript_path" ] && [ ! -e "$STATE/%996.artifact_dir" ] && [ -e "$STATE/$AGY_PANE.artifact_dir" ]'
 "$KEL" kill api-gw/agy-agent >/dev/null 2>&1
 # #25: a record whose JSON does not even parse must still render, distinctly
 # -- not vanish, and (the worse bug this actually was) not take the rest of
