@@ -1821,6 +1821,13 @@ ok "does not notify for states not in \$KEL_NOTIFY" '[ "$(grep -c . "$NLOG")" = 
 : > "$NLOG"; KEL_NOTIFY="done" hook "$P" Stop
 wait_until '[ "$(grep -c . "$NLOG")" = 1 ]'
 ok "\$KEL_NOTIFY selects which states do"   '[ "$(grep -c . "$NLOG")" = 1 ]'
+# the row over the bar is the window list; the suite skips kel.conf, so load
+# its own lines for the row rather than a copy
+grep -E '^set -g (@kel-bar-lead-blank|@kel-wcol|@kel-went|status-format\[0\])' "$HERE/../tmux/kel.conf" > "$WORK/winrow.conf"
+tmux source-file "$WORK/winrow.conf"
+winrow() { tmux display-message -p -t "=keltest:" -F "$(tmux show-options -Agv -t "=keltest:" 'status-format[0]')"; }
+winent() { winrow | grep -o "#\[range=window|[^]]*\][0-9]* $1[^#]*"; }
+winplain() { winrow | sed 's/#\[[^]]*\]//g; s/  *$//'; }
 # the banner: a line at the top while an agent waits, gone when it moves on
 : > "$NLOG"; hook "$P" UserPromptSubmit; hook "$P" Notification permission_prompt 'run #(touch pwned)?'
 AW="$(window_of api-gw a)"
@@ -1833,6 +1840,7 @@ hook "$P" UserPromptSubmit
 # "● is" from a blank line, which contains no "is waiting".  Check the bar
 # itself is gone, not just one phrase.
 ok "  ...and takes it down when the agent moves on" '[ ! -s "$STATE/banner" ] && [ -z "$(tmux show-options -v -t "=keltest:" status-format[0] 2>/dev/null)" ] && [ -z "$(tmux show-options -v -t "=keltest:" status 2>/dev/null)" ]'
+ok "  ...and the window list is back on the row" '[[ "$(winrow)" == *"range=window|"* ]]'
 ok "  ...leaving no empty status-format behind, which blanks the bar" '! tmux show-options -t "=keltest:" | grep -q "^status-format"'
 NEW api-gw b
 hold_client 20
@@ -1862,6 +1870,29 @@ ok "  ...and a version-number window name gives way to the folder" '[ "$(cut -f3
 tmux kill-window -t "$VW"; : > "$STATE/banner"
 release_client
 unset KEL_NOTIFY_CMD
+section "the row over the bar lists every window in its agents' state"
+reset
+NEW api-gw w1; NEW api-gw w2; NEW api-gw w3
+tmux source-file "$WORK/winrow.conf"
+WP1="$(pane_of api-gw w1)"; WP2="$(pane_of api-gw w2)"; WP3="$(pane_of api-gw w3)"
+tmux select-window -t "$(window_of api-gw w1)"
+hook "$WP2" UserPromptSubmit; hook "$WP2" Notification permission_prompt "allow?"
+ok "the row names all three windows" '[[ "$(winplain)" == *"w1"*"w2"*"w3"* ]]'
+ok "  ...the waiting one carries a dot and amber" '[[ "$(winent w2)" == *colour214*"●"* ]]'
+ok "  ...the others carry neither" '[[ "$(winent w1)" != *"●"* ]] && [[ "$(winent w3)" != *"●"* ]] && [[ "$(winent w3)" != *colour214* ]]'
+ok "  ...the window you are in is bold, the rest are not" '[[ "$(winent w1)" == *" bold]"* ]] && [[ "$(winent w2)" == *nobold* ]] && [[ "$(winent w3)" == *nobold* ]]'
+ok "  ...each entry is a click target for its own window" '[[ "$(winent w2)" == "#[range=window|$(tmux display-message -p -t "$(window_of api-gw w2)" "#{window_index}")"* ]]'
+hook "$WP2" UserPromptSubmit
+ok "the dot and the colour go when the agent moves on" '[[ "$(winent w2)" != *"●"* ]] && [[ "$(winent w2)" != *colour214* ]] && [ -z "$(tmux show-options -wv -t "$(window_of api-gw w2)" @kel-wstate 2>/dev/null)" ]'
+tmux select-window -t "$(window_of api-gw w2)"
+ok "  ...and bold follows the window you move to" '[[ "$(winent w2)" == *" bold]"* ]] && [[ "$(winent w1)" == *nobold* ]]'
+hook "$WP3" UserPromptSubmit
+DPID="$(tmux list-panes -t "$(window_of api-gw w3)" -F "#{pane_pid}")"
+pkill -P "$DPID" sleep 2>/dev/null
+wait_until '[ "$(tmux list-panes -t "$(window_of api-gw w3)" -F "#{pane_current_command}")" = bash ]'
+"$KEL" ls >/dev/null 2>&1
+ok "a dead agent shows red after kel ls repaints" '[[ "$(winent w3)" == *colour167*"●"* ]]'
+tmux set-option -gu status-format; tmux set-option -gu @kel-bar-lead-blank; tmux set-option -gu @kel-wcol; tmux set-option -gu @kel-went
 # The cases above already prove the detached path: this suite never attaches a
 # client, so every notification here took the "nobody is looking" branch.
 # Suppression *while focused* needs an attached client, and attaching one

@@ -3137,9 +3137,11 @@ paint_state() {   # wid state
     *)         col='' ;;          # working / idle / done: stay quiet
   esac
   if [ -n "$col" ]; then
+    tmux set-option -w -t "$wid" @kel-wstate "$2" 2>/dev/null || true
     tmux set-option -w -t "$wid" pane-border-style        "fg=$col" 2>/dev/null || true
     tmux set-option -w -t "$wid" pane-active-border-style "fg=$col" 2>/dev/null || true
   else
+    tmux set-option -wu -t "$wid" @kel-wstate 2>/dev/null || true
     tmux set-option -wu -t "$wid" pane-border-style        2>/dev/null || true
     tmux set-option -wu -t "$wid" pane-active-border-style 2>/dev/null || true
   fi

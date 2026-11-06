@@ -568,10 +568,28 @@ Cut from the first draft, each because the sidebar holds it: per-state counts
 sidebar is showing. Memory was considered earlier and dropped: it has never
 been the problem.
 
-The per-window list (`1:auth-fix? 2:docs`) is gone — the sidebar replaced it,
-and it was what overflowed the bar past about six windows. With live agents
-and nothing to say, the second segment reads `nothing waiting` rather than
-going blank: an empty bar would look like a broken one.
+The per-window list (`1:auth-fix? 2:docs`) is gone from the bar itself — the
+sidebar replaced it, and it was what overflowed the bar past about six windows.
+With live agents and nothing to say, the second segment reads `nothing waiting`
+rather than going blank: an empty bar would look like a broken one.
+
+**The half-row above the bar is the window list** (2026-11-05; it was a `▄` line
+in the surface colour). The sidebar is offscreen in all but one window, so this
+is the one place every window's state is visible. After the sidebar's blank,
+each window of the session reads `<index> <name>`, two spaces apart, in the
+colour of its most urgent agent: amber `waiting`, red `error` / `dead`, violet
+`throttled`, a `●` after the name for those, grey otherwise; the window you are
+in is bold. A click on an entry selects that window.
+
+The state reaches the row through the window option `@kel-wstate`, which
+`paint_state` sets beside the border colour and unsets when the state is calm;
+`repaint_all` keeps it true for a `dead` agent no hook reported. The row is
+`status-format[0]` in `kel.conf`, expanded by tmux at redraw: a `#{W:...}` loop
+over the windows reading `#{@kel-wstate}`, so no kel process runs per redraw
+(invariant 5). The banner still replaces the row while it has something to say.
+`#{W:` is in tmux since 3.0; `range=window|N` styles too, but the format
+`#{mouse_status_range}` that the click binding keys on is 3.4+, so below 3.4 the
+list draws and is not clickable.
 
 **Stale quota reads as unknown.** Quota is per account, so it moves out of the
 per-window `.ctx` into its own small file (5h %, its reset, weekly %, its

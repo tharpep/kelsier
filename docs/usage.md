@@ -301,10 +301,9 @@ the sidebar's colours.
 ## The quota line, and tmux's bar
 
 **tmux's bar runs along the bottom of the window**, on the sidebar's own
-surface, with half a row of room above it (a `▄` line in the bar's colour):
-what belongs to no agent on the left, what waits on you and the clock on the
-right. While an agent waits, the banner takes that line; only its `↵ go` and
-`✕` are clickable.
+surface: what belongs to no agent on the left, what waits on you and the clock
+on the right. Half a row above it lists every window (below). While an agent
+waits, the banner takes that half row; only its `↵ go` and `✕` are clickable.
 
 ```
   5h ━━━━━━━━ 58% (1h20m)   7d 41% · $24.10          ▐needs you▌ docs 6m +1   14:32
@@ -318,6 +317,7 @@ right. While an agent waits, the banner takes that line; only its `↵ go` and
 | `$24.10` | the cost of the agents open right now |
 | `▐needs you▌ docs 6m +1` | the agent that has waited on you longest, how long, and how many more; a click jumps there. Absent when none waits |
 | `kelsier · fix-auth ↑2 ●3` | only while the sidebar is off: where the pane you are in stands |
+| `1 api  2 docs ●  3 fix-auth ●` | the half row above the bar: every window, in its most urgent agent's colour (amber waiting, red error or dead, violet throttled, with a `●`; grey otherwise), bold for yours. Click one to go there (tmux 3.4+) |
 
 No quota shows until a session has reported one — an API-key session never
 does, and the bar never invents a `0%`. If `kel-fleet` is missing the bar says
