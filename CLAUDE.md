@@ -93,7 +93,7 @@ change; migrate old records in `migrate_meta`.
 | `<pane-id>.plan` | two lines like `.edit`: the plan file a plan-mode `Write` under `$CLAUDE_CONFIG_DIR/plans/` named. The same hook, sorted by path |
 | `<pane-id>.transcript_path` / `.artifact_dir` | Antigravity: one line each, the transcript file and the artifact directory its hooks report. 0600, reaped with the pane's other files |
 | `<pane-id>.view` | what `p` or `h` last composed (plan, then tasks; or the state history) for its popup; overwritten each time |
-| `<pane-id>.log` | the agent's state history, one line `<epoch> <event> <state> <note, first 40 chars>` appended by the state hook for each transition it writes. Trimmed to the last 20 lines once it passes 40. 0600, removed by `rm_agent_state`, pruned with the other pane files; read by `kel _panel history` |
+| `<pane-id>.log` | the agent's state history, one line `<epoch> <event> <state> <note, first 40 chars>` appended by the state hook for each transition it writes. Trimmed to the last 20 lines when it passes 40. Cleared by `SessionStart`, `SessionEnd` and relaunch, so a pane's new session starts empty; `_panel history` ignores one whose pane is a bare shell with no `@kel-agent`. Written by the Antigravity hook too. 0600, removed by `rm_agent_state`, pruned with the other pane files; read by `kel _panel history` |
 | `<pane-id>.cards` | JSON lines of cards reported by agents (`kel card`), newest last, last 20 kept (spec §10a) |
 | `<pane-id>.cards-seen` | one epoch: when the pane's cards were last viewed via `i`. If `latest.at > seen`, cards are unseen |
 | `lazygit-overlay.yml` | `quitOnTopLevelReturn: true`, laid over the user's lazygit config (never written into it) so `esc` closes kel's lazygit popup |

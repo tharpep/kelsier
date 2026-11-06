@@ -1696,7 +1696,7 @@ cmd_relaunch() {
   cid="$(jq -r '.claude_session // ""' "$meta")"
 
   # drop the stale reading; the relaunched agent's SessionStart sets it again
-  rm -f "$STATE_DIR/$pane.state" "$STATE_DIR/$pane.ctx" "$STATE_DIR/$wid.state" "$STATE_DIR/$wid.ctx"
+  rm -f "$STATE_DIR/$pane.state" "$STATE_DIR/$pane.ctx" "$STATE_DIR/$pane.log" "$STATE_DIR/$wid.state" "$STATE_DIR/$wid.ctx"
   tmux set-option -pu -t "$pane" @kel-state 2>/dev/null
   tmux send-keys -t "$pane" "$(agent_resume_cmd "$meta")" Enter
   tmux refresh-client -S 2>/dev/null || true
@@ -2616,6 +2616,14 @@ panel_history() { # dir title pane
   local dir="$1" title="$2" pane="$3" f view
   f="$STATE_DIR/$pane.log"
   [ -s "$f" ] || die "no state history for this agent"
+  local info k_ag k_st k_cmd
+  info="$(tmux display-message -p -t "$pane" '#{@kel-agent}	#{@kel-state}	#{pane_current_command}' 2>/dev/null || true)"
+  if [ -n "$info" ]; then
+    IFS=$'\t' read -r k_ag k_st k_cmd <<< "$info"
+    if [ -z "$k_ag" ] && [ -z "$k_st" ]; then
+      case "$k_cmd" in bash|zsh|sh|fish|csh|tcsh) die "no state history for this agent" ;; esac
+    fi
+  fi
   view="$STATE_DIR/$pane.view"
   tail -n 20 "$f" | awk -v now="$(date +%s)" '
     function ago(s) { return s < 60 ? s "s ago" : s < 3600 ? int(s / 60) "m ago" : s < 86400 ? int(s / 3600) "h ago" : int(s / 86400) "d ago" }
@@ -4015,10 +4023,12 @@ cmd_hook_agy() {
 
   [ -n "$state" ] || exit 0
 
-  local tmp
+  local tmp now
   tmp="$(mktemp "$STATE_DIR/.${pane#%}.XXXXXX" 2>/dev/null)" || exit 0
-  printf '%s %s %s\n' "$state" "$(date +%s)" "$ntext" > "$tmp"
+  now="$(date +%s)"
+  printf '%s %s %s\n' "$state" "$now" "$ntext" > "$tmp"
   mv -f "$tmp" "$STATE_DIR/$pane.state"
+  hook_history "$pane" "$now" "$event" "$state" "$ntext"
   tmux set-option -p -t "$pane" @kel-state "$state" 2>/dev/null
   [ "$(agent_pane "$wid")" = "$pane" ] && rm -f "$STATE_DIR/$wid.state"
 
@@ -4046,10 +4056,11 @@ cmd_hook_agy() {
 }
 
 hook_history() { # pane epoch event state note
-  local f="$STATE_DIR/$1.log" h='' nl
+  local f="$STATE_DIR/$1.log" h='' nl note="${5//[[:cntrl:]]/ }"
+  [ "$3" = SessionStart ] && rm -f "$f"
   [ -e "$f" ] || ( umask 077; : > "$f" )
-  printf '%s %s %s %s\n' "$2" "$3" "$4" "${5:0:40}" >> "$f"
-  read -r -d '' h < "$f" || true
+  printf '%s %s %s %s\n' "$2" "$3" "$4" "${note:0:40}" >> "$f"
+  IFS= read -r -d '' h < "$f" || true
   nl="${h//[!$'\n']/}"
   if [ "${#nl}" -gt 40 ]; then
     write_private "$f.$$" "$(tail -n 20 "$f")"$'\n' && mv -f "$f.$$" "$f"
@@ -4177,7 +4188,7 @@ cmd_hook() {
       tmux refresh-client -S 2>/dev/null || true
       exit 0 ;;
     SessionEnd)
-      rm -f "$STATE_DIR/$pane.state" "$STATE_DIR/$pane.ctx" "$STATE_DIR/$pane.mode"
+      rm -f "$STATE_DIR/$pane.state" "$STATE_DIR/$pane.ctx" "$STATE_DIR/$pane.mode" "$STATE_DIR/$pane.log"
       [ "$(agent_pane "$wid")" = "$pane" ] && rm -f "$STATE_DIR/$wid.state" "$STATE_DIR/$wid.ctx"
       tmux set-option -pu -t "$pane" @kel-state 2>/dev/null
       paint_state "$wid" ''
