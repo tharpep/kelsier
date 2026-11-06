@@ -730,6 +730,44 @@ func TestAgentDoing(t *testing.T) {
 	}
 }
 
+func TestAgentMode(t *testing.T) {
+	for in, want := range map[string]string{"plan": "plan", "acceptEdits": "edits", "bypassPermissions": "bypass", "dontAsk": "dontask", "Auto": "auto", "default": "", "": ""} {
+		if got := modeWord(&in); got != want {
+			t.Errorf("modeWord(%q) = %q, want %q", in, got, want)
+		}
+	}
+	if modeWord(nil) != "" {
+		t.Error("an agent with no mode shows none")
+	}
+	doc := loadFixture(t, "one-agent")
+	doc.Agents[0].Mode = sp("acceptEdits")
+	out, _ := renderView(buildView(doc, uiState{}), 32, 0, 0)
+	if !strings.Contains(plain(out), "kelsier edits") || !strings.Contains(out, faint+"edits") {
+		t.Errorf("no faint mode after the name:\n%s", plain(out))
+	}
+	doc.Agents[0].Mode = nil
+	out, _ = renderView(buildView(doc, uiState{}), 32, 0, 0)
+	if strings.Contains(plain(out), "edits") || strings.Contains(plain(out), "plan") {
+		t.Errorf("a null mode drew something:\n%s", plain(out))
+	}
+	doc.Agents[0].Name = "a-long-agent-name-that-cannot-fit"
+	doc.Agents[0].Mode = sp("bypassPermissions")
+	out, _ = renderView(buildView(doc, uiState{}), 28, 0, 0)
+	row := strings.Split(plain(out), "\n")
+	found := false
+	for _, l := range row {
+		if strings.Contains(l, "a-long") {
+			found = true
+			if !strings.Contains(l, "… bypass") || visWidth(l) > 28 {
+				t.Errorf("the name should truncate to keep the mode: %q", l)
+			}
+		}
+	}
+	if !found {
+		t.Errorf("no agent row:\n%s", plain(out))
+	}
+}
+
 func sp(s string) *string { return &s }
 
 // d asks which base; tab completes a branch.

@@ -38,6 +38,7 @@
     "model": "Opus 5.5 (1M context)"
    },
    "unseen": false,
+   "mode": "plan",
    "title": "Okay, so I put out PR 16 as an audit and exploration. I want you to take a look",
    "doing": "editing sbview.go"
   }

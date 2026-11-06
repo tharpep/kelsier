@@ -351,6 +351,11 @@ in any terminal:
   model's name when known (`Opus 5.5 · 36% · $10.65`). An agent with no state (opencode,
   or a restored session before its first hook) shows dim `unknown` where the
   age would be, and its dot stays `?`; never a cause kel cannot know.
+- **A permission mode follows the name** (*2026-11-06*): `plan`, `edits`
+  (acceptEdits), `bypass` (bypassPermissions), `dontask` (dontAsk), any other
+  mode lowercased, faint; nothing for `default` (invariant 3: a mode kel was
+  not told is not drawn). The name truncates to make room, as it does for the
+  inline hover buttons.
 - **The selection is a raised block**, opencode's way: a lighter fill with a
   blank row above and below, the accent bar down its whole height, and the
   entry's detail inside it — context and cost, what it is doing, subagents;
