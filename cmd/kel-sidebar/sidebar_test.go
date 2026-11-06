@@ -137,7 +137,7 @@ func TestSidebarView(t *testing.T) {
 		names = append(names, a.agent.Name)
 	}
 	// a fixed order: repos by name, agents in the order their windows were made
-	if got := strings.Join(names, " "); got != "gateway rate-limits kelsier fix-auth docs dashboard usage-charts spike" {
+	if got := strings.Join(names, " "); got != "gateway rate-limits api-auth kelsier fix-auth docs dashboard usage-charts spike" {
 		t.Errorf("agents in a fixed order: got %s", got)
 	}
 	if v.sel != "a:@1" {
@@ -716,7 +716,7 @@ func TestAgentDoing(t *testing.T) {
 	if !strings.Contains(plain(out), "   editing sbview.go") {
 		t.Errorf("no doing line:\n%s", plain(out))
 	}
-	// and on a working agent that is not selected, quieter, in faint
+	// and on a working agent that is not selected, in dim
 	doc = loadFixture(t, "fifteen-three-repos")
 	st := "working"
 	for i := range doc.Agents {
@@ -725,7 +725,7 @@ func TestAgentDoing(t *testing.T) {
 		}
 	}
 	out, _ = renderView(buildView(doc, uiState{sel: "a:@1"}), 32, 0, 0)
-	if !strings.Contains(out, faint+italic+"running the tests") {
+	if !strings.Contains(out, dim+"running the tests") {
 		t.Errorf("an unselected working agent shows no doing line:\n%s", plain(out))
 	}
 }

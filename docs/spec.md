@@ -149,7 +149,8 @@ or resized.**
 
 - **Sidebar** — a Go TUI (Bubble Tea v2), grown from `kel top`. **Two
   sections**, after herdr (`herdrdev/herdr`), which answers the same question
-  in the terminal:
+  in the terminal, and above them, only while it is not empty, **`Needs you`**
+  (§5d) — a pointer to each agent that wants a look:
   - **`spaces`** — *where*: one entry per repo / worktree, its git position
     (branch, ahead/behind, dirty, land) and the ports its servers listen on.
     Expanding an entry lists its panes — agent, server, shell, program — so
@@ -331,6 +332,25 @@ in any terminal:
   are, agents by window index. Sorting by urgency moved the row under the
   pointer whenever a state changed; chips, the banner and `` prefix ` `` carry
   urgency instead.
+- **`Needs you` lists and never reorders** (*2026-11-05*). A section above
+  `Spaces`, present only when non-empty, headed in the waiting colour with a
+  faint count: one row per agent that is `waiting`, `error`, or `done` and
+  unseen, ordered by `state_since`, oldest first — `● name  reason  age`, the
+  reason being the waiting note, the error text, or `done`. A row is a pointer:
+  a click or `enter` jumps as the agent's own row does and selects that row
+  (`a:<window>`), and the agent stays where it was in its repo group. It has no
+  buttons. The agents below keep their fixed order; this list is the one place
+  urgency orders anything, and it holds no row long enough to be aimed at.
+- **One summary line under every agent, chosen by its state** (*2026-11-05*):
+  working, what it is doing; waiting, the reason in the bright grey and, dim
+  after it, the command the note quotes; error, the error text in red; done or
+  idle, the session's **title** — the first real prompt, first line only. A
+  state with nothing known has no line, never a placeholder (invariant 3);
+  subagent and background children stay. The selected block opens with the
+  title in full (two lines at most) above the context line, which leads with the
+  model's name when known (`Opus 5.5 · 36% · $10.65`). An agent whose state kel
+  cannot know (no hooks, as opencode) shows dim `no hooks` where the age
+  would be, and its dot stays `?`.
 - **The selection is a raised block**, opencode's way: a lighter fill with a
   blank row above and below, the accent bar down its whole height, and the
   entry's detail inside it — context and cost, what it is doing, subagents;
