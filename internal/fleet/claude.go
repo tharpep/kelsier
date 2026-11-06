@@ -8,7 +8,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 )
 
@@ -106,14 +105,13 @@ func claudeSessions(sd string) (sessions []ClaudeSession, ok bool) {
 		if b, err := json.Marshal(c); err == nil {
 			WriteAtomic(path, b)
 		}
-		spawnRefresh()
+		StartClaudeRefresh(sd)
 	}
 	return c.Sessions, !c.Failed && age < claudeMaxAge
 }
 
-// RefreshClaudeAgents is what the detached `kel-fleet --refresh-claude-agents` runs.
-func RefreshClaudeAgents() {
-	sd := StateDir()
+// RefreshClaudeAgents asks claude and rewrites the cache in sd.
+func RefreshClaudeAgents(sd string) {
 	var c claudeCache
 	if b, err := os.ReadFile(filepath.Join(sd, "claude-agents.json")); err == nil {
 		json.Unmarshal(b, &c)
@@ -141,17 +139,10 @@ func refreshClaudeAgents(sd, cachedBin string) ([]ClaudeSession, bool) {
 	return c.Sessions, !c.Failed
 }
 
-var spawnRefresh = func() {
-	exe, err := os.Executable()
-	if err != nil {
-		return
-	}
-	cmd := exec.Command(exe, "--refresh-claude-agents")
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
-	if cmd.Start() == nil {
-		cmd.Process.Release()
-	}
-}
+// StartClaudeRefresh is how a host refreshes a stale cache without making the
+// load wait: a goroutine for a long-lived process, a detached re-exec for a
+// short-lived one (cmd/kel-fleet).
+var StartClaudeRefresh = func(sd string) { go RefreshClaudeAgents(sd) }
 
 // parentOf reads a process's parent: /proc on Linux, one `ps` on macOS. ok is
 // false when the process is gone or unreadable.

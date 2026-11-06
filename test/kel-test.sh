@@ -554,6 +554,14 @@ ok "  ...and one a Claude Code session is using" '[ -d "$WORK/sw-hb" ] && [[ "$o
 ok "  ...and the unmerged one, without a word"  '[ -d "$WORK/sw-hw" ] && [[ "$o" != *"kept  hw"* ]]'
 rm -f "$WORK/claude-agents.json" "$STATE/claude-agents.json"
 
+# a stale claude-agents.json is read at once and refreshed by a detached kel-fleet
+printf '[{"pid":1,"cwd":"/","kind":"background","sessionId":"x","name":"rf","status":"busy","id":"r1"}]' > "$WORK/claude-agents.json"
+printf '{"at":1,"sessions":[]}' > "$STATE/claude-agents.json"
+"$KEL" _fleet --panes >/dev/null
+for _ in $(seq 50); do [ "$(jq -r .at "$STATE/claude-agents.json")" -gt 1 ] && break; sleep 0.2; done
+ok "a stale claude-agents.json is refreshed by a detached kel-fleet" '[ "$(jq -r ".sessions[0].name" "$STATE/claude-agents.json")" = rf ]'
+rm -f "$WORK/claude-agents.json" "$STATE/claude-agents.json"
+
 # squash-merged branch deletion in sweep
 GW hsq
 ( cd "$WORK/sw-hsq" && echo sq > sq && git add -A && git -c user.email=t@t -c user.name=t commit -qm sq && git push -q origin hsq ) >/dev/null 2>&1

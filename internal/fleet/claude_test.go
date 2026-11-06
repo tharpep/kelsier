@@ -21,9 +21,9 @@ func stubClaude(t *testing.T, sleep string) {
 
 func countSpawns(t *testing.T) *int32 {
 	var n int32
-	old := spawnRefresh
-	spawnRefresh = func() { atomic.AddInt32(&n, 1) }
-	t.Cleanup(func() { spawnRefresh = old })
+	old := StartClaudeRefresh
+	StartClaudeRefresh = func(string) { atomic.AddInt32(&n, 1) }
+	t.Cleanup(func() { StartClaudeRefresh = old })
 	return &n
 }
 
@@ -85,19 +85,20 @@ func TestClaudeSessionsFreshAndMissing(t *testing.T) {
 	}
 }
 
-// The refresh writes the cache and clears the refreshing mark.
-func TestRefreshClaudeAgentsWritesCache(t *testing.T) {
+// The default refresh, a goroutine as the sidebar runs it, writes the cache
+// and clears the refreshing mark.
+func TestStaleCacheRefreshesInGoroutine(t *testing.T) {
 	sd := t.TempDir()
-	t.Setenv("XDG_STATE_HOME", sd)
-	if err := os.MkdirAll(StateDir(), 0o755); err != nil {
-		t.Fatal(err)
-	}
 	stubClaude(t, "0")
-	cache := filepath.Join(StateDir(), "claude-agents.json")
-	os.WriteFile(cache, []byte(`{"at":1,"refreshing":99,"sessions":[]}`), 0o600)
-	RefreshClaudeAgents()
-	s, ok := claudeSessions(StateDir())
-	if !ok || len(s) != 1 || s[0].PID != 7 {
-		t.Errorf("refresh did not write the cache: %v %v", s, ok)
+	writeCache(t, sd, `{"at":1,"sessions":[]}`)
+	if s, _ := claudeSessions(sd); len(s) != 0 {
+		t.Errorf("stale cache not returned as it was: %v", s)
 	}
+	for i := 0; i < 100; i++ {
+		if s, _ := claudeSessions(sd); len(s) == 1 && s[0].PID == 7 {
+			return
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	t.Error("the goroutine refresh never wrote the cache")
 }

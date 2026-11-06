@@ -10,11 +10,26 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
+	"syscall"
 
 	"github.com/tharpep/kelsier/internal/fleet"
 )
 
+func detachedRefresh(string) {
+	exe, err := os.Executable()
+	if err != nil {
+		return
+	}
+	cmd := exec.Command(exe, "--refresh-claude-agents")
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	if cmd.Start() == nil {
+		go cmd.Wait()
+	}
+}
+
 func main() {
+	fleet.StartClaudeRefresh = detachedRefresh
 	var opt fleet.Options
 	for _, a := range os.Args[1:] {
 		switch a {
@@ -31,7 +46,7 @@ func main() {
 		case "--worktrees":
 			opt.Worktrees = true
 		case "--refresh-claude-agents":
-			fleet.RefreshClaudeAgents()
+			fleet.RefreshClaudeAgents(fleet.StateDir())
 			return
 		case "-h", "--help":
 			fmt.Fprintln(os.Stderr, "usage: kel-fleet [--dirty] [--land] [--pr] [--panes] [--here] [--worktrees]")
