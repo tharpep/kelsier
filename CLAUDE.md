@@ -285,6 +285,10 @@ with nothing in kel to assert against. Re-breaking an `unguarded` one is silent.
   bit a dev box. A `tmux` shim on the suite's `PATH` adds `-f /dev/null` to
   every call. That shim is the mechanism; no assertion checks a server the
   suite started is free of `~/.tmux.conf`.
+- `[guarded]` **`display-message`, `display-popup -T` and the banner's status-format all expand
+  formats.** Agent- or git-controlled text (a notification body, a branch name) reaching them
+  must have `#` doubled, or a `#(…)` in it runs in the server. The suite's `tmux` shim logs
+  `display-message` and `new-session` argv under `KEL_TEST_TMUX_LOG`, and the tests read it.
 - `[guarded]` **`grep -vx 1` on a column of flags matches empty lines and
   prints nothing.** A user pane's `@kel-sidebar` is empty, so
   `[ -n "$(… | grep -vx 1)" ]` read "no user panes" for every window and

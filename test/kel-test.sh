@@ -64,7 +64,7 @@ mkdir -p "$WORK/shim"
 TMUX_BIN="$(command -v tmux)"
 SOCK="$TMUX_TMPDIR/tmux-$(id -u)/default"
 mkdir -m 700 "${SOCK%/*}"
-printf '#!/bin/sh\nexec %s -S %s -f /dev/null "$@"\n' "$TMUX_BIN" "$SOCK" > "$WORK/shim/tmux"
+printf '#!/bin/sh\ncase "$1" in display-message|new-session) [ -n "$KEL_TEST_TMUX_LOG" ] && printf "%%s\\n" "$*" >> "$KEL_TEST_TMUX_LOG" ;; esac\nexec %s -S %s -f /dev/null "$@"\n' "$TMUX_BIN" "$SOCK" > "$WORK/shim/tmux"
 chmod +x "$WORK/shim/tmux"
 export PATH="$WORK/shim:$PATH"
 printf '#!/bin/sh\n[ "$1 $2" = "agents --json" ] && { cat "%s/claude-agents.json" 2>/dev/null || echo "[]"; }\n' "$WORK" > "$WORK/claude-stub"
@@ -1483,6 +1483,17 @@ ok "  ...nor snapshots"                           '! grep -q _kelpop_ "$STATE/sn
 ( unset KEL_POPUP_TRACE; KEL_POPUP_NODRAW=1 TMUX="$TMUX_TMPDIR/tmux-$(id -u)/default,1,0" "$KEL" _panel files "$WT5" api-gw/wt5 ) >/dev/null 2>&1
 ok "files and git keep theirs between opens"     '[ "$(tmux list-sessions -F "#{session_name}" | grep -c "^_kelpop_")" = 1 ]'
 tmux kill-session -t "=$POP" 2>/dev/null
+XD="$WORK/x#(touch p)"; mkdir -p "$XD"
+export KEL_TEST_TMUX_LOG="$WORK/popdir.log"; : > "$KEL_TEST_TMUX_LOG"
+( unset KEL_POPUP_TRACE; KEL_POPUP_NODRAW=1 TMUX="$TMUX_TMPDIR/tmux-$(id -u)/default,1,0" "$KEL" _panel files "$XD" api-gw/x ) >/dev/null 2>&1
+unset KEL_TEST_TMUX_LOG
+KEL_POPUP_TRACE="$WORK/poptitle" "$KEL" _panel files "$XD" 'api-gw/x#(touch p)' >/dev/null 2>&1
+ok "a popup's title is doubled, so a branch name is never run as a format" '[[ "$(cut -f2 "$WORK/poptitle")" == "yazi · api-gw/x##(touch p) · "* ]] && [ "$(cut -f1 "$WORK/poptitle")" = "$XD" ]'
+POP="$(tmux list-sessions -F '#{session_name}' | grep '^_kelpop_' | head -1)"
+ok "a popup's directory is doubled for tmux, which expands -c and -d" 'grep -q "new-session.* -c .*x##(touch p)" "$WORK/popdir.log"'
+ok "  ...so the hosted session opens in the real path" '[ "$(tmux display -p -t "=$POP:" "#{pane_current_path}")" = "$XD" ]'
+ok "  ...and no file was touched" '! [ -e p ] && ! [ -e "$WORK/p" ] && ! [ -e "$XD/p" ]'
+tmux kill-session -t "=$POP" 2>/dev/null
 printf '#!/bin/sh\nexit 0\n' > "$WORK/shim/yazi"
 # read from kel.conf itself: on CI's macOS runner (Homebrew tmux 3.7) a
 # throwaway server's list-keys printed nothing at all, start-server or a real
@@ -1829,14 +1840,17 @@ ok "does not notify for states not in \$KEL_NOTIFY" '[ "$(grep -c . "$NLOG")" = 
 wait_until '[ "$(grep -c . "$NLOG")" = 1 ]'
 ok "\$KEL_NOTIFY selects which states do"   '[ "$(grep -c . "$NLOG")" = 1 ]'
 # the banner: a line at the top while an agent waits, gone when it moves on
-: > "$NLOG"; hook "$P" UserPromptSubmit; hook "$P" Notification permission_prompt 'run #(touch pwned)?'
+: > "$NLOG"; hook "$P" UserPromptSubmit
+export KEL_TEST_TMUX_LOG="$WORK/tmux.log"; : > "$KEL_TEST_TMUX_LOG"
+hook "$P" Notification permission_prompt 'run #(touch pwned)?'
+wait_until 'grep -q "pwned" "$KEL_TEST_TMUX_LOG" && [ "$(tmux show-options -v -t "=keltest:" status)" = 2 ]'
 AW="$(window_of api-gw a)"
 ok "a waiting agent puts up the banner, above the bar" '[ "$(tmux show-options -v -t "=keltest:" status)" = 2 ] && [ -n "$(tmux show-options -v -t "=keltest:" status-format[1])" ] && [[ "$(tmux show-options -v -t "=keltest:" status-format[0])" == *"a#[nobold,fg=colour252] is waiting"* ]]'
 ok "  ...the sidebar hint once, on the bar, not on the banner too (#22)" '[[ "$(tmux show-options -v -t "=keltest:" status-format[0])" == *"@kel-bar-lead-blank"* ]] && [[ "$(tmux show-options -v -t "=keltest:" status-format[0])" != *"{E:@kel-bar-lead}"* ]]'
 ok "  ...and only ↵ go and ✕ are clickable, not the message under the prompt" '[[ "$(tmux show-options -v -t "=keltest:" status-format[0])" != *"bgo]#[fg=colour214,bold] ●"* ]] && [[ "$(tmux show-options -v -t "=keltest:" status-format[0])" == *"range=user|bgo]"*"↵ go"* ]]'
 ok "  ...its text printed, never run as a format" '[[ "$(tmux show-options -v -t "=keltest:" status-format[0])" == *"##(touch pwned)"* ]]'
-sleep 0.5
-ok "  ...nor by the message line: no file was touched" '! [ -e pwned ] && ! [ -e "$WORK/pwned" ]'
+ok "  ...the message line carries it doubled: a bare #( would run in the server" 'grep -q "display-message.*##(touch pwned)" "$KEL_TEST_TMUX_LOG" && ! sed "s/##//g" "$KEL_TEST_TMUX_LOG" | grep -q "#("'
+unset KEL_TEST_TMUX_LOG
 hook "$P" UserPromptSubmit
 # "is waiting" alone let a bug through: an emptied banner file once drew
 # "● is" from a blank line, which contains no "is waiting".  Check the bar
