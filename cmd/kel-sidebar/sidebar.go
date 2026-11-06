@@ -42,6 +42,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/colorprofile"
+	"github.com/charmbracelet/x/term"
 	"github.com/tharpep/kelsier/internal/fleet"
 )
 
@@ -299,6 +300,9 @@ var (
 )
 
 func (h *hiddenWait) Run() error {
+	if st, err := term.MakeRaw(os.Stdin.Fd()); err == nil {
+		defer term.Restore(os.Stdin.Fd(), st)
+	}
 	if h.out != nil && h.frame != "" {
 		fmt.Fprint(h.out, "\x1b[H\x1b[2J"+h.frame)
 	}
@@ -310,9 +314,22 @@ func (h *hiddenWait) Run() error {
 		}
 		select {
 		case <-wakeCh:
+			if settleVisible(h.pane) {
+				return nil
+			}
 		case <-time.After(10 * time.Second):
 		}
 	}
+}
+
+func settleVisible(pane string) bool {
+	for range 20 {
+		time.Sleep(100 * time.Millisecond)
+		if v, _ := probeVisible(pane); v {
+			return true
+		}
+	}
+	return false
 }
 
 func (*hiddenWait) SetStdin(io.Reader)      {}
@@ -323,7 +340,11 @@ func (m sbModel) pause() tea.Cmd {
 	w := &hiddenWait{pane: m.myPane}
 	if m.width > 0 && m.height > 0 {
 		lines := strings.Split(paintFrame(m.render(), m.width, m.height), "\n")
-		w.frame = strings.Join(lines[:min(len(lines), m.height)], "\n")
+		var b strings.Builder
+		for i, l := range lines[:min(len(lines), m.height)] {
+			fmt.Fprintf(&b, "\x1b[%d;1H%s", i+1, l)
+		}
+		w.frame = b.String()
 	}
 	return tea.Exec(w, func(error) tea.Msg { return sbWake{} })
 }
