@@ -55,7 +55,10 @@ type Agent struct {
 	Activity      *float64 `json:"activity"`
 	// Doing: a working agent's last tool call in words, read from the tail
 	// of Claude Code's transcript (doing.go). Sidebar path only
-	Doing   *string    `json:"doing,omitempty"`
+	Doing *string `json:"doing,omitempty"`
+	// Title: the first prompt of the session, from the head of the same
+	// transcript (title.go). Sidebar path only
+	Title   *string    `json:"title,omitempty"`
 	Context *Context   `json:"context"`
 	Cards   *PaneCards `json:"cards,omitempty"`
 	// Unseen marks a `done` the user has not looked at since it finished: the
@@ -607,6 +610,7 @@ func Load(o Options) Doc {
 		withAgy(&doc)
 		withCards(&doc, sd, stalePanes)
 		withDoing(&doc)
+		withTitle(&doc)
 		withRepos(&doc, sd, o.Worktrees)
 	} else {
 		withAgy(&doc)

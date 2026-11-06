@@ -826,6 +826,13 @@ from `/proc` on Linux and WSL2 with no fork, and from one `lsof` + `ps` on
 macOS, cached 10 s. Unknowns stay null: no ports scan means `ports: null`, not
 `[]`; no client attached means no pane is `current`.
 
+`agents[].title` *(2026-11-05)* is the first prompt typed in the agent's
+session: the first line of the first `user` entry in Claude Code's transcript
+whose text does not start with `<` (slash-command echoes, caveats, reminders),
+is not blank and is not `isMeta`. It is read from the transcript's head, a few
+KB to a megabyte at most, on the `--panes` path only, and kept nowhere; null
+for an agent with no Claude transcript (Antigravity, opencode).
+
 `--dirty` is opt-in because `git status` per worktree is the expensive part
 and the bar never shows it.
 
