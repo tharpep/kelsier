@@ -1875,6 +1875,10 @@ ok "  ...the sidebar hint once, on the bar, not on the banner too (#22)" '[[ "$(
 ok "  ...and the whole message is clickable, ↵ go too, but not ✕" '[[ "$(tmux show-options -v -t "=keltest:" status-format[0])" == *"range=user|bgo]#[fg=colour214,bold] ●"* ]] && [[ "$(tmux show-options -v -t "=keltest:" status-format[0])" == *"range=user|bgo]"*"↵ go"* ]] && [[ "$(tmux show-options -v -t "=keltest:" status-format[0])" == *"#[norange]#[range=user|bx]#[fg=colour245] ✕ #[norange]" ]]'
 ok "  ...its text printed, never run as a format" '[[ "$(tmux show-options -v -t "=keltest:" status-format[0])" == *"##(touch pwned)"* ]]'
 ok "  ...the message line carries it doubled: a bare #( would run in the server" 'grep -q "display-message.*##(touch pwned)" "$KEL_TEST_TMUX_LOG" && ! sed "s/##//g" "$KEL_TEST_TMUX_LOG" | grep -q "#("'
+hook "$P" UserPromptSubmit; : > "$KEL_TEST_TMUX_LOG"
+hook "$P" Notification permission_prompt 'stamp %Y-%m on #(x)'
+wait_until 'grep -q "display-message" "$KEL_TEST_TMUX_LOG" && [[ "$(tmux show-options -v -t "=keltest:" status-format[0])" == *"stamp"* ]]'
+ok "  ...a % is doubled too, on the message line and in the banner (strftime)" 'grep -q "display-message.*stamp %%Y-%%m on ##(x)" "$KEL_TEST_TMUX_LOG" && [[ "$(tmux show-options -v -t "=keltest:" status-format[0])" == *"stamp %%Y-%%m on ##(x)"* ]]'
 unset KEL_TEST_TMUX_LOG
 hook "$P" UserPromptSubmit
 # "is waiting" alone let a bug through: an emptied banner file once drew

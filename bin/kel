@@ -2069,7 +2069,7 @@ cmd_prompt() { # 'args'
   # not look. A longer one is a popup either way
   if [ "$(printf '%s\n' "$out" | grep -c .)" -le 1 ]; then
     if [ -n "${KEL_PROMPT_PRINT:-}" ]; then printf '%s\n' "${out:-done}"
-    else out="${out//#/##}"; tmux display-message "kel ${args[*]}: ${out:-done}$( [ $rc = 0 ] || printf ' (failed)')"; fi
+    else out="$(fmt_text "$out")"; tmux display-message "kel ${args[*]}: ${out:-done}$( [ $rc = 0 ] || printf ' (failed)')"; fi
   else
     local f="$STATE_DIR/prompt.out"
     printf '%s\n' "$out" > "$f"
@@ -2420,8 +2420,8 @@ banner_apply() {
   [ "$n" -gt 1 ] && more="#[fg=colour245]  +$((n - 1)) more"
   # the text is Claude Code's — the agent quoting a command back — so every
   # # is doubled: tmux must print it, never read it as a format
-  name="${name//#/##}"; text="${text//#/##}"
   [ "${#text}" -gt 80 ] && text="${text:0:79}…"
+  name="$(fmt_text "$name")"; text="$(fmt_text "$text")"
   # the bar is kel.conf's second line; with no kel.conf (the suite), tmux's
   # own first
   local bar; bar="$(tmux show-options -gv 'status-format[1]' 2>/dev/null)"
@@ -3109,8 +3109,8 @@ cmd_jump() {
 
   # say where you landed and how long it has been sitting — the jump is
   # otherwise silent, and "which one was that?" is the next question
-  case "${ep:-}" in ''|*[!0-9]*) tmux display-message "→ ${label//#/##}" ;;
-    *) tmux display-message "→ ${label//#/##}  ($st $(humanize_secs $(( $(date +%s) - ${ep%.*} ))))" ;;
+  case "${ep:-}" in ''|*[!0-9]*) tmux display-message "→ $(fmt_text "$label")" ;;
+    *) tmux display-message "→ $(fmt_text "$label")  ($st $(humanize_secs $(( $(date +%s) - ${ep%.*} ))))" ;;
   esac
 }
 
@@ -3178,9 +3178,13 @@ repaint_all() {   # fleet-json
 # $KEL_NOTIFY_CMD still overrides the desktop half; notify_bell / notify_desktop
 # = off silence either. Paths are stat'ed, never `command -v`'d, on WSL: a
 # lookup walks every /mnt/c dir on PATH (CLAUDE.md, traps).
+fmt_text() { # text -> text tmux prints as written
+  local t="${1//#/##}"
+  printf '%s' "${t//%/%%}"
+}
+
 notify() {   # title body
-  local body="${2//#/##}"
-  tmux display-message "${1//#/##} — $body" 2>/dev/null || true
+  tmux display-message "$(fmt_text "$1") — $(fmt_text "$2")" 2>/dev/null || true
   case "${KEL_NOTIFY_BELL:-on}" in off|0|no|false) ;; *) notify_bell ;; esac
   # Backgrounded, and deliberately not with setsid — macOS has no setsid.  A
   # hook is synchronous: Claude Code waits for it, and a PowerShell toast

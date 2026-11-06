@@ -822,8 +822,8 @@ poller would be a daemon.
 *Revised 2026-10-15.* kel used to ship no platform detection and leave
 recipes in `setup.md`; in practice nothing reached the author outside the
 terminal, while both tools kel was measured against (herdr, Orca) tell you
-when an agent needs you. The text is untrusted (the agent quoting a command):
-it crosses into PowerShell as base64 and into AppleScript as arguments. The
+when an agent needs you. The text is untrusted (the agent quoting a command), and tmux expands it as a format and as strftime, so the message line and the banner double `#` and `%` (*2026-11-06*). On the desktop half the text
+crosses into PowerShell as base64 and into AppleScript as arguments. The
 bell is the terminal's own — the "screen flash" Claude Code itself uses on a
 Mac. On WSL, the PowerShell path is stat'ed, never looked up on `PATH` (the
 76 ms trap).
