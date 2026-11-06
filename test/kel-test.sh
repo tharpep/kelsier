@@ -1205,6 +1205,7 @@ wait_until 'sbtext "$SP" | grep -q "wt"' 50
 ok "the sidebar draws spaces, then agents"       'sbtext "$SP" | grep -qx "  Spaces" && sbtext "$SP" | grep -qx "  Agents"'
 ok "  ...the worktree as a space of its own"     '[ "$(sbtext "$SP" | grep -c "api-gw")" -ge 2 ]'
 ok "  ...and selects with a bar, not inverse video" '! tmux capture-pane -e -p -t "$SP" | grep -q "\[7m" && sbtext "$SP" | grep -q "▌"'
+ok "  ...in truecolor, never a palette index"      'tmux capture-pane -e -p -t "$SP" | grep -q "48;2;" && ! tmux capture-pane -e -p -t "$SP" | grep -q "[34]8;5;"'
 
 # a fixed order: wt's window was made first, so it sits above main1
 tmux send-keys -t "$SP" k

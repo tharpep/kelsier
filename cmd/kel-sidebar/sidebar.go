@@ -41,6 +41,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/colorprofile"
 	"github.com/tharpep/kelsier/internal/fleet"
 )
 
@@ -1617,7 +1618,11 @@ func runSidebar(once bool) {
 		fmt.Println(m.render())
 		return
 	}
-	p := tea.NewProgram(m, tea.WithFPS(sidebarFPS))
+	// truecolor always: inside tmux the pane's TERM carries no RGB hint, so
+	// the renderer quantised every surface to 256 colours and the hover fill
+	// landed on palette slot 17, which themes repaint (CLAUDE.md, palette
+	// slots). tmux downgrades for a client that cannot take RGB
+	p := tea.NewProgram(m, tea.WithFPS(sidebarFPS), tea.WithColorProfile(colorprofile.TrueColor))
 	ch := make(chan os.Signal, 4)
 	signal.Notify(ch, syscall.SIGUSR1)
 	if m.myPane != "" {
