@@ -853,6 +853,19 @@ func TestSidebarRelaunchDeadAgent(t *testing.T) {
 	}
 }
 
+// pinnedEnd is the first line under the kel header, its blank and the pinned
+// Needs you block (header, rows, blank) when there is one.
+func pinnedEnd(lines []string) int {
+	if len(lines) > 2 && strings.HasPrefix(lines[2], "  Needs you") {
+		for i := 3; i < len(lines); i++ {
+			if lines[i] == "" {
+				return i + 1
+			}
+		}
+	}
+	return 2
+}
+
 func TestStickyHeaders(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 
@@ -863,8 +876,8 @@ func TestStickyHeaders(t *testing.T) {
 	vSpike := buildView(fifteenDoc, uiState{focused: true, sel: "a:@8"})
 	outSpike, _ := renderView(vSpike, 32, 16, 0)
 	linesSpike := strings.Split(plain(outSpike), "\n")
-	if len(linesSpike) < 3 || linesSpike[2] != "  Agents" {
-		t.Errorf("sticky header for scrolled agents: want Agents under the header, got %q", linesSpike[2])
+	if i := pinnedEnd(linesSpike); len(linesSpike) <= i || linesSpike[i] != "  Agents" {
+		t.Errorf("sticky header for scrolled agents: want Agents under the pinned block, got %q", linesSpike)
 	}
 	if !strings.Contains(plain(outSpike), "spike") {
 		t.Errorf("selected agent spike was scrolled off screen")
@@ -874,8 +887,8 @@ func TestStickyHeaders(t *testing.T) {
 	vSpace := buildView(fifteenDoc, uiState{focused: true, sel: spaceID("/home/me/code/web-dashboard")})
 	outSpace, _ := renderView(vSpace, 32, 16, 0)
 	linesSpace := strings.Split(plain(outSpace), "\n")
-	if len(linesSpace) < 3 || linesSpace[2] != "  Spaces" {
-		t.Errorf("sticky header for scrolled spaces: want Spaces under the header, got %q", linesSpace[2])
+	if i := pinnedEnd(linesSpace); len(linesSpace) <= i || linesSpace[i] != "  Spaces" {
+		t.Errorf("sticky header for scrolled spaces: want Spaces under the pinned block, got %q", linesSpace)
 	}
 }
 
@@ -887,7 +900,7 @@ func TestStickyHeaderNamesTheShownSection(t *testing.T) {
 		for h := 8; h <= 24; h++ {
 			out, _ := renderView(buildView(doc, uiState{focused: true, sel: id}), 32, h, 0)
 			l := strings.Split(plain(out), "\n")
-			for i := 0; i < 3 && i+1 < len(l); i++ {
+			for i := 0; i < 10 && i+1 < len(l); i++ {
 				if l[i] == "  Spaces" && (l[i+1] == "  Agents" || (l[i+1] == "" && i+2 < len(l) && l[i+2] == "  Agents")) {
 					t.Errorf("sel %s at h=%d: spaces pinned above agents:\n%s", id, h, strings.Join(l[:4], "\n"))
 				}

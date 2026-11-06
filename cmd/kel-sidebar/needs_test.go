@@ -227,3 +227,51 @@ func TestSplitNote(t *testing.T) {
 		t.Errorf("shortModel: %q", shortModel(&m))
 	}
 }
+
+func TestNeedsYouStaysPinnedWhileScrolled(t *testing.T) {
+	doc := loadFixture(t, "fifteen-three-repos")
+	out, _ := renderView(buildView(doc, uiState{focused: true, sel: "a:@8"}), 32, 30, 1792018800)
+	rows := strings.Split(plain(out), "\n")
+	if len(rows) != 30 {
+		t.Fatalf("%d rows", len(rows))
+	}
+	for i, want := range []string{"  kel ", "", "  Needs you ", "  ● docs ", "  ● fix-auth ", "  ● api-auth ", ""} {
+		if !strings.HasPrefix(rows[i], want) {
+			t.Errorf("row %d: %q, want %q first:\n%s", i, rows[i], want, strings.Join(rows[:8], "\n"))
+		}
+	}
+	if !strings.Contains(plain(out), "spike") {
+		t.Error("the selection is scrolled off")
+	}
+}
+
+func TestNeedsYouFoldsPastFour(t *testing.T) {
+	jumps := recordJumps(t)
+	m := needsModel(t, "fifteen-three-repos")
+	m.height = 30
+	for i := range m.doc.Agents {
+		a := &m.doc.Agents[i]
+		since, ok := map[string]float64{"docs": 100, "fix-auth": 200, "api-auth": 300, "gateway": 400, "kelsier": 500, "dashboard": 600}[a.Name]
+		if !ok {
+			continue
+		}
+		a.State, a.StateSince, a.Note, a.Unseen = sp("waiting"), &since, sp("Claude needs your permission to use Edit"), false
+	}
+	m.ui.sel = "a:@8"
+	out, refs := renderView(m.view(), m.width, m.height, 1792018800)
+	rows := strings.Split(plain(out), "\n")
+	if got := needNames(m.view()); got != "docs fix-auth api-auth gateway kelsier dashboard" {
+		t.Fatalf("needs: %q", got)
+	}
+	if !strings.HasPrefix(rows[5], "  ● api-auth") || !strings.HasPrefix(rows[6], "  +3 more") || rows[7] != "" {
+		t.Errorf("three rows then +3 more:\n%s", strings.Join(rows[:9], "\n"))
+	}
+	if !strings.Contains(out, yellow+"+3 more") {
+		t.Error("+N more is in the waiting colour")
+	}
+	nm, _ := m.Update(tea.MouseClickMsg{X: 4, Y: 6, Button: tea.MouseLeft})
+	m = nm.(sbModel)
+	if refs[6].id != "q:@4" || len(*jumps) != 1 || (*jumps)[0] != "@4|%6" || m.ui.sel != "a:@4" {
+		t.Errorf("a click on +3 more jumps to the oldest one not shown (gateway): id %q jumps %v sel %q", refs[6].id, *jumps, m.ui.sel)
+	}
+}

@@ -339,7 +339,8 @@ in any terminal:
   reason being the waiting note, the error text, or `done`. A row is a pointer:
   a click or `enter` jumps as the agent's own row does and selects that row
   (`a:<window>`), and the agent stays where it was in its repo group. It has no
-  buttons. The agents below keep their fixed order; this list is the one place
+  buttons. It stays pinned while the list scrolls; more than four fold into
+  `+N more`, which jumps to the oldest one not shown. The agents below keep their fixed order; this list is the one place
   urgency orders anything, and it holds no row long enough to be aimed at.
 - **One summary line under every agent, chosen by its state** (*2026-11-05*):
   working, what it is doing; waiting, the reason in the bright grey and, dim

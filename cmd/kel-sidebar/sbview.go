@@ -1079,6 +1079,7 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 		add(s, r)
 	}
 
+	needEnd := 0
 	if len(v.needs) > 0 {
 		add(spread(in+yellow+truncate("Needs you", w-8)+reset, faint+fmt.Sprint(len(v.needs))+reset, w), lineRef{kind: "header"})
 		for _, a := range v.needs {
@@ -1102,6 +1103,7 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 			one(id, lineRef{id: id, kind: "need"}, spread(left, dim+age+reset, w))
 		}
 		add("", lineRef{})
+		needEnd = len(body)
 	}
 	add(label("Spaces"), lineRef{kind: "header"})
 	if v.unknown {
@@ -1408,6 +1410,16 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 			room = 0
 		}
 		off := 0
+		var pinned []line
+		if len(body) > room && needEnd > 0 {
+			pinned = pinNeeds(body[:needEnd], v, w, in, lead)
+			if room-len(pinned) < 4 {
+				pinned = nil
+			} else {
+				body = body[needEnd:]
+				room -= len(pinned)
+			}
+		}
 		if len(body) > room {
 			first, last := -1, -1
 			for i, l := range body {
@@ -1465,6 +1477,7 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 		for len(body) < room {
 			body = append(body, line{"", lineRef{}})
 		}
+		body = append(pinned, body...)
 	} else if len(tail) == 0 {
 		tail = append(tail, footerLine(w, in, ""))
 	}
@@ -1522,6 +1535,26 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 		refs[i] = l.ref
 	}
 	return b.String(), refs
+}
+
+const needsPinned = 4
+
+// pinNeeds is the Needs you block as it stays above a scrolled list: its
+// header and at most four rows, the fourth becoming `+N more` for the oldest
+// one not shown. block is the header, the rows and the blank after them.
+func pinNeeds(block []line, v sbView, w int, in string, lead func(string) string) []line {
+	rows := block[1 : len(block)-1]
+	if len(rows) <= needsPinned {
+		return block
+	}
+	out := append([]line{block[0]}, rows[:needsPinned-1]...)
+	hidden := v.needs[needsPinned-1:]
+	id := needID(hidden[0].key)
+	more := lead(id) + " " + yellow + fmt.Sprintf("+%d more", len(hidden)) + reset
+	if id == v.sel {
+		more = fill(more, w, raised)
+	}
+	return append(out, line{more, lineRef{id: id, kind: "need"}}, block[len(block)-1])
 }
 
 // sbAct is a key and what it does, shown at the foot and clickable.
