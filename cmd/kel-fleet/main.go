@@ -30,6 +30,9 @@ func main() {
 			opt.Here = true
 		case "--worktrees":
 			opt.Worktrees = true
+		case "--refresh-claude-agents":
+			fleet.RefreshClaudeAgents()
+			return
 		case "-h", "--help":
 			fmt.Fprintln(os.Stderr, "usage: kel-fleet [--dirty] [--land] [--pr] [--panes] [--here] [--worktrees]")
 			return

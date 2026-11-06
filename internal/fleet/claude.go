@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -18,12 +19,16 @@ import (
 // it idle. It also lists background agents (`claude --bg`), which run in no
 // tmux pane and which kel could not see at all.
 //
-// One call is a node start, ~0.7 s, so it is cached in the state dir for
-// claudeTTL and only asked for on the sidebar's path (Options.Panes), never
+// One call is a node start, ~1 s, so it is cached in the state dir, refreshed
+// detached once older than claudeTTL, and only read on the sidebar's path (Options.Panes), never
 // the bar's. Unavailable — no claude, an older one without `agents --json`,
 // a timeout — is nil, and every reader falls back to the hooks alone.
 
-const claudeTTL = 10 * time.Second
+const (
+	claudeTTL          = 10 * time.Second
+	claudeRefreshGuard = 5 * time.Second
+	claudeMaxAge       = time.Minute
+)
 
 // ClaudeSession is one entry of `claude agents --json`. Only the fields kel
 // reads; the rest pass by.
@@ -62,6 +67,8 @@ type claudeCache struct {
 	Bin      string          `json:"bin"`
 	Sessions []ClaudeSession `json:"sessions"`
 	Failed   bool            `json:"failed"`
+	// Refreshing is the epoch a detached refresh was last started.
+	Refreshing int64 `json:"refreshing,omitempty"`
 }
 
 // claudeBin finds claude once and remembers where: a PATH lookup on WSL walks
@@ -82,17 +89,42 @@ func claudeBin(cached string) string {
 	return b
 }
 
-// claudeSessions returns Claude Code's sessions, from cache when fresh. ok is
-// false when they could not be read; callers then know nothing, not "none".
+// claudeSessions returns what the cache holds at once and never waits for
+// claude: a cache older than claudeTTL starts a detached refresh and is still
+// returned, up to claudeMaxAge, past which it is unknown (ok false). Only a
+// missing cache reads inline, once, so a first sidebar is not empty.
 func claudeSessions(sd string) (sessions []ClaudeSession, ok bool) {
 	path := filepath.Join(sd, "claude-agents.json")
 	var c claudeCache
-	if b, err := os.ReadFile(path); err == nil && json.Unmarshal(b, &c) == nil &&
-		time.Since(time.Unix(c.At, 0)) < claudeTTL {
-		return c.Sessions, !c.Failed
+	b, err := os.ReadFile(path)
+	if err != nil || json.Unmarshal(b, &c) != nil {
+		return refreshClaudeAgents(sd, "")
 	}
-	bin := claudeBin(c.Bin)
-	c = claudeCache{At: time.Now().Unix(), Bin: bin}
+	age := time.Since(time.Unix(c.At, 0))
+	if age >= claudeTTL && time.Since(time.Unix(c.Refreshing, 0)) >= claudeRefreshGuard {
+		c.Refreshing = time.Now().Unix()
+		if b, err := json.Marshal(c); err == nil {
+			WriteAtomic(path, b)
+		}
+		spawnRefresh()
+	}
+	return c.Sessions, !c.Failed && age < claudeMaxAge
+}
+
+// RefreshClaudeAgents is what the detached `kel-fleet --refresh-claude-agents` runs.
+func RefreshClaudeAgents() {
+	sd := StateDir()
+	var c claudeCache
+	if b, err := os.ReadFile(filepath.Join(sd, "claude-agents.json")); err == nil {
+		json.Unmarshal(b, &c)
+	}
+	refreshClaudeAgents(sd, c.Bin)
+}
+
+// refreshClaudeAgents asks claude and writes the cache atomically.
+func refreshClaudeAgents(sd, cachedBin string) ([]ClaudeSession, bool) {
+	bin := claudeBin(cachedBin)
+	c := claudeCache{At: time.Now().Unix(), Bin: bin}
 	if bin == "" {
 		c.Failed = true
 	} else {
@@ -104,9 +136,21 @@ func claudeSessions(sd string) (sessions []ClaudeSession, ok bool) {
 		}
 	}
 	if b, err := json.Marshal(c); err == nil {
-		WriteAtomic(path, b)
+		WriteAtomic(filepath.Join(sd, "claude-agents.json"), b)
 	}
 	return c.Sessions, !c.Failed
+}
+
+var spawnRefresh = func() {
+	exe, err := os.Executable()
+	if err != nil {
+		return
+	}
+	cmd := exec.Command(exe, "--refresh-claude-agents")
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	if cmd.Start() == nil {
+		cmd.Process.Release()
+	}
 }
 
 // parentOf reads a process's parent: /proc on Linux, one `ps` on macOS. ok is

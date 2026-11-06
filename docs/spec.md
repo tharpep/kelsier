@@ -720,7 +720,7 @@ every payload, both halves of that were stale:
 **Claude Code's own view** *(built 2026-10-16)*. `claude agents --json` lists
 Claude Code's sessions with a busy/idle status — interactive ones, and
 background ones (`claude --bg`) that run in no pane. On the sidebar's path
-only (a node start, ~0.7 s, cached 10 s in `claude-agents.json`), kel matches
+only (a node start, ~1 s, cached in `claude-agents.json`), kel matches
 each interactive session to its window by walking up from its pid to a pane's,
 and lets it correct the hooks where they cannot know: `working` + idle →
 `idle` (an interrupt fires no Stop — the "working 15h" agent), `idle`/`done`
@@ -728,6 +728,12 @@ and lets it correct the hooks where they cannot know: `working` + idle →
 listed (`bg`), nested under the top agent of the same name — Claude Code does
 not say which agent dispatched one — and `enter` opens one with `claude
 attach` in a popup. Unreadable (no claude, a timeout) is null: hooks alone.
+The cache is read at once whatever its age: past 10 s it starts a detached
+`kel-fleet --refresh-claude-agents` (a new session, no `setsid` binary; at most
+one per 5 s) that rewrites it, so a load never waits on the node start. A
+session list is therefore up to about 15 s old, not 10 s; the fleet document
+carries no age field, and a cache past 60 s is treated as unreadable. Only a
+missing cache (the first run) is read inline.
 
 **Subagents** *(built 2026-10-16)*. `kel substatus` is Claude Code's
 `subagentStatusLine`: run every refresh tick while the agent panel shows
