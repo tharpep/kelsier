@@ -1041,7 +1041,8 @@ tmux select-layout -t "$LW" main-vertical
 ok "  ...a layout change re-docks by itself"      "wait_until 'docked $LW'"
 ok "  ...rotate's keys re-dock too (it fires no layout hook)" '[ "$(grep -c "rotate-window.*_sidebar fit" "$HERE/../tmux/kel.conf")" = 2 ]'
 hold_client 20
-tmux select-window -t "$LW"; tmux select-pane -t "$LA"
+tmux select-window -t "$LW"; "$KEL" _sidebar wake; tmux select-pane -t "$LA"
+wait_until '[ "$(tmux display -p -t "$(sidebar_of "$LW")" "#{alternate_on}")" = 1 ]' 30
 tmux select-pane -t "$(sidebar_of "$LW")"
 ok "selecting the sidebar by hand moves on to your pane" "wait_until '[ -z \"\$(tmux display -p -t $LW \"#{@kel-sidebar}\")\" ]'"
 "$KEL" _sidebar focus "$LW"; sleep 0.3
@@ -1078,6 +1079,54 @@ hold_client 7
 tmux select-window -t "$SBW"; "$KEL" _sidebar wake
 sleep 5
 ok "the shown sidebar reloads; the hidden one does not" '[ "$(reloads "$SB1")" -ge 3 ] && [ "$(reloads "$SB2")" -le 2 ]'
+release_client
+# wake signals the shown sidebar only: the hooks run after the switch, so the
+# window they find active is the one now in view
+export KEL_WAKE_TRACE="$WORK/wake.trace"
+hold_client 8
+tmux select-window -t "$SBW"; : > "$KEL_WAKE_TRACE"; "$KEL" _sidebar wake
+ok "a wake signals the active window's sidebar only" '[ "$(cat "$KEL_WAKE_TRACE")" = "$SB1" ]'
+tmux select-window -t "$OTW"; : > "$KEL_WAKE_TRACE"; "$KEL" _sidebar wake
+ok "  ...and follows the client to the window it switched to" '[ "$(cat "$KEL_WAKE_TRACE")" = "$SB2" ]'
+: > "$KEL_WAKE_TRACE"; "$KEL" _sidebar wake all
+ok "  ...while wake all signals every ready sidebar" '[ "$(sort "$KEL_WAKE_TRACE" | tr "\n" " ")" = "$(printf "%s\n%s\n" "$SB1" "$SB2" | sort | tr "\n" " ")" ]'
+release_client
+: > "$KEL_WAKE_TRACE"; "$KEL" _sidebar wake
+ok "  ...and with no client attached, wake signals no one" '[ ! -s "$KEL_WAKE_TRACE" ]'
+unset KEL_WAKE_TRACE
+
+# a hidden sidebar runs no Program: it is off the alternate screen, burns no
+# CPU, and comes back drawing and answering keys when its window is shown
+NEW coppermind third
+THW="$(window_of coppermind third)"
+wait_until '[ "$(sbcount "$THW")" = 1 ]'
+SB3="$(tmux list-panes -t "$THW" -F '#{@kel-sidebar} #{pane_id}' | awk '$1==1 {print $2}')"
+alt() { tmux display -p -t "$1" '#{alternate_on}'; }
+hold_client 40
+tmux select-window -t "$SBW"; "$KEL" _sidebar wake
+wait_until '[ "$(alt "$SB1")" = 1 ] && [ "$(alt "$SB2")" = 0 ] && [ "$(alt "$SB3")" = 0 ]' 80
+ok "the shown sidebar is on the alternate screen, hidden ones are not" \
+   '[ "$(alt "$SB1")" = 1 ] && [ "$(alt "$SB2")" = 0 ] && [ "$(alt "$SB3")" = 0 ]'
+ok "  ...and a paused pane still shows the last frame" \
+   'tmux capture-pane -p -t "$SB2" | grep -q "kel" && tmux capture-pane -p -t "$SB2" | grep -q "Spaces"'
+ok "  ...and one created hidden, never shown, does too" \
+   'tmux capture-pane -p -t "$SB3" | grep -q "kel" && tmux capture-pane -p -t "$SB3" | grep -q "Spaces"'
+if [ -r /proc/self/stat ]; then
+  ticks() { local t=0 p; for p in "$@"; do t=$((t + $(awk '{print $14 + $15}' "/proc/$(tmux display -p -t "$p" '#{pane_pid}')/stat"))); done; echo "$t"; }
+  c0="$(ticks "$SB2" "$SB3")"; sleep 10; c1="$(ticks "$SB2" "$SB3")"
+  printf '       (two hidden sidebars used %s clock ticks in 10 s; one frame-ticking sidebar used ~6)\n' "$((c1 - c0))"
+  ok "  ...and two hidden sidebars use under 4 clock ticks in 10 s" '[ $((c1 - c0)) -lt 4 ]'
+fi
+tmux select-window -t "$OTW"; "$KEL" _sidebar wake
+wait_until '[ "$(alt "$SB2")" = 1 ] && tmux capture-pane -p -t "$SB2" | grep -q Spaces' 30
+ok "a hidden sidebar that is shown draws again" '[ "$(alt "$SB2")" = 1 ] && tmux capture-pane -p -t "$SB2" | grep -q Spaces'
+tmux send-keys -t "$SB2" '?'
+wait_until 'tmux capture-pane -p -t "$SB2" | grep -q "click a bold key"' 30
+ok "  ...and answers keys" 'tmux capture-pane -p -t "$SB2" | grep -q "click a bold key"'
+tmux send-keys -t "$SB2" Escape
+tmux select-window -t "$SBW"; "$KEL" _sidebar wake
+wait_until '[ "$(alt "$SB2")" = 0 ]' 80
+ok "  ...and pauses again when hidden"  '[ "$(alt "$SB2")" = 0 ]'
 release_client
 
 "$KEL" sidebar off >/dev/null 2>&1
@@ -1237,7 +1286,8 @@ sbdiag "$SW" "$f0"
 # jumping to the window it made, just after the window exists — wait for that
 # jump, or it can land after the select below and take the client with it
 wait_until '[ "$(active_win)" = "$(window_of api-gw api-gw-1)" ]' 50
-tmux select-window -t "$MW"
+tmux select-window -t "$MW"; "$KEL" _sidebar wake
+wait_until '[ "$(tmux display -p -t "$SP" "#{alternate_on}")" = 1 ]' 30
 UP="$(userpane "$MW")"; tmux select-pane -t "$UP"
 "$KEL" _sidebar focus "$MW"   # what prefix Space passes: the window it was pressed in
 ok "_sidebar focus puts the keyboard in the sidebar" '[ "$(tmux display -p -t "$MW" "#{pane_id}")" = "$SP" ]'

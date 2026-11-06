@@ -9,8 +9,9 @@ package main
 //
 // One of these runs in every window, so a hidden one must cost nothing. It is
 // "visible" when its window is the active window of an attached session —
-// one cheap tmux call. Visible: reload every 2s. Hidden: look again every 10s
-// and do nothing else. SIGUSR1 (`kel _sidebar wake`, sent on window changes
+// one cheap tmux call. Visible: reload every 2s. Hidden: the Program is paused
+// (hiddenWait) — no renderer, no timers — and looks again every 10s.
+// SIGUSR1 (`kel _sidebar wake`, sent to the shown sidebar on window changes
 // and agent state changes) makes it look at once.
 //
 // Loading is never done inside Update: fleet.Load runs git and the port scan,
@@ -27,6 +28,7 @@ import (
 	"image/color"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -34,6 +36,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -255,18 +258,62 @@ func parseVisible(s string) (visible, active bool) {
 	return visible, visible && len(f) > 2 && f[2] == "1"
 }
 
-func (m *sbModel) checkVisible() {
-	if m.myPane == "" {
-		m.visible = true // not in tmux (--once, a test): draw as if seen
-		return
+func probeVisible(pane string) (visible, focused bool) {
+	if pane == "" {
+		return true, false // not in tmux (--once, a test): draw as if seen
 	}
-	out, err := exec.Command("tmux", "display-message", "-p", "-t", m.myPane,
+	out, err := exec.Command("tmux", "display-message", "-p", "-t", pane,
 		"#{window_active} #{session_attached} #{pane_active}").Output()
 	if err != nil {
-		m.visible = false
-		return
+		return false, false
 	}
-	m.visible, m.ui.focused = parseVisible(string(out))
+	return parseVisible(string(out))
+}
+
+func (m *sbModel) checkVisible() {
+	m.visible, m.ui.focused = probeVisible(m.myPane)
+}
+
+// tea.Exec pauses the Program; tea.Suspend would stop the process with SIGTSTP.
+type hiddenWait struct {
+	pane  string
+	frame string
+	out   io.Writer
+}
+
+var (
+	paused atomic.Bool
+	wakeCh = make(chan struct{}, 1)
+)
+
+func (h *hiddenWait) Run() error {
+	if h.out != nil && h.frame != "" {
+		fmt.Fprint(h.out, "\x1b[H\x1b[2J"+h.frame)
+	}
+	paused.Store(true)
+	defer paused.Store(false)
+	for {
+		if v, _ := probeVisible(h.pane); v {
+			return nil
+		}
+		select {
+		case <-wakeCh:
+		case <-time.After(10 * time.Second):
+		}
+	}
+}
+
+func (*hiddenWait) SetStdin(io.Reader)      {}
+func (h *hiddenWait) SetStdout(w io.Writer) { h.out = w }
+func (*hiddenWait) SetStderr(io.Writer)     {}
+
+func (m sbModel) pause() tea.Cmd {
+	w := &hiddenWait{pane: m.myPane}
+	if m.width > 0 && m.height > 0 {
+		lines := strings.Split(paintFrame(m.render(), m.width, m.height), "\n")
+		w.frame = strings.Join(lines[:min(len(lines), m.height)], "\n")
+	}
+	return tea.Exec(w, func(error) tea.Msg { return sbWake{} })
 }
 
 func jump(wid, pane string) {
@@ -444,12 +491,8 @@ func trace(pane string) {
 
 const sidebarFPS = 30
 
-func tickAfter(visible bool) tea.Cmd {
-	d := 10 * time.Second
-	if visible {
-		d = 2 * time.Second
-	}
-	return tea.Tick(d, func(time.Time) tea.Msg { return sbTick{} })
+func tickAfter() tea.Cmd {
+	return tea.Tick(2*time.Second, func(time.Time) tea.Msg { return sbTick{} })
 }
 
 // ---------------------------------------------------------------- entries
@@ -778,19 +821,28 @@ func (m sbModel) browse() (sbModel, tea.Cmd) {
 
 // ---------------------------------------------------------------- update
 
-func (m sbModel) Init() tea.Cmd { return tea.Batch(tickAfter(m.visible), m.askColours()) }
+func (m sbModel) Init() tea.Cmd {
+	if !m.visible {
+		return nil
+	}
+	return tea.Batch(tickAfter(), m.askColours())
+}
 
 func (m sbModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
+		first := m.width == 0
 		m.width, m.height = msg.Width, msg.Height
+		if first && !m.visible {
+			return m, m.pause()
+		}
 
 	case sbTick:
 		m.checkVisible()
 		if m.visible {
-			return m, tea.Batch(m.loadCmd(), tickAfter(true)) // the one tick chain
+			return m, tea.Batch(m.loadCmd(), tickAfter()) // the one tick chain
 		}
-		return m, tickAfter(false)
+		return m, m.pause()
 
 	case tea.BackgroundColorMsg:
 		c := toRGB(msg.Color)
@@ -806,7 +858,7 @@ func (m sbModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		was := m.visible
 		m.checkVisible()
 		if !m.visible {
-			return m, nil
+			return m, m.pause()
 		}
 		if !was {
 			// just shown: draw the last document any sidebar saw, with this
@@ -816,7 +868,7 @@ func (m sbModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.ui = m.withShared()
 			m.markSeen()
-			return m, tea.Batch(m.loadCmd(), tickAfter(true), m.askColours())
+			return m, tea.Batch(m.loadCmd(), tickAfter(), m.askColours())
 		}
 		return m, m.loadCmd()
 
@@ -1556,12 +1608,6 @@ func runSidebar(once bool) {
 		fmt.Println(m.render())
 		return
 	}
-	// Bubble Tea wakes at its frame rate for the life of the program, shown
-	// or hidden: at its default 60 every sidebar cost ~2% of a core doing
-	// nothing (measured 2026-11-03). 30 halves that and keeps a keypress
-	// within 33 ms of its frame. Pausing the renderer while hidden is not
-	// available without leaving the alternate screen, which would flash
-	// the pane on every window switch
 	p := tea.NewProgram(m, tea.WithFPS(sidebarFPS))
 	ch := make(chan os.Signal, 4)
 	signal.Notify(ch, syscall.SIGUSR1)
@@ -1573,6 +1619,13 @@ func runSidebar(once bool) {
 	}
 	go func() {
 		for range ch {
+			if paused.Load() {
+				select {
+				case wakeCh <- struct{}{}:
+				default:
+				}
+				continue
+			}
 			p.Send(sbWake{})
 		}
 	}()
