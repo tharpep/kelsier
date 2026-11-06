@@ -559,7 +559,7 @@ claude ███░░ 58% (1h20m) · wk 41%  │  1 waiting 6m · $24.10  │  
    status` of that pane's root. *Not* the land code (decided in M4 planning):
    `review` / `merged` / `no PR` need the base branch and the PR cache, which
    do not belong on a path that redraws constantly.
-4. **spend** — the spend limit, after the weekly window, **only from 50%**
+4. **spend** — the spend limit, after the weekly window, drawn as a meter like 5h (#34), **only from 50%**
    (`quota_from` since #28: a `quota_cmd` budget may be watched from 0):
    account-wide like the others, and almost always irrelevant.
 

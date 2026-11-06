@@ -3046,7 +3046,10 @@ cmd_status_line() {
               elif .pct == null then ("7d" | tag) + "?"
               else (.pct | floor) as $p | ("7d" | tag) + (if $p >= 70 then ($p | heat) else "" end) + "\($p)%#[default]" end ),
             ( $q.spend // null | if . == null or .pct == null or .pct < $from then empty
-              else (.pct | floor) as $p | ("spend" | tag) + ($p | heat) + "\($p)%#[default]" end ) ]
+              else (.pct | floor) as $p
+                | ("spend" | tag) + ($p | meter) + " \($p)%"
+                  + (if (.resets_at // 0) > $now then "#[fg=#7f7f8a] (\(.resets_at - $now | dur))#[default]" else "" end)
+              end ) ]
           | if length == 0 then null else join("   ") end
         end ) as $quota
     | [ .agents[] | select(.window_id != null and .state != "dead") ] as $live
