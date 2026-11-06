@@ -325,11 +325,16 @@ with nothing in kel to assert against. Re-breaking an `unguarded` one is silent.
   the agent itself. kel folds a background session named like a top agent
   into that agent. Its statusLine runs in the background process, outside any
   pane — which is why such an agent's Claude row shows the repo identity.
-- `[unguarded]` **Palette slots are themed — `colour16` included.** xterm's
+- `[guarded]` **Palette slots are themed — `colour16` included.** xterm's
   256-colour table makes 16 true black, but base16-style schemes repurpose
   16 and up as accents: WezTerm's Catppuccin Mocha made the sidebar peach.
   A colour that must be a colour is `#rrggbb`; one that should follow the
-  theme is one of the 16 ANSI colours (§5d). Never a 16–21 index.
+  theme is one of the 16 ANSI colours (§5d). Never a 16–21 index. **And
+  never let the renderer choose** (2026-11-05): inside tmux the pane's TERM
+  carries no RGB hint, so Bubble Tea quantised every `#rrggbb` to 256
+  colours and the hover fill landed on slot 17, pink under Catppuccin. The
+  sidebar forces a truecolor profile; tmux downgrades for a client without
+  RGB. The suite checks a real frame holds `48;2;` and no `38;5;` / `48;5;`.
 - `[guarded]` **tmux's pane commands move the sidebar — and not all of them
   say so.** `select-layout`, `swap-pane` and border drags fire
   `window-layout-changed`; `rotate-window` fires nothing (measured on 3.6),
