@@ -61,7 +61,10 @@ unset TMUX TMUX_PANE VISUAL  # don't inherit an outer tmux or interactive editor
 # so this only ever bit a dev box: it put a test's agent pane into view-mode.
 # Every tmux call — the suite's, kel's, kel-sidebar's — goes through this shim.
 mkdir -p "$WORK/shim"
-printf '#!/bin/sh\nexec %s -f /dev/null "$@"\n' "$(command -v tmux)" > "$WORK/shim/tmux"
+TMUX_BIN="$(command -v tmux)"
+SOCK="$TMUX_TMPDIR/tmux-$(id -u)/default"
+mkdir -m 700 "${SOCK%/*}"
+printf '#!/bin/sh\nexec %s -S %s -f /dev/null "$@"\n' "$TMUX_BIN" "$SOCK" > "$WORK/shim/tmux"
 chmod +x "$WORK/shim/tmux"
 export PATH="$WORK/shim:$PATH"
 printf '#!/bin/sh\n[ "$1 $2" = "agents --json" ] && { cat "%s/claude-agents.json" 2>/dev/null || echo "[]"; }\n' "$WORK" > "$WORK/claude-stub"
@@ -79,8 +82,10 @@ export KEL_FLEET_BIN="$WORK/kel-fleet" KEL_SIDEBAR_BIN="$WORK/kel-sidebar"
 ( cd "$HERE/.." && go build -o "$KEL_FLEET_BIN" ./cmd/kel-fleet && go build -o "$KEL_SIDEBAR_BIN" ./cmd/kel-sidebar ) \
   || { echo "go build failed" >&2; exit 1; }
 
-cleanup() { tmux kill-server 2>/dev/null; rm -rf "$WORK" "$TMUX_TMPDIR"; }
-trap cleanup EXIT INT TERM
+cleanup() { "$TMUX_BIN" -S "$SOCK" kill-server 2>/dev/null; rm -rf "$WORK" "$TMUX_TMPDIR"; }
+trap cleanup EXIT
+trap 'cleanup; exit 130' INT TERM
+shim_here() { [ -x "$WORK/shim/tmux" ] || { echo "refusing to continue: the shim is gone" >&2; exit 1; }; }
 
 pass=0; fail=0; failed=()
 ok() {  # description  test-expression
@@ -88,7 +93,7 @@ ok() {  # description  test-expression
   else printf '  \033[31mFAIL\033[0m %s\n' "$1"; fail=$((fail+1)); failed+=("$1")
        [ "$VERBOSE" = 1 ] && printf '       expr: %s\n' "$2"; fi
 }
-section() { printf '\n\033[1m== %s ==\033[0m\n' "$*"; }
+section() { shim_here; printf '\n\033[1m== %s ==\033[0m\n' "$*"; }
 
 # Poll for a condition instead of sleeping a guessed interval.  A fixed sleep
 # is either slower than it needs to be or occasionally too short, and the
@@ -104,6 +109,7 @@ wait_until() {   # 'test expression'  [max tenths of a second, default 50]
 }
 
 reset() {
+  shim_here
   tmux kill-server 2>/dev/null; sleep 0.4
   # Start the server ourselves with NO user config.  Otherwise the suite
   # inherits whatever ~/.tmux.conf does — on a developer box that sources
@@ -1571,7 +1577,8 @@ tmux new-session -d -s _kelpop_quitcheck 'sleep 30'
 ok "kel quit closes kel and its popups' sessions" '! tmux has-session -t =keltest 2>/dev/null && ! tmux has-session -t =_kelpop_quitcheck 2>/dev/null'
 ok "  ...having saved the workspace first"      'jq -r ".windows[].name" "$STATE/snapshot.json" | grep -qx wt5'
 
-ok "a missing tool is said, not a crash"        '[[ "$(PATH="/usr/bin:/bin" KEL_FLEET_BIN="$KEL_FLEET_BIN" "$KEL" _panel files "$WT5" t 2>&1)" == *"yazi is not installed"* ]]'
+mkdir -p "$WORK/tmuxonly" && ln -sf "$WORK/shim/tmux" "$WORK/tmuxonly/tmux"
+ok "a missing tool is said, not a crash"        '[[ "$(PATH="$WORK/tmuxonly:/usr/bin:/bin" KEL_FLEET_BIN="$KEL_FLEET_BIN" "$KEL" _panel files "$WT5" t 2>&1)" == *"yazi is not installed"* ]]'
 release_client
 unset KEL_AGENT KEL_POPUP_TRACE BROWSER XDG_RUNTIME_DIR
 rm -f "$WORK/shim/yazi" "$WORK/shim/lazygit" "$WORK/shim/nvim" "$WORK/shim/browser"
