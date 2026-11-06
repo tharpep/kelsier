@@ -768,6 +768,35 @@ func TestAgentMode(t *testing.T) {
 	}
 }
 
+func TestAgentTasks(t *testing.T) {
+	doc := loadFixture(t, "fifteen-three-repos")
+	out, _ := renderView(buildView(doc, uiState{sel: "a:@2"}), 32, 0, 0)
+	p := plain(out)
+	if !regexp.MustCompile(`editing UsageChart\.tsx +1/4 *$`).MatchString(strings.Split(p, "\n")[findRow(p, "editing Usage")]) || !strings.Contains(out, dim+"1/4") {
+		t.Errorf("no dim 1/4 right-aligned on the summary line:\n%s", p)
+	}
+	doc = loadFixture(t, "one-agent")
+	out, _ = renderView(buildView(doc, uiState{sel: "a:@1"}), 32, 0, 0)
+	p = plain(out)
+	if !regexp.MustCompile(`\$1\.20 +3/7 `).MatchString(p) || strings.Count(p, "3/7") != 1 {
+		t.Errorf("the selected block's context line lacks the count, once:\n%s", p)
+	}
+	doc.Agents[0].Tasks = nil
+	out, _ = renderView(buildView(doc, uiState{sel: "a:@1"}), 32, 0, 0)
+	if strings.Contains(plain(out), "/7") {
+		t.Errorf("no tasks drew a count:\n%s", plain(out))
+	}
+}
+
+func findRow(s, sub string) int {
+	for i, l := range strings.Split(s, "\n") {
+		if strings.Contains(l, sub) {
+			return i
+		}
+	}
+	return 0
+}
+
 func sp(s string) *string { return &s }
 
 // d asks which base; tab completes a branch.

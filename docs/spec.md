@@ -351,6 +351,10 @@ in any terminal:
   model's name when known (`Opus 5.5 · 36% · $10.65`). An agent with no state (opencode,
   or a restored session before its first hook) shows dim `unknown` where the
   age would be, and its dot stays `?`; never a cause kel cannot know.
+- **Task progress sits at the right of the summary line** (*2026-11-06*): a
+  dim `3/7`, done of all, from the session's task list. A selected agent shows
+  it on the context line's right instead, when the line holds it whole; an
+  agent with no summary line shows no count, because it has no line to hold it.
 - **A permission mode follows the name** (*2026-11-06*): `plan`, `edits`
   (acceptEdits), `bypass` (bypassPermissions), `dontask` (dontAsk), any other
   mode lowercased, faint; nothing for `default` (invariant 3: a mode kel was
@@ -714,7 +718,13 @@ every payload, both halves of that were stale:
   is exactly the current list, with no state machine to keep in step. It is
   undocumented, so a file that does not parse makes the list read
   `tasks unreadable`, never an empty list (invariant 3). No directory means
-  the session keeps no list, which is the common case and says so.
+  the session keeps no list, which is the common case and says so. The
+  sidebar's path counts the same files in Go (`internal/fleet/tasks.go`) as the
+  agent's `tasks: {done, total}` (*2026-11-06*): `completed` of everything not
+  `deleted`, absent when there is no directory or no task, and absent again
+  when any file does not parse, since a short count would look complete.
+  Measured on WSL2: 9 µs for a session with no directory, 270 µs for seven
+  files, one `ReadDir` and one read per file.
 - **The plan needs no new hook.** In plan mode Claude writes its plan with the
   ordinary `Write` tool to `~/.claude/plans/<generated name>.md` — which the
   M5 hook already sees. So the generated name never has to be tied to a

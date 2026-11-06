@@ -879,6 +879,13 @@ func modeWord(m *string) string {
 	return strings.ToLower(*m)
 }
 
+func taskCount(t *fleet.Tasks) string {
+	if t == nil {
+		return ""
+	}
+	return fmt.Sprintf("%d/%d", t.Done, t.Total)
+}
+
 // agentAge is the right edge of an agent's row: how long it has been in its
 // state, and a chip naming the state when it is one that needs a word.
 // A `working` kel has not heard from reads "quiet", grey italic: kel is not
@@ -1322,10 +1329,19 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 		if t := a.agent.Title; t != nil {
 			title = *t
 		}
+		tasks := taskCount(a.agent.Tasks)
+		tw := 0
+		if tasks != "" {
+			tw = len(tasks) + 1
+		}
+		ta := avail
+		if !sel {
+			ta -= tw
+		}
 		var lines []string
 		switch {
 		case sum.titled && title != "" && !sel:
-			lines = []string{pre + dim + truncate(title, avail) + reset}
+			lines = []string{pre + dim + truncate(title, ta) + reset}
 		case sum.titled && title != "":
 			for _, l := range wrapWords(title, avail, 2) {
 				lines = append(lines, pre+dim+l+reset)
@@ -1335,7 +1351,10 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 				lines = append(lines, pre+sum.colour+l+reset)
 			}
 		case sum.text != "":
-			lines = []string{pre + sum.colour + truncate(sum.text, avail) + reset}
+			lines = []string{pre + sum.colour + truncate(sum.text, ta) + reset}
+		}
+		if tasks != "" && !sel && len(lines) > 0 {
+			lines[0] = spread(lines[0], dim+tasks+reset, w)
 		}
 		rows = append(rows, lines...)
 		sums := len(lines)
@@ -1345,7 +1364,12 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 					rows = append(rows, pre+dim+l+reset)
 				}
 			}
-			rows = append(rows, pre+mid+truncate(agentFacts(a.agent), avail)+reset)
+			ft := agentFacts(a.agent)
+			facts := pre + mid + truncate(ft, avail) + reset
+			if tasks != "" && len([]rune(ft)) <= avail-tw {
+				facts = spread(facts, dim+tasks+reset, w)
+			}
+			rows = append(rows, facts)
 			// subagents: the Task-tool helpers this agent has running
 			for _, sub := range a.agent.Subagents {
 				sd, sc := subLook(sub.Status)
