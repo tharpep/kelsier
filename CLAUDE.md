@@ -95,7 +95,7 @@ change; migrate old records in `migrate_meta`.
 | `<pane-id>.cards-seen` | one epoch: when the pane's cards were last viewed via `i`. If `latest.at > seen`, cards are unseen |
 | `lazygit-overlay.yml` | `quitOnTopLevelReturn: true`, laid over the user's lazygit config (never written into it) so `esc` closes kel's lazygit popup |
 | `prompt.out` | the last multi-line answer `prefix k` showed in a popup |
-| `claude-agents.json` | `{at, bin, sessions, failed}` — `claude agents --json`, cached 10 s for the sidebar's path; `bin` remembers where claude is |
+| `claude-agents.json` | `{at, bin, sessions, failed, refreshing}` — `claude agents --json` for the sidebar's path; `bin` remembers where claude is. Read at once whatever its age; older than 10 s it starts a detached `kel-fleet --refresh-claude-agents` (`refreshing` = epoch started, none within 5 s of one), so sessions may be up to ~15 s old, and past 60 s read as unknown. Only a missing file reads inline |
 | `<pane-id>.subs` | two lines: the epoch, then the agent panel's subagent rows as JSON, from `kel substatus`; older than 30 s means none now |
 | `restore-offer` | present while an archived workspace waits: set by a fresh `kel`, cleared by `kel restore`; the sidebar offers `b` |
 | `sidebar-off` | present after `kel sidebar off`; no new sidebars until `kel sidebar on` |
