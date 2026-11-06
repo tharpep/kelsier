@@ -472,7 +472,7 @@ rm_agent_state() { # key...
   local k
   for k in "$@"; do
     [ -n "$k" ] && rm -f "$STATE_DIR/$k.state" "$STATE_DIR/$k.ctx" "$STATE_DIR/$k.edit" \
-      "$STATE_DIR/$k.plan" "$STATE_DIR/$k.view" "$STATE_DIR/$k.subs" "$STATE_DIR/$k.cards" "$STATE_DIR/$k.cards-seen" "$STATE_DIR/$k.mode" \
+      "$STATE_DIR/$k.plan" "$STATE_DIR/$k.view" "$STATE_DIR/$k.subs" "$STATE_DIR/$k.cards" "$STATE_DIR/$k.cards-seen" "$STATE_DIR/$k.mode" "$STATE_DIR/$k.log" \
       "$STATE_DIR/$k.transcript_path" "$STATE_DIR/$k.artifact_dir"
   done
   return 0
@@ -848,7 +848,7 @@ prune_state() {
   local live f wid panes pane
   live="$(tmux list-windows -a -F '#{window_id}' 2>/dev/null; tmux list-panes -a -F '#{pane_id}' 2>/dev/null)"
   [ -n "$live" ] || return 0
-  for f in "$STATE_DIR"/*.state "$STATE_DIR"/*.ctx "$STATE_DIR"/*.seen "$STATE_DIR"/*.edit "$STATE_DIR"/*.plan "$STATE_DIR"/*.view "$STATE_DIR"/*.subs "$STATE_DIR"/*.cards "$STATE_DIR"/*.cards-seen "$STATE_DIR"/*.mode "$STATE_DIR"/*.transcript_path "$STATE_DIR"/*.artifact_dir "$STATE_DIR"/*.refit; do
+  for f in "$STATE_DIR"/*.state "$STATE_DIR"/*.ctx "$STATE_DIR"/*.seen "$STATE_DIR"/*.edit "$STATE_DIR"/*.plan "$STATE_DIR"/*.view "$STATE_DIR"/*.subs "$STATE_DIR"/*.cards "$STATE_DIR"/*.cards-seen "$STATE_DIR"/*.mode "$STATE_DIR"/%*.log "$STATE_DIR"/*.transcript_path "$STATE_DIR"/*.artifact_dir "$STATE_DIR"/*.refit; do
     [ -e "$f" ] || continue
     wid="${f##*/}"; wid="${wid%.*}"
     if ! printf '%s\n' "$live" | grep -qxF "$wid"; then
@@ -2129,6 +2129,7 @@ cmd_url() { # [dir|agent]
 #   _panel diff   <dir> <title> <base>   what changed against the land base
 #   _panel edit   <dir> <title> <wid>    the file the agent last touched
 #   _panel plan   <dir> <title> <wid>    the agent's plan, then its tasks
+#   _panel history <dir> <title> <pane>  the agent's last twenty state changes
 #   _panel editor <dir> <title>          nvim at the space, kept between opens
 #   _panel attach <dir> <name> <id>      a background agent, `claude attach <id>`
 #   _panel browse <url>                  the real browser
@@ -2145,6 +2146,7 @@ cmd_panel() {
     diff)  panel_diff "$dir" "$title" "$arg" ;;
     edit)  panel_edit "$dir" "$title" "$arg" ;;
     plan)  panel_plan "$dir" "$title" "$arg" ;;
+    history) panel_history "$dir" "$title" "$arg" ;;
     cards) panel_cards "$dir" "$title" "$arg" ;;
     attach) need_tool claude
            # a background agent (`claude --bg`) has no pane: open it here.
@@ -2608,6 +2610,18 @@ panel_plan() { # dir title wid
   elif command -v bat >/dev/null 2>&1; then popup "$dir" "plan · $title · prefix q closes" bat --paging=always -l md "$view"
   elif command -v batcat >/dev/null 2>&1; then popup "$dir" "plan · $title · prefix q closes" batcat --paging=always -l md "$view"
   else popup "$dir" "plan · $title · prefix q closes" less -R "$view"; fi
+}
+
+panel_history() { # dir title pane
+  local dir="$1" title="$2" pane="$3" f view
+  f="$STATE_DIR/$pane.log"
+  [ -s "$f" ] || die "no state history for this agent"
+  view="$STATE_DIR/$pane.view"
+  tail -n 20 "$f" | awk -v now="$(date +%s)" '
+    function ago(s) { return s < 60 ? s "s ago" : s < 3600 ? int(s / 60) "m ago" : s < 86400 ? int(s / 3600) "h ago" : int(s / 86400) "d ago" }
+    { line[NR] = sprintf("%-8s %-9s %-17s %s", ago(now - $1), $3, $2, substr($0, length($1 $2 $3) + 4)) }
+    END { for (i = NR; i >= 1; i--) print line[i] }' > "$view.$$" && mv -f "$view.$$" "$view"
+  popup "$dir" "history · $title · prefix q closes" less -R "$view"
 }
 
 panel_cards() { # dir title pane_or_wid
@@ -4031,6 +4045,17 @@ cmd_hook_agy() {
   esac
 }
 
+hook_history() { # pane epoch event state note
+  local f="$STATE_DIR/$1.log" h='' nl
+  [ -e "$f" ] || ( umask 077; : > "$f" )
+  printf '%s %s %s %s\n' "$2" "$3" "$4" "${5:0:40}" >> "$f"
+  read -r -d '' h < "$f" || true
+  nl="${h//[!$'\n']/}"
+  if [ "${#nl}" -gt 40 ]; then
+    write_private "$f.$$" "$(tail -n 20 "$f")"$'\n' && mv -f "$f.$$" "$f"
+  fi
+}
+
 hook_mode() { # pane mode
   case "$2" in
     '') ;;
@@ -4161,7 +4186,7 @@ cmd_hook() {
       exit 0 ;;
     *) exit 0 ;;
   esac
-  local tmp keep=0 oldnote
+  local tmp keep=0 oldnote now
   if [ "$event" = Notification ] && [ "$prev" = waiting ] && [ "$state" = waiting ]; then
     read -r _ _ oldnote < "$STATE_DIR/$pane.state" 2>/dev/null || true
     case "$oldnote" in
@@ -4171,8 +4196,10 @@ cmd_hook() {
   fi
   if [ "$keep" = 0 ]; then
     tmp="$(mktemp "$STATE_DIR/.${pane#%}.XXXXXX" 2>/dev/null)" || exit 0
-    printf '%s %s %s\n' "$state" "$(date +%s)" "$ntext" > "$tmp"
+    now="$(date +%s)"
+    printf '%s %s %s\n' "$state" "$now" "$ntext" > "$tmp"
     mv -f "$tmp" "$STATE_DIR/$pane.state"
+    hook_history "$pane" "$now" "$event" "$state" "$ntext"
   fi
   tmux set-option -p -t "$pane" @kel-state "$state" 2>/dev/null
   [ "$(agent_pane "$wid")" = "$pane" ] && rm -f "$STATE_DIR/$wid.state"

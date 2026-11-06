@@ -1127,6 +1127,22 @@ func TestEntryMenu(t *testing.T) {
 	if got := nm.(sbModel); got.mode != modeKill || got.target != "a:@2" {
 		t.Errorf("Kill: mode %v target %q", got.mode, got.target)
 	}
+	_, acts := entryMenu(buildView(m.doc, uiState{sel: "a:@2"}))
+	has := false
+	for _, a := range acts {
+		has = has || a == sbAct{"h", "History"}
+	}
+	if !has {
+		t.Errorf("an agent's menu lacks h History: %+v", acts)
+	}
+	_, cmd := m.Update(tea.KeyPressMsg{Code: 'h', Text: "h"})
+	if cmd == nil {
+		t.Error("h on an agent opened no history")
+	}
+	m.ui.sel = "s:/home/me/code/api-gw"
+	if _, cmd := m.Update(tea.KeyPressMsg{Code: 'h', Text: "h"}); cmd != nil {
+		t.Error("h on a space still closes it, with no popup")
+	}
 }
 
 // The entry under the pointer shows its buttons in place of its detail; the
