@@ -38,6 +38,7 @@
     "model": "Opus 5.5 (1M context)"
    },
    "unseen": false,
+   "tasks": {"done": 3, "total": 7},
    "subagents": [
     {
      "id": "t1",
@@ -125,6 +126,7 @@
     "model": "Opus 5.5 (1M context)"
    },
    "unseen": true,
+   "tasks": {"done": 7, "total": 7},
    "title": "Rewrite the setup guide so a new user can get from install to first agent"
   },
   {
@@ -265,6 +267,7 @@
     "model": "Opus 5.5 (1M context)"
    },
    "unseen": false,
+   "tasks": {"done": 1, "total": 4},
    "title": "Chart token spend per day, stacked by model",
    "doing": "editing UsageChart.tsx"
   },

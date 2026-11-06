@@ -222,17 +222,21 @@ func describeTool(name string, in map[string]any) string {
 	return strings.ToLower(name)
 }
 
+func sessionOf(a Agent) string {
+	if a.Claude != nil {
+		return a.Claude.SessionID
+	}
+	if a.ClaudeSession != nil {
+		return *a.ClaudeSession
+	}
+	return ""
+}
+
 // transcriptPaths is each agent's transcript, "" when it has none, by Agents index.
 func transcriptPaths(doc *Doc) []string {
 	paths := make([]string, len(doc.Agents))
 	for i, a := range doc.Agents {
-		sid := ""
-		if a.Claude != nil {
-			sid = a.Claude.SessionID
-		} else if a.ClaudeSession != nil {
-			sid = *a.ClaudeSession
-		}
-		paths[i] = transcriptOf(sid)
+		paths[i] = transcriptOf(sessionOf(a))
 	}
 	return paths
 }

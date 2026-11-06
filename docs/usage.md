@@ -147,7 +147,9 @@ scrolls; more than four needing you fold into `+N more`.
   session's **title**, the first thing you typed to it, from the head of the same
   transcript (none for an agent with no Claude transcript). Nothing known, no
   line. The selected agent opens to its title in full, the model's name, context
-  % and cost (`Opus 5.5 · 36% · $10.65`), and its subagents.
+  % and cost (`Opus 5.5 · 36% · $10.65`), and its subagents. An agent whose
+  session keeps a task list shows its progress, dim, at the right of that line
+  (`3/7`: done of all; on the context line when selected).
 
 **Mouse first.** The top line is `kel` with two buttons:
 
