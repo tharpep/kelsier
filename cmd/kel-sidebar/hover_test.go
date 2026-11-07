@@ -48,10 +48,13 @@ func TestHoverNeverMovesAnyRow(t *testing.T) {
 			}
 			variants = append(variants, uiState{now: 1792018800}, uiState{now: 1792018800, expanded: open})
 		}
-		for vi, h := range []int{16, 40, 16, 40, 16, 40}[:2*len(variants)] {
-			ui := variants[vi/2]
+		for vi := 0; vi < len(variants)*4; vi++ {
+			ui, h, drawer := variants[vi/4], []int{16, 40}[vi%2], vi%4 >= 2
 			rng := rand.New(rand.NewSource(int64(h)*7919 + int64(len(name)) + int64(vi)))
 			m := sbModel{doc: doc, width: 32, height: h, visible: true, ui: ui}
+			if drawer {
+				m.openDrawer()
+			}
 			y := rng.Intn(h)
 			for step := 0; step < 60; step++ {
 				bl, br := hoverFrame(m)
@@ -65,6 +68,9 @@ func TestHoverNeverMovesAnyRow(t *testing.T) {
 				}
 				free := map[int]bool{y: true, ny: true, nameRow(br, oldID): true, nameRow(ar, m.ui.hoverID): true}
 				for i := range al {
+					if br[i].kind == "drawer" {
+						free[i] = true
+					}
 					if ar[i].id != br[i].id || ar[i].kind != br[i].kind {
 						t.Fatalf("%s h=%d step %d: moving %d to %d changed row %d from %q to %q", name, h, step, y, ny, i, br[i].id, ar[i].id)
 					}

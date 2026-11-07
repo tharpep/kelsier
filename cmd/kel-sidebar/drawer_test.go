@@ -135,50 +135,103 @@ func TestDrawerKeys(t *testing.T) {
 
 // Only what the document holds is drawn: the git position when known.
 func TestDrawerFactsOmitUnknowns(t *testing.T) {
-	text := func(a sbAgent) string {
-		v := sbView{agents: []sbAgent{a}, drawer: &sbDrawer{id: agentID(a.key), items: []sbAct{{"enter", "Go to it"}}}}
+	text := func(git *fleet.Git) string {
+		d := &sbDrawer{items: []sbAct{{"enter", "Go to it"}}}
 		var ss []string
-		for _, l := range drawerLines(v, agentID(a.key), 32, " ") {
+		for _, l := range drawerLines(d, git, "/x", 32, " ") {
 			ss = append(ss, strings.TrimRight(plain(l.s), " "))
 		}
 		return strings.Join(ss, "\n")
 	}
 	branch, ahead, dirty := "main", 2, 3
-	g := &fleet.Git{Branch: &branch, Ahead: &ahead, Dirty: &dirty}
-	base := sbAgent{key: "@1", cwd: "/x"}
 	item := "   ›Go to it                  ↵"
-	pos := "    main ↑2 ●3"
-	cases := []struct {
-		name string
-		a    sbAgent
-		want []string
-	}{
-		{"nothing known", base, []string{"", item}},
-		{"git only", func() sbAgent { a := base; a.git = g; return a }(), []string{"", pos, "", item}},
+	if got := text(nil); got != "\n"+item {
+		t.Errorf("nothing known:\n%s", got)
 	}
-	for _, c := range cases {
-		if got := text(c.a); got != strings.Join(c.want, "\n") {
-			t.Errorf("%s:\n%s", c.name, got)
-		}
+	g := &fleet.Git{Branch: &branch, Ahead: &ahead, Dirty: &dirty}
+	if got := text(g); got != "\n    main ↑2 ●3\n\n"+item {
+		t.Errorf("git only:\n%s", got)
 	}
 }
 
-// The viewport scrolls so an opened drawer shows whole when it can.
+// The cursor stays on screen when the block and its drawer outgrow the pane.
+func TestDrawerCursorStaysInView(t *testing.T) {
+	m := drawerModel(t, "a:@7")
+	m.height = 16
+	m = press(m, "right")
+	for step := 0; step < 12; step++ {
+		_, refs := renderView(m.view(), 32, 16, 0)
+		want := "dr:" + m.drawer.items[m.drawer.sel].key
+		found := false
+		for _, r := range refs {
+			found = found || r.id == want
+		}
+		if !found {
+			t.Fatalf("step %d: the cursor row %s is off screen", step, want)
+		}
+		m = press(m, "down")
+	}
+}
+
+// The drawer rows end in the last item, whole, when the pane is tall enough.
 func TestDrawerScrollsIntoView(t *testing.T) {
 	m := drawerModel(t, "a:@7")
 	m.height = 30
 	m = press(m, "right")
-	out, _ := renderView(m.view(), 32, 30, 0)
+	out, refs := renderView(m.view(), 32, 30, 0)
 	lines := strings.Split(plain(out), "\n")
-	if len(lines) != 30 || !strings.Contains(out, "Own window") {
-		t.Errorf("%d lines, last item missing:\n%s", len(lines), plain(out))
+	var drawer []string
+	for i, r := range refs {
+		if r.kind == "drawer" {
+			drawer = append(drawer, lines[i])
+		}
 	}
-	rowOf(t, m, "a:@7")
+	if len(lines) != 30 || len(drawer) == 0 || !strings.Contains(drawer[len(drawer)-1], "Kill") {
+		t.Errorf("%d lines, drawer rows %q", len(lines), drawer)
+	}
+	if refs[rowOf(t, m, "a:@7")].kind != "agent" {
+		t.Error("the card's first row is not shown")
+	}
+}
+
+// An action list that changes under an open drawer closes it.
+func TestDrawerClosesWhenItemsGoStale(t *testing.T) {
+	m := press(drawerModel(t, "a:@2"), "right")
+	doc := m.doc
+	doc.Agents = append([]fleet.Agent(nil), m.doc.Agents...)
+	for i := range doc.Agents {
+		if doc.Agents[i].WindowID != nil && *doc.Agents[i].WindowID == "@2" {
+			dead := "dead"
+			doc.Agents[i].State = &dead
+		}
+	}
+	nm, _ := m.Update(sbLoaded{doc})
+	if nm.(sbModel).drawer != nil {
+		t.Error("relaunch appeared and the drawer kept its old items")
+	}
+	nm, _ = m.Update(sbLoaded{m.doc})
+	if nm.(sbModel).drawer == nil {
+		t.Error("an unchanged fleet closed the drawer")
+	}
+}
+
+// A pointer into a Needs you pointer, or a prompt in progress, opens nothing.
+func TestDrawerNotForPointersOrPrompts(t *testing.T) {
+	m := drawerModel(t, needID("@2"))
+	if got := press(m, "right"); got.drawer != nil {
+		t.Errorf("→ on a Needs you pointer opened %+v", got.drawer)
+	}
+	m = drawerModel(t, "a:@1")
+	m.mode = modeNew
+	if got := click(m, rowOf(t, m, "a:@1"), tea.MouseRight); got.drawer != nil {
+		t.Errorf("a right-click during a prompt opened %+v", got.drawer)
+	}
 }
 
 // The drawer open on an agent, at 32 columns and at 32x30, held like every
 // other frame.
 func TestDrawerGolden(t *testing.T) {
+	keepPalette(t)
 	t.Setenv("HOME", "/home/me")
 	doc := loadFixture(t, "fifteen-three-repos")
 	now := int64(0)

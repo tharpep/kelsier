@@ -175,7 +175,7 @@ its age, branch or chip, and its name shortens to make room: `Diff · Files · �
 on an agent, `Files · Git · ⋯` on a space or pane. Nothing is inserted, so no
 row moves. The selected entry carries the same buttons permanently, in the
 foot of its raised block, pointer or not. A click acts on that entry, and `⋯`
-opens its menu, for a trackpad with no right button. A drawer closes on `←`, esc, a click outside it, or when the
+opens its drawer, for a trackpad with no right button. A drawer closes on `←`, esc, a click outside it, or when the
 selection moves; `↑` `↓` and enter walk it, and a letter runs its item. The header menus close on esc or a click outside them; the
 arrows and enter walk those too. `|` and `-` split the pane you were in, right
 or below, at its directory, and put you in the new shell.
