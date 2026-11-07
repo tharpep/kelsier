@@ -1417,6 +1417,18 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 	}
 	group := "\x00"
 	firstCard := true
+	owner, ownerRaised := "", false
+	spacer := func() {
+		switch {
+		case owner == "":
+			add("", lineRef{})
+		case owner == v.sel && ownerRaised:
+			add(fill(lead(owner), w, raised), lineRef{id: owner, kind: "agent"})
+		default:
+			add("", lineRef{id: owner, kind: "agent"})
+		}
+		owner = ""
+	}
 	card := func(a sbAgent) {
 		id := agentID(a.key)
 		r := lineRef{id: id, kind: "agent"}
@@ -1531,6 +1543,7 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 			rows = append(rows, pre+col+truncate("▸ "+latest.Kind+": "+latest.Title, avail)+reset)
 		}
 		entry(id, r, rows, sums)
+		owner, ownerRaised = id, len(v.bgUnder[a.key]) == 0
 		for _, b := range v.bgUnder[a.key] {
 			bd, bc, _ := bgLook(b)
 			bid := bgID(b.ID)
@@ -1545,7 +1558,7 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 	for i, a := range v.agents {
 		if a.repo != group {
 			if i > 0 {
-				add("", lineRef{})
+				spacer()
 			}
 			group = a.repo
 			groupHead(group, count[group])
@@ -1553,14 +1566,14 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 		}
 		if !a.folded {
 			if !firstCard {
-				add("", lineRef{})
+				spacer()
 			}
 			firstCard = false
 			card(a)
 		}
 		if q, ok := v.quiet[a.repo]; ok && (i+1 == len(v.agents) || v.agents[i+1].repo != a.repo) {
 			if !firstCard {
-				add("", lineRef{})
+				spacer()
 			}
 			firstCard = false
 			id := quietID(a.repo)
@@ -1569,7 +1582,7 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 	}
 	if len(v.bgLoose) > 0 {
 		if len(v.agents) > 0 {
-			add("", lineRef{})
+			spacer()
 		}
 		groupHead("background", len(v.bgLoose))
 	}
@@ -1749,12 +1762,12 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 				if l.ref.id != id {
 					continue
 				}
-				if strings.HasPrefix(l.s, " ") {
+				if l.s == "" {
+					body[i].s = dim + "▏" + reset
+				} else if strings.HasPrefix(l.s, " ") {
 					body[i].s = dim + "▏" + reset + l.s[1:]
 				}
-				if len(rowButtons(l.ref.kind)) > 0 {
-					body[i].s = fill(body[i].s, w, soft)
-				}
+				body[i].s = fill(body[i].s, w, soft)
 			}
 		}
 	}

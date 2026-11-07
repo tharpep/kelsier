@@ -163,3 +163,62 @@ func TestMotionReadsTheLastFrame(t *testing.T) {
 		t.Errorf("View left %d refs", len(*m.frame))
 	}
 }
+
+// The blank row after an agent card is the card's: hovering it lights the
+// card and clicking it selects the agent.
+func TestSpacerBelongsToCard(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	m := sbModel{doc: loadFixture(t, "fifteen-three-repos"), width: 32, height: 60, visible: true}
+	lines, refs := hoverFrame(m)
+	id, name, sp := "", -1, -1
+	for i, r := range refs {
+		if r.kind == "agent" && strings.TrimSpace(lines[i]) == "" {
+			id, sp = r.id, i
+			name = nameRow(refs, id)
+			break
+		}
+	}
+	if sp < 0 {
+		t.Fatal("no agent spacer row in the frame")
+	}
+	nm, _ := m.Update(tea.MouseMotionMsg{X: 4, Y: sp})
+	hm := nm.(sbModel)
+	if hm.ui.hoverID != id {
+		t.Fatalf("hoverID %q, want %q", hm.ui.hoverID, id)
+	}
+	hov, _ := hoverFrame(hm)
+	if !strings.HasSuffix(strings.TrimRight(hov[name], " "), "▐Diff▌▐Files▌▐⋯▌") {
+		t.Errorf("name row not showing buttons: %q", hov[name])
+	}
+	out, _ := renderView(hm.view(), hm.width, hm.height, 0)
+	if row := strings.Split(out, "\n")[sp]; !strings.Contains(row, "▏") {
+		t.Errorf("spacer not painted: %q", row)
+	}
+	nm, _ = m.Update(tea.MouseClickMsg{X: 4, Y: sp, Button: tea.MouseLeft})
+	if got := nm.(sbModel).ui.sel; got != id {
+		t.Errorf("click on the spacer selected %q, want %q", got, id)
+	}
+}
+
+// The blank that closes a group is the group's last card's, selected or not.
+func TestLastCardSpacerIsOwned(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	m := sbModel{doc: loadFixture(t, "fifteen-three-repos"), width: 32, height: 60, visible: true}
+	lines, refs := hoverFrame(m)
+	for i := 1; i < len(refs); i++ {
+		if strings.TrimSpace(lines[i]) != "" || strings.Contains(lines[i-1], "Agents") || refs[i].kind == "agent" || refs[i-1].kind != "agent" {
+			continue
+		}
+		t.Fatalf("row %d is a blank after an agent row but unowned: %q", i, lines[i])
+	}
+	for i := 1; i+1 < len(refs); i++ {
+		if refs[i].kind == "agent" && strings.TrimSpace(lines[i]) == "" && refs[i+1].kind == "group" {
+			nm, _ := m.Update(tea.MouseClickMsg{X: 4, Y: i, Button: tea.MouseLeft})
+			if got := nm.(sbModel).ui.sel; got != refs[i].id {
+				t.Errorf("click on the group-closing spacer selected %q, want %q", got, refs[i].id)
+			}
+			return
+		}
+	}
+	t.Fatal("no group-closing spacer owned by a card")
+}
