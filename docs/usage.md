@@ -266,8 +266,7 @@ else `open` / `xdg-open` / `wslview`, else Windows' `start` from WSL.
 
 `kel _fleet` reports each agent's permission mode (`plan`, `acceptEdits`, `bypassPermissions`…) as `mode`, null for the default; the sidebar does not show it yet.
 
-A finished agent stays green until its window has been shown; after that it
-dims. A waiting agent says what it waits for — `waiting 6m · allow Bash? git push origin main` — the command, or the file an edit names, cut to 80 characters. An
+A finished agent is a green `●` until its window has been shown, then a green `○`; after 12 h it dims. A waiting agent says what it waits for — `waiting 6m · allow Bash? git push origin main` — the command, or the file an edit names, cut to 80 characters. An
 agent kel has heard nothing from for half an hour while "working", with no subagent running, reads
 `◌ working? · quiet 14h`: an interrupt (esc) fires no hook, so kel will not
 claim it is still at work. The entry under the mouse pointer shows a dim bar —
