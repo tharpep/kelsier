@@ -5,13 +5,13 @@ package main
 // fixture renders the same frame every time and the golden tests can hold an
 // approved frame in place (§5e). sidebar.go owns everything live.
 //
-//	spaces   where: one entry per repo checkout or linked worktree, its git
-//	         position and ports; the current one expanded to its non-agent
-//	         panes (servers, shells, programs)
+//	shells   every non-agent pane (servers, shells, programs), the space it
+//	         stands in on the right
+//	repos    where: one entry per repo checkout or linked worktree, its git
+//	         position and ports; folded to a header by default
 //	agents   who needs me: every agent, most urgent first
 //
-// Agents are listed only under `agents` — one home per fact (§7) — so an
-// expanded space shows what else is running there, not the agents again.
+// Agents are listed only under `agents` — one home per fact (§7).
 
 import (
 	"fmt"
@@ -34,7 +34,8 @@ const italic = "\x1b[3m"
 // uiState is what the user has done to the view; it is not data.
 type uiState struct {
 	sel      string          // selected entry id (see sbEntry.id)
-	expanded map[string]bool // explicit toggles by space key; absent = default
+	expanded map[string]bool // explicit toggles by fold key; absent = folded
+	now      int64           // the clock the quiet fold reads
 	filter   string
 	myWindow string // the window this sidebar sits in — current, whatever the doc says
 	focused  bool   // the keyboard is in this sidebar
@@ -55,7 +56,6 @@ type sbSpace struct {
 	state      *string // the most urgent agent state in the space, nil if none
 	unseen     bool
 	current    bool
-	open       bool
 	// phase 2: a repo's worktrees nest under it (fleet.Repo)
 	parent     string      // the main checkout's key, for a linked worktree
 	land       *fleet.Land // a linked worktree's land state; nil = not known
@@ -102,12 +102,61 @@ type sbAgent struct {
 	shared  bool
 	agent   fleet.Agent
 	current bool
+	quiet   string // "idle" | "unknown" | "": why the quiet fold covers it
+	folded  bool   // quiet and the group's fold is shut
+}
+
+type sbShell struct {
+	pane  fleet.Pane
+	where string
+}
+
+type sbQuiet struct {
+	idle, unknown int
+	open          bool
+}
+
+func (q sbQuiet) text() string {
+	var parts []string
+	if q.idle > 0 {
+		parts = append(parts, fmt.Sprintf("%d idle 1d+", q.idle))
+	}
+	if q.unknown > 0 {
+		parts = append(parts, fmt.Sprintf("%d unknown", q.unknown))
+	}
+	mark := "+"
+	if q.open {
+		mark = "−"
+	}
+	return mark + " " + strings.Join(parts, " · ")
+}
+
+const (
+	reposID    = "r:repos"
+	reposKey   = "sec:repos"
+	quietAfter = 24 * 3600
+)
+
+func quietID(repo string) string  { return "x:" + repo }
+func quietKey(repo string) string { return "quiet:" + repo }
+
+func quietKind(a fleet.Agent, now int64) string {
+	if a.State == nil || *a.State == "" {
+		return "unknown"
+	}
+	if (*a.State == "idle" || *a.State == "done") && a.StateSince != nil && now-int64(*a.StateSince) >= quietAfter {
+		return "idle"
+	}
+	return ""
 }
 
 type sbView struct {
-	spaces []sbSpace
-	agents []sbAgent
-	needs  []sbAgent
+	shells    []sbShell
+	reposOpen bool
+	quiet     map[string]sbQuiet // by repo: the group's quiet fold, if it has one
+	spaces    []sbSpace
+	agents    []sbAgent
+	needs     []sbAgent
 	// bg: background agents (`claude --bg`), each nested under the top agent
 	// of the same name when there is one — Claude Code does not say which
 	// agent dispatched it, and a same-named one is how the author makes them
@@ -402,10 +451,6 @@ func buildView(doc fleet.Doc, ui uiState) sbView {
 			}
 			return f(pa.PaneIndex) < f(pb.PaneIndex)
 		})
-		s.open = s.current
-		if o, ok := ui.expanded[s.key]; ok {
-			s.open = o
-		}
 	}
 	// stable order, for muscle memory: by label, the main checkout before its
 	// worktrees, then by path; a repo's listed worktrees right under it
@@ -451,6 +496,16 @@ func buildView(doc fleet.Doc, ui uiState) sbView {
 		}
 	}
 
+	for _, s := range v.spaces {
+		for _, p := range s.panes {
+			where := s.repoName()
+			if s.git == nil || s.git.Root == "" {
+				where = tildify(p.Cwd)
+			}
+			v.shells = append(v.shells, sbShell{p, where})
+		}
+	}
+	v.reposOpen = ui.expanded[reposKey] || ui.filter != ""
 	if ui.filter != "" {
 		v.applyFilter(strings.ToLower(ui.filter))
 	}
@@ -475,24 +530,58 @@ func buildView(doc fleet.Doc, ui uiState) sbView {
 	for _, a := range v.needs {
 		v.entryIDs = append(v.entryIDs, needID(a.key))
 	}
+	for _, sh := range v.shells {
+		v.entryIDs = append(v.entryIDs, sh.pane.PaneID)
+	}
+	if !v.unknown {
+		v.entryIDs = append(v.entryIDs, reposID)
+	}
 	for _, s := range v.spaces {
-		if s.folded {
+		if s.folded || !v.reposOpen {
 			continue
 		}
 		v.entryIDs = append(v.entryIDs, spaceID(s.key))
-		if s.open {
-			for _, p := range s.panes {
-				v.entryIDs = append(v.entryIDs, p.PaneID)
-			}
-		}
 		if s.wtSummary() {
 			v.entryIDs = append(v.entryIDs, wtID(s.key))
 		}
 	}
-	for _, a := range v.agents {
-		v.entryIDs = append(v.entryIDs, agentID(a.key))
-		for _, b := range v.bgUnder[a.key] {
-			v.entryIDs = append(v.entryIDs, bgID(b.ID))
+	if ui.filter == "" {
+		inNeeds := map[string]bool{}
+		for _, a := range v.needs {
+			inNeeds[a.key] = true
+		}
+		for i := range v.agents {
+			a := &v.agents[i]
+			if inNeeds[a.key] || a.current || agentID(a.key) == ui.sel {
+				continue
+			}
+			a.quiet = quietKind(a.agent, ui.now)
+			if a.quiet == "" {
+				continue
+			}
+			if v.quiet == nil {
+				v.quiet = map[string]sbQuiet{}
+			}
+			q := v.quiet[a.repo]
+			q.open = ui.expanded[quietKey(a.repo)]
+			if a.quiet == "idle" {
+				q.idle++
+			} else {
+				q.unknown++
+			}
+			v.quiet[a.repo] = q
+			a.folded = !q.open
+		}
+	}
+	for i, a := range v.agents {
+		if !a.folded {
+			v.entryIDs = append(v.entryIDs, agentID(a.key))
+			for _, b := range v.bgUnder[a.key] {
+				v.entryIDs = append(v.entryIDs, bgID(b.ID))
+			}
+		}
+		if _, ok := v.quiet[a.repo]; ok && (i+1 == len(v.agents) || v.agents[i+1].repo != a.repo) {
+			v.entryIDs = append(v.entryIDs, quietID(a.repo))
 		}
 	}
 	for _, b := range v.bgLoose {
@@ -519,27 +608,23 @@ func buildView(doc fleet.Doc, ui uiState) sbView {
 	return v
 }
 
-// applyFilter keeps what matches by name; a space survives if it or any of
-// its panes matches, and opens to show the match.
+// applyFilter keeps what matches by name.
 func (v *sbView) applyFilter(q string) {
 	var ss []sbSpace
 	for _, s := range v.spaces {
-		hit := strings.Contains(strings.ToLower(s.label), q) ||
-			(s.git != nil && s.git.Branch != nil && strings.Contains(strings.ToLower(*s.git.Branch), q))
-		var ps []fleet.Pane
-		for _, p := range s.panes {
-			if strings.Contains(strings.ToLower(paneLabel(p)), q) {
-				ps = append(ps, p)
-			}
-		}
-		if hit {
-			ss = append(ss, s)
-		} else if len(ps) > 0 {
-			s.panes, s.open = ps, true
+		if strings.Contains(strings.ToLower(s.label), q) ||
+			(s.git != nil && s.git.Branch != nil && strings.Contains(strings.ToLower(*s.git.Branch), q)) {
 			ss = append(ss, s)
 		}
 	}
 	v.spaces = ss
+	var shs []sbShell
+	for _, sh := range v.shells {
+		if strings.Contains(strings.ToLower(paneLabel(sh.pane)), q) || strings.Contains(strings.ToLower(sh.where), q) {
+			shs = append(shs, sh)
+		}
+	}
+	v.shells = shs
 	var as []sbAgent
 	for _, a := range v.agents {
 		if strings.Contains(strings.ToLower(a.agent.Name), q) || strings.Contains(strings.ToLower(a.agent.Group), q) {
@@ -1132,14 +1217,65 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 		add("", lineRef{})
 		needEnd = len(body)
 	}
-	add(label("Spaces"), lineRef{kind: "header"})
+	shellN := ""
+	if len(v.shells) > 0 {
+		shellN = faint + fmt.Sprint(len(v.shells)) + reset
+	}
+	add(spread(in+dim+truncate("Shells", w-8)+reset, shellN, w), lineRef{kind: "header"})
 	if v.unknown {
 		add("    "+dim+truncate("? panes unknown", w-4)+reset, lineRef{})
-	} else if len(v.spaces) == 0 {
+	} else if len(v.shells) == 0 {
+		add("    "+dim+truncate("none", w-4)+reset, lineRef{})
+	}
+	// two panes that would read the same (`$ bash`, `$ bash`) are told
+	// apart by their window's name
+	seen := map[string]int{}
+	for _, sh := range v.shells {
+		seen[paneLabel(sh.pane)]++
+	}
+	for _, sh := range v.shells {
+		p := sh.pane
+		pr := lineRef{id: p.PaneID, kind: "pane"}
+		lw, rw := fitPair(paneLabel(p), len([]rune(sh.where)), avail)
+		right := ""
+		if rw > 0 {
+			right = dim + truncate(sh.where, rw) + reset
+		}
+		if btns, bn, hits := inline(p.PaneID, "pane", 4, false); bn >= 0 {
+			right, lw, pr.hits = btns, bn, hits
+		}
+		lbl := truncate(paneLabel(p), lw)
+		if seen[paneLabel(p)] > 1 && p.WindowName != "" {
+			if room := lw - len([]rune(lbl)) - 3; room > 0 {
+				lbl += dim + " · " + truncate(p.WindowName, room) + reset
+			}
+		}
+		one(p.PaneID, pr, spread(lead(p.PaneID)+" "+paneGlyph(p.Kind)+" "+weight(lbl, p.Current), right, w))
+		pr.hits = nil
+		if p.Cards != nil && p.Cards.Unseen && p.Cards.Latest != nil {
+			latest := p.Cards.Latest
+			col := dim
+			if latest.Kind == "decision" {
+				col = yellow
+			}
+			one(p.PaneID, pr, lead(p.PaneID)+"   "+col+truncate("▸ "+latest.Kind+": "+latest.Title, avail)+reset)
+		}
+	}
+	if !v.unknown {
+		name, tail := "Repos ▸", fmt.Sprint(len(v.spaces))
+		if v.reposOpen {
+			name = "Repos ▾"
+		} else if m := mergedCount(v.spaces); m > 0 {
+			tail += fmt.Sprintf(" · %d merged", m)
+		}
+		lw, rw := fitPair(name, len([]rune(tail)), avail)
+		one(reposID, lineRef{id: reposID, kind: "header"}, spread(lead(reposID)+" "+dim+truncate(name, lw)+reset, faint+truncate(tail, rw)+reset, w))
+	}
+	if v.reposOpen && len(v.spaces) == 0 && !v.unknown {
 		add("    "+dim+truncate("nothing open", w-4)+reset, lineRef{})
 	}
 	for _, s := range v.spaces {
-		if s.folded {
+		if s.folded || !v.reposOpen {
 			continue
 		}
 		id := spaceID(s.key)
@@ -1150,12 +1286,11 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 				one(wid, lineRef{id: wid, kind: "space"}, lead(wid)+" "+dim+"└"+reset+"  "+dim+truncate(s.wtText(), w-6)+reset)
 			}
 		}
-		dot := " "
+		dot := dim + "·" + reset
 		if s.state != nil {
 			d, c := stateLook(s.state, s.unseen)
 			dot = c + d + reset
 		}
-		indent := ""
 		if s.parent != "" {
 			// a worktree: one line under its repo, the branch and what
 			// landing it needs — `└● fix-auth     ↑2 · review`
@@ -1185,7 +1320,6 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 				right, r.hits = btns, hits
 			}
 			one(id, r, spread(left, right, w))
-			indent = "  "
 		} else {
 			pos := spacePos(s)
 			lw, rw := fitPair(s.label, len([]rune(pos)), avail)
@@ -1205,41 +1339,6 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 				}
 			}
 			entry(id, r, rows, 0)
-		}
-		if !s.open {
-			summary()
-			continue
-		}
-		// two panes that would read the same (`$ bash`, `$ bash`) are told
-		// apart by their window's name
-		seen := map[string]int{}
-		for _, p := range s.panes {
-			seen[paneLabel(p)]++
-		}
-		for _, p := range s.panes {
-			pr := lineRef{id: p.PaneID, kind: "pane"}
-			lw := max(w-7-len(indent), 0)
-			btns, bn, hits := inline(p.PaneID, "pane", 6+len(indent), false)
-			nw := lw
-			if bn >= 0 {
-				nw, pr.hits = bn, hits
-			}
-			lbl := truncate(paneLabel(p), nw)
-			if seen[paneLabel(p)] > 1 && p.WindowName != "" {
-				if room := nw - len([]rune(lbl)) - 3; room > 0 {
-					lbl += dim + " · " + truncate(p.WindowName, room) + reset
-				}
-			}
-			one(p.PaneID, pr, spread(lead(p.PaneID)+"   "+indent+paneGlyph(p.Kind)+" "+weight(lbl, p.Current), btns, w))
-			pr.hits = nil
-			if p.Cards != nil && p.Cards.Unseen && p.Cards.Latest != nil {
-				latest := p.Cards.Latest
-				col := dim
-				if latest.Kind == "decision" {
-					col = yellow
-				}
-				one(p.PaneID, pr, lead(p.PaneID)+"    "+indent+col+truncate("▸ "+latest.Kind+": "+latest.Title, lw)+reset)
-			}
 		}
 		summary()
 	}
@@ -1265,14 +1364,8 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 		add(spread("  "+mid+truncate(g, w-8)+reset, faint+fmt.Sprint(n)+reset, w), lineRef{kind: "group"})
 	}
 	group := "\x00"
-	for i, a := range v.agents {
-		if a.repo != group {
-			if i > 0 {
-				add("", lineRef{})
-			}
-			group = a.repo
-			groupHead(group, count[group])
-		}
+	firstCard := true
+	card := func(a sbAgent) {
 		id := agentID(a.key)
 		r := lineRef{id: id, kind: "agent"}
 		d, c := stateLook(a.agent.State, a.agent.Unseen)
@@ -1400,6 +1493,31 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 			one(bid, lineRef{id: bid, kind: "bg"}, spread(lead(bid)+"   "+dim+"└"+reset+" "+bc+bd+reset+" "+bl, bright, w))
 		}
 	}
+	for i, a := range v.agents {
+		if a.repo != group {
+			if i > 0 {
+				add("", lineRef{})
+			}
+			group = a.repo
+			groupHead(group, count[group])
+			firstCard = true
+		}
+		if !a.folded {
+			if !firstCard {
+				add("", lineRef{})
+			}
+			firstCard = false
+			card(a)
+		}
+		if q, ok := v.quiet[a.repo]; ok && (i+1 == len(v.agents) || v.agents[i+1].repo != a.repo) {
+			if !firstCard {
+				add("", lineRef{})
+			}
+			firstCard = false
+			id := quietID(a.repo)
+			one(id, lineRef{id: id, kind: "fold"}, lead(id)+"   "+dim+truncate(q.text(), avail)+reset)
+		}
+	}
 	if len(v.bgLoose) > 0 {
 		if len(v.agents) > 0 {
 			add("", lineRef{})
@@ -1518,7 +1636,7 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 				case starts(off):
 					body = body[off+1:]
 				default:
-					pinned := label("Spaces")
+					pinned := label("Shells")
 					for _, l := range body[:off] {
 						if l.ref.kind == "header" {
 							pinned = l.s
@@ -1910,4 +2028,13 @@ func warm(a fleet.Agent, now, ttl int64) bool {
 	}
 	ago := now - int64(*a.StateSince)
 	return ago >= 0 && ago < ttl
+}
+
+func mergedCount(spaces []sbSpace) (n int) {
+	for _, s := range spaces {
+		if s.land != nil && s.land.Code == "merged" {
+			n++
+		}
+	}
+	return
 }
