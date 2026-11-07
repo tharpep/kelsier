@@ -1268,6 +1268,7 @@ func TestStateLook(t *testing.T) {
 		{"done seen", st("done"), false, 60, "○", green},
 		{"done seen 11h59m", st("done"), false, 12*h - 60, "○", green},
 		{"done seen 12h", st("done"), false, 12 * h, "○", dim},
+		{"done seen no clock", st("done"), false, -1, "○", dim},
 		{"done unseen 3d", st("done"), true, 72 * h, "●", green},
 		{"working", st("working"), false, 60, "●", cyan},
 		{"waiting", st("waiting"), false, 60, "●", yellow + bold},
@@ -1278,7 +1279,11 @@ func TestStateLook(t *testing.T) {
 		{"no state", nil, false, 60, "?", dim},
 	} {
 		since := float64(now) - c.ago
-		if d, col := stateLook(c.state, c.unseen, &since, now); d != c.dot || col != c.colour {
+		sincep := &since
+		if c.ago < 0 {
+			sincep = nil
+		}
+		if d, col := stateLook(c.state, c.unseen, sincep, now); d != c.dot || col != c.colour {
 			t.Errorf("%s: got %q %q, want %q %q", c.name, d, col, c.dot, c.colour)
 		}
 	}

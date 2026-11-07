@@ -331,6 +331,8 @@ func TestQuietKind(t *testing.T) {
 	}{
 		{"nil state, no clock", fleet.Agent{}, ""},
 		{"unknown, no since, activity 25h old", fleet.Agent{Activity: since(90000)}, "unknown"},
+		{"unknown, no since, activity at 24h", fleet.Agent{Activity: since(86400)}, "unknown"},
+		{"done seen, no clock", fleet.Agent{State: st("done")}, ""},
 		{"unknown, no since, activity 1h old", fleet.Agent{Activity: since(3600)}, ""},
 		{"idle, no since, old activity", idle("idle", nil, since(9e5)), ""},
 		{"nil state, young", fleet.Agent{StateSince: since(60)}, ""},

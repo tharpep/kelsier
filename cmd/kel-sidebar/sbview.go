@@ -41,7 +41,7 @@ type sbSpace struct {
 	panes      []fleet.Pane
 	state      *string // the most urgent agent state in the space, nil if none
 	unseen     bool
-	since      *float64 // when that state began
+	since      *float64
 	current    bool
 	// phase 2: a repo's worktrees nest under it (fleet.Repo)
 	parent     string      // the main checkout's key, for a linked worktree
@@ -121,9 +121,9 @@ func (q sbQuiet) text() string {
 }
 
 const (
-	reposID    = "r:repos"
-	reposKey   = "sec:repos"
-	quietAfter = 24 * 3600
+	reposID       = "r:repos"
+	reposKey      = "sec:repos"
+	quietAfter    = 24 * 3600
 	doneFadeAfter = 12 * 3600
 )
 
@@ -395,7 +395,8 @@ func buildView(doc fleet.Doc, ui uiState) sbView {
 				if a.agent.State == nil || *a.agent.State != "dead" {
 					s.agents++
 				}
-				if s.state == nil || triageRank(a.agent.State) < triageRank(s.state) {
+				if s.state == nil || triageRank(a.agent.State) < triageRank(s.state) ||
+					(triageRank(a.agent.State) == triageRank(s.state) && f(a.agent.StateSince) > f(s.since)) {
 					s.state, s.since = a.agent.State, a.agent.StateSince
 				}
 				if a.agent.Unseen {
@@ -693,7 +694,7 @@ func stateLook(state *string, unseen bool, since *float64, now int64) (dot, colo
 		if unseen {
 			return "●", green
 		}
-		if since != nil && now-int64(*since) >= doneFadeAfter {
+		if since == nil || now-int64(*since) >= doneFadeAfter {
 			return "○", dim
 		}
 		return "○", green
