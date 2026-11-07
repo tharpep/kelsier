@@ -1042,6 +1042,9 @@ func (m sbModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			m.drawer = nil
+			if hit.pad && hit.id == m.ui.sel && msg.Button == tea.MouseLeft {
+				return m, nil
+			}
 		}
 		if m.menu != nil {
 			// an item is its key, pressed; anywhere else closes the menu

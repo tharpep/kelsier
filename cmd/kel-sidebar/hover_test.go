@@ -200,25 +200,189 @@ func TestSpacerBelongsToCard(t *testing.T) {
 	}
 }
 
-// The blank that closes a group is the group's last card's, selected or not.
+// Every blank row right under an agent row is that card's.
 func TestLastCardSpacerIsOwned(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	m := sbModel{doc: loadFixture(t, "fifteen-three-repos"), width: 32, height: 60, visible: true}
 	lines, refs := hoverFrame(m)
+	closing := false
 	for i := 1; i < len(refs); i++ {
-		if strings.TrimSpace(lines[i]) != "" || strings.Contains(lines[i-1], "Agents") || refs[i].kind == "agent" || refs[i-1].kind != "agent" {
+		if strings.TrimSpace(lines[i]) != "" || refs[i-1].kind != "agent" {
 			continue
 		}
-		t.Fatalf("row %d is a blank after an agent row but unowned: %q", i, lines[i])
-	}
-	for i := 1; i+1 < len(refs); i++ {
-		if refs[i].kind == "agent" && strings.TrimSpace(lines[i]) == "" && refs[i+1].kind == "group" {
+		if !refs[i].pad || refs[i].id != refs[i-1].id {
+			t.Fatalf("row %d is a blank under an agent row but not its card's: %+v", i, refs[i])
+		}
+		if i+1 < len(refs) && refs[i+1].kind == "group" {
+			closing = true
 			nm, _ := m.Update(tea.MouseClickMsg{X: 4, Y: i, Button: tea.MouseLeft})
 			if got := nm.(sbModel).ui.sel; got != refs[i].id {
 				t.Errorf("click on the group-closing spacer selected %q, want %q", got, refs[i].id)
 			}
-			return
 		}
 	}
-	t.Fatal("no group-closing spacer owned by a card")
+	if !closing {
+		t.Fatal("no group-closing spacer owned by a card")
+	}
+}
+
+// No spacer ends the card list: each is followed by a card, a group header or a trailer.
+func TestNoSpacerAtTheEnd(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	files, _ := filepath.Glob(filepath.Join(fixtures, "*.json"))
+	for _, f := range files {
+		name := strings.TrimSuffix(filepath.Base(f), ".json")
+		m := sbModel{doc: loadFixture(t, name), width: 32, height: 80, visible: true}
+		_, refs := hoverFrame(m)
+		for i, r := range refs {
+			if !r.pad {
+				continue
+			}
+			if i+1 >= len(refs) {
+				t.Errorf("%s: spacer on the last row", name)
+				continue
+			}
+			if k := refs[i+1].kind; k != "agent" && k != "group" && k != "fold" {
+				t.Errorf("%s: spacer row %d is followed by %q", name, i, k)
+			}
+		}
+	}
+}
+
+// The selected card's spacer is raised and carries the bar.
+func TestSelectedSpacerIsRaised(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	m := sbModel{doc: loadFixture(t, "fifteen-three-repos"), width: 32, height: 60, visible: true, ui: uiState{sel: "a:@1"}}
+	out, refs := renderView(m.view(), m.width, m.height, 0)
+	rows := strings.Split(out, "\n")
+	found := false
+	for i, r := range refs {
+		if r.pad && r.id == "a:@1" {
+			found = true
+			if !strings.Contains(rows[i], raised) || !strings.Contains(rows[i], "▌") {
+				t.Errorf("spacer not raised: %q", rows[i])
+			}
+		}
+	}
+	if !found {
+		t.Fatal("a:@1 has no spacer")
+	}
+}
+
+// A card with background rows under it keeps its spacer below them, owned and flat.
+func TestSpacerBelowBackgroundRows(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	m := sbModel{doc: loadFixture(t, "fifteen-three-repos"), width: 32, height: 60, visible: true}
+	_, refs := hoverFrame(m)
+	bg := -1
+	for i, r := range refs {
+		if r.kind == "bg" && i > 0 && refs[i-1].kind != "bg" {
+			bg = i
+			break
+		}
+	}
+	if bg < 0 {
+		t.Fatal("no bg row under a card")
+	}
+	card := ""
+	for i := bg - 1; i >= 0; i-- {
+		if refs[i].kind == "agent" {
+			card = refs[i].id
+			break
+		}
+	}
+	m.ui.sel = card
+	out, refs := renderView(m.view(), m.width, m.height, 0)
+	rows := strings.Split(out, "\n")
+	sp := 0
+	for refs[sp].kind != "bg" {
+		sp++
+	}
+	for refs[sp].kind == "bg" {
+		sp++
+	}
+	if !refs[sp].pad || refs[sp].id != card {
+		t.Fatalf("row %d under the bg rows is %+v, want %s's spacer", sp, refs[sp], card)
+	}
+	if rows[sp] != "" {
+		t.Errorf("spacer under bg rows is raised: %q", rows[sp])
+	}
+}
+
+// The blank after a quiet trailer belongs to nobody.
+func TestBlankAfterTrailerIsUnowned(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	m := sbModel{doc: loadFixture(t, "density"), width: 32, height: 80, visible: true, ui: uiState{now: 1792018800}}
+	lines, refs := hoverFrame(m)
+	seen := false
+	for i := 0; i+1 < len(refs); i++ {
+		if refs[i].kind == "fold" && strings.TrimSpace(lines[i+1]) == "" {
+			seen = true
+			if refs[i+1].id != "" || refs[i+1].pad {
+				t.Errorf("blank after the trailer at %d is owned: %+v", i, refs[i+1])
+			}
+		}
+	}
+	if !seen {
+		t.Fatal("no trailer followed by a blank")
+	}
+}
+
+// Hovering the selected card's spacer paints nothing.
+func TestHoverSelectedSpacerDoesNotRepaint(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	m := sbModel{doc: loadFixture(t, "fifteen-three-repos"), width: 32, height: 60, visible: true, ui: uiState{sel: "a:@1"}}
+	before, refs := renderView(m.view(), m.width, m.height, 0)
+	sp := -1
+	for i, r := range refs {
+		if r.pad && r.id == "a:@1" {
+			sp = i
+		}
+	}
+	nm, _ := m.Update(tea.MouseMotionMsg{X: 4, Y: sp})
+	after, _ := renderView(nm.(sbModel).view(), m.width, m.height, 0)
+	if sp < 0 || before != after {
+		t.Errorf("hover on the selected spacer (row %d) repainted the frame", sp)
+	}
+}
+
+// At 32x30 the open drawer shows every item, Kill last.
+func TestDrawerFitsBesideItsSpacer(t *testing.T) {
+	m := drawerModel(t, "a:@1")
+	m.height = 30
+	m = press(m, "right")
+	if m.drawer == nil {
+		t.Fatal("no drawer")
+	}
+	lines, refs := hoverFrame(m)
+	n, last := 0, ""
+	for i, r := range refs {
+		if r.kind == "drawer" && strings.HasPrefix(r.id, "dr:") {
+			n++
+			last = lines[i]
+		}
+	}
+	if n != len(m.drawer.items) || !strings.Contains(last, "Kill") {
+		t.Errorf("%d of %d drawer rows shown, last %q", n, len(m.drawer.items), last)
+	}
+}
+
+// A click on the selected card's spacer with its drawer open only closes the drawer.
+func TestSpacerClickClosesDrawerOnly(t *testing.T) {
+	m := drawerModel(t, "a:@1")
+	m = press(m, "right")
+	_, refs := hoverFrame(m)
+	sp := -1
+	for i, r := range refs {
+		if r.pad && r.id == "a:@1" {
+			sp = i
+		}
+	}
+	if sp < 0 || m.drawer == nil {
+		t.Fatalf("setup: spacer %d, drawer %v", sp, m.drawer)
+	}
+	got := click(m, sp, tea.MouseLeft)
+	if got.drawer != nil || got.pending != nil || got.ui.sel != "a:@1" {
+		t.Errorf("drawer %v, pending %v, sel %q", got.drawer, got.pending != nil, got.ui.sel)
+	}
 }

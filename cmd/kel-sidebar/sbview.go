@@ -193,6 +193,7 @@ type lineRef struct {
 	from  int    // a click left of this column hits nothing
 	hits  []hit  // buttons drawn on the line
 	sum   bool   // an agent's summary line (spec §5d)
+	pad   bool   // the blank row a card owns below it
 	text  string // a choices line as drawn, without colour, for hintKey
 }
 
@@ -1423,9 +1424,9 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 		case owner == "":
 			add("", lineRef{})
 		case owner == v.sel && ownerRaised:
-			add(fill(lead(owner), w, raised), lineRef{id: owner, kind: "agent"})
+			add(fill(lead(owner), w, raised), lineRef{id: owner, kind: "agent", pad: true})
 		default:
-			add("", lineRef{id: owner, kind: "agent"})
+			add("", lineRef{id: owner, kind: "agent", pad: true})
 		}
 		owner = ""
 	}
@@ -1660,16 +1661,19 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 			}
 		}
 		if len(body) > room {
-			first, last := -1, -1
+			first, last, blockLast := -1, -1, -1
 			for i, l := range body {
 				if l.ref.id != "" && l.ref.id == v.sel || l.ref.kind == "drawer" {
 					if first < 0 {
 						first = i
 					}
 					last = i
+					if !l.ref.pad {
+						blockLast = i
+					}
 				}
 			}
-			if v.drawer != nil && last-first+1 >= room {
+			if v.drawer != nil && blockLast-first+1 >= room {
 				for i, l := range body {
 					if l.ref.kind == "drawer" && l.ref.id == "dr:"+v.drawer.items[v.drawer.sel].key {
 						last = i
