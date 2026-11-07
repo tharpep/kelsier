@@ -41,6 +41,7 @@ type sbSpace struct {
 	panes      []fleet.Pane
 	state      *string // the most urgent agent state in the space, nil if none
 	unseen     bool
+	since      *float64 // when that state began
 	current    bool
 	// phase 2: a repo's worktrees nest under it (fleet.Repo)
 	parent     string      // the main checkout's key, for a linked worktree
@@ -123,6 +124,7 @@ const (
 	reposID    = "r:repos"
 	reposKey   = "sec:repos"
 	quietAfter = 24 * 3600
+	doneFadeAfter = 12 * 3600
 )
 
 func quietID(repo string) string  { return "x:" + repo }
@@ -141,6 +143,8 @@ func quietKind(a fleet.Agent, now int64) string {
 	case unknown:
 		return "unknown"
 	case *a.State == "idle":
+		return "idle"
+	case *a.State == "done" && !a.Unseen:
 		return "idle"
 	}
 	return ""
@@ -392,7 +396,7 @@ func buildView(doc fleet.Doc, ui uiState) sbView {
 					s.agents++
 				}
 				if s.state == nil || triageRank(a.agent.State) < triageRank(s.state) {
-					s.state = a.agent.State
+					s.state, s.since = a.agent.State, a.agent.StateSince
 				}
 				if a.agent.Unseen {
 					s.unseen = true
@@ -676,7 +680,7 @@ func (v sbView) indexOf(id string) int {
 
 // stateLook is §5d's table: one colour and one dot per state. Unknown is its
 // own look, never idle's.
-func stateLook(state *string, unseen bool) (dot, colour string) {
+func stateLook(state *string, unseen bool, since *float64, now int64) (dot, colour string) {
 	if state == nil || *state == "" {
 		return "?", dim
 	}
@@ -688,6 +692,9 @@ func stateLook(state *string, unseen bool) (dot, colour string) {
 	case "done":
 		if unseen {
 			return "●", green
+		}
+		if since != nil && now-int64(*since) >= doneFadeAfter {
+			return "○", dim
 		}
 		return "○", green
 	case "throttled":
@@ -1238,7 +1245,7 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 		add(spread(in+yellow+truncate("Needs you", w-8)+reset, faint+fmt.Sprint(len(v.needs))+reset, w), lineRef{kind: "header"})
 		for _, a := range v.needs {
 			id := needID(a.key)
-			d, c := stateLook(a.agent.State, a.agent.Unseen)
+			d, c := stateLook(a.agent.State, a.agent.Unseen, a.agent.StateSince, now)
 			reason := ""
 			if *a.agent.State == "done" {
 				reason = "done"
@@ -1332,7 +1339,7 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 		}
 		dot := dim + "·" + reset
 		if s.state != nil {
-			d, c := stateLook(s.state, s.unseen)
+			d, c := stateLook(s.state, s.unseen, s.since, now)
 			dot = c + d + reset
 		}
 		if s.parent != "" {
@@ -1412,7 +1419,7 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 	card := func(a sbAgent) {
 		id := agentID(a.key)
 		r := lineRef{id: id, kind: "agent"}
-		d, c := stateLook(a.agent.State, a.agent.Unseen)
+		d, c := stateLook(a.agent.State, a.agent.Unseen, a.agent.StateSince, now)
 		if quietFor(a.agent, now) > 0 {
 			d, c = "◌", dim // not heard from: no state colour it has not earned
 		}

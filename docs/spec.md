@@ -370,9 +370,10 @@ in any terminal:
   states are a dot and an age.
 - **The first-column glyph is the state** (*revised 2026-11-07*): one line
   per state, and the only glyph table.
-  - grey `○` idle: started, never prompted; the only colour that folds.
+  - grey `○` idle: started, never prompted; folds after 24 h.
   - green `●` done, unseen.
-  - green `○` done, seen; never folds.
+  - green `○` done, seen, under 12 h in `done`.
+  - grey `○` done, seen, 12 h or more in `done`; at 24 h it folds. Done and unseen never fades or folds.
   - cyan `●` working, including an agent whose subagents are running.
   - amber `●` waiting.
   - red `●` error.
