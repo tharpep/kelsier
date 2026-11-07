@@ -69,8 +69,9 @@ kel sweep [-n] [-f]    close out every finished agent whose branch has landed,
 kel sweep <path>       the same, for one worktree — says why when it won't
 kel relaunch [name]    relaunch ONE crashed agent in its existing window
 kel restore [<n>]      bring back a previous workspace — windows, splits,
-                       directories, and each agent's conversation, by the
-                       session id kel recorded or else by its name
+                       directories, and each agent's conversation: the newest
+                       transcript titled with the agent's name, else the
+                       session id kel recorded, else the name
                        (--no-resume: start each agent fresh)
 kel restore --list     the last five saved workspaces, newest first
 kel prune [-f]         discard dead agent records (and their worktrees)

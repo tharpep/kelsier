@@ -843,6 +843,37 @@ ok "  ...and one it did not, by its name"           'grep -q -- "--resume twin2"
 ok "  ...never --continue, which takes the directory's newest" '! grep -q -- --continue "$WORK"/argv.*'
 
 reset
+FKC="$WORK/claude-fork"; rm -rf "$FKC"
+FKCWD="$(cd "$WORK/repos/api-gw" && pwd -P)"
+FKP="$FKC/projects/$(printf '%s' "$FKCWD" | tr '/.' '--')"; mkdir -p "$FKP"
+fk_tx() { # id title mtime
+  printf '{"type":"custom-title","customTitle":"%s","sessionId":"%s"}\n{"type":"user","note":"\\"customTitle\\":\\"zzz\\""}\n' "$2" "$1" > "$FKP/$1.jsonl"
+  touch -t "$3" "$FKP/$1.jsonl"
+}
+for n in fk1 fk2 fk3 fk4; do
+  K api-gw new $n --agent "KEL_ARGV=$n $WORK/argv-agent --name $n" >/dev/null 2>&1
+  agent_up "$(window_of api-gw $n)"
+done
+fk_tx fk1-a fk1 202601010000; fk_tx fk1-b fk1 202601020000
+fk_tx fk2-a fk2 202601010000; fk_tx fk2-c other 202601030000
+fk_tx fk3-a fk3 202601020000; fk_tx fk3-b fk3 202601010000
+fk_tx fk4-b fk4 202601010000; fk_tx fk4-c fk4 202601020000
+for n in fk1 fk2 fk3 fk4; do
+  m="$SESSIONS/api-gw/$n.json"; jq --arg s "$n-a" '.claude_session=$s' "$m" > "$m.t" && mv "$m.t" "$m"
+done
+"$KEL" snapshot >/dev/null 2>&1
+rm -f "$WORK"/argv.*
+tmux kill-server 2>/dev/null; sleep 0.6
+(cd "$WORK" && CLAUDE_CONFIG_DIR="$FKC" "$KEL" < /dev/null) >/dev/null 2>&1
+wait_until '[ -n "$(tmux capture-pane -p -t "$(tmux list-windows -t =keltest -F "#{window_id}" | head -1)" | grep .)" ]' 50
+CLAUDE_CONFIG_DIR="$FKC" "$KEL" restore >/dev/null 2>&1
+wait_until '[ -s "$WORK/argv.fk1" ] && [ -s "$WORK/argv.fk2" ] && [ -s "$WORK/argv.fk3" ] && [ -s "$WORK/argv.fk4" ]'
+ok "restore resumes the newest transcript titled with the agent's name" 'grep -q -- "--resume fk1-b" "$WORK/argv.fk1"'
+ok "  ...but not one titled for another agent"      'grep -q -- "--resume fk2-a" "$WORK/argv.fk2"'
+ok "  ...and keeps the record's session when it is the newest" 'grep -q -- "--resume fk3-a" "$WORK/argv.fk3"'
+ok "  ...and falls back to the newest titled one when the record's transcript is gone" 'grep -q -- "--resume fk4-c" "$WORK/argv.fk4"'
+
+reset
 K api-gw new left --agent "KEL_ARGV=left $WORK/argv-agent --name left" >/dev/null 2>&1
 agent_up "$(window_of api-gw left)"
 K api-gw new right --split right --at "$(pane_of api-gw left)" --agent "KEL_ARGV=right $WORK/argv-agent --name right" >/dev/null 2>&1

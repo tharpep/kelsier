@@ -660,7 +660,9 @@ branch         worktree only
 agent          command run in the window (default: claude)
 group          repo basename (or --group, or misc); stamped on the window as @kel-group
 claude_session Claude Code's session id, recorded by the hook on the record whose
-               window id AND name match — restore resumes by it, else by name
+               window id AND name match — restore resumes by it, else by name,
+               unless a newer transcript in the project dir is titled with the
+               agent's name (a background fork's hooks never rewrite the record)
 compactions    PreCompact count
 created_at     timestamp
 ```

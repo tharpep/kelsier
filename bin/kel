@@ -1300,6 +1300,23 @@ cmd_ls() {
 # --------------------------------------------------------------------------
 # kel restore
 # --------------------------------------------------------------------------
+# pinned by "restore resumes the newest transcript titled with the agent's name"
+newest_titled_session() { # cwd name recorded-id
+  local dir f id
+  dir="$CLAUDE_HOME/projects/$(printf '%s' "$1" | tr -c 'A-Za-z0-9' '-')"
+  if [ -d "$dir" ]; then
+    while IFS= read -r f; do
+      id="${f##*/}"; id="${id%.jsonl}"
+      [ "$id" = "$3" ] && break
+      case "$id" in *[!A-Za-z0-9_-]*) continue ;; esac
+      if [ "$(head -c 4096 "$f" 2>/dev/null | grep -m1 -o '"customTitle":"[^"]*"')" = "\"customTitle\":\"$2\"" ]; then
+        printf '%s' "$id"; return 0
+      fi
+    done < <(cd "$dir" && ls -t -- *.jsonl 2>/dev/null | sed "s|^|$dir/|")
+  fi
+  printf '%s' "$3"
+}
+
 # the shell string that resumes a record's agent, or starts it fresh.
 # By session id when a hook recorded one; else by the session's NAME, which
 # `kel new` gives it (`claude --name <name>`) and `--resume` also accepts.
@@ -1321,7 +1338,8 @@ agent_resume_cmd() { # record
     *" --name $name"|*" --name $name "*) ;;   # named: --resume <name> finds it
     *) name='' ;;                              # not ours to name: start fresh
   esac
-  if [ -n "$cid" ]; then printf '%s --resume %s || %s' "$agent" "$cid" "$agent"
+  [ -n "$cid" ] && [ -n "$name" ] && cid="$(newest_titled_session "$(jq -r '.cwd // ""' "$1" 2>/dev/null)" "$name" "$cid")"
+  if [ -n "$cid" ]; then printf '%s --resume %q || %s' "$agent" "$cid" "$agent"
   elif [ -n "$name" ]; then printf '%s --resume %s || %s' "$agent" "$name" "$agent"
   else printf '%s' "$agent"; fi
 }
