@@ -164,17 +164,20 @@ scrolls; more than four needing you fold into `+N more`.
 `+ New` opens a menu of what makes something: a new agent, an agent in a
 worktree, split right, split down. `⋯` opens kel's own: next that needs you,
 usage, pull requests, a kel command, restore (while a previous workspace
-waits), all keys, quit. **Right-click any space, agent or pane** for its own
-menu, everything it can do: an agent's has go to it, edit last file, plan,
-cards, rename, kill, zoom, own window, and relaunch when it is dead. Every
+waits), all keys, quit. **Right-click any space, agent or pane** (or press `→`
+on an agent, pane or background agent) to open its drawer beneath it, pushing the rows below
+down: everything it can do. An agent's has go to it,
+diff, files, edit last file, plan, history, cards, zoom, own window, rename,
+kill, and relaunch when it is dead, under its git position when known. Every
 item shows its key on the right, so the keys are there when you want them,
 learned by using the mouse. **The entry under the pointer shows its buttons on its own row**, in place of
 its age, branch or chip, and its name shortens to make room: `Diff · Files · ⋯`
 on an agent, `Files · Git · ⋯` on a space or pane. Nothing is inserted, so no
 row moves. The selected entry carries the same buttons permanently, in the
 foot of its raised block, pointer or not. A click acts on that entry, and `⋯`
-opens its menu, for a trackpad with no right button. A menu closes on esc or a click outside it; the
-arrows and enter walk it too. `|` and `-` split the pane you were in, right
+opens its menu, for a trackpad with no right button. A drawer closes on `←`, esc, a click outside it, or when the
+selection moves; `↑` `↓` and enter walk it, and a letter runs its item. The header menus close on esc or a click outside them; the
+arrows and enter walk those too. `|` and `-` split the pane you were in, right
 or below, at its directory, and put you in the new shell.
 
 The foot reads `≡ Settings` and `? Help`; anything clickable lights up under
