@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"reflect"
+	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
@@ -100,5 +101,51 @@ func TestKnownSessionIsPassedOn(t *testing.T) {
 	m.Update(sbLoaded{d})
 	if got := (*calls)[0][6]; got != "sess-B" {
 		t.Errorf("known session %q", got)
+	}
+}
+
+func unseenDoc(window string) fleet.Doc {
+	sp := func(s string) *string { return &s }
+	since, panes := 100.0, []fleet.Pane{}
+	return fleet.Doc{Panes: &panes, Agents: []fleet.Agent{{
+		Name: "docs", Group: "g", Managed: true, WindowID: sp(window), PaneID: sp("%7"),
+		State: sp("done"), StateSince: &since, Unseen: true,
+	}}}
+}
+
+func TestShownWindowIsSeenAtDraw(t *testing.T) {
+	stubQuiet(t)
+	m := sbModel{width: 32, height: 40, visible: true, ui: uiState{myWindow: "@1"}}
+	nm, _ := m.Update(sbLoaded{unseenDoc("@1")})
+	got := nm.(sbModel)
+	if got.doc.Agents[0].Unseen {
+		t.Error("the shown sidebar's own window still reads unseen")
+	}
+	v := buildView(got.doc, got.ui)
+	if n := needNames(v); n != "" {
+		t.Errorf("needs you: %q", n)
+	}
+	out, _ := renderView(v, 32, 0, 1792018800)
+	if strings.Contains(plain(out), "Needs you") {
+		t.Errorf("frame draws Needs you:\n%s", plain(out))
+	}
+}
+
+func TestOtherWindowStillNeedsYou(t *testing.T) {
+	stubQuiet(t)
+	m := sbModel{width: 32, height: 40, visible: true, ui: uiState{myWindow: "@1"}}
+	nm, _ := m.Update(sbLoaded{unseenDoc("@2")})
+	got := nm.(sbModel)
+	if n := needNames(buildView(got.doc, got.ui)); n != "docs" {
+		t.Errorf("needs you: %q", n)
+	}
+}
+
+func TestHiddenSidebarLeavesUnseenAlone(t *testing.T) {
+	stubQuiet(t)
+	m := sbModel{width: 32, height: 40, ui: uiState{myWindow: "@1"}}
+	nm, _ := m.Update(sbLoaded{unseenDoc("@1")})
+	if !nm.(sbModel).doc.Agents[0].Unseen {
+		t.Error("a hidden sidebar cleared Unseen")
 	}
 }

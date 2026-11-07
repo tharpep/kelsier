@@ -1410,8 +1410,7 @@ t0="$(ms)"
 tmux select-window -t "$WTW"; "$KEL" _sidebar wake
 wait_until '[ -f "$STATE/$WTW.seen" ]' 30
 t1="$(ms)"
-# shown in the same second it finished is a tie, read unseen; the shown
-# sidebar marks it again on its next load (2 s)
+# shown in the same second it finished is a tie, read seen
 wait_until '[ "$(U)" = "done false" ]' 60
 ok "  ...and seen once its window is shown"      '[ "$(U)" = "done false" ]'
 printf '       (the shown sidebar noticed in %s ms)\n' "$((t1 - t0))"

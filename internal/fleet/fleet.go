@@ -696,8 +696,6 @@ func unseen(sd, wid string, since *float64) bool {
 	if seen == nil || since == nil {
 		return true
 	}
-	// a tie is unseen: epochs are whole seconds, so "shown at 100, finished at
-	// 100" may be either order. If you were looking, the sidebar showing it
-	// marks it seen again on its next load, so the loud side costs a blink.
-	return *since >= *seen
+	// pinned by TestUnseen
+	return *since > *seen
 }

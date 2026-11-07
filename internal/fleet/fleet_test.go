@@ -56,7 +56,7 @@ func TestRepoGroup(t *testing.T) {
 	}
 }
 
-// done is unseen until the window's .seen epoch catches up with the state's;
+// done is unseen until the window's .seen epoch reaches the state's;
 // no .seen, or a done with no epoch, is unseen — the loud side of the guess.
 func TestUnseen(t *testing.T) {
 	sd := t.TempDir()
@@ -68,8 +68,8 @@ func TestUnseen(t *testing.T) {
 	if unseen(sd, "@1", n(100)) {
 		t.Error("shown after it finished must read seen")
 	}
-	if !unseen(sd, "@1", n(150)) {
-		t.Error("finished in the second it was shown must read unseen — the order is unknown")
+	if unseen(sd, "@1", n(150)) {
+		t.Error("finished in the second it was shown must read seen")
 	}
 	if !unseen(sd, "@1", n(200)) {
 		t.Error("finished again after being shown must read unseen")

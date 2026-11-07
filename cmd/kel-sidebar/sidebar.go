@@ -1015,14 +1015,15 @@ func (m sbModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.doc = msg.doc
 		m.ui = m.withShared()
 		if m.visible {
-			if b, err := json.Marshal(m.doc); err == nil {
-				fleet.WriteAtomic(sbStatePath("sidebar-cache.json"), b)
-			}
-			// an agent here finished while you were looking at it: seen
-			for _, a := range m.doc.Agents {
+			for i := range m.doc.Agents {
+				a := &m.doc.Agents[i]
 				if a.WindowID != nil && *a.WindowID == m.ui.myWindow && a.Unseen {
+					a.Unseen = false
 					m.markSeen()
 				}
+			}
+			if b, err := json.Marshal(m.doc); err == nil {
+				fleet.WriteAtomic(sbStatePath("sidebar-cache.json"), b)
 			}
 			return m, m.claudeWrites()
 		}
