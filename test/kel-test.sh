@@ -1077,6 +1077,15 @@ ok "| in the sidebar splits your pane"            "wait_until '[ \"\$(tmux list-
 # reports the resolved path.
 ok "  ...at its directory, with the keyboard there" '[ "$(tmux display -p -t "$LW" "#{@kel-sidebar}|#{pane_current_path}")" = "|$(cd "$WORK/repos/api-gw" && pwd -P)" ]'
 ok "  ...and focusing your pane cleared the way in" '[ -z "$(tmux show-options -wv -t "$LW" @kel-via 2>/dev/null)" ]'
+RC="$WORK/rightclick.conf"
+grep '^bind -n MouseDown3Pane ' "$HERE/../tmux/kel.conf" | sed 's/^bind -n MouseDown3Pane //; s/ -t = / -t TARGET /g' > "$WORK/rc.tmpl"
+SBR="$(sidebar_of "$LW")"
+sed "s/TARGET/$SBR/g" "$WORK/rc.tmpl" > "$RC"
+tmux set-option -wu -t "$LW" @kel-via; tmux select-pane -t "$LA"; wait_until '[ -z "$(tmux display -p -t "$LW" "#{@kel-sidebar}")" ]'
+tmux source-file "$RC" 2>/dev/null
+ok "a right-click on the sidebar keeps the keyboard there" 'wait_until "[ \"\$(tmux display -p -t \"$LW\" \"#{@kel-sidebar}\")\" = 1 ] && [ \"\$(tmux show-options -wv -t \"$LW\" @kel-via)\" = 1 ]"'
+ok "  ...and anywhere else it is still tmux's pane menu" 'grep "^bind -n MouseDown3Pane " "$HERE/../tmux/kel.conf" | grep -q "display-menu "'
+tmux select-pane -t "$LA"; wait_until '[ -z "$(tmux display -p -t "$LW" "#{@kel-sidebar}")" ]'
 tmux resize-pane -Z -t "$LA"
 "$KEL" _click unzoom '' "$(tmux list-clients -F '#{client_name}' | head -1)"
 ok "a click on the bar's zoomed restores the layout" '[ "$(tmux display -p -t "$LW" "#{window_zoomed_flag}")" = 0 ]'
@@ -2264,7 +2273,10 @@ section "right-click menus stay open until a click"
 # right-click flashed one and lost it; kel _menus rebinds them with -O (3.2+)
 TV="$(tmux -V | grep -oE '[0-9]+\.[0-9]+' | head -1)"
 if [ "${TV%%.*}" -gt 3 ] || { [ "${TV%%.*}" -eq 3 ] && [ "${TV#*.}" -ge 2 ]; }; then
+  grep '^bind -n MouseDown3Pane ' "$HERE/../tmux/kel.conf" > "$WORK/rc-bind.conf"
+  tmux source-file "$WORK/rc-bind.conf"
   "$KEL" _menus; "$KEL" _menus
+  ok "  kel's sidebar branch survives the -O rebind" 'tmux list-keys -T root MouseDown3Pane | grep -q "@kel-via"'
   for k in MouseDown3Pane MouseDown3Status MouseDown3StatusLeft; do
     ok "  $k opens a menu that stays open" 'tmux list-keys -T root '"$k"' | grep -q "display-menu -O "'
   done

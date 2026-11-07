@@ -95,7 +95,7 @@ Keys below use `Ctrl-b`, tmux's default prefix; if you changed yours, kel's own 
 | `Ctrl-b ,` | rename this window (routes through `kel rename`) |
 | `Ctrl-b \|` / `-` | split, keeping the current directory |
 | `Ctrl-b [` | scroll mode for a shell pane (`q` to leave) |
-| right-click | tmux's menu for the pane, tab or session — it stays open until you click an item or outside it (tmux 3.2+; below that it is tmux's press-drag-release menu) |
+| right-click | on the sidebar, its drawer for the row, with the keyboard staying in the sidebar. Elsewhere, tmux's menu for the pane, tab or session — it stays open until you click an item or outside it (tmux 3.2+; below that it is tmux's press-drag-release menu) |
 | mouse wheel | scroll an agent's conversation (one page per notch). In a pane on the normal screen it scrolls tmux's history: up shows `[5/1999]` and you are reading back; down to the bottom and you are live again — no `esc`. Over the status bar the wheel does nothing (tmux's default would switch windows) |
 | drag, double-click (word), triple-click (line), or `Ctrl-b [` then enter | copy to the system clipboard, through `pbcopy` / `wl-copy` / `xclip` / `clip.exe` (`KEL_COPY_CMD` overrides). Hold **shift** instead in a pane whose app grabs the mouse — Claude Code sometimes does, and tmux never sees the drag |
 | middle-click | paste the system clipboard into that pane, bracketed, through `pbpaste` / `wl-paste` / `xclip -o` / `powershell.exe Get-Clipboard` (`KEL_PASTE_CMD` overrides). An empty clipboard, or no tool, is said in the message line. A program that takes the mouse itself still gets the click |
