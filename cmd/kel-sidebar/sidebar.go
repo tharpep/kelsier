@@ -753,6 +753,16 @@ func (m sbModel) selSpace(id string) (sbSpace, bool) {
 		key = strings.TrimPrefix(id, "s:")
 	case strings.HasPrefix(id, "w:"):
 		key = strings.TrimPrefix(id, "w:")
+	case id == reposID:
+		return sbSpace{}, false
+	case strings.HasPrefix(id, "x:"):
+		repo := strings.TrimPrefix(id, "x:")
+		for _, s := range v.spaces {
+			if s.parent == "" && s.label == repo {
+				key = s.key
+				break
+			}
+		}
 	case m.doc.Panes != nil:
 		wid := ""
 		if a, ok := m.agentOf(id); ok {
@@ -1374,10 +1384,15 @@ func (m sbModel) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 	case "/":
 		m.mode, m.input = modeFilter, m.ui.filter
-	case "n":
+	case "n", "w":
+		if m.view().sel == reposID {
+			m.msg, m.msgBad = "select something first", true
+			return m, nil
+		}
 		m.mode = modeNew
-	case "w":
-		m.mode = modeNewWorktree
+		if k == "w" {
+			m.mode = modeNewWorktree
+		}
 	case "z":
 		return m, zoomCmd(m.ui.myWindow, m.zoomTarget())
 	case "m":
@@ -1439,6 +1454,10 @@ func (m sbModel) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, runKel(dir, nil, "_panel", "usage", dir)
 	case "t":
+		if m.view().sel == reposID {
+			m.msg, m.msgBad = "select something first", true
+			return m, nil
+		}
 		dir, _ := m.spaceFor(m.view().sel)
 		return m, runKel(dir, nil, "shell", dir)
 	case "|", "-":
@@ -1514,7 +1533,7 @@ func (m sbModel) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 var sbHelp = [][2]string{
 	{"#", "move"},
 	{"j k", "up, down"},
-	{"enter", "jump · fold a space"},
+	{"enter", "jump · fold a section"},
 	{"/", "filter by name"},
 	{"esc", "back to your pane"},
 	{"#", "an agent"},

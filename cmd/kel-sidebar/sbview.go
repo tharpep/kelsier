@@ -1,18 +1,5 @@
 package main
 
-// The sidebar's view: the fleet document turned into two sections, and those
-// drawn as text (spec.md §5, §5d). Pure — no tmux, no clock, no files — so a
-// fixture renders the same frame every time and the golden tests can hold an
-// approved frame in place (§5e). sidebar.go owns everything live.
-//
-//	shells   every non-agent pane (servers, shells, programs), the space it
-//	         stands in on the right
-//	repos    where: one entry per repo checkout or linked worktree, its git
-//	         position and ports; folded to a header by default
-//	agents   who needs me: every agent, most urgent first
-//
-// Agents are listed only under `agents` — one home per fact (§7).
-
 import (
 	"fmt"
 	"math"
@@ -34,8 +21,8 @@ const italic = "\x1b[3m"
 // uiState is what the user has done to the view; it is not data.
 type uiState struct {
 	sel      string          // selected entry id (see sbEntry.id)
-	expanded map[string]bool // explicit toggles by fold key; absent = folded
-	now      int64           // the clock the quiet fold reads
+	expanded map[string]bool
+	now      int64
 	filter   string
 	myWindow string // the window this sidebar sits in — current, whatever the doc says
 	focused  bool   // the keyboard is in this sidebar
@@ -102,8 +89,8 @@ type sbAgent struct {
 	shared  bool
 	agent   fleet.Agent
 	current bool
-	quiet   string // "idle" | "unknown" | "": why the quiet fold covers it
-	folded  bool   // quiet and the group's fold is shut
+	quiet   string
+	folded  bool
 }
 
 type sbShell struct {
@@ -141,10 +128,13 @@ func quietID(repo string) string  { return "x:" + repo }
 func quietKey(repo string) string { return "quiet:" + repo }
 
 func quietKind(a fleet.Agent, now int64) string {
-	if a.State == nil || *a.State == "" {
-		return "unknown"
+	if a.StateSince == nil || now-int64(*a.StateSince) < quietAfter {
+		return ""
 	}
-	if (*a.State == "idle" || *a.State == "done") && a.StateSince != nil && now-int64(*a.StateSince) >= quietAfter {
+	switch {
+	case a.State == nil || *a.State == "":
+		return "unknown"
+	case *a.State == "idle" || *a.State == "done":
 		return "idle"
 	}
 	return ""
@@ -497,12 +487,17 @@ func buildView(doc fleet.Doc, ui uiState) sbView {
 	}
 
 	for _, s := range v.spaces {
+		inRepo := s.git != nil && s.git.Root != ""
+		where := ""
+		if inRepo && len(s.panes) > 0 {
+			where = s.repoName()
+		}
 		for _, p := range s.panes {
-			where := s.repoName()
-			if s.git == nil || s.git.Root == "" {
-				where = tildify(p.Cwd)
+			w := where
+			if !inRepo {
+				w = tildify(p.Cwd)
 			}
-			v.shells = append(v.shells, sbShell{p, where})
+			v.shells = append(v.shells, sbShell{p, w})
 		}
 	}
 	v.reposOpen = ui.expanded[reposKey] || ui.filter != ""
@@ -546,17 +541,23 @@ func buildView(doc fleet.Doc, ui uiState) sbView {
 		}
 	}
 	if ui.filter == "" {
-		inNeeds := map[string]bool{}
-		for _, a := range v.needs {
-			inNeeds[a.key] = true
-		}
+		var inNeeds map[string]bool
 		for i := range v.agents {
 			a := &v.agents[i]
-			if inNeeds[a.key] || a.current || agentID(a.key) == ui.sel {
+			if a.current || agentID(a.key) == ui.sel {
 				continue
 			}
-			a.quiet = quietKind(a.agent, ui.now)
-			if a.quiet == "" {
+			if a.quiet = quietKind(a.agent, ui.now); a.quiet == "" {
+				continue
+			}
+			if inNeeds == nil {
+				inNeeds = map[string]bool{}
+				for _, n := range v.needs {
+					inNeeds[n.key] = true
+				}
+			}
+			if inNeeds[a.key] {
+				a.quiet = ""
 				continue
 			}
 			if v.quiet == nil {
@@ -1192,6 +1193,7 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 	}
 
 	needEnd := 0
+	reposPin := ""
 	if len(v.needs) > 0 {
 		add(spread(in+yellow+truncate("Needs you", w-8)+reset, faint+fmt.Sprint(len(v.needs))+reset, w), lineRef{kind: "header"})
 		for _, a := range v.needs {
@@ -1227,8 +1229,6 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 	} else if len(v.shells) == 0 {
 		add("    "+dim+truncate("none", w-4)+reset, lineRef{})
 	}
-	// two panes that would read the same (`$ bash`, `$ bash`) are told
-	// apart by their window's name
 	seen := map[string]int{}
 	for _, sh := range v.shells {
 		seen[paneLabel(sh.pane)]++
@@ -1269,7 +1269,11 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 			tail += fmt.Sprintf(" · %d merged", m)
 		}
 		lw, rw := fitPair(name, len([]rune(tail)), avail)
-		one(reposID, lineRef{id: reposID, kind: "header"}, spread(lead(reposID)+" "+dim+truncate(name, lw)+reset, faint+truncate(tail, rw)+reset, w))
+		row := func(bar string) string {
+			return spread(bar+" "+dim+truncate(name, lw)+reset, faint+truncate(tail, rw)+reset, w)
+		}
+		reposPin = row(" ")
+		one(reposID, lineRef{id: reposID, kind: "header"}, row(lead(reposID)))
 	}
 	if v.reposOpen && len(v.spaces) == 0 && !v.unknown {
 		add("    "+dim+truncate("nothing open", w-4)+reset, lineRef{})
@@ -1636,13 +1640,16 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 				case starts(off):
 					body = body[off+1:]
 				default:
-					pinned := label("Shells")
+					pinned := line{label("Shells"), lineRef{kind: "header"}}
 					for _, l := range body[:off] {
 						if l.ref.kind == "header" {
-							pinned = l.s
+							pinned = line{l.s, lineRef{kind: "header"}}
+							if l.ref.id == reposID {
+								pinned = line{reposPin, l.ref}
+							}
 						}
 					}
-					body = append([]line{{s: pinned, ref: lineRef{kind: "header"}}}, body[off:]...)
+					body = append([]line{pinned}, body[off:]...)
 				}
 			} else {
 				body = body[off:]
@@ -1791,18 +1798,17 @@ func selActions(v sbView) (string, string, []sbAct) {
 			return what, s.label, acts
 		}
 	default:
-		for _, s := range v.spaces {
-			for _, p := range s.panes {
-				if p.PaneID != v.sel {
-					continue
-				}
-				acts := []sbAct{{"enter", "go to it"}}
-				if p.Kind == "server" {
-					acts = append(acts, sbAct{"o", "browser"})
-				}
-				acts = append(acts, sbAct{"f", "files"}, sbAct{"g", "git"}, sbAct{"e", "nvim"}, sbAct{"i", "cards"}, sbAct{"x", "close"}, sbAct{"z", "zoom"})
-				return "pane", paneLabel(p), acts
+		for _, sh := range v.shells {
+			p := sh.pane
+			if p.PaneID != v.sel {
+				continue
 			}
+			acts := []sbAct{{"enter", "go to it"}}
+			if p.Kind == "server" {
+				acts = append(acts, sbAct{"o", "browser"})
+			}
+			acts = append(acts, sbAct{"f", "files"}, sbAct{"g", "git"}, sbAct{"e", "nvim"}, sbAct{"i", "cards"}, sbAct{"x", "close"}, sbAct{"z", "zoom"})
+			return "pane", paneLabel(p), acts
 		}
 	}
 	return "", "", nil

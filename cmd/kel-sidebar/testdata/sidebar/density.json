@@ -293,7 +293,7 @@
    "current": false,
    "managed": true,
    "state": null,
-   "state_since": null,
+   "state_since": 1791759600,
    "note": null,
    "isolation": "inplace",
    "branch": null,

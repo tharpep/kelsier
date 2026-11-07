@@ -114,10 +114,12 @@ it or press `enter` and you are at that agent, and its own row below is
 selected. Nothing needs you, no section. Needs you stays pinned while the list
 scrolls; more than four needing you fold into `+N more`.
 
-- **`spaces`** — where things are: one entry per repo checkout or worktree,
+- **`Shells`** — every pane that is not an agent (servers, shells, programs),
+  one row each with the repo or directory it stands in on the right.
+- **`Repos`** — where things are, folded to `Repos ▸  4 · 2 merged` until you
+  open it with `enter` or a click: one entry per repo checkout or worktree,
   with its branch, `↑` unpushed / `↓` behind, `●` uncommitted files and the
-  ports its servers listen on. The space you are in is open, listing its
-  servers, shells and programs; the others are folded. **Every worktree of a
+  ports its servers listen on, and a dim `·` where no agent works. **Every worktree of a
   repo nests under it** — kel's, Claude Code's own (`.claude/worktrees`) and
   ones made by hand, open in a window or not — one line each: `└ ● fix-auth
   ↑1 · review`, grey when no window stands there, `merged` in green when it
@@ -129,8 +131,10 @@ scrolls; more than four needing you fold into `+N more`.
   or the one you are in, stay listed. `enter` or a click on that row opens the
   list (`− worktrees` closes it); the choice is saved with the other folds.
 - **`agents`** — every agent, grouped under the repo it works in, in a fixed
-  order: repos by name, agents in the order their windows were made. A state
-  change moves a dot or a chip, never a row. A dot per state (amber waiting, cyan
+  order: repos by name, agents in the order their windows were made, a blank
+  row between cards. An agent with no state or idle for a day or more folds
+  into a `+ 3 idle 1d+ · 1 unknown` row ending its group, which `enter` opens.
+  A state change moves a dot or a chip, never a row. A dot per state (amber waiting, cyan
   working, green finished-and-not-yet-looked-at, a green `○` finished and seen
   but still cheap to resume (its prompt cache is warm: `cache_ttl`, five
   minutes by default, `3600` for the one-hour cache), grey idle or seen and
@@ -226,8 +230,8 @@ doubtful `working` reads `quiet 2h` in grey italic.
 |---|---|
 | `Ctrl-b Space` | put the keyboard in the sidebar (replaces tmux's `next-layout` on that key) |
 | `j` / `k` | move |
-| `enter` | jump to an agent or pane · open or fold a space |
-| `space` / `l` / `h` | fold, open, close a space |
+| `enter` | jump to an agent or pane · open or fold Repos or a quiet trailer |
+| `space` / `l` / `h` | fold, open, close Repos or a quiet trailer |
 | `/` | filter by name, live · `esc` clears |
 | `n` / `w` | new agent / new worktree agent in the selected entry's space — `enter` at once, or type a name first |
 | `r` | rename the selected agent |
@@ -239,7 +243,7 @@ doubtful `working` reads `quiet 2h` in grey italic.
 | `e` on a space | nvim at that directory, kept between opens — your buffers are still there next time |
 | `t` | a plain shell window in the selected space — no agent |
 | `q` | quit kel, after `y`: saves the workspace, then closes it all; refuses while a worktree holds unsaved work |
-| `h` | the selected agent's last twenty state changes in a popup, newest first with ages (`2m ago  done  Stop`). On a space, `h` still closes it |
+| `h` | the selected agent's last twenty state changes in a popup, newest first with ages (`2m ago  done  Stop`). On Repos or a quiet trailer, `h` still closes it |
 | `p` | the selected agent's plan (from plan mode), then its task list — `✓` done, `▸` in progress, `·` pending, and what blocks what. Most sessions on newer models keep no task list; it says so. Rendered with glow when installed |
 | `i` | the selected entry's cards (reports from agents) in a popup, newest first — result, update, decision. Rendered with glow when installed |
 | `c` | the Claude Code configuration that applies to the selected space, in yazi, a tab per place: the repo's `CLAUDE.md`, its `.claude/`, the global `~/.claude` and the project's memory. To read and open — kel writes none of it |
@@ -250,7 +254,7 @@ doubtful `working` reads `quiet 2h` in grey italic.
 | `s` | sweep the selected worktree once it has landed (anywhere else: everything landed), after `y` |
 | `?` | every key |
 | `esc` | back to the pane you were in |
-| click · wheel | select and jump, fold a space · move |
+| click · wheel | select and jump, fold Repos or a quiet trailer · move |
 
 **`Ctrl-b q` closes any popup**, whatever is running in it — even vim that
 yazi opened for you. It says so in every popup's title. Quitting the tool
