@@ -40,9 +40,18 @@ func TestHoverNeverMovesAnyRow(t *testing.T) {
 	for _, f := range files {
 		name := strings.TrimSuffix(filepath.Base(f), ".json")
 		doc := loadFixture(t, name)
-		for _, h := range []int{16, 40} {
-			rng := rand.New(rand.NewSource(int64(h)*7919 + int64(len(name))))
-			m := sbModel{doc: doc, width: 32, height: h, visible: true}
+		variants := []uiState{{}}
+		if name == "density" {
+			open := map[string]bool{reposKey: true}
+			for _, g := range []string{"api-gw", "kelsier", "misc", "web-dashboard"} {
+				open[quietKey(g)] = true
+			}
+			variants = append(variants, uiState{now: 1792018800}, uiState{now: 1792018800, expanded: open})
+		}
+		for vi, h := range []int{16, 40, 16, 40, 16, 40}[:2*len(variants)] {
+			ui := variants[vi/2]
+			rng := rand.New(rand.NewSource(int64(h)*7919 + int64(len(name)) + int64(vi)))
+			m := sbModel{doc: doc, width: 32, height: h, visible: true, ui: ui}
 			y := rng.Intn(h)
 			for step := 0; step < 60; step++ {
 				bl, br := hoverFrame(m)

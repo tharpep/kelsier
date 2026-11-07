@@ -639,11 +639,9 @@ func (m sbModel) agentOf(id string) (sbAgent, bool) {
 }
 
 func (m sbModel) paneOf(id string) (fleet.Pane, bool) {
-	for _, s := range buildView(m.doc, m.ui).spaces {
-		for _, p := range s.panes {
-			if p.PaneID == id {
-				return p, true
-			}
+	for _, sh := range buildView(m.doc, m.ui).shells {
+		if sh.pane.PaneID == id {
+			return sh.pane, true
 		}
 	}
 	return fleet.Pane{}, false
@@ -660,16 +658,15 @@ func (m sbModel) entryName(id string) string {
 }
 
 // activate is enter, and a click: jump to an agent or pane; open or close a
-// space.
+// fold.
 func (m *sbModel) activate(id string) {
 	v := m.view()
 	switch {
-	case strings.HasPrefix(id, "s:"):
-		for _, s := range v.spaces {
-			if spaceID(s.key) == id {
-				m.toggle(s.key, s.open)
-			}
-		}
+	case id == reposID:
+		m.toggle(reposKey, m.ui.expanded[reposKey])
+	case strings.HasPrefix(id, "x:"):
+		repo := strings.TrimPrefix(id, "x:")
+		m.toggle(quietKey(repo), v.quiet[repo].open)
 	case strings.HasPrefix(id, "w:"):
 		for _, s := range v.spaces {
 			if wtID(s.key) == id {
@@ -756,6 +753,16 @@ func (m sbModel) selSpace(id string) (sbSpace, bool) {
 		key = strings.TrimPrefix(id, "s:")
 	case strings.HasPrefix(id, "w:"):
 		key = strings.TrimPrefix(id, "w:")
+	case id == reposID:
+		return sbSpace{}, false
+	case strings.HasPrefix(id, "x:"):
+		repo := strings.TrimPrefix(id, "x:")
+		for _, s := range v.spaces {
+			if s.parent == "" && s.label == repo {
+				key = s.key
+				break
+			}
+		}
 	case m.doc.Panes != nil:
 		wid := ""
 		if a, ok := m.agentOf(id); ok {
@@ -1097,6 +1104,7 @@ func (m sbModel) withShared() uiState {
 		ui.sel = sh.Selected
 	}
 	ui.expanded = sh.Expanded
+	ui.now = time.Now().Unix()
 	return ui
 }
 
@@ -1358,21 +1366,33 @@ func (m sbModel) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		if k == "h" && strings.HasPrefix(v.sel, "a:") {
 			return m.panel("history")
 		}
-		for _, s := range v.spaces {
-			if spaceID(s.key) == v.sel {
-				open := k == "h" || k == "left" // h closes, l opens, space flips
-				if k == "space" {
-					open = s.open
-				}
-				m.toggle(s.key, open)
+		key, open := "", false
+		switch {
+		case v.sel == reposID:
+			key, open = reposKey, v.reposOpen
+		case strings.HasPrefix(v.sel, "x:"):
+			repo := strings.TrimPrefix(v.sel, "x:")
+			key, open = quietKey(repo), v.quiet[repo].open
+		}
+		if key != "" {
+			if k == "h" || k == "left" { // h closes, l opens, space flips
+				open = true
+			} else if k == "l" || k == "right" {
+				open = false
 			}
+			m.toggle(key, open)
 		}
 	case "/":
 		m.mode, m.input = modeFilter, m.ui.filter
-	case "n":
+	case "n", "w":
+		if m.view().sel == reposID {
+			m.msg, m.msgBad = "select something first", true
+			return m, nil
+		}
 		m.mode = modeNew
-	case "w":
-		m.mode = modeNewWorktree
+		if k == "w" {
+			m.mode = modeNewWorktree
+		}
 	case "z":
 		return m, zoomCmd(m.ui.myWindow, m.zoomTarget())
 	case "m":
@@ -1434,6 +1454,10 @@ func (m sbModel) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, runKel(dir, nil, "_panel", "usage", dir)
 	case "t":
+		if m.view().sel == reposID {
+			m.msg, m.msgBad = "select something first", true
+			return m, nil
+		}
 		dir, _ := m.spaceFor(m.view().sel)
 		return m, runKel(dir, nil, "shell", dir)
 	case "|", "-":
@@ -1509,7 +1533,7 @@ func (m sbModel) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 var sbHelp = [][2]string{
 	{"#", "move"},
 	{"j k", "up, down"},
-	{"enter", "jump · fold a space"},
+	{"enter", "jump · fold a section"},
 	{"/", "filter by name"},
 	{"esc", "back to your pane"},
 	{"#", "an agent"},
@@ -1699,7 +1723,7 @@ func fixtureFrame(path string, w, h int, focused bool) (string, error) {
 	if t, err := time.Parse(time.RFC3339, doc.GeneratedAt); err == nil {
 		now = t.Unix()
 	}
-	out, _ := renderView(buildView(doc, uiState{focused: focused}), w, h, now)
+	out, _ := renderView(buildView(doc, uiState{focused: focused, now: now}), w, h, now)
 	return out, nil
 }
 

@@ -1,15 +1,14 @@
   kel               ▐+ New▌ ▐⋯▌
 
-  Spaces
-▌                               
-▌   orca                   main 
-▌   no window                   
-▌   └ ▐Files▌▐Git▌▐⋯▌           
+  Shells
+    none
+▌ Repos ▾                     5 
+  · orca                   main
   └  − worktrees
-  └  task/a         ↑3 unpushed
-  └  task/b         ↑2 unpushed
-  └  task/c         ↑1 unpushed
-  └  task/d         ↑4 unpushed
+  └· task/a         ↑3 unpushed
+  └· task/b         ↑2 unpushed
+  └· task/c         ↑1 unpushed
+  └· task/d         ↑4 unpushed
 
   Agents
     none

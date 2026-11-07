@@ -1,0 +1,60 @@
+  kel               ▐+ New▌ ▐⋯▌
+
+  Needs you                   2
+  ● docs  done              15m
+  ● fix-auth  allow Bash?    6m
+
+  Shells                      7
+  ▪ python3 :8000        api-gw
+  ▸ nvim                kelsier
+  $ bash                kelsier
+  $ bash                      ~
+  ▸ htop                      ~
+  ▪ node :3000 :…  web-dashboa…
+  ▪ node :5173    web-dashboard
+  Repos ▾                    12
+  ◌ api-gw              main ↓4
+  ● kelsier          main ↑2 ●3
+  └  +3 worktrees
+  └● docs
+  └● fix-auth       ↑1 · review
+  · misc                      ~
+  · notes                  main
+  └· wip            ↑4 unpushed
+  ○ web-dashboard          main
+  └● usage-charts    ●5 · no PR
+
+  Agents
+  api-gw                      2
+  ◌ rate-limits     10m ▐quota▌
+
+    + 1 idle 1d+
+
+  kelsier                     3
+▌                               
+▌ ● kelsier                  2m 
+▌   Opus 5.5 · 36% · $10.65     
+▌   └ ● Reading parser.go · Ex… 
+▌   └ ✓ Run the tests           
+▌   └ ▐Diff▌▐Files▌▐⋯▌          
+
+  ● fix-auth     6m ▐needs you▌
+    allow Bash?
+    └ ● fix-auth · bg
+
+  ● docs             15m ▐done▌
+
+  web-dashboard               4
+  ○ dashboard            49h00m
+
+  ● usage-charts            30s
+
+  ✕ spike          2h00m ▐dead▌
+
+  ? scratch             unknown
+
+    − 1 idle 1d+ · 1 unknown
+
+  background                  1
+  ● nightly           ▐blocked▌
+  ≡ Settings             ? Help

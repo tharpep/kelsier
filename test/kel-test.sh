@@ -1127,13 +1127,13 @@ SB3="$(tmux list-panes -t "$THW" -F '#{@kel-sidebar} #{pane_id}' | awk '$1==1 {p
 alt() { tmux display -p -t "$1" '#{alternate_on}'; }
 hold_client 40
 tmux select-window -t "$SBW"; "$KEL" _sidebar wake
-wait_until '[ "$(alt "$SB1")" = 1 ] && [ "$(alt "$SB2")" = 0 ] && [ "$(alt "$SB3")" = 0 ] && tmux capture-pane -p -t "$SB3" | grep -q Spaces && tmux capture-pane -p -t "$SB3" | grep -q kel' 150
+wait_until '[ "$(alt "$SB1")" = 1 ] && [ "$(alt "$SB2")" = 0 ] && [ "$(alt "$SB3")" = 0 ] && tmux capture-pane -p -t "$SB3" | grep -q Shells && tmux capture-pane -p -t "$SB3" | grep -q kel' 150
 ok "the shown sidebar is on the alternate screen, hidden ones are not" \
    '[ "$(alt "$SB1")" = 1 ] && [ "$(alt "$SB2")" = 0 ] && [ "$(alt "$SB3")" = 0 ]'
 ok "  ...and a paused pane still shows the last frame" \
-   'tmux capture-pane -p -t "$SB2" | grep -q "kel" && tmux capture-pane -p -t "$SB2" | grep -q "Spaces"'
+   'tmux capture-pane -p -t "$SB2" | grep -q "kel" && tmux capture-pane -p -t "$SB2" | grep -q "Shells"'
 ok "  ...and one created hidden, never shown, does too" \
-   'tmux capture-pane -p -t "$SB3" | grep -q "kel" && tmux capture-pane -p -t "$SB3" | grep -q "Spaces"'
+   'tmux capture-pane -p -t "$SB3" | grep -q "kel" && tmux capture-pane -p -t "$SB3" | grep -q "Shells"'
 if [ -r /proc/self/stat ]; then
   ticks() { local t=0 p; for p in "$@"; do t=$((t + $(awk '{print $14 + $15}' "/proc/$(tmux display -p -t "$p" '#{pane_pid}')/stat"))); done; echo "$t"; }
   c0="$(ticks "$SB2" "$SB3")"; sleep 10; c1="$(ticks "$SB2" "$SB3")"
@@ -1141,8 +1141,8 @@ if [ -r /proc/self/stat ]; then
   ok "  ...and two hidden sidebars use under 8 clock ticks in 10 s" '[ $((c1 - c0)) -lt 8 ]'
 fi
 tmux select-window -t "$OTW"; "$KEL" _sidebar wake
-wait_until '[ "$(alt "$SB2")" = 1 ] && tmux capture-pane -p -t "$SB2" | grep -q Spaces' 30
-ok "a hidden sidebar that is shown draws again" '[ "$(alt "$SB2")" = 1 ] && tmux capture-pane -p -t "$SB2" | grep -q Spaces'
+wait_until '[ "$(alt "$SB2")" = 1 ] && tmux capture-pane -p -t "$SB2" | grep -q Shells' 30
+ok "a hidden sidebar that is shown draws again" '[ "$(alt "$SB2")" = 1 ] && tmux capture-pane -p -t "$SB2" | grep -q Shells'
 tmux send-keys -t "$SB2" '?'
 wait_until 'tmux capture-pane -p -t "$SB2" | grep -q "click a bold key"' 30
 ok "  ...and answers keys" 'tmux capture-pane -p -t "$SB2" | grep -q "click a bold key"'
@@ -1225,8 +1225,8 @@ hold_client 40
 tmux select-window -t "$MW"; "$KEL" _sidebar wake
 SP="$(sbpane "$MW")"
 wait_until 'sbtext "$SP" | grep -q "wt" && sbtext "$SP" | grep -qx "  Agents"' 150
-ok "the sidebar draws spaces, then agents"       'sbtext "$SP" | grep -qx "  Spaces" && sbtext "$SP" | grep -qx "  Agents"'
-ok "  ...the worktree as a space of its own"     '[ "$(sbtext "$SP" | grep -c "api-gw")" -ge 2 ]'
+ok "the sidebar draws shells, repos folded, then agents" 'sbtext "$SP" | grep -q "^  Shells" && sbtext "$SP" | grep -q "Repos ▸" && sbtext "$SP" | grep -qx "  Agents"'
+ok "  ...no space row while Repos is folded"     '[ "$(sbtext "$SP" | grep -c "api-gw")" -lt 2 ]'
 ok "  ...and selects with a bar, not inverse video" '! tmux capture-pane -e -p -t "$SP" | grep -q "\[7m" && sbtext "$SP" | grep -q "▌"'
 ok "  ...in truecolor, never a palette index"      'tmux capture-pane -e -p -t "$SP" | grep -q "48;2;" && ! tmux capture-pane -e -p -t "$SP" | grep -q "[34]8;5;"'
 
@@ -1238,9 +1238,15 @@ tmux send-keys -t "$SP" Enter
 wait_until '[ "$(active_win)" = "$WTW" ]'
 ok "enter jumps to the agent's window"          '[ "$(active_win)" = "$WTW" ]'
 
-# enter on a space header row jumps to that space's window: k up to the
-# repo's own row, the first entry, so pressing past it is harmless
-wait_until 'tmux send-keys -t "$SP" k; [[ "$(jq -r .selected "$STATE/sidebar.json" 2>/dev/null)" == s:*/api-gw ]]' 50
+# enter on the Repos header opens it, shared through sidebar.json
+wait_until 'tmux send-keys -t "$SP" k; [[ "$(jq -r .selected "$STATE/sidebar.json" 2>/dev/null)" == r:repos ]]' 50
+tmux send-keys -t "$SP" Enter
+wait_until '[ "$(jq -r ".expanded[\"sec:repos\"]" "$STATE/sidebar.json" 2>/dev/null)" = true ] && [ "$(sbtext "$SP" | grep -c "api-gw")" -ge 2 ]' 50
+ok "enter on the Repos header opens it, with the worktree as a space of its own" '[ "$(jq -r ".expanded[\"sec:repos\"]" "$STATE/sidebar.json")" = true ] && [ "$(sbtext "$SP" | grep -c "api-gw")" -ge 2 ]'
+
+# enter on a space header row jumps to that space's window: j down to the
+# repo's own row, the first space under Repos
+wait_until 'tmux send-keys -t "$SP" j; [[ "$(jq -r .selected "$STATE/sidebar.json" 2>/dev/null)" == s:*/api-gw ]]' 50
 tmux send-keys -t "$SP" Enter
 wait_until '[ "$(active_win)" = "$MW" ]' 50
 ok "enter on a space header row jumps to that space's window" '[ "$(active_win)" = "$MW" ]'

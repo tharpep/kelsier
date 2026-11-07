@@ -330,7 +330,7 @@ the `TodoWrite` design was stale, and the plan turned out to need no new hook.
   fixture and asserts no row changes entry or text but the hovered ones; a
   hidden sidebar drops its hover (`spec.md` §5c, actions)
 - *design pass, milestone 1 (2026-11-05):* a `Needs you` section above
-  `Spaces`, present only while something waits: one pointer row per agent
+  `Shells`, present only while something waits: one pointer row per agent
   that is `waiting`, `error` or `done` and unseen, the longest-waiting first,
   each jumping to its agent's own row. Every agent now has one summary line
   chosen by state (doing, reason, error, or the session's title); the title is
