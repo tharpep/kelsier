@@ -1006,10 +1006,12 @@ func TestPaintFrameCoversEveryCell(t *testing.T) {
 // keepPalette puts the colours back as they were, so the golden frames do not
 // depend on which test ran first.
 func keepPalette(t *testing.T) {
-	bb, bf, b, d, m, f, r := baseBg, baseFg, base, dim, mid, faint, raised
+	bb, bf, b, d, m, f, r, dr := baseBg, baseFg, base, dim, mid, faint, raised, drawerBg
+	li, lt := lifted, lit
 	y, rd, g, p := yellowBg, redBg, greenBg, purpleBg
 	t.Cleanup(func() {
-		baseBg, baseFg, base, dim, mid, faint, raised = bb, bf, b, d, m, f, r
+		baseBg, baseFg, base, dim, mid, faint, raised, drawerBg = bb, bf, b, d, m, f, r, dr
+		lifted, lit = li, lt
 		yellowBg, redBg, greenBg, purpleBg = y, rd, g, p
 	})
 }

@@ -484,8 +484,8 @@ func TestFilteredShellKeepsItsMenu(t *testing.T) {
 	if kind, name, acts := selActions(v); kind != "pane" || name != "vite :5173" || len(acts) == 0 {
 		t.Errorf("hints: %q %q %v", kind, name, acts)
 	}
-	if title, acts := entryMenu(v); title != "vite :5173" || len(acts) == 0 {
-		t.Errorf("menu: %q %v", title, acts)
+	if acts := entryMenu(v); len(acts) == 0 {
+		t.Errorf("menu: %v", acts)
 	}
 }
 

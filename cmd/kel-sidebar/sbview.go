@@ -1141,7 +1141,14 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 	label := func(s string) string { return in + dim + truncate(s, w-2) + reset }
 	drawn := func(id string) bool { return v.drawer != nil && v.drawer.id == id && id == v.sel }
 	drawer := func(id string) {
-		for _, l := range drawerLines(v, id, w, lead(id)) {
+		var git *fleet.Git
+		var cwd string
+		for _, a := range v.agents {
+			if agentID(a.key) == id {
+				git, cwd = a.git, a.cwd
+			}
+		}
+		for _, l := range drawerLines(v.drawer, git, cwd, w, lead(id)) {
 			add(l.s, l.ref)
 		}
 	}
@@ -1637,6 +1644,14 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 					last = i
 				}
 			}
+			if v.drawer != nil && last-first+1 >= room {
+				for i, l := range body {
+					if l.ref.kind == "drawer" && l.ref.id == "dr:"+v.drawer.items[v.drawer.sel].key {
+						last = i
+					}
+				}
+				first = max(first, last-room+2)
+			}
 			if last >= room {
 				off = last - room + 1
 			}
@@ -1893,28 +1908,16 @@ type sbDrawer struct {
 	sel   int
 }
 
-func drawerLines(v sbView, id string, w int, bar string) []line {
+func drawerLines(d *sbDrawer, git *fleet.Git, cwd string, w int, bar string) []line {
 	avail := max(w-5, 0)
 	row := func(s string, r lineRef) line { return line{fill(s, w, drawerBg), r} }
 	blank := row(bar, lineRef{kind: "drawer"})
 	pre := bar + "   "
 	out := []line{blank}
-	for _, a := range v.agents {
-		if agentID(a.key) != id {
-			continue
-		}
-		var facts []string
-		if a.git != nil {
-			facts = append(facts, mid+truncate(spacePos(sbSpace{git: a.git, cwd: a.cwd}), avail)+reset)
-		}
-		for _, f := range facts {
-			out = append(out, row(pre+f, lineRef{kind: "drawer"}))
-		}
-		if len(facts) > 0 {
-			out = append(out, blank)
-		}
+	if git != nil {
+		out = append(out, row(pre+mid+truncate(spacePos(sbSpace{git: git, cwd: cwd}), avail)+reset, lineRef{kind: "drawer"}), blank)
 	}
-	for i, it := range v.drawer.items {
+	for i, it := range d.items {
 		k := it.key
 		if k == "enter" {
 			k = "↵"
@@ -1925,7 +1928,7 @@ func drawerLines(v sbView, id string, w int, bar string) []line {
 		}
 		lbl := truncate(it.label, max(avail-2-len([]rune(k)), 1))
 		left := pre + c + lbl + reset
-		if i == v.drawer.sel {
+		if i == d.sel {
 			left = bar + "  " + accent + "›" + reset + c + bold + lbl + reset
 		}
 		out = append(out, row(spread(left, dim+k+reset, w), lineRef{id: "dr:" + it.key, kind: "drawer"}))
@@ -1949,7 +1952,10 @@ func kelMenu(v sbView) []sbAct {
 
 // entryMenu holds the selected entry's own verbs, as selActions lists them.
 func entryMenu(v sbView) []sbAct {
-	_, _, acts := selActions(v)
+	what, _, acts := selActions(v)
+	if what == "" {
+		return nil
+	}
 	out := []sbAct{{"enter", "Go to it"}}
 	for _, a := range acts {
 		if a.key == "enter" {

@@ -33,6 +33,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -879,18 +880,31 @@ func (m sbModel) Init() tea.Cmd {
 
 func (m sbModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	nm, cmd := m.update(msg)
-	if s, ok := nm.(sbModel); ok && s.drawer != nil {
-		if v := buildView(s.doc, s.ui); v.sel != s.drawer.id || v.indexOf(v.sel) < 0 {
+	s, ok := nm.(sbModel)
+	if !ok || s.drawer == nil {
+		return nm, cmd
+	}
+	switch msg.(type) {
+	case sbLoaded:
+		v := buildView(s.doc, s.ui)
+		if v.sel != s.drawer.id || v.indexOf(v.sel) < 0 || !slices.Equal(entryMenu(v), s.drawer.items) {
 			s.drawer = nil
-			return s, cmd
+		}
+	case tea.KeyPressMsg, tea.MouseClickMsg, tea.MouseWheelMsg:
+		if s.ui.sel != s.drawer.id {
+			s.drawer = nil
 		}
 	}
-	return nm, cmd
+	return s, cmd
 }
 
 func (m *sbModel) openDrawer() {
+	if m.mode != modeNormal {
+		return
+	}
 	v := m.view()
 	if items := entryMenu(v); len(items) > 0 {
+		m.ui.sel = v.sel
 		m.drawer = &sbDrawer{id: v.sel, items: items}
 	}
 }
