@@ -1252,26 +1252,33 @@ func TestWrapWords(t *testing.T) {
 }
 
 func TestStateLook(t *testing.T) {
+	const now = 1_000_000
 	st := func(s string) *string { return &s }
+	h := 3600.0
 	for _, c := range []struct {
 		name   string
 		state  *string
 		unseen bool
+		ago    float64
 		dot    string
 		colour string
 	}{
-		{"idle", st("idle"), false, "○", dim},
-		{"done unseen", st("done"), true, "●", green},
-		{"done seen", st("done"), false, "○", green},
-		{"working", st("working"), false, "●", cyan},
-		{"waiting", st("waiting"), false, "●", yellow + bold},
-		{"error", st("error"), false, "●", red},
-		{"dead", st("dead"), false, "✕", red},
-		{"throttled", st("throttled"), false, "◌", purple},
-		{"unknown", st(""), false, "?", dim},
-		{"no state", nil, false, "?", dim},
+		{"idle", st("idle"), false, 60, "○", dim},
+		{"done unseen", st("done"), true, 60, "●", green},
+		{"done seen", st("done"), false, 60, "○", green},
+		{"done seen 11h59m", st("done"), false, 12*h - 60, "○", green},
+		{"done seen 12h", st("done"), false, 12 * h, "○", dim},
+		{"done unseen 3d", st("done"), true, 72 * h, "●", green},
+		{"working", st("working"), false, 60, "●", cyan},
+		{"waiting", st("waiting"), false, 60, "●", yellow + bold},
+		{"error", st("error"), false, 60, "●", red},
+		{"dead", st("dead"), false, 60, "✕", red},
+		{"throttled", st("throttled"), false, 60, "◌", purple},
+		{"unknown", st(""), false, 60, "?", dim},
+		{"no state", nil, false, 60, "?", dim},
 	} {
-		if d, col := stateLook(c.state, c.unseen); d != c.dot || col != c.colour {
+		since := float64(now) - c.ago
+		if d, col := stateLook(c.state, c.unseen, &since, now); d != c.dot || col != c.colour {
 			t.Errorf("%s: got %q %q, want %q %q", c.name, d, col, c.dot, c.colour)
 		}
 	}
@@ -1297,7 +1304,7 @@ func TestRunningSubagentsKeepWorkingGlyph(t *testing.T) {
 	if age, _, _, _ := agentAge(running, now); strings.Contains(age, "quiet") {
 		t.Errorf("age %q carries the quiet marker", age)
 	}
-	if d, c := stateLook(running.State, false); d != "●" || c != cyan {
+	if d, c := stateLook(running.State, false, nil, now); d != "●" || c != cyan {
 		t.Errorf("running subagent: glyph %q %q, want the working glyph", d, c)
 	}
 }
