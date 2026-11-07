@@ -1209,6 +1209,17 @@ sbpane() { tmux list-panes -t "$1" -F '#{@kel-sidebar} #{pane_id}' | awk '$1==1 
 sbtext() { tmux capture-pane -p -t "$1" 2>/dev/null; }
 active_win() { tmux list-windows -t '=keltest' -F '#{window_active} #{window_id}' | awk '$1==1 {print $2}'; }
 ms() { perl -MTime::HiRes=time -e 'printf "%d\n", time*1000'; }   # BSD date has no %N
+sel() { jq -r .selected "$STATE/sidebar.json" 2>/dev/null; }
+step_to() {
+  local cur
+  for _ in 1 2 3 4 5 6 7 8; do
+    cur="$(sel)"
+    [[ "$cur" == $3 ]] && return 0
+    tmux send-keys -t "$1" "$2"
+    wait_until '[ "$(sel)" != "$cur" ]' 30
+  done
+  [[ "$(sel)" == $3 ]]
+}
 # when an assertion here fails, show what the sidebar had on screen — these
 # have failed only on CI's macOS runner, where nothing can be looked at after
 sbdiag() { # pane  fail-count-before
@@ -1239,14 +1250,14 @@ wait_until '[ "$(active_win)" = "$WTW" ]'
 ok "enter jumps to the agent's window"          '[ "$(active_win)" = "$WTW" ]'
 
 # enter on the Repos header opens it, shared through sidebar.json
-wait_until 'tmux send-keys -t "$SP" k; [[ "$(jq -r .selected "$STATE/sidebar.json" 2>/dev/null)" == r:repos ]]' 50
+step_to "$SP" k r:repos
 tmux send-keys -t "$SP" Enter
 wait_until '[ "$(jq -r ".expanded[\"sec:repos\"]" "$STATE/sidebar.json" 2>/dev/null)" = true ] && [ "$(sbtext "$SP" | grep -c "api-gw")" -ge 2 ]' 50
 ok "enter on the Repos header opens it, with the worktree as a space of its own" '[ "$(jq -r ".expanded[\"sec:repos\"]" "$STATE/sidebar.json")" = true ] && [ "$(sbtext "$SP" | grep -c "api-gw")" -ge 2 ]'
 
 # enter on a space header row jumps to that space's window: j down to the
 # repo's own row, the first space under Repos
-wait_until 'tmux send-keys -t "$SP" j; [[ "$(jq -r .selected "$STATE/sidebar.json" 2>/dev/null)" == s:*/api-gw ]]' 50
+step_to "$SP" j 's:*/api-gw'
 tmux send-keys -t "$SP" Enter
 wait_until '[ "$(active_win)" = "$MW" ]' 50
 ok "enter on a space header row jumps to that space's window" '[ "$(active_win)" = "$MW" ]'
