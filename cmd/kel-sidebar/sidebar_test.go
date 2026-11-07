@@ -1251,28 +1251,53 @@ func TestWrapWords(t *testing.T) {
 	}
 }
 
-// A done agent you have seen is warm while its prompt cache lives, cold
-// after; an undated or unseen one is never drawn warm.
-func TestWarmDone(t *testing.T) {
-	now := int64(1_000_000)
-	done, idle := "done", "idle"
-	at := func(ago int64) *float64 { f := float64(now - ago); return &f }
-	cases := []struct {
-		a    fleet.Agent
-		ttl  int64
-		want bool
+func TestStateLook(t *testing.T) {
+	st := func(s string) *string { return &s }
+	for _, c := range []struct {
+		name   string
+		state  *string
+		unseen bool
+		dot    string
+		colour string
 	}{
-		{fleet.Agent{State: &done, StateSince: at(60)}, 300, true},
-		{fleet.Agent{State: &done, StateSince: at(600)}, 300, false},
-		{fleet.Agent{State: &done, StateSince: at(600)}, 3600, true},
-		{fleet.Agent{State: &done}, 300, false},
-		{fleet.Agent{State: &done, StateSince: at(60), Unseen: true}, 300, false},
-		{fleet.Agent{State: &idle, StateSince: at(60)}, 300, false},
-		{fleet.Agent{State: &done, StateSince: at(60)}, 0, true}, // unset: five minutes
-	}
-	for i, c := range cases {
-		if got := warm(c.a, now, c.ttl); got != c.want {
-			t.Errorf("case %d: warm = %v, want %v", i, got, c.want)
+		{"idle", st("idle"), false, "○", dim},
+		{"done unseen", st("done"), true, "●", green},
+		{"done seen", st("done"), false, "○", green},
+		{"working", st("working"), false, "●", cyan},
+		{"waiting", st("waiting"), false, "●", yellow + bold},
+		{"error", st("error"), false, "●", red},
+		{"dead", st("dead"), false, "✕", red},
+		{"throttled", st("throttled"), false, "◌", purple},
+		{"unknown", st(""), false, "?", dim},
+		{"no state", nil, false, "?", dim},
+	} {
+		if d, col := stateLook(c.state, c.unseen); d != c.dot || col != c.colour {
+			t.Errorf("%s: got %q %q, want %q %q", c.name, d, col, c.dot, c.colour)
 		}
+	}
+}
+
+func TestRunningSubagentsKeepWorkingGlyph(t *testing.T) {
+	const now = 1_000_000
+	w := "working"
+	silent := func(subs ...fleet.Subagent) fleet.Agent {
+		since := float64(now - 31*60)
+		return fleet.Agent{State: &w, StateSince: &since, Subagents: subs}
+	}
+	if quietFor(silent(), now) == 0 {
+		t.Error("a working agent with no subagents and 31 minutes of silence is not marked quiet")
+	}
+	if quietFor(silent(fleet.Subagent{Status: "completed"}), now) == 0 {
+		t.Error("finished subagents keep the agent quiet")
+	}
+	running := silent(fleet.Subagent{Status: "completed"}, fleet.Subagent{Status: "running"})
+	if quietFor(running, now) != 0 {
+		t.Error("an agent with a running subagent is marked quiet")
+	}
+	if age, _, _, _ := agentAge(running, now); strings.Contains(age, "quiet") {
+		t.Errorf("age %q carries the quiet marker", age)
+	}
+	if d, c := stateLook(running.State, false); d != "●" || c != cyan {
+		t.Errorf("running subagent: glyph %q %q, want the working glyph", d, c)
 	}
 }

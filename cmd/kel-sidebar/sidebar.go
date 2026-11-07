@@ -970,7 +970,6 @@ func (m sbModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.loading = false
 		m.doc = msg.doc
 		m.ui = m.withShared()
-		m.ui.cacheTTL = cacheTTL()
 		if m.visible {
 			if b, err := json.Marshal(m.doc); err == nil {
 				fleet.WriteAtomic(sbStatePath("sidebar-cache.json"), b)
@@ -1717,7 +1716,6 @@ func (m sbModel) View() tea.View {
 
 func runSidebar(once bool) {
 	m := sbModel{myPane: os.Getenv("TMUX_PANE"), fixedBg: loadPalette(), frame: new([]lineRef)}
-	m.ui.cacheTTL = cacheTTL()
 	if m.myPane != "" {
 		// the pane wears no style of its own: tmux would give that as the
 		// terminal's background. kel up to v0.10 set one on every sidebar

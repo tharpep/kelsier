@@ -6,7 +6,6 @@ package main
 
 import (
 	"os"
-	"strconv"
 	"path/filepath"
 	"strings"
 
@@ -103,19 +102,4 @@ func setConfig(path, key, val string) error {
 	}
 	fleet.WriteAtomic(path, []byte(strings.Join(lines, "\n")+"\n"))
 	return nil
-}
-
-// cacheTTL is cache_ttl: KEL_CACHE_TTL when exported, else the user's
-// config, else Claude Code's five minutes. Read on each load, so a change in
-// Settings shows on the next one.
-func cacheTTL() int64 {
-	v := os.Getenv("KEL_CACHE_TTL")
-	if v == "" {
-		v = readConfig(kelConfigPath())["cache_ttl"]
-	}
-	n, err := strconv.ParseInt(strings.TrimSpace(v), 10, 64)
-	if err != nil || n <= 0 {
-		return defaultCacheTTL
-	}
-	return n
 }

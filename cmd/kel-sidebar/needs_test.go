@@ -339,7 +339,9 @@ func TestQuietKind(t *testing.T) {
 		{"unknown just under 24h", fleet.Agent{StateSince: since(86399)}, ""},
 		{"idle at 24h", fleet.Agent{State: st("idle"), StateSince: since(86400)}, "idle"},
 		{"idle just under 24h", fleet.Agent{State: st("idle"), StateSince: since(86399)}, ""},
-		{"done at 24h", fleet.Agent{State: st("done"), StateSince: since(90000)}, "idle"},
+		{"idle at 23h59m", fleet.Agent{State: st("idle"), StateSince: since(23*3600 + 59*60)}, ""},
+		{"done seen for days", fleet.Agent{State: st("done"), StateSince: since(9e5)}, ""},
+		{"done unseen for days", fleet.Agent{State: st("done"), Unseen: true, StateSince: since(9e5)}, ""},
 		{"idle with no clock", fleet.Agent{State: st("idle")}, ""},
 		{"waiting for days", fleet.Agent{State: st("waiting"), StateSince: since(9e5)}, ""},
 		{"working for days", fleet.Agent{State: st("working"), StateSince: since(9e5)}, ""},
@@ -366,22 +368,17 @@ func TestQuietFoldNeverHidesWhatMatters(t *testing.T) {
 		}
 		return out
 	}
-	if got := folded(uiState{}); !got["gateway"] || !got["dashboard"] || !got["scratch"] || len(got) != 3 {
-		t.Errorf("folded: %v, want gateway dashboard scratch", got)
+	if got := folded(uiState{}); !got["gateway"] || !got["scratch"] || len(got) != 2 {
+		t.Errorf("folded: %v, want gateway scratch", got)
 	}
 	if got := folded(uiState{sel: "a:@4"}); got["gateway"] {
 		t.Error("the selected agent folded")
 	}
-	if got := folded(uiState{expanded: map[string]bool{quietKey("web-dashboard"): true}}); got["dashboard"] || got["scratch"] || !got["gateway"] {
+	if got := folded(uiState{expanded: map[string]bool{quietKey("web-dashboard"): true}}); got["scratch"] || !got["gateway"] {
 		t.Errorf("quiet:web-dashboard does not open that group alone: %v", got)
 	}
-	for i := range doc.Agents {
-		if doc.Agents[i].Name == "dashboard" {
-			doc.Agents[i].Unseen = true
-		}
-	}
 	if got := folded(uiState{}); got["dashboard"] {
-		t.Error("an unseen done agent, in Needs you, folded")
+		t.Error("a done agent folded")
 	}
 	for i := range doc.Agents {
 		if doc.Agents[i].Name == "kelsier" {

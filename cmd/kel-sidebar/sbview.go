@@ -29,7 +29,6 @@ type uiState struct {
 	hover    int    // screen line under the pointer, plus one; 0 = none
 	hoverX   int    // and its column
 	hoverID  string // the entry it is on
-	cacheTTL int64  // seconds a finished agent's prompt cache stays warm
 	prefix   string // the tmux prefix in words ("Ctrl-b"), for hints
 	restore  bool   // a previous workspace waits to be restored
 }
@@ -141,7 +140,7 @@ func quietKind(a fleet.Agent, now int64) string {
 	switch {
 	case unknown:
 		return "unknown"
-	case *a.State == "idle" || *a.State == "done":
+	case *a.State == "idle":
 		return "idle"
 	}
 	return ""
@@ -173,7 +172,6 @@ type sbView struct {
 	hover                int
 	hoverX               int
 	hoverID              string
-	cacheTTL             int64
 	restore              bool
 	menu                 *sbMenu // open over the rows, or nil
 	drawer               *sbDrawer
@@ -271,7 +269,7 @@ func spaceKey(p fleet.Pane) (key, label string) {
 }
 
 func buildView(doc fleet.Doc, ui uiState) sbView {
-	v := sbView{sel: ui.sel, filter: ui.filter, focused: ui.focused, hover: ui.hover, hoverX: ui.hoverX, hoverID: ui.hoverID, cacheTTL: ui.cacheTTL,
+	v := sbView{sel: ui.sel, filter: ui.filter, focused: ui.focused, hover: ui.hover, hoverX: ui.hoverX, hoverID: ui.hoverID,
 		restore: ui.restore}
 	if doc.Panes == nil {
 		v.unknown = true
@@ -691,7 +689,7 @@ func stateLook(state *string, unseen bool) (dot, colour string) {
 		if unseen {
 			return "●", green
 		}
-		return "○", dim
+		return "○", green
 	case "throttled":
 		return "◌", purple
 	case "error":
@@ -900,7 +898,7 @@ func tildify(p string) string {
 // Window activity was the first idea and does not work: the window's own
 // sidebar redraws in it.
 func quietFor(a fleet.Agent, now int64) int64 {
-	if a.State == nil || *a.State != "working" {
+	if a.State == nil || *a.State != "working" || runningSubs(a) {
 		return 0
 	}
 	last := f(a.StateSince)
@@ -911,6 +909,15 @@ func quietFor(a fleet.Agent, now int64) int64 {
 		return 0
 	}
 	return now - int64(last)
+}
+
+func runningSubs(a fleet.Agent) bool {
+	for _, sub := range a.Subagents {
+		if sub.Status == "running" {
+			return true
+		}
+	}
+	return false
 }
 
 func shortNote(n string) string {
@@ -1406,9 +1413,6 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 		id := agentID(a.key)
 		r := lineRef{id: id, kind: "agent"}
 		d, c := stateLook(a.agent.State, a.agent.Unseen)
-		if warm(a.agent, now, v.cacheTTL) {
-			c = green // seen, and cheap to resume: its cache is still warm
-		}
 		if quietFor(a.agent, now) > 0 {
 			d, c = "◌", dim // not heard from: no state colour it has not earned
 		}
@@ -2093,24 +2097,6 @@ func wrapWords(text string, w, n int) []string {
 		r = []rune(strings.TrimLeft(string(r[cut:]), " "))
 	}
 	return out
-}
-
-// defaultCacheTTL is Claude Code's prompt cache lifetime, five minutes.
-const defaultCacheTTL = 300
-
-// warm reports a done agent you have seen whose prompt cache is still warm:
-// it stopped less than ttl seconds ago, so resuming it is cheap. kel cannot
-// see the cache, so the ttl is a setting (cache_ttl). An agent with no
-// state_since cannot be dated and is never warm (invariant 3).
-func warm(a fleet.Agent, now, ttl int64) bool {
-	if ttl <= 0 {
-		ttl = defaultCacheTTL
-	}
-	if a.State == nil || *a.State != "done" || a.Unseen || a.StateSince == nil {
-		return false
-	}
-	ago := now - int64(*a.StateSince)
-	return ago >= 0 && ago < ttl
 }
 
 func mergedCount(spaces []sbSpace) (n int) {

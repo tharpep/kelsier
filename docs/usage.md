@@ -134,13 +134,8 @@ scrolls; more than four needing you fold into `+N more`.
   order: repos by name, agents in the order their windows were made, a blank
   row between cards. An agent with no state or idle for a day or more folds
   into a `+ 3 idle 1d+ · 1 unknown` row ending its group, which `enter` opens.
-  A state change moves a dot or a chip, never a row. A dot per state (amber waiting, cyan
-  working, green finished-and-not-yet-looked-at, a green `○` finished and seen
-  but still cheap to resume (its prompt cache is warm: `cache_ttl`, five
-  minutes by default, `3600` for the one-hour cache), grey idle or seen and
-  cold, violet
-  throttled, red `●` error, red `✕` dead, grey `?` unknown) and how long,
-  right-aligned; an agent with no state (opencode, or a restored session before
+  A state change moves a dot or a chip, never a row. A dot per state (the table is spec §5d) and how
+  long, right-aligned; an agent with no state (opencode, or a restored session before
   its first hook) reads dim `unknown` there and keeps a grey `?`. An agent
   not in the default permission mode carries it, faint, after its name:
   `plan`, `edits`, `bypass`, `dontask`. A state that needs a word gets a chip: `needs
@@ -273,7 +268,7 @@ else `open` / `xdg-open` / `wslview`, else Windows' `start` from WSL.
 
 A finished agent stays green until its window has been shown; after that it
 dims. A waiting agent says what it waits for — `waiting 6m · allow Bash? git push origin main` — the command, or the file an edit names, cut to 80 characters. An
-agent kel has heard nothing from for half an hour while "working" reads
+agent kel has heard nothing from for half an hour while "working", with no subagent running, reads
 `◌ working? · quiet 14h`: an interrupt (esc) fires no hook, so kel will not
 claim it is still at work. The entry under the mouse pointer shows a dim bar —
 what a click would hit.
