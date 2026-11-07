@@ -321,12 +321,18 @@ func TestQuietKind(t *testing.T) {
 	const now = 1792018800
 	st := func(s string) *string { return &s }
 	since := func(ago float64) *float64 { f := float64(now) - ago; return &f }
+	idle := func(s string, since, act *float64) fleet.Agent {
+		return fleet.Agent{State: &s, StateSince: since, Activity: act}
+	}
 	for _, c := range []struct {
 		name string
 		a    fleet.Agent
 		want string
 	}{
 		{"nil state, no clock", fleet.Agent{}, ""},
+		{"unknown, no since, activity 25h old", fleet.Agent{Activity: since(90000)}, "unknown"},
+		{"unknown, no since, activity 1h old", fleet.Agent{Activity: since(3600)}, ""},
+		{"idle, no since, old activity", idle("idle", nil, since(9e5)), ""},
 		{"nil state, young", fleet.Agent{StateSince: since(60)}, ""},
 		{"nil state at 24h", fleet.Agent{StateSince: since(86400)}, "unknown"},
 		{"empty state at 24h", fleet.Agent{State: st(""), StateSince: since(90000)}, "unknown"},

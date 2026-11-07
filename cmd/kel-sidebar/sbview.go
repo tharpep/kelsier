@@ -128,11 +128,16 @@ func quietID(repo string) string  { return "x:" + repo }
 func quietKey(repo string) string { return "quiet:" + repo }
 
 func quietKind(a fleet.Agent, now int64) string {
-	if a.StateSince == nil || now-int64(*a.StateSince) < quietAfter {
+	since := a.StateSince
+	unknown := a.State == nil || *a.State == ""
+	if since == nil && unknown {
+		since = a.Activity
+	}
+	if since == nil || now-int64(*since) < quietAfter {
 		return ""
 	}
 	switch {
-	case a.State == nil || *a.State == "":
+	case unknown:
 		return "unknown"
 	case *a.State == "idle" || *a.State == "done":
 		return "idle"
