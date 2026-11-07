@@ -91,6 +91,8 @@ type sbAgent struct {
 	current bool
 	quiet   string
 	folded  bool
+	git     *fleet.Git
+	cwd     string
 }
 
 type sbShell struct {
@@ -174,6 +176,7 @@ type sbView struct {
 	cacheTTL             int64
 	restore              bool
 	menu                 *sbMenu // open over the rows, or nil
+	drawer               *sbDrawer
 }
 
 // lineRef says which entry a screen line belongs to — what a click hits.
@@ -327,7 +330,12 @@ func buildView(doc fleet.Doc, ui uiState) sbView {
 			pane = first.PaneID
 		}
 		repo := a.Group
+		var git *fleet.Git
+		var cwd string
 		for _, p := range byWin[wid] {
+			if p.PaneID == pane {
+				git, cwd = p.Git, p.Cwd
+			}
 			if p.PaneID == pane && p.Git != nil {
 				repo = repoLabel(doc, p.Git.Root)
 				// a linked worktree kel did not list under a repo: its group names
@@ -337,7 +345,7 @@ func buildView(doc fleet.Doc, ui uiState) sbView {
 				}
 			}
 		}
-		v.agents = append(v.agents, sbAgent{wid: wid, pane: pane, key: key, agent: a, current: wid == curWid, repo: repo, shared: len(byWin[wid]) > 1})
+		v.agents = append(v.agents, sbAgent{wid: wid, pane: pane, key: key, agent: a, current: wid == curWid, repo: repo, shared: len(byWin[wid]) > 1, git: git, cwd: cwd})
 	}
 	// a fixed order: repos by name, as spaces are, and agents in the order
 	// their windows were made. State changes a row's dot and chip, never its
@@ -1131,6 +1139,12 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 		in = ""
 	}
 	label := func(s string) string { return in + dim + truncate(s, w-2) + reset }
+	drawn := func(id string) bool { return v.drawer != nil && v.drawer.id == id && id == v.sel }
+	drawer := func(id string) {
+		for _, l := range drawerLines(v, id, w, lead(id)) {
+			add(l.s, l.ref)
+		}
+	}
 	// the selected entry stands on a raised block, a blank row above and
 	// below, with its detail inside — opencode's way
 	entry := func(id string, r lineRef, rows []string, sums int) {
@@ -1149,6 +1163,10 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 		add(fill(lead(id), w, raised), r)
 		for i, s := range rows {
 			add(fill(s, w, raised), marked(i))
+		}
+		if drawn(id) {
+			drawer(id)
+			return
 		}
 		foot := line{fill(lead(id), w, raised), r}
 		if btns := rowButtons(r.kind); len(btns) > 0 {
@@ -1195,6 +1213,9 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 			s = fill(s, w, raised)
 		}
 		add(s, r)
+		if drawn(id) {
+			drawer(id)
+		}
 	}
 
 	needEnd := 0
@@ -1609,7 +1630,7 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 		if len(body) > room {
 			first, last := -1, -1
 			for i, l := range body {
-				if l.ref.id != "" && l.ref.id == v.sel {
+				if l.ref.id != "" && l.ref.id == v.sel || l.ref.kind == "drawer" {
 					if first < 0 {
 						first = i
 					}
@@ -1691,7 +1712,7 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 	}
 	// hover: the entry under the pointer gets a dim bar where the selection's
 	// would be, so what a click would hit is visible before the click
-	if v.hover > 0 && v.hover <= len(body) && v.menu == nil && body[v.hover-1].ref.kind != "menu" {
+	if v.hover > 0 && v.hover <= len(body) && v.menu == nil && body[v.hover-1].ref.kind != "menu" && body[v.hover-1].ref.kind != "drawer" {
 		hl := body[v.hover-1]
 		if hl.ref.id2 != "" && v.hoverX >= hl.ref.split {
 			body[v.hover-1].ref.right = dim + "▏" + reset + hl.ref.right[1:]
@@ -1760,12 +1781,13 @@ func selActions(v sbView) (string, string, []sbAct) {
 	case strings.HasPrefix(v.sel, "a:"):
 		for _, a := range v.agents {
 			if agentID(a.key) == v.sel {
-				acts := []sbAct{{"e", "edit file"}, {"p", "plan"}, {"h", "history"}, {"i", "cards"}, {"r", "rename"}, {"x", "kill"}, {"z", "zoom"}}
-				if a.agent.State != nil && *a.agent.State == "dead" {
-					acts = append([]sbAct{{"R", "relaunch"}}, acts...)
-				}
+				acts := []sbAct{{"d", "diff"}, {"f", "files"}, {"e", "edit file"}, {"p", "plan"}, {"h", "history"}, {"i", "cards"}, {"z", "zoom"}}
 				if a.shared {
 					acts = append(acts, sbAct{"m", "own window"})
+				}
+				acts = append(acts, sbAct{"r", "rename"}, sbAct{"x", "kill"})
+				if a.agent.State != nil && *a.agent.State == "dead" {
+					acts = append([]sbAct{{"R", "relaunch"}}, acts...)
 				}
 				return "agent", a.agent.Name, acts
 			}
@@ -1858,13 +1880,57 @@ func repoLabel(doc fleet.Doc, root string) string {
 	return filepath.Base(root)
 }
 
-// sbMenu is a menu drawn over the sidebar's rows: kel's two from the header,
-// or an entry's own from a right-click.
 type sbMenu struct {
 	title string
 	items []sbAct
 	y     int // the row it opens at
 	sel   int // the item under the pointer or the arrow keys
+}
+
+type sbDrawer struct {
+	id    string
+	items []sbAct
+	sel   int
+}
+
+func drawerLines(v sbView, id string, w int, bar string) []line {
+	avail := max(w-5, 0)
+	row := func(s string, r lineRef) line { return line{fill(s, w, drawerBg), r} }
+	blank := row(bar, lineRef{kind: "drawer"})
+	pre := bar + "   "
+	out := []line{blank}
+	for _, a := range v.agents {
+		if agentID(a.key) != id {
+			continue
+		}
+		var facts []string
+		if a.git != nil {
+			facts = append(facts, mid+truncate(spacePos(sbSpace{git: a.git, cwd: a.cwd}), avail)+reset)
+		}
+		for _, f := range facts {
+			out = append(out, row(pre+f, lineRef{kind: "drawer"}))
+		}
+		if len(facts) > 0 {
+			out = append(out, blank)
+		}
+	}
+	for i, it := range v.drawer.items {
+		k := it.key
+		if k == "enter" {
+			k = "↵"
+		}
+		c := ""
+		if it.key == "q" || it.key == "x" {
+			c = red
+		}
+		lbl := truncate(it.label, max(avail-2-len([]rune(k)), 1))
+		left := pre + c + lbl + reset
+		if i == v.drawer.sel {
+			left = bar + "  " + accent + "›" + reset + c + bold + lbl + reset
+		}
+		out = append(out, row(spread(left, dim+k+reset, w), lineRef{id: "dr:" + it.key, kind: "drawer"}))
+	}
+	return out
 }
 
 // newMenu holds what makes something.
@@ -1882,8 +1948,8 @@ func kelMenu(v sbView) []sbAct {
 }
 
 // entryMenu holds the selected entry's own verbs, as selActions lists them.
-func entryMenu(v sbView) (string, []sbAct) {
-	_, name, acts := selActions(v)
+func entryMenu(v sbView) []sbAct {
+	_, _, acts := selActions(v)
 	out := []sbAct{{"enter", "Go to it"}}
 	for _, a := range acts {
 		if a.key == "enter" {
@@ -1891,7 +1957,7 @@ func entryMenu(v sbView) (string, []sbAct) {
 		}
 		out = append(out, sbAct{a.key, strings.ToUpper(a.label[:1]) + a.label[1:]})
 	}
-	return name, out
+	return out
 }
 
 // menuLines draws a menu one column in from each edge, boxed, each item with

@@ -69,6 +69,7 @@ var (
 	faint    = rgb{85, 85, 94}.fg()
 	lifted   = rgb{29, 29, 34}
 	raised   = lifted.bg()
+	drawerBg = lifted.mix(baseFg, 0.06).bg()
 	lit      = lifted.mix(accentRGB, 0.35)
 	yellowBg = rgb{46, 34, 16}
 	redBg    = rgb{49, 21, 25}
@@ -117,6 +118,7 @@ func applyPalette(term, text rgb) {
 	dim = text.mix(surface, 0.50).fg()
 	faint = text.mix(surface, 0.64).fg()
 	lifted, raised = lift, lift.bg()
+	drawerBg = lift.mix(text, 0.06).bg()
 	lit = lift.mix(accentRGB, 0.35)
 	chip := func(c rgb) rgb { return c.mix(surface, 0.80) }
 	yellowBg, redBg = chip(rgb{245, 167, 66}), chip(rgb{242, 114, 127})

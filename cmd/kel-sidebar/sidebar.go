@@ -98,7 +98,8 @@ type sbModel struct {
 
 	pending tea.Cmd // a command activate() started, returned by the caller
 
-	menu *sbMenu // open over the rows: kel's, from the header, or an entry's
+	menu   *sbMenu   // open over the rows: kel's, from the header
+	drawer *sbDrawer // an entry's actions, open beneath its block
 
 	settings bool // the settings screen, in place of the lists
 	setSel   int  // its row the keyboard is on
@@ -533,6 +534,7 @@ func tickAfter() tea.Cmd {
 func (m sbModel) view() sbView {
 	v := buildView(m.doc, m.ui)
 	v.menu = m.menu
+	v.drawer = m.drawer
 	ask := func(title, colour, hint string) {
 		v.promptTitle, v.promptColour, v.hint2 = title, colour, hint
 	}
@@ -876,6 +878,24 @@ func (m sbModel) Init() tea.Cmd {
 }
 
 func (m sbModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	nm, cmd := m.update(msg)
+	if s, ok := nm.(sbModel); ok && s.drawer != nil {
+		if v := buildView(s.doc, s.ui); v.sel != s.drawer.id || v.indexOf(v.sel) < 0 {
+			s.drawer = nil
+			return s, cmd
+		}
+	}
+	return nm, cmd
+}
+
+func (m *sbModel) openDrawer() {
+	v := m.view()
+	if items := entryMenu(v); len(items) > 0 {
+		m.drawer = &sbDrawer{id: v.sel, items: items}
+	}
+}
+
+func (m sbModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		first := m.width == 0
@@ -980,6 +1000,13 @@ func (m sbModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 		}
+		if m.drawer != nil && msg.Y >= 0 && msg.Y < len(refs) {
+			for i, it := range m.drawer.items {
+				if "dr:"+it.key == refs[msg.Y].id {
+					m.drawer.sel = i
+				}
+			}
+		}
 
 	case tea.MouseClickMsg:
 		m.ui.focused = true
@@ -993,6 +1020,16 @@ func (m sbModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return lineRef{}
 		}()
+		if m.drawer != nil {
+			if hit.kind == "drawer" {
+				if k := strings.TrimPrefix(hit.id, "dr:"); k != hit.id && msg.Button == tea.MouseLeft {
+					m.drawer = nil
+					return m.press(k)
+				}
+				return m, nil
+			}
+			m.drawer = nil
+		}
 		if m.menu != nil {
 			// an item is its key, pressed; anywhere else closes the menu
 			m.menu = nil
@@ -1002,14 +1039,11 @@ func (m sbModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		if msg.Button == tea.MouseRight {
-			// an entry's own menu, at the row clicked
 			switch hit.kind {
 			case "agent", "space", "pane", "bg":
 				m.ui.sel = hit.id
 				m.saveShared()
-				if t, items := entryMenu(m.view()); len(items) > 0 {
-					m.menu = &sbMenu{title: t, items: items, y: msg.Y + 1}
-				}
+				m.openDrawer()
 			}
 			return m, nil
 		}
@@ -1022,9 +1056,7 @@ func (m sbModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.ui.sel = hit.id
 				m.saveShared()
 				if b.key == "menu" {
-					if ti, items := entryMenu(m.view()); len(items) > 0 {
-						m.menu = &sbMenu{title: ti, items: items, y: msg.Y + 1}
-					}
+					m.openDrawer()
 					return m, nil
 				}
 				return m.press(b.key)
@@ -1122,6 +1154,30 @@ func (m sbModel) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	m.ui.focused = true
 	if m.settings {
 		return m.settingsKey(k)
+	}
+	if m.drawer != nil {
+		d := m.drawer
+		switch k {
+		case "up", "k":
+			d.sel = (d.sel + len(d.items) - 1) % len(d.items)
+			return m, nil
+		case "down", "j":
+			d.sel = (d.sel + 1) % len(d.items)
+			return m, nil
+		case "esc", "left":
+			m.drawer = nil
+			return m, nil
+		case "enter":
+			m.drawer = nil
+			return m.press(d.items[d.sel].key)
+		}
+		for _, it := range d.items {
+			if it.key == k {
+				m.drawer = nil
+				return m.press(k)
+			}
+		}
+		return m, nil
 	}
 	if m.menu != nil {
 		// the arrows walk it, enter chooses, esc or any other key closes it
@@ -1363,6 +1419,10 @@ func (m sbModel) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, c
 	case "space", "l", "right", "h", "left":
 		v := m.view()
+		if k == "right" && !strings.HasPrefix(v.sel, "s:") {
+			m.openDrawer()
+			return m, nil
+		}
 		if k == "h" && strings.HasPrefix(v.sel, "a:") {
 			return m.panel("history")
 		}
@@ -1533,10 +1593,13 @@ func (m sbModel) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 var sbHelp = [][2]string{
 	{"#", "move"},
 	{"j k", "up, down"},
+	{"→ ←", "open, close its drawer"},
 	{"enter", "jump · fold a section"},
 	{"/", "filter by name"},
 	{"esc", "back to your pane"},
 	{"#", "an agent"},
+	{"d", "diff"},
+	{"f", "files"},
 	{"e", "edit its last file"},
 	{"p", "plan and tasks"},
 	{"h", "state history"},

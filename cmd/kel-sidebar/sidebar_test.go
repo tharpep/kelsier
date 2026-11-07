@@ -532,7 +532,7 @@ func TestWorktreesNest(t *testing.T) {
 			}
 			// kelsier folds its idle worktrees; old-ui is selectable only open
 			ui := uiState{focused: true, sel: spaceID(s.key), expanded: map[string]bool{reposKey: true, wtKey("/home/me/code/kelsier"): true}}
-			if _, acts := entryMenu(buildView(loadFixture(t, "worktrees"), ui)); len(acts) < 2 || acts[1].key != "s" {
+			if acts := entryMenu(buildView(loadFixture(t, "worktrees"), ui)); len(acts) < 2 || acts[1].key != "s" {
 				t.Errorf("a merged worktree's menu does not lead with sweep: %+v", acts)
 			}
 		case "fix-auth":
@@ -865,7 +865,7 @@ func TestSidebarRelaunchDeadAgent(t *testing.T) {
 	if !hasRelaunch {
 		t.Errorf("dead agent actions missing R relaunch: %+v", actsDead)
 	}
-	if _, acts := entryMenu(vDead); len(acts) < 2 || acts[1].key != "R" {
+	if acts := entryMenu(vDead); len(acts) < 2 || acts[1].key != "R" {
 		t.Errorf("a dead agent's menu does not lead with relaunch: %+v", acts)
 	}
 
@@ -901,7 +901,7 @@ func TestSidebarRelaunchDeadAgent(t *testing.T) {
 	// right-click the dead agent, then Relaunch in its menu
 	nm, _ = m.Update(tea.MouseClickMsg{X: 4, Y: rowOf(t, m, m.ui.sel), Button: tea.MouseRight})
 	m = nm.(sbModel)
-	nmClick, cmdClick := m.Update(tea.MouseClickMsg{X: 4, Y: rowOf(t, m, "mi:R"), Button: tea.MouseLeft})
+	nmClick, cmdClick := m.Update(tea.MouseClickMsg{X: 4, Y: rowOf(t, m, "dr:R"), Button: tea.MouseLeft})
 	if nmClick.(sbModel).msg != "relaunching crashed…" {
 		t.Errorf("Relaunch in the menu: got msg %q", nmClick.(sbModel).msg)
 	}
@@ -1103,21 +1103,21 @@ func TestKelMenus(t *testing.T) {
 	}
 }
 
-// A right-click on an entry selects it and opens its own menu there.
+// A right-click on an entry selects it and opens its drawer beneath it.
 func TestEntryMenu(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	m := sbModel{doc: loadFixture(t, "fifteen-three-repos"), width: 32, height: 40, visible: true}
 	y := rowOf(t, m, "a:@2")
 	nm, _ := m.Update(tea.MouseClickMsg{X: 4, Y: y, Button: tea.MouseRight})
 	m = nm.(sbModel)
-	if m.ui.sel != "a:@2" || m.menu == nil || m.menu.title != "fix-auth" || m.menu.y != y+1 {
-		t.Fatalf("right-click fix-auth: sel %q menu %+v", m.ui.sel, m.menu)
+	if m.ui.sel != "a:@2" || m.drawer == nil || m.drawer.id != "a:@2" || m.menu != nil {
+		t.Fatalf("right-click fix-auth: sel %q drawer %+v", m.ui.sel, m.drawer)
 	}
-	nm, _ = m.Update(tea.MouseClickMsg{X: 4, Y: rowOf(t, m, "mi:x"), Button: tea.MouseLeft})
-	if got := nm.(sbModel); got.mode != modeKill || got.target != "a:@2" {
-		t.Errorf("Kill: mode %v target %q", got.mode, got.target)
+	nm, _ = m.Update(tea.MouseClickMsg{X: 4, Y: rowOf(t, m, "dr:x"), Button: tea.MouseLeft})
+	if got := nm.(sbModel); got.mode != modeKill || got.target != "a:@2" || got.drawer != nil {
+		t.Errorf("Kill: mode %v target %q drawer %+v", got.mode, got.target, got.drawer)
 	}
-	_, acts := entryMenu(buildView(m.doc, uiState{sel: "a:@2"}))
+	acts := entryMenu(buildView(m.doc, uiState{sel: "a:@2"}))
 	has := false
 	for _, a := range acts {
 		has = has || a == sbAct{"h", "History"}
@@ -1166,8 +1166,8 @@ func TestRowButtons(t *testing.T) {
 		t.Errorf("Files: sel %q, cmd %v", nm.(sbModel).ui.sel, cmd)
 	}
 	nm, _ = m.Update(tea.MouseClickMsg{X: r.hits[2].x0, Y: y, Button: tea.MouseLeft})
-	if mn := nm.(sbModel).menu; mn == nil || mn.title != "fix-auth" {
-		t.Errorf("⋯ opened %+v", mn)
+	if d := nm.(sbModel).drawer; d == nil || d.id != "a:@2" {
+		t.Errorf("⋯ opened %+v", d)
 	}
 }
 
