@@ -86,6 +86,7 @@ type sbModel struct {
 	pendArgs      []string
 	pendDir       string
 	visible       bool
+	claudeSent    map[string]string
 	loading       bool
 
 	mode   sbMode
@@ -463,6 +464,49 @@ func runKel(dir string, env []string, args ...string) tea.Cmd {
 // own output is not the thing to show.
 func runKelSaying(ok, dir string, env []string, args ...string) tea.Cmd {
 	return func() tea.Msg { return kelDone(ok, dir, env, args...) }
+}
+
+var runKelQuiet = func(args ...string) tea.Cmd {
+	return func() tea.Msg {
+		kelDone("", "", nil, args...)
+		return nil
+	}
+}
+
+// claudeWrites hands each agent whose state came from Claude Code's view to
+// `kel _claude_state`, once per state until the tag clears (spec.md §9).
+func (m *sbModel) claudeWrites() tea.Cmd {
+	if m.claudeSent == nil {
+		m.claudeSent = map[string]string{}
+	}
+	var cmds []tea.Cmd
+	tagged := map[string]bool{}
+	for _, a := range m.doc.Agents {
+		if a.StateFrom != "claude" || !a.Managed || a.PaneID == nil || a.State == nil || a.Claude == nil {
+			continue
+		}
+		pane := *a.PaneID
+		tagged[pane] = true
+		if m.claudeSent[pane] == *a.State {
+			continue
+		}
+		m.claudeSent[pane] = *a.State
+		note := ""
+		if a.Note != nil {
+			note = *a.Note
+		}
+		known := ""
+		if a.ClaudeSession != nil {
+			known = *a.ClaudeSession
+		}
+		cmds = append(cmds, runKelQuiet("_claude_state", pane, *a.State, strconv.FormatInt(a.Claude.At, 10), note, a.Claude.SessionID, known))
+	}
+	for pane := range m.claudeSent {
+		if !tagged[pane] {
+			delete(m.claudeSent, pane)
+		}
+	}
+	return tea.Sequence(cmds...)
 }
 
 func kelDone(ok, dir string, env []string, args ...string) sbDone {
@@ -980,6 +1024,7 @@ func (m sbModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.markSeen()
 				}
 			}
+			return m, m.claudeWrites()
 		}
 
 	case sbDone:

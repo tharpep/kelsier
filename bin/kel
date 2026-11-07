@@ -881,6 +881,10 @@ prune_state() {
     [ -n "$pane" ] || { rm -f "$f"; continue; }
     printf '%s\n' "$panes" | grep -qxF "$pane" || rm -f "$f"
   done
+  for f in "$WAITING_DIR"/*; do
+    [ -e "$f" ] || continue
+    [ -f "$STASH_DIR/${f##*/}" ] || rm -f "$f"
+  done
 }
 
 # unpushed commits on HEAD (or target ref), excluding commits on any remote and commits in merged PR heads
@@ -4191,7 +4195,7 @@ cmd_hook() {
       exit 0 ;;
     *) exit 0 ;;
   esac
-  local tmp keep=0 oldnote now
+  local keep=0 oldnote
   if [ "$event" = Notification ] && [ "$prev" = waiting ] && [ "$state" = waiting ]; then
     read -r _ _ oldnote < "$STATE_DIR/$pane.state" 2>/dev/null || true
     case "$oldnote" in
@@ -4199,13 +4203,22 @@ cmd_hook() {
       "allow "*) [ "$ntype" = permission_prompt ] && keep=1 ;;
     esac
   fi
-  if [ "$keep" = 0 ]; then
-    tmp="$(mktemp "$STATE_DIR/.${pane#%}.XXXXXX" 2>/dev/null)" || exit 0
-    now="$(date +%s)"
-    printf '%s %s %s\n' "$state" "$now" "$ntext" > "$tmp"
-    mv -f "$tmp" "$STATE_DIR/$pane.state"
-    hook_history "$pane" "$now" "$event" "$state" "$ntext"
-  fi
+  [ "$keep" = 0 ] && { write_agent_state "$pane" "$state" "$(date +%s)" "$ntext" "$event" || exit 0; }
+  state_landed "$pane" "$wid" "$sid" "$state" "$prev" "$ntext"
+}
+
+# `.state` and its history line, atomically
+write_agent_state() { # pane state epoch note event
+  local tmp; tmp="$(mktemp "$STATE_DIR/.${1#%}.XXXXXX" 2>/dev/null)" || return 1
+  printf '%s %s %s\n' "$2" "$3" "$4" > "$tmp"
+  mv -f "$tmp" "$STATE_DIR/$1.state"
+  hook_history "$1" "$3" "$5" "$2" "$4"
+}
+
+# everything that follows a state written: the pane option, the paint, the
+# wake, and — on a transition into a notifying state — the banner and the bell
+state_landed() { # pane wid sid state prev note
+  local pane="$1" wid="$2" sid="$3" state="$4" prev="$5" ntext="$6"
   tmux set-option -p -t "$pane" @kel-state "$state" 2>/dev/null
   [ "$(agent_pane "$wid")" = "$pane" ] && rm -f "$STATE_DIR/$wid.state"
   if [ -n "$sid" ]; then
@@ -4222,16 +4235,54 @@ cmd_hook() {
   # Only on a transition *into* a notifying state, and only when you are not
   # already looking at it.  Without the transition test every repeat hook of
   # the same state re-notifies, which is how people learn to ignore them.
-  [ "$state" = "$prev" ] && exit 0
+  [ "$state" = "$prev" ] && return 0
   # an agent that moved on takes its banner line with it
   banner_drop "$pane"
   case " $KEL_NOTIFY " in
     *" $state "*)
-      window_focused "$wid" && exit 0
+      window_focused "$wid" && return 0
       local wn; wn="$(agent_label "$pane" "$wid")"
       case "${KEL_NOTIFY_BANNER:-on}" in off|0|no|false) ;; *) banner_add "$pane" "$state" "$wn" "$ntext" ;; esac
       notify "kel: $wn" "${ntext:-$state}" ;;
   esac
+}
+
+# kel _claude_state <pane> <state> <cache epoch> <note> <session id> [known session]
+# The visible sidebar's write of a state Claude Code's view overrode (spec §9):
+# what the hook would have written, stamped with the cache's epoch.
+cmd_claude_state() {
+  local pane="${1:-}" state="${2:-}" at="${3:-}" note="${4:-}" sid="${5:-}" known="${6:-}"
+  command -v tmux >/dev/null 2>&1 || return 0
+  case "$state" in waiting|working|idle) ;; *) return 0 ;; esac
+  case "$pane" in %[0-9]*) ;; *) return 0 ;; esac
+  case "$at" in ''|*[!0-9]*) return 0 ;; esac
+  note="${note//[[:cntrl:]]/ }"
+  local psess wid
+  { read -r psess; read -r wid; } < <(tmux display-message -p -t "$pane" '#{session_name}
+#{window_id}' 2>/dev/null)
+  [ "${psess:-}" = "$KEL_PREFIX" ] && [ -n "${wid:-}" ] || return 0
+  if [ -n "$sid" ] && [ "$sid" != "$known" ]; then
+    local mr m mg mn cf cep
+    if mr="$(meta_by_pane "$pane")"; then
+      m="${mr##*$'\t'}"
+      if [ "$(jq -r '.claude_session // ""' "$m" 2>/dev/null)" != "$sid" ]; then
+        meta_update "$m" '.claude_session=$s' --arg s "$sid"
+        IFS=$'\t' read -r mg mn _ <<< "$mr"
+        stamp_pane "$pane" "$mg" "$mn"
+        cf="$STATE_DIR/$pane.ctx"
+        cep="$(awk -F'\t' 'NR==1 {print $6}' "$cf" 2>/dev/null)"
+        case "$cep" in ''|*[!0-9]*) rm -f "$cf" ;; *) [ "$cep" -lt "$at" ] && rm -f "$cf" ;; esac
+      fi
+    fi
+  fi
+  [ -f "$STASH_DIR/$sid" ] || sid=""
+  local prev="" held=0
+  [ -f "$STATE_DIR/$pane.state" ] && read -r prev held _ < "$STATE_DIR/$pane.state"
+  [ "$prev" = "$state" ] && return 0
+  case "${held:-0}" in ''|*[!0-9]*) held=0 ;; esac
+  [ "$held" -ge "$at" ] && return 0
+  write_agent_state "$pane" "$state" "$at" "$note" ClaudeAgents || return 0
+  state_landed "$pane" "$wid" "$sid" "$state" "$prev" "$note"
 }
 
 # --------------------------------------------------------------------------
@@ -4348,6 +4399,7 @@ main() {
     _click)       cmd_click "$@" ;;
     substatus)    cmd_substatus "$@" ;;
     _panel)       cmd_panel "$@" ;;
+    _claude_state) cmd_claude_state "$@" ;;
     _banner)      case "${1:-}" in
                     seen)  banner_seen ;;
                     *)     die "usage: kel _banner seen|clear" ;;

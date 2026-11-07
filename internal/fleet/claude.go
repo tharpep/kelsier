@@ -50,6 +50,7 @@ type ClaudeView struct {
 	Status    string `json:"status"`
 	SessionID string `json:"session_id"`
 	Name      string `json:"name"`
+	At        int64  `json:"at,omitempty"`
 }
 
 // Background is an agent Claude Code runs outside any pane.
@@ -317,7 +318,7 @@ func replaced(a *Agent, s ClaudeSession, at int64) bool {
 // newer of the hook and the cache wins; a session that began after the hook
 // state was written has replaced whatever wrote it.
 func correct(a *Agent, s ClaudeSession, at int64) {
-	a.Claude = &ClaudeView{Status: s.Status, SessionID: s.SessionID, Name: s.Name}
+	a.Claude = &ClaudeView{Status: s.Status, SessionID: s.SessionID, Name: s.Name, At: at}
 	ctxOlder := a.Context != nil && (a.Context.At == nil || *a.Context.At < float64(at))
 	if a.Context != nil && a.Context.Session != nil && *a.Context.Session != s.SessionID && ctxOlder {
 		a.Context = nil
@@ -338,7 +339,7 @@ func correct(a *Agent, s ClaudeSession, at int64) {
 			a.Context = nil
 		}
 		if want != "" {
-			a.State = sp(want)
+			a.State, a.StateFrom = sp(want), "claude"
 			enter()
 		}
 		return
@@ -361,7 +362,7 @@ func correct(a *Agent, s ClaudeSession, at int64) {
 	if want == "idle" && (cur == "error" || cur == "throttled" || cur == "done") {
 		return
 	}
-	a.State, a.Unseen = sp(want), false
+	a.State, a.Unseen, a.StateFrom = sp(want), false, "claude"
 	enter()
 }
 

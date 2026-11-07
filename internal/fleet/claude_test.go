@@ -421,3 +421,57 @@ func TestCacheKeepsStartedAtAndWaitingFor(t *testing.T) {
 		t.Errorf("reread %+v", s)
 	}
 }
+
+func bgWaiting(sid string) cs {
+	return cs{"pid": 99999999, "kind": "background", "id": "bg1", "name": "docs", "cwd": "/r/docs",
+		"sessionId": sid, "status": "waiting", "waitingFor": "permission prompt"}
+}
+
+func TestCorrectTagsStateFromClaude(t *testing.T) {
+	now := time.Now().Unix()
+	a := scene{hook: "done", since: now - 37*3600, rec: "A", cwd: "/r/docs", cacheAt: now,
+		sessions: []cs{bgWaiting("B")}}.run(t)
+	if a.StateFrom != "claude" || a.Claude == nil || a.Claude.At != now {
+		t.Errorf("replaced: from %q view %+v", a.StateFrom, a.Claude)
+	}
+	a = scene{hook: "working", since: now - 30, cacheAt: now, sessions: []cs{self("idle", "A")}}.run(t)
+	wantState(t, a, "idle")
+	if a.StateFrom != "claude" {
+		t.Errorf("newer cache: from %q", a.StateFrom)
+	}
+	a = scene{hook: "working", since: now, cacheAt: now, sessions: []cs{self("idle", "A")}}.run(t)
+	if a.StateFrom != "" {
+		t.Errorf("hook stands: from %q", a.StateFrom)
+	}
+	a = scene{hook: "done", since: now - 60, cacheAt: now, sessions: []cs{self("idle", "A")}}.run(t)
+	if a.StateFrom != "" {
+		t.Errorf("done held against idle: from %q", a.StateFrom)
+	}
+}
+
+func TestWrittenStateIsHookStateNextLoad(t *testing.T) {
+	now := time.Now().Unix()
+	for _, rec := range []string{"A", "B"} {
+		a := scene{hook: "waiting", since: now, rec: rec, cwd: "/r/docs", cacheAt: now,
+			sessions: []cs{bgWaiting("B")}}.run(t)
+		wantState(t, a, "waiting")
+		if a.StateFrom != "" {
+			t.Errorf("rec %s: written state tagged again: %q", rec, a.StateFrom)
+		}
+	}
+}
+
+func TestF1ContextStaysUnknownAfterWrite(t *testing.T) {
+	now := time.Now().Unix()
+	sc := scene{hook: "waiting", since: now, rec: "B", cwd: "/r/docs", cacheAt: now, sessions: []cs{bgWaiting("B")}}
+	sd := t.TempDir()
+	b, _ := json.Marshal(map[string]any{"at": sc.cacheAt, "sessions": sc.sessions})
+	writeCache(t, sd, string(b))
+	f := float64(now)
+	doc := Doc{Agents: []Agent{{Name: "docs", Managed: true, WindowID: sp("@1"), PaneID: sp("%1"), State: sp("waiting"),
+		StateSince: &f, Cwd: sp("/r/docs"), ClaudeSession: sp("B")}}}
+	withClaude(&doc, sd, []Pane{{PaneID: "%1", WindowID: "@1"}})
+	if doc.Agents[0].Context != nil {
+		t.Errorf("context appeared: %+v", doc.Agents[0].Context)
+	}
+}

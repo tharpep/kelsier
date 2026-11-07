@@ -75,6 +75,10 @@ type Agent struct {
 	// Claude is Claude Code's own view of this agent (claude.go): only on
 	// the sidebar's path (Options.Panes), and null when it could not be read
 	Claude *ClaudeView `json:"claude,omitempty"`
+	// StateFrom is "claude" when spec.md §9's rule overrode the hook state
+	// with Claude Code's: the visible sidebar then writes that state down
+	// (`kel _claude_state`)
+	StateFrom string `json:"state_from,omitempty"`
 	// Subagents: the agent panel's rows, from `kel substatus` (claude.go).
 	// Empty when none are showing; recorded within subsFresh or not at all
 	Subagents []Subagent `json:"subagents,omitempty"`

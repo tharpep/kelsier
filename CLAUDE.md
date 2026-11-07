@@ -56,7 +56,7 @@ The tree is self-describing. These relationships are not.
 | `docs/backlog.md` | candidates, each with a *gate*: the specific pain that unlocks it. Its *Rejected* section rules several good-sounding ideas out already |
 
 `bin/kel` is `cmd_<name>` functions with a `main` dispatcher at the bottom.
-Internal subcommands are `_`-prefixed (`_fleet`, `_cfgdump`) and are wired into
+Internal subcommands are `_`-prefixed (`_fleet`, `_cfgdump`, `_claude_state`) and are wired into
 tmux or the tests, never typed by hand. Helpers are plain snake_case
 (`ctx_field`, `resolve_pane`, `si_units`) — the `_` prefix means "dispatcher
 entry", not "private", so a new helper that takes one reads as a subcommand that
@@ -74,7 +74,7 @@ change; migrate old records in `migrate_meta`.
 | path | contents |
 |---|---|
 | `sessions/<group>/<name>.json` | one record per managed agent. Keyed by group **and** name — two repos can each have a `docs`. Carries `window_id` and, since M7, `pane_id` |
-| `<pane-id>.state` | `<state> <epoch> <note>` — one line, atomic write. A waiting note is `allow <tool>? <arg>` from `PermissionRequest`, which a later `permission_prompt` Notification does not overwrite |
+| `<pane-id>.state` | `<state> <epoch> <note>` — one line, atomic write. A waiting note is `allow <tool>? <arg>` from `PermissionRequest`, which a later `permission_prompt` Notification does not overwrite. Also written by the visible sidebar via `kel _claude_state`, with the cache's `at` as the epoch (spec §9) |
 | `<pane-id>.mode` | the agent's `permission_mode` (`plan`, `acceptEdits`…), from a hook payload that carries it (not the `PostToolUse` fast path, so a mid-turn change shows late); absent while the mode is `default`. 0600, atomic. `kel-fleet` reads it as the agent's `mode` |
 | `<pane-id>.ctx` | `<pct> <cost> <in_tokens> <ctx_size> <rate_5h> <epoch> <model> <session>`, tab-separated |
 | `snapshot.json` | full workspace shape, format v2 since v0.10: `{version:2, saved_at, saved_epoch, last, windows:[{name, group, layout, panes:[{cwd,cmd,agent?}]}]}` (`agent` is the pane's `@kel-agent`, M7). `.prev` keeps one generation. Restore still reads v1 (`groups` keyed by group) |
@@ -93,7 +93,7 @@ change; migrate old records in `migrate_meta`.
 | `<pane-id>.plan` | two lines like `.edit`: the plan file a plan-mode `Write` under `$CLAUDE_CONFIG_DIR/plans/` named. The same hook, sorted by path |
 | `<pane-id>.transcript_path` / `.artifact_dir` | Antigravity: one line each, the transcript file and the artifact directory its hooks report. 0600, reaped with the pane's other files |
 | `<pane-id>.view` | what `p` or `h` last composed (plan, then tasks; or the state history) for its popup; overwritten each time |
-| `<pane-id>.log` | the agent's state history, one line `<epoch> <event> <state> <note, first 40 chars>` appended by the state hook for each transition it writes. Trimmed to the last 20 lines when it passes 40. Cleared by `SessionStart`, `SessionEnd` and relaunch, so a pane's new session starts empty; `_panel history` ignores one whose pane is a bare shell with no `@kel-agent`. Written by the Antigravity hook too. 0600, removed by `rm_agent_state`, pruned with the other pane files; read by `kel _panel history` |
+| `<pane-id>.log` | the agent's state history, one line `<epoch> <event> <state> <note, first 40 chars>` appended by the state hook for each transition it writes. Trimmed to the last 20 lines when it passes 40. Cleared by `SessionStart`, `SessionEnd` and relaunch, so a pane's new session starts empty; `_panel history` ignores one whose pane is a bare shell with no `@kel-agent`. Written by the Antigravity hook too. The `ClaudeAgents` event marks a line `_claude_state` wrote. 0600, removed by `rm_agent_state`, pruned with the other pane files; read by `kel _panel history` |
 | `<pane-id>.cards` | JSON lines of cards reported by agents (`kel card`), newest last, last 20 kept (spec §10a) |
 | `<pane-id>.cards-seen` | one epoch: when the pane's cards were last viewed via `i`. If `latest.at > seen`, cards are unseen |
 | `lazygit-overlay.yml` | `quitOnTopLevelReturn: true`, laid over the user's lazygit config (never written into it) so `esc` closes kel's lazygit popup |
@@ -103,7 +103,7 @@ change; migrate old records in `migrate_meta`.
 | `restore-offer` | present while an archived workspace waits: set by a fresh `kel`, cleared by `kel restore`; the sidebar offers `b` |
 | `sidebar-off` | present after `kel sidebar off`; no new sidebars until `kel sidebar on` |
 | `worktrees.json` | `{at, repos:{<main root>: repo}, stamps:{<main root>: ns}}` — every repo's worktrees with land state, for the sidebar's `repos`; reused for 20 s unless `.git/worktrees` changed (its mtime is the stamp). `kel sweep` reads fresh |
-| `banner` | one line per agent the banner above tmux's bar shows: `<pane-id> TAB <state> TAB <name> TAB <text>`. Written by the state hook on a notifying transition, dropped when the agent moves on, when a client shows its window (`session-window-changed` → `kel _banner seen`) or on ✕ (`_click bx`); empty = tmux's bar back to its one line |
+| `banner` | one line per agent the banner above tmux's bar shows: `<pane-id> TAB <state> TAB <name> TAB <text>`. Written by the state hook or `_claude_state` on a notifying transition, dropped when the agent moves on, when a client shows its window (`session-window-changed` → `kel _banner seen`) or on ✕ (`_click bx`); empty = tmux's bar back to its one line |
 | `prompt-history` | the last twenty commands typed at the sidebar's `;`, one per line |
 | `gh-dash.yml` | the config `v` writes for gh dash each time — every open space's repos; not the user's own |
 | `sidebar-fail.log` | a dying sidebar's own stderr (`kel-sidebar 2>>`), appended. Temporary: backlog #41 is fixed, and it goes once daily use stays quiet |

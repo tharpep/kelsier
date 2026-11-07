@@ -1990,7 +1990,7 @@ hook "$VP" Notification permission_prompt "allow?"
 ok "  ...and a version-number window name gives way to the folder" '[ "$(cut -f3 "$STATE/banner" | tail -1)" = vault-fix ]'
 tmux kill-window -t "$VW"; : > "$STATE/banner"
 release_client
-unset KEL_NOTIFY_CMD
+unset KEL_NOTIFY_CMD KEL_SIDEBAR_TRACE
 # The cases above already prove the detached path: this suite never attaches a
 # client, so every notification here took the "nobody is looking" branch.
 # Suppression *while focused* needs an attached client, and attaching one
@@ -2455,6 +2455,106 @@ ok "a .log for a gone pane is pruned, the sidebar's own log kept" '[ ! -e "$STAT
 K api-gw kill hist >/dev/null 2>&1
 ok "kel kill removes the history"                     '[ ! -e "$STATE/$HP.log" ]'
 unset KEL_POPUP_TRACE
+
+section "the sidebar writes Claude Code's view down (W2b)"
+export KEL_SIDEBAR=on KEL_NOTIFY_CMD="$WORK/stub" KEL_SIDEBAR_TRACE="$WORK/sidebar-w2b.trace"
+: > "$KEL_SIDEBAR_TRACE"
+NLOG="$WORK/notify.log"
+printf '#!/bin/sh\nprintf "%%s|%%s\\n" "$1" "$2" >> %s\n' "$NLOG" > "$WORK/stub"; chmod +x "$WORK/stub"
+reset
+NEW api-gw a
+NEW api-gw b
+NEW api-gw c
+upane() { tmux list-panes -t "$1" -F '#{@kel-sidebar}|#{pane_id}' | awk -F'|' '$1=="" {print $2; exit}'; }
+CP="$(upane "$(window_of api-gw a)")"; CPW="$(window_of api-gw a)"; BW="$(window_of api-gw b)"
+TC="$TMUX_TMPDIR/tmux-$(id -u)/default,$(tmux display-message -p '#{pid}'),0"
+hold_client 90
+tmux select-window -t "$BW"
+: > "$NLOG"; : > "$STATE/banner"
+printf 'done %s\n' "$(( $(date +%s) - 100 ))" > "$STATE/$CP.state"; tmux set-option -p -t "$CP" @kel-state done
+printf 'x\n' > "$STATE/$CP.ctx"
+AT="$(( $(date +%s) ))"
+mkdir -p "$STATE/.stash"; printf '%s\n' "$CP" > "$STATE/.stash/sessB"
+"$KEL" _claude_state "$CP" waiting "$AT" "permission prompt" sessB
+wait_until '[ "$(grep -c . "$NLOG")" = 1 ]'
+ok "_claude_state writes .state with the cache's epoch and the note" '[ "$(cat "$STATE/$CP.state")" = "waiting $AT permission prompt" ]'
+ok "  ...sets @kel-state, as the hook does"            '[ "$(tmux display-message -p -t "$CP" "#{@kel-state}")" = waiting ]'
+ok "  ...logs a ClaudeAgents line"                      '[ "$(tail -n 1 "$STATE/$CP.log" | cut -d" " -f2,3)" = "ClaudeAgents waiting" ]'
+ok "  ...marks the session as waiting"                  '[ -e "$STATE/.waiting/sessB" ]'
+ok "  ...puts a banner line up for an unfocused pane"   'cut -f1,2 "$STATE/banner" | grep -qx "$CP	waiting"'
+ok "  ...and rings once"                                'grep -q "permission prompt" "$NLOG" && [ "$(grep -c . "$NLOG")" = 1 ]'
+ok "  ...records the session and drops the old context" '[ "$(jq -r .claude_session "$SESSIONS/api-gw/a.json")" = sessB ] && [ ! -e "$STATE/$CP.ctx" ]'
+printf '50\t1.0\t1\t200000\t10\t%s\tm\n' "$(( AT + 100 ))" > "$STATE/$CP.ctx"
+"$KEL" _claude_state "$CP" waiting "$AT" "permission prompt" sessC
+ok "a .ctx newer than the view survives a session change" '[ -s "$STATE/$CP.ctx" ] && [ "$(jq -r .claude_session "$SESSIONS/api-gw/a.json")" = sessC ]'
+printf '50\t1.0\t1\t200000\t10\t%s\tm\n' "$(( AT - 100 ))" > "$STATE/$CP.ctx"
+"$KEL" _claude_state "$CP" waiting "$AT" "permission prompt" sessB
+ok "  ...and an older one goes" '[ ! -e "$STATE/$CP.ctx" ]'
+NL="$(grep -c . "$STATE/$CP.log")"
+"$KEL" _claude_state "$CP" waiting "$(( AT + 1 ))" "permission prompt" sessB
+sleep 0.3
+ok "a repeat of the same state writes and rings nothing" '[ "$(grep -c . "$NLOG")" = 1 ] && [ "$(grep -c . "$STATE/$CP.log")" = "$NL" ]'
+"$KEL" _claude_state "$CP" idle "$(( AT - 5 ))" "" sessB
+ok "a view older than the state on disk does not overwrite it" '[ "$(cut -d" " -f1 "$STATE/$CP.state")" = waiting ]'
+"$KEL" _claude_state "$CP" idle "$(( AT + 2 ))" "" sessB
+ok "_claude_state idle drops the banner line and the wait" '[ ! -s "$STATE/banner" ] && [ "$(cut -d" " -f1 "$STATE/$CP.state")" = idle ] && [ ! -e "$STATE/.waiting/sessB" ]'
+"$KEL" _claude_state "$CP" waiting "$(( AT + 3 ))" "again" sessB
+wait_until '[ "$(grep -c . "$NLOG")" = 2 ]'
+tmux select-window -t "$CPW"
+ok "  ...the line is there before it is seen" '[ -s "$STATE/banner" ]'
+"$KEL" _banner seen
+ok "_banner seen drops a line the sidebar wrote" '[ ! -s "$STATE/banner" ]'
+tmux select-window -t "$BW"
+tmux new-session -d -s other
+OP="$(tmux list-panes -t =other: -F '#{pane_id}' | head -1)"
+"$KEL" _claude_state "$OP" waiting "$AT" x s
+ok "a pane that is not in kel's session is refused" '[ -n "$OP" ] && [ ! -e "$STATE/$OP.state" ]'
+tmux kill-session -t =other
+rm -f "$STATE/$CP.state"
+"$KEL" _claude_state "$CP" working "$(( AT + 10 ))" "" sessNS
+ok "a pane with no state file still gets one" '[ "$(cut -d" " -f1 "$STATE/$CP.state")" = working ]'
+"$KEL" _claude_state "$CP" waiting "$(( AT + 20 ))" "x" sessNS
+ok "a session with no stash is not marked as waiting" '[ "$(cut -d" " -f1 "$STATE/$CP.state")" = waiting ] && [ ! -e "$STATE/.waiting/sessNS" ]'
+mkdir -p "$STATE/.waiting"; : > "$STATE/.waiting/orphan"; : > "$STATE/.waiting/kept"; printf '%s\n' "$CP" > "$STATE/.stash/kept"
+"$KEL" ls >/dev/null
+ok "a .waiting with no stash is pruned, one with a stash kept" '[ ! -e "$STATE/.waiting/orphan" ] && [ -e "$STATE/.waiting/kept" ]'
+rm -f "$STATE/.waiting/kept" "$STATE/.stash/kept"
+
+# pinned by this section: status-line and jump read hooks alone and never ask claude
+printf '#!/bin/sh\ntouch "%s/claude-ran"\necho "[]"\n' "$WORK" > "$WORK/claude-marker"; chmod +x "$WORK/claude-marker"
+rm -f "$STATE/claude-agents.json" "$WORK/claude-ran"
+TMUX="$TC" KEL_CLAUDE_BIN="$WORK/claude-marker" "$KEL" status-line >/dev/null 2>&1
+TMUX="$TC" KEL_CLAUDE_BIN="$WORK/claude-marker" "$KEL" jump >/dev/null 2>&1
+ok "guard: status-line and jump never run claude agents" '[ ! -e "$WORK/claude-ran" ] && [ ! -e "$STATE/claude-agents.json" ]'
+
+# end to end: a background session waiting, folded into agent c, seen by the shown sidebar
+CCP="$(upane "$(window_of api-gw c)")"; CCW="$(window_of api-gw c)"
+CCWD="$("$KEL" _fleet | jq -r '.agents[] | select(.name=="c") | .cwd')"
+printf "idle %s\n" "$(( $(date +%s) - 100 ))" > "$STATE/$CCP.state"; tmux set-option -p -t "$CCP" @kel-state idle
+: > "$NLOG"; : > "$STATE/banner"; rm -f "$STATE/claude-agents.json"
+printf '[{"pid":1,"id":"bgc","cwd":"%s","kind":"background","sessionId":"sessE2E","name":"c","status":"waiting","state":"blocked","waitingFor":"permission prompt","startedAt":1}]' "$CCWD" > "$WORK/claude-agents.json"
+ACWD="$("$KEL" _fleet | jq -r '.agents[] | select(.name=="a") | .cwd')"
+printf "idle %s\n" "$(( $(date +%s) - 100 ))" > "$STATE/$CP.state"; tmux set-option -p -t "$CP" @kel-state idle
+printf '[{"pid":1,"id":"bgc","cwd":"%s","kind":"background","sessionId":"sessE2E","name":"c","status":"waiting","state":"blocked","waitingFor":"permission prompt","startedAt":1},{"pid":2,"id":"bga","cwd":"%s","kind":"background","sessionId":"sessE2A","name":"a","status":"waiting","state":"blocked","waitingFor":"permission prompt","startedAt":1}]' "$CCWD" "$ACWD" > "$WORK/claude-agents.json"
+printf '%s\n' "$CCP" > "$STATE/.stash/sessE2E"
+tmux select-window -t "$BW"
+"$KEL" _sidebar wake
+wait_until '[ "$(cut -d" " -f1 "$STATE/$CCP.state")" = waiting ]' 200
+ok "a waiting background session folded into an agent is written by the visible sidebar" '[ "$(cut -d" " -f1 "$STATE/$CCP.state")" = waiting ] && [ "$(jq -r .claude_session "$SESSIONS/api-gw/c.json")" = sessE2E ]'
+wait_until '[ "$(grep -c . "$NLOG")" = 1 ]'
+wait_until '[ "$(grep -c . "$STATE/banner")" = 2 ]'
+ok "  ...the banner and the bell follow"  'cut -f1,2 "$STATE/banner" | grep -qx "$CCP	waiting" && [ "$(grep -c . "$NLOG")" -ge 1 ]'
+ok "  ...two panes in one load both keep their banner line" 'cut -f1,2 "$STATE/banner" | grep -qx "$CP	waiting" && cut -f1,2 "$STATE/banner" | grep -qx "$CCP	waiting"'
+TMUX="$TC" "$KEL" jump >/dev/null 2>&1
+ok "  ...and kel jump lands on that pane"  '[ "$(tmux list-windows -t "=keltest" -F "#{window_active} #{window_id}" | awk "\$1==1 {print \$2}")" = "$CCW" ]'
+CSB="$(tmux list-panes -t "$CCW" -F '#{@kel-sidebar} #{pane_id}' | awk '$1==1 {print $2}')"
+NR0="$(grep -c " $CSB " "$KEL_SIDEBAR_TRACE")"; NL0="$(grep -c . "$NLOG")"
+"$KEL" _sidebar wake
+wait_until '[ "$(grep -c " $CSB " "$KEL_SIDEBAR_TRACE")" -gt "$NR0" ]'
+ok "  ...the next loads rewrite and ring nothing" '[ "$(grep -c " $CSB " "$KEL_SIDEBAR_TRACE")" -gt "$NR0" ] && [ "$(grep -c . "$NLOG")" = "$NL0" ]'
+release_client
+rm -f "$WORK/claude-agents.json"
+unset KEL_NOTIFY_CMD
 
 # ---------------------------------------------------------------- summary
 printf '\n'

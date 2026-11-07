@@ -571,6 +571,8 @@ Opus 5.5 · ████░░ 36% ctx · $10.65
 
 ### 7b. tmux's bottom bar  ·  *built (M4)*
 
+The bar reads hook state, which includes what the visible sidebar wrote from Claude Code's view (§9): it applies no rule of its own and never runs `claude agents`.
+
 *Redesigned 2026-11-04, from the mockups:* `5h ━━━━━━━━ 58% (1h20m)   7d 41% · $24.10` on the left, a thin meter with labels in place of `claude ███░░` and `wk`; on the right `▐needs you▌ <agent> 6m +N`, one click target that jumps there, chip, name, age and count, then the clock. The waiting alarm lives here only, so the sidebar's foot stays `Settings · Help`; `nothing waiting` went with it. The bar wears the sidebar's surface. What follows is the M4 design it grew from.
 
 ```
@@ -746,7 +748,7 @@ every payload, both halves of that were stale:
 Claude Code's sessions with a busy/idle status — interactive ones, and
 background ones (`claude --bg`) that run in no pane. On the sidebar's path
 only (a node start, ~1 s, cached in `claude-agents.json`), kel folds them in.
-Which source wins, in order: (1) `dead` is computed when read, and nothing overrides it. (2) A session matches its agent by pane only. A background session folds into the one managed agent with its name and directory, or with its session id. (3) If the live session differs from the record's and started after the pane's state was written, that state and context belong to an older session. They are dropped: state from Claude Code, context unknown. A background session whose id differs from the record's is always the newer one, because its hooks cannot write the record; its state and context replace the pane's unless the pane's state is newer than the cache. (4) Otherwise the newer source wins. The hook stands when its epoch is at or after the cache's `at`. A newer cache corrects it, except that `error`, `throttled` and `done` hold against idle. Claude Code's `waiting` status is `waiting`. A background session's `state` is Claude Code's guess from its last message and never sets kel's state. (5) A cache older than 60 s or failed means hooks alone. kel needs a Claude Code that reports `waiting`; an older one would turn a real prompt `idle`.
+Which source wins, in order: (1) `dead` is computed when read, and nothing overrides it. (2) A session matches its agent by pane only. A background session folds into the one managed agent with its name and directory, or with its session id. (3) If the live session differs from the record's and started after the pane's state was written, that state and context belong to an older session. They are dropped: state from Claude Code, context unknown. A background session whose id differs from the record's is always the newer one, because its hooks cannot write the record; its state and context replace the pane's unless the pane's state is newer than the cache. (4) Otherwise the newer source wins. The hook stands when its epoch is at or after the cache's `at`. A newer cache corrects it, except that `error`, `throttled` and `done` hold against idle. Claude Code's `waiting` status is `waiting`. A background session's `state` is Claude Code's guess from its last message and never sets kel's state. (5) A cache older than 60 s or failed means hooks alone. kel needs a Claude Code that reports `waiting`; an older one would turn a real prompt `idle`. The rule runs only on the sidebar's path, so `kel jump`, the bar, the banner and the bell would never see its result. The visible sidebar therefore writes it down: for an agent whose hook state the rule overrode (`state_from: "claude"` in the fleet document), it runs `kel _claude_state <pane> <state> <cache at> <note> <session>`, once per state. That does what the hook does for a transition: `.state` with the cache's `at` as its epoch, `@kel-state`, a `ClaudeAgents` line in `.log`, `.waiting/<session>`, the paint, the banner and the bell. A session that differs from the record's removes `.ctx` and rewrites `claude_session`. The epoch makes it unable to flap: a hook newer than `at` wins the next load, and a state already on disk is not rewritten. *(2026-11-07, W2b.)*
 Background agents are
 listed (`bg`), nested under the top agent of the same name — Claude Code does
 not say which agent dispatched one — and `enter` opens one with `claude
@@ -847,7 +849,7 @@ When an agent **transitions into** a state listed in `KEL_NOTIFY` (default
 **a desktop notification** — a Windows toast from WSL (built-in WinRT via
 `powershell.exe`), `osascript` on macOS, `notify-send` on Linux.
 `$KEL_NOTIFY_CMD` replaces the desktop half. Hook-driven, never polled — a
-poller would be a daemon.
+poller would be a daemon. One exception: a state Claude Code's view overrode (§9) is written by the **visible sidebar** through the same code path, so a background session waiting on a permission prompt reaches the bell and the banner only while a sidebar is shown. With the sidebar off or detached nothing refreshes the view, which after 60 s reads as unknown, and hooks alone decide; on reattach the first load writes the state and notifies, late. *(2026-11-07.)*
 
 *Revised 2026-10-15.* kel used to ship no platform detection and leave
 recipes in `setup.md`; in practice nothing reached the author outside the
