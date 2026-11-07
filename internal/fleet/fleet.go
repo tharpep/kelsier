@@ -27,6 +27,7 @@ type Context struct {
 	Rate5h   *float64 `json:"rate_5h"`
 	At       *float64 `json:"at"`
 	Model    *string  `json:"model"`
+	Session  *string  `json:"session,omitempty"`
 }
 
 // Agent is one row of the fleet: a live tmux window, or a record whose window
@@ -120,6 +121,26 @@ type record struct {
 
 var shells = map[string]bool{
 	"bash": true, "zsh": true, "fish": true, "sh": true, "dash": true, "tmux": true,
+}
+
+// parseCtx reads a .ctx line: seven tab-separated fields, an eighth since W2.
+func parseCtx(line string) *Context {
+	c := strings.Split(line, "\t")
+	at := func(i int) string {
+		if i < len(c) {
+			return c[i]
+		}
+		return ""
+	}
+	rate := numPtr(at(4))
+	if rate != nil && *rate == -1 {
+		rate = nil
+	}
+	return &Context{
+		Pct: numPtr(at(0)), CostUSD: numPtr(at(1)), InTokens: numPtr(at(2)),
+		Size: numPtr(at(3)), Rate5h: rate, At: numPtr(at(5)),
+		Model: emptyToNil(at(6)), Session: emptyToNil(at(7)),
+	}
 }
 
 func sp(s string) *string { return &s }
@@ -293,22 +314,7 @@ func Load(o Options) Doc {
 		if err != nil {
 			continue
 		}
-		c := strings.Split(strings.SplitN(strings.TrimRight(string(b), "\n"), "\n", 2)[0], "\t")
-		at := func(i int) string {
-			if i < len(c) {
-				return c[i]
-			}
-			return ""
-		}
-		rate := numPtr(at(4))
-		if rate != nil && *rate == -1 { // -1 is "unknown", not a value
-			rate = nil
-		}
-		ctxMap[wid] = &Context{
-			Pct: numPtr(at(0)), CostUSD: numPtr(at(1)), InTokens: numPtr(at(2)),
-			Size: numPtr(at(3)), Rate5h: rate, At: numPtr(at(5)),
-			Model: emptyToNil(at(6)),
-		}
+		ctxMap[wid] = parseCtx(strings.SplitN(strings.TrimRight(string(b), "\n"), "\n", 2)[0])
 	}
 
 	var records []record

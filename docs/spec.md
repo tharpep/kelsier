@@ -745,11 +745,9 @@ every payload, both halves of that were stale:
 **Claude Code's own view** *(built 2026-10-16)*. `claude agents --json` lists
 Claude Code's sessions with a busy/idle status — interactive ones, and
 background ones (`claude --bg`) that run in no pane. On the sidebar's path
-only (a node start, ~1 s, cached in `claude-agents.json`), kel matches
-each interactive session to its window by walking up from its pid to a pane's,
-and lets it correct the hooks where they cannot know: `working` + idle →
-`idle` (an interrupt fires no Stop — the "working 15h" agent), `idle`/`done`
-+ busy → `working`. `waiting` is never overridden. Background agents are
+only (a node start, ~1 s, cached in `claude-agents.json`), kel folds them in.
+Which source wins, in order: (1) `dead` is computed when read, and nothing overrides it. (2) A session matches its agent by pane only. A background session folds into the one managed agent with its name and directory, or with its session id. (3) If the live session differs from the record's and started after the pane's state was written, that state and context belong to an older session. They are dropped: state from Claude Code, context unknown. A background session whose id differs from the record's is always the newer one, because its hooks cannot write the record; its state and context replace the pane's unless the pane's state is newer than the cache. (4) Otherwise the newer source wins. The hook stands when its epoch is at or after the cache's `at`. A newer cache corrects it, except that `error`, `throttled` and `done` hold against idle. Claude Code's `waiting` status is `waiting`. A background session's `state` is Claude Code's guess from its last message and never sets kel's state. (5) A cache older than 60 s or failed means hooks alone. kel needs a Claude Code that reports `waiting`; an older one would turn a real prompt `idle`.
+Background agents are
 listed (`bg`), nested under the top agent of the same name — Claude Code does
 not say which agent dispatched one — and `enter` opens one with `claude
 attach` in a popup. Unreadable (no claude, a timeout) is null: hooks alone.
@@ -797,9 +795,7 @@ it is not `throttled`, which resumes on its own — this does not.
 permission prompt — so "why is this blocked" needs no pane scrape. `kel jump`
 takes `waiting` and `error` first, then a `done` you have not seen.
 
-`kel hook` resolves which window it is in, in order: `$TMUX_PANE`; the pane
-stashed by this session's `SessionStart`, keyed by session id; the single pane
-whose current path equals the payload's `cwd`.
+`kel hook` writes a pane's state only when it knows the pane: `$TMUX_PANE`, if that pane is in kel's session, or else the pane stashed by this session's own `SessionStart`. A session in neither is not kel's to write. That covers a background session, or one in another terminal or another tmux server. Its state comes from `claude agents` (below). *(2026-11-07; the cwd fallback let any session claim a pane and rewrite its `claude_session`.)*
 
 **State file.** `~/.local/state/kel/<pane-id>.state`, one line
 `<state> <epoch> <note>`, written atomically. Keyed by pane id since M7 (an
@@ -821,8 +817,10 @@ scrape. `kel statusline` records one line per agent window to
 `<pane-id>.ctx`:
 
 ```
-<pct> <cost_usd> <in_tokens> <ctx_size> <rate_5h> <epoch> <model>
+<pct> <cost_usd> <in_tokens> <ctx_size> <rate_5h> <epoch> <model> <session_id>
 ```
+
+A context whose session is not the agent's live one reads unknown.
 
 Updates are debounced to 300 ms and an in-flight script is **cancelled** when
 the next arrives, so the handler is one `jq`, one atomic write, and a

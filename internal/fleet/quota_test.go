@@ -62,15 +62,15 @@ func TestLoadSubs(t *testing.T) {
 	}
 }
 
-// Claude Code's status corrects the hooks where they cannot know, and never
-// overrides waiting.
+// Claude Code's status corrects the hooks where they cannot know; a hook with
+// no epoch is older than any cache (the newer-wins rule has its own tests).
 func TestWithClaude(t *testing.T) {
 	sd := t.TempDir()
 	pid := os.Getpid()
 	w, wt := "working", "waiting"
 	for _, c := range []struct {
 		hook, claude, want string
-	}{{w, "idle", "idle"}, {"idle", "busy", "working"}, {wt, "idle", "waiting"}, {w, "busy", "working"}} {
+	}{{w, "idle", "idle"}, {"idle", "busy", "working"}, {wt, "idle", "idle"}, {w, "busy", "working"}} {
 		cache := fmt.Sprintf(`{"at":%d,"sessions":[{"pid":%d,"kind":"interactive","status":%q}]}`, time.Now().Unix(), pid, c.claude)
 		os.WriteFile(filepath.Join(sd, "claude-agents.json"), []byte(cache), 0o600)
 		st := c.hook

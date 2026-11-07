@@ -235,7 +235,7 @@ func withRepos(doc *Doc, sd string, fresh bool) {
 		}
 	}
 	rs := loadRepos(sd, roots, fresh)
-	sessions, ok := claudeSessions(sd) // cached alongside withClaude's read
+	sessions, _, ok := claudeSessions(sd) // cached alongside withClaude's read
 	for i := range rs {
 		for j := range rs[i].Worktrees {
 			w := &rs[i].Worktrees[j]

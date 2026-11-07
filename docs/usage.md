@@ -18,6 +18,8 @@ and `kel-sidebar` and fails if it cannot. It symlinks `bin/kel` into
 state hooks and the `statusLine` into `~/.claude/settings.json`, keeping the
 newest three backups of each file it edits.
 
+`install.sh` alone leaves running sidebars on the old binary, which rewrites `claude-agents.json` without newer fields. Run `kel reload` after it (`kel update` already does).
+
 **`./install.sh --uninstall` reverses all of it**, restoring any `statusLine`
 kel displaced, and leaves `~/.local/state/kel` alone — uninstalling must not be
 able to lose work. `--uninstall --purge` removes that too, after asking.

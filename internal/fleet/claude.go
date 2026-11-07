@@ -38,8 +38,11 @@ type ClaudeSession struct {
 	Kind      string `json:"kind"` // interactive | background
 	SessionID string `json:"sessionId"`
 	Name      string `json:"name"`
-	Status    string `json:"status"`          // busy | idle
+	Status    string `json:"status"`          // busy | idle | waiting
 	State     string `json:"state,omitempty"` // background: e.g. blocked
+	StartedAt int64  `json:"startedAt"`       // ms
+	// WaitingFor is what a waiting session waits on, in Claude Code's words
+	WaitingFor string `json:"waitingFor,omitempty"`
 }
 
 // ClaudeView is what an agent row learns from Claude Code.
@@ -51,14 +54,16 @@ type ClaudeView struct {
 
 // Background is an agent Claude Code runs outside any pane.
 type Background struct {
-	ID        string `json:"id"`
-	Name      string `json:"name"`
-	Cwd       string `json:"cwd"`
-	Status    string `json:"status"`
-	State     string `json:"state,omitempty"`
-	SessionID string `json:"session_id"`
-	Group     string `json:"group"`
-	Git       *Git   `json:"git"`
+	ID         string `json:"id"`
+	Name       string `json:"name"`
+	Cwd        string `json:"cwd"`
+	Status     string `json:"status"`
+	State      string `json:"state,omitempty"`
+	SessionID  string `json:"session_id"`
+	StartedAt  int64  `json:"-"`
+	WaitingFor string `json:"-"`
+	Group      string `json:"group"`
+	Git        *Git   `json:"git"`
 }
 
 type claudeCache struct {
@@ -92,7 +97,7 @@ func claudeBin(cached string) string {
 // claude: a cache older than claudeTTL starts a detached refresh and is still
 // returned, up to claudeMaxAge, past which it is unknown (ok false). Only a
 // missing cache reads inline, once, so a first sidebar is not empty.
-func claudeSessions(sd string) (sessions []ClaudeSession, ok bool) {
+func claudeSessions(sd string) (sessions []ClaudeSession, at int64, ok bool) {
 	path := filepath.Join(sd, "claude-agents.json")
 	var c claudeCache
 	b, err := os.ReadFile(path)
@@ -107,7 +112,7 @@ func claudeSessions(sd string) (sessions []ClaudeSession, ok bool) {
 		}
 		StartClaudeRefresh(sd)
 	}
-	return c.Sessions, !c.Failed && age < claudeMaxAge
+	return c.Sessions, c.At, !c.Failed && age < claudeMaxAge
 }
 
 // RefreshClaudeAgents asks claude and rewrites the cache in sd.
@@ -120,7 +125,7 @@ func RefreshClaudeAgents(sd string) {
 }
 
 // refreshClaudeAgents asks claude and writes the cache atomically.
-func refreshClaudeAgents(sd, cachedBin string) ([]ClaudeSession, bool) {
+func refreshClaudeAgents(sd, cachedBin string) ([]ClaudeSession, int64, bool) {
 	bin := claudeBin(cachedBin)
 	c := claudeCache{At: time.Now().Unix(), Bin: bin}
 	if bin == "" {
@@ -136,7 +141,7 @@ func refreshClaudeAgents(sd, cachedBin string) ([]ClaudeSession, bool) {
 	if b, err := json.Marshal(c); err == nil {
 		WriteAtomic(filepath.Join(sd, "claude-agents.json"), b)
 	}
-	return c.Sessions, !c.Failed
+	return c.Sessions, c.At, !c.Failed
 }
 
 // StartClaudeRefresh is how a host refreshes a stale cache without making the
@@ -182,38 +187,33 @@ func paneOfPID(pid int, panePIDs map[int]string) (string, bool) {
 	return "", false
 }
 
-// withClaude folds Claude Code's sessions into the document. An interactive
-// session finds its window by walking up from its process to a pane's, and
-// its status corrects the hook state where the hooks cannot have known:
-//
-//	working, but Claude Code says idle   -> idle   (an interrupt fires no Stop)
-//	idle or done, but Claude Code is busy -> working (a missed UserPromptSubmit)
-//
-// `waiting` is never overridden: it is the hook's precise news that the agent
-// is blocked on you, and Claude Code's busy/idle does not say so.
+// withClaude folds Claude Code's sessions into the document by the precedence
+// rule of spec.md §9: an interactive session finds its agent by walking up from
+// its process to a pane's, and corrects the hook state only where it is newer.
 func withClaude(doc *Doc, sd string, panes []Pane) {
-	sessions, ok := claudeSessions(sd)
+	sessions, at, ok := claudeSessions(sd)
 	if !ok {
 		return
 	}
 	pidPane := map[int]string{}
-	paneWin := map[string]string{}
 	for _, p := range panes {
 		if p.PID != nil {
 			pidPane[int(*p.PID)] = p.PaneID
 		}
+	}
+	paneWin := map[string]string{}
+	for _, p := range panes {
 		paneWin[p.PaneID] = p.WindowID
 	}
 	byWin := map[string]int{}
 	byPane := map[string]int{}
 	for i, a := range doc.Agents {
-		if a.WindowID != nil {
+		if a.PaneID != nil {
+			byPane[*a.PaneID] = i
+		} else if a.WindowID != nil {
 			if _, ok := byWin[*a.WindowID]; !ok {
 				byWin[*a.WindowID] = i
 			}
-		}
-		if a.PaneID != nil {
-			byPane[*a.PaneID] = i
 		}
 	}
 	bg := []Background{}
@@ -221,7 +221,8 @@ func withClaude(doc *Doc, sd string, panes []Pane) {
 	for _, s := range sessions {
 		if s.Kind == "background" {
 			bg = append(bg, Background{ID: s.ID, Name: s.Name, Cwd: s.Cwd, Status: s.Status,
-				State: s.State, SessionID: s.SessionID, Group: worktreeRepo(s.Cwd)})
+				State: s.State, SessionID: s.SessionID, StartedAt: s.StartedAt, WaitingFor: s.WaitingFor,
+				Group: worktreeRepo(s.Cwd)})
 			if r, _, ok := repoRoot(s.Cwd); ok {
 				roots[r] = true
 			}
@@ -246,27 +247,17 @@ func withClaude(doc *Doc, sd string, panes []Pane) {
 		if !ok {
 			continue
 		}
-		correct(&doc.Agents[i], ClaudeView{Status: s.Status, SessionID: s.SessionID, Name: s.Name})
-	}
-	// A background session with a top agent's name is that agent: Claude Code
-	// can move a session to the background while its window goes on showing
-	// it (the author's pr52 — the "bg child" was the agent in front of them).
-	// kel names its agents (`claude --name`), so the name is meaningful. The
-	// agent gets its status; it is not listed a second time.
-	names := map[string]int{}
-	for i, a := range doc.Agents {
-		if a.WindowID != nil {
-			names[a.Name] = i
-		}
+		correct(&doc.Agents[i], s, at)
 	}
 	kept := bg[:0]
 	for _, b := range bg {
-		i, ok := names[b.Name]
-		if !ok || doc.Agents[i].Claude != nil {
+		i, ok := foldTarget(doc.Agents, b)
+		if !ok {
 			kept = append(kept, b)
 			continue
 		}
-		correct(&doc.Agents[i], ClaudeView{Status: b.Status, SessionID: b.SessionID, Name: b.Name})
+		correct(&doc.Agents[i], ClaudeSession{Kind: "background", Status: b.Status, State: b.State, SessionID: b.SessionID,
+			Name: b.Name, StartedAt: b.StartedAt, WaitingFor: b.WaitingFor}, at)
 	}
 	bg = kept
 	pos := gitPositions(roots)
@@ -280,20 +271,98 @@ func withClaude(doc *Doc, sd string, panes []Pane) {
 	doc.Background = &bg
 }
 
-// correct gives an agent Claude Code's own account of it, which wins where the
-// hook state is stale: a turn that ended without a Stop, a resumed session
-// that never fired one.
-func correct(a *Agent, v ClaudeView) {
-	a.Claude = &v
-	if a.State == nil {
+// foldTarget finds the one agent a background session is: Claude Code can move
+// a session to the background while its window goes on showing it. The agent
+// is managed, has a window and no session of its own, and either shares the
+// session's name and directory or records its id. Zero or several is no fold.
+func foldTarget(agents []Agent, b Background) (int, bool) {
+	found := -1
+	for i, a := range agents {
+		if !a.Managed || a.WindowID == nil || a.Claude != nil {
+			continue
+		}
+		byID := a.ClaudeSession != nil && *a.ClaudeSession == b.SessionID
+		byName := a.Name == b.Name && a.Cwd != nil && (b.Cwd == *a.Cwd || strings.HasPrefix(b.Cwd, *a.Cwd+"/"))
+		if !byID && !byName {
+			continue
+		}
+		if found >= 0 {
+			return 0, false
+		}
+		found = i
+	}
+	return found, found >= 0
+}
+
+func mapClaude(s ClaudeSession) string {
+	switch {
+	case s.Status == "waiting":
+		return "waiting"
+	case s.Status == "busy":
+		return "working"
+	case s.Status == "idle":
+		return "idle"
+	}
+	return ""
+}
+
+func replaced(a *Agent, s ClaudeSession, at int64) bool {
+	if s.Kind == "background" {
+		return a.State == nil || a.StateSince == nil || *a.StateSince < float64(at)
+	}
+	return s.StartedAt > 0 && a.StateSince != nil && *a.StateSince < float64(s.StartedAt/1000)
+}
+
+// correct gives an agent Claude Code's own account of it (spec.md §9). The
+// newer of the hook and the cache wins; a session that began after the hook
+// state was written has replaced whatever wrote it.
+func correct(a *Agent, s ClaudeSession, at int64) {
+	a.Claude = &ClaudeView{Status: s.Status, SessionID: s.SessionID, Name: s.Name}
+	ctxOlder := a.Context != nil && (a.Context.At == nil || *a.Context.At < float64(at))
+	if a.Context != nil && a.Context.Session != nil && *a.Context.Session != s.SessionID && ctxOlder {
+		a.Context = nil
+	}
+	if a.State != nil && *a.State == "dead" {
 		return
 	}
-	switch {
-	case *a.State == "working" && v.Status == "idle":
-		a.State, a.Unseen = sp("idle"), false
-	case (*a.State == "idle" || *a.State == "done") && v.Status == "busy":
-		a.State, a.Unseen = sp("working"), false
+	want := mapClaude(s)
+	enter := func() {
+		a.Note = nil
+		if want == "waiting" {
+			a.Note = emptyToNil(s.WaitingFor)
+		}
 	}
+	if a.ClaudeSession != nil && *a.ClaudeSession != "" && *a.ClaudeSession != s.SessionID && replaced(a, s, at) {
+		a.Unseen, a.StateSince = false, nil
+		if a.State == nil || ctxOlder {
+			a.Context = nil
+		}
+		if want != "" {
+			a.State = sp(want)
+			enter()
+		}
+		return
+	}
+	if want == "" {
+		return
+	}
+	if a.State == nil {
+		a.State = sp(want)
+		enter()
+		return
+	}
+	if a.StateSince != nil && *a.StateSince >= float64(at) {
+		return
+	}
+	cur := *a.State
+	if cur == want {
+		return
+	}
+	if want == "idle" && (cur == "error" || cur == "throttled" || cur == "done") {
+		return
+	}
+	a.State, a.Unseen = sp(want), false
+	enter()
 }
 
 // Subagent is one row of an agent's subagent panel (Task-tool helpers).

@@ -82,3 +82,19 @@ func TestUnseen(t *testing.T) {
 		t.Error("an unreadable .seen must read unseen")
 	}
 }
+
+// .ctx grew an eighth field, the session; a seven-field file still parses.
+func TestCtxSessionField(t *testing.T) {
+	c := parseCtx("25\t1.5\t100\t1000\t-1\t1700000000\topus\tsess-1")
+	if c.Session == nil || *c.Session != "sess-1" || c.Model == nil || *c.Model != "opus" {
+		t.Errorf("8 fields: %+v", c)
+	}
+	c = parseCtx("25\t1.5\t100\t1000\t-1\t1700000000\topus")
+	if c.Session != nil || c.Pct == nil || *c.Pct != 25 {
+		t.Errorf("7 fields: %+v", c)
+	}
+	c = parseCtx("25\t1.5\t100\t1000\t-1\t1700000000\t\tsess-2")
+	if c.Model != nil || c.Session == nil || *c.Session != "sess-2" {
+		t.Errorf("empty model: %+v", c)
+	}
+}

@@ -1600,11 +1600,13 @@ printf '[{"pid":%s,"cwd":"%s","kind":"interactive","sessionId":"s5","name":"wt5"
   "${APID:-0}" "$WT5" "$WT5" > "$WORK/claude-agents.json"
 rm -f "$STATE/claude-agents.json"
 FA() { "$KEL" _fleet --panes | jq -r "$1"; }
+age_state() { local st; st="$(cut -d" " -f1 "$STATE/$K5.state")"; printf '%s %s\n' "$st" "$(( $(date +%s) - 30 ))" > "$STATE/$K5.state"; }
+age_state
 ok "working, but Claude Code says idle: idle"     '[ "$(FA ".agents[] | select(.name==\"wt5\") | .state")" = idle ]'
 ok "  ...the hook state alone still says working" '[ "$("$KEL" _fleet | jq -r ".agents[] | select(.name==\"wt5\") | .state")" = working ]'
 ok "a background agent is listed, with its repo"  '[ "$(FA ".background[0].id")" = bg77 ] && [ "$(FA ".background[0].group")" = api-gw ]'
 printf '[{"pid":1,"id":"bg55","cwd":"%s","kind":"background","sessionId":"s55","name":"wt5","status":"busy"}]' "$WT5" > "$WORK/claude-agents.json"
-rm -f "$STATE/claude-agents.json"; hook "$UP5" Stop
+rm -f "$STATE/claude-agents.json"; hook "$UP5" Stop; age_state
 ok "a background session named like an agent is that agent" '[ "$(FA ".background | length")" = 0 ] && [ "$(FA ".agents[] | select(.name==\"wt5\") | .state + \"/\" + .claude.status")" = working/busy ]'
 rm -f "$STATE/claude-agents.json"; hook "$UP5" UserPromptSubmit
 printf '#!/bin/sh\nexit 1\n' > "$WORK/claude-stub.fail"; chmod +x "$WORK/claude-stub.fail"
@@ -2164,6 +2166,28 @@ sed "s/kel rename '%%' 2>&1\"/kel rename '%%'\"/" "$CONF" > "$WORK/kel-conf-reve
 REVERTED=$(grep -n '^bind.*run-shell .*local/bin/kel rename' "$WORK/kel-conf-revert")
 ok "  ...and dropping it is caught"       '[ "$(printf "%s\n" "$REVERTED" | grep -c "2>&1")" != 1 ]'
 
+section "a hook writes only a pane it knows"
+reset
+NEW api-gw a
+P="$(pane_of api-gw a)"
+hk() { printf '{"session_id":"%s","cwd":"%s","hook_event_name":"%s"}' "$1" "$2" "$3" | env "${@:4}" "$KEL" hook "$3"; }
+CWD="$(tmux display-message -p -t "$P" '#{pane_current_path}')"
+rm -f "$STATE/$P.state"
+hk nostash "$CWD" UserPromptSubmit -u TMUX_PANE
+ok "no TMUX_PANE and no stash writes nothing, though a pane's cwd matches" '[ ! -f "$STATE/$P.state" ]'
+hk stashed "$CWD" SessionStart TMUX_PANE="$P"
+rm -f "$STATE/$P.state"
+hk stashed "$CWD" UserPromptSubmit -u TMUX_PANE
+ok "a stashed session still writes its pane"                              '[ "$(cut -d" " -f1 "$STATE/$P.state")" = working ]'
+rm -f "$STATE/$P.state"
+hk other "$CWD" UserPromptSubmit TMUX_PANE=%9999
+ok "a pane id from another server writes nothing"                         '[ ! -f "$STATE/$P.state" ] && [ ! -f "$STATE/%9999.state" ]'
+tmux new-session -d -s other_sess -c "$WORK"
+OP="$(tmux list-panes -t other_sess: -F '#{pane_id}' | head -1)"
+hk other2 "$WORK" UserPromptSubmit TMUX_PANE="$OP"
+ok "a pane outside kel's session writes nothing"                          '[ ! -f "$STATE/$OP.state" ]'
+tmux kill-session -t other_sess 2>/dev/null
+
 section "statusline records context without a live agent"
 reset
 NEW api-gw a
@@ -2176,6 +2200,7 @@ sl '{"session_id":"a","model":{"display_name":"Opus 5"},"workspace":{"current_di
 ok "a .ctx file is written"                         '[ -f "$STATE/$P.ctx" ]'
 ok "  ...with the right percentage"                 '[ "$(cut -f1 "$STATE/$P.ctx")" = 42 ]'
 ok "  ...and the model in the last field"           '[ "$(cut -f7 "$STATE/$P.ctx")" = "Opus 5" ]'
+ok "  ...and the session id as field 8"            '[ "$(cut -f8 "$STATE/$P.ctx")" = a ]'
 ok "ls surfaces it"                                 '[[ "$("$KEL" ls 2>/dev/null)" == *42%* ]]'
 ok "--json surfaces it"                             '[ "$("$KEL" ls --json | jq -r ".agents[0].context.pct")" = 42 ]'
 # the IFS-tab-folding regression: an empty field must not shift every later value
