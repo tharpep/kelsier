@@ -1118,6 +1118,22 @@ release_client
 ok "  ...and with no client attached, wake signals no one" '[ ! -s "$KEL_WAKE_TRACE" ]'
 unset KEL_WAKE_TRACE
 
+sbtext() { tmux capture-pane -p -t "$1" 2>/dev/null; }
+# when an assertion fails, show what the server held: these have failed only
+# on CI's macOS runner, where nothing can be looked at after
+sbdiag() { # pane  fail-count-before  [more panes]
+  local p="$1" q
+  [ "$fail" -gt "$2" ] || return 0
+  shift 2
+  printf '       panes: %s\n' "$(tmux list-panes -a -F '#{window_id}/#{pane_id}:#{@kel-sidebar}#{@kel-ready}:alt#{alternate_on}:#{pane_width}x#{pane_height}:#{pane_dead}' 2>&1 | tr '\n' ' ')"
+  printf '       windows: %s\n' "$(tmux list-windows -a -F '#{window_id}:#{window_active}#{window_name}' 2>&1 | tr '\n' ' ')"
+  printf '       clients: %s\n' "$(tmux list-clients -F '#{client_name}:#{session_attached}' 2>&1 | tr '\n' ' ')"
+  for q in "$p" "$@"; do
+    printf '       sidebar %s showed:\n' "$q"; sbtext "$q" | sed 's/^/       | /'
+  done
+  printf '       sidebar-fail.log: %s\n' "$(tail -n 5 "$STATE/sidebar-fail.log" 2>&1 | tr '\n' '|')"
+  printf '       trace: %s\n' "$(tail -n 8 "$KEL_SIDEBAR_TRACE" 2>&1 | tr '\n' '|')"
+}
 # a hidden sidebar runs no Program: it is off the alternate screen, burns no
 # CPU, and comes back drawing and answering keys when its window is shown
 NEW coppermind third
@@ -1125,6 +1141,7 @@ THW="$(window_of coppermind third)"
 wait_until '[ "$(sbcount "$THW")" = 1 ]'
 SB3="$(tmux list-panes -t "$THW" -F '#{@kel-sidebar} #{pane_id}' | awk '$1==1 {print $2}')"
 alt() { tmux display -p -t "$1" '#{alternate_on}'; }
+f0=$fail
 hold_client 40
 tmux select-window -t "$SBW"; "$KEL" _sidebar wake
 wait_until '[ "$(alt "$SB1")" = 1 ] && [ "$(alt "$SB2")" = 0 ] && [ "$(alt "$SB3")" = 0 ] && tmux capture-pane -p -t "$SB3" | grep -q Shells && tmux capture-pane -p -t "$SB3" | grep -q kel' 150
@@ -1150,6 +1167,7 @@ tmux send-keys -t "$SB2" Escape
 tmux select-window -t "$SBW"; "$KEL" _sidebar wake
 wait_until '[ "$(alt "$SB2")" = 0 ]' 80
 ok "  ...and pauses again when hidden"  '[ "$(alt "$SB2")" = 0 ]'
+sbdiag "$SB1" "$f0" "$SB2" "$SB3"
 release_client
 
 "$KEL" sidebar off >/dev/null 2>&1
@@ -1206,7 +1224,6 @@ ok "restore still closes an unused fresh-start shell beside its sidebar" '[ "$(w
 export KEL_AGENT='sleep 9999'
 reset
 sbpane() { tmux list-panes -t "$1" -F '#{@kel-sidebar} #{pane_id}' | awk '$1==1 {print $2; exit}'; }
-sbtext() { tmux capture-pane -p -t "$1" 2>/dev/null; }
 active_win() { tmux list-windows -t '=keltest' -F '#{window_active} #{window_id}' | awk '$1==1 {print $2}'; }
 ms() { perl -MTime::HiRes=time -e 'printf "%d\n", time*1000'; }   # BSD date has no %N
 sel() { jq -r .selected "$STATE/sidebar.json" 2>/dev/null; }
@@ -1219,13 +1236,6 @@ step_to() {
     wait_until '[ "$(sel)" != "$cur" ]' 30
   done
   [[ "$(sel)" == $3 ]]
-}
-# when an assertion here fails, show what the sidebar had on screen — these
-# have failed only on CI's macOS runner, where nothing can be looked at after
-sbdiag() { # pane  fail-count-before
-  [ "$fail" -gt "$2" ] || return 0
-  printf '       sidebar %s showed:\n' "$1"; sbtext "$1" | sed 's/^/       | /'
-  printf '       windows: %s\n' "$(tmux list-windows -t '=keltest' -F '#{window_active}#{window_name}' | tr '\n' ' ')"
 }
 K api-gw new wt -w >/dev/null 2>&1
 WTW="$(window_of api-gw wt)"; agent_up "$WTW"
