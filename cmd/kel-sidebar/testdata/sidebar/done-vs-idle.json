@@ -7,7 +7,7 @@
  "agents": [
   {
    "group": "kelsier",
-   "name": "warm",
+   "name": "seen-1m",
    "window_id": "@2",
    "index": 2,
    "current": false,
@@ -43,7 +43,7 @@
   },
   {
    "group": "kelsier",
-   "name": "cold",
+   "name": "seen-10m",
    "window_id": "@3",
    "index": 3,
    "current": false,

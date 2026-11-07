@@ -33,7 +33,6 @@ type setRow struct {
 var configDefaults = map[string]string{
 	"notify": "waiting error", "notify_bell": "on", "notify_desktop": "on", "notify_banner": "on",
 	"sidebar_width": "32", "ctx_warn": "70", "pr": "on", "pr_ttl": "300", "agent": "claude",
-	"cache_ttl": "300",
 }
 
 func cfgGet(c map[string]string, k string) string {
@@ -82,7 +81,6 @@ func settingRows(c map[string]string) []setRow {
 		{name: "agent", label: "Command", kind: setShow, value: cfgGet(c, "agent")},
 		{name: "worktrees", label: "Worktrees", kind: setShow, value: tildify(wt)},
 		{name: "ctx_warn", label: "Warn at context", kind: setStep, value: cfgGet(c, "ctx_warn") + "%"},
-		{name: "cache_ttl", label: "Cache stays warm", kind: setChoice, value: cacheChoice(cfgGet(c, "cache_ttl")), opts: []string{"5m", "1h"}},
 		{kind: setBlank},
 		{kind: setHead, label: "Network"},
 		{name: "pr", label: "PR lookups (gh)", kind: setToggle, on: isOn(cfgGet(c, "pr"))},
@@ -231,12 +229,6 @@ func applySetting(path, name, how string, termBg string) (refit bool, err error)
 		}
 		i = step(i, how, 1, 0, len(prTTLs)-1)
 		return false, setConfig(path, name, strconv.Itoa(prTTLs[i]))
-	case name == "cache_ttl":
-		v := "3600"
-		if how == "opt:5m" || (how == "toggle" && cfgGet(c, name) == "3600") {
-			v = "300"
-		}
-		return false, setConfig(path, name, v)
 	case name == "sidebar_bg":
 		v := ""
 		if how == "opt:Fixed" || (how == "toggle" && cfgGet(c, name) == "") {
@@ -262,13 +254,4 @@ func step(n int, how string, d, lo, hi int) int {
 		return hi
 	}
 	return n
-}
-
-// cacheChoice names a cache_ttl as Settings offers it: Claude Code's prompt
-// cache lives five minutes, or an hour with the longer cache.
-func cacheChoice(v string) string {
-	if v == "3600" {
-		return "1h"
-	}
-	return "5m"
 }

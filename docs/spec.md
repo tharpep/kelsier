@@ -323,7 +323,7 @@ in any terminal:
   answers** (ConPTY sits between them), so `sidebar_bg = "#rrggbb"` names the
   background to build from instead.
 - **Colour means state, and nothing else.** One colour per state (waiting,
-  working, done-unseen, throttled, dead); everything else is the default
+  working, done, throttled, dead); everything else is the default
   foreground, bold, or dim. A colour that does not mean a state is noise.
 - **One line per entry**, herdr's way (*revised 2026-11-03*; two lines
   until then): the name on the left, its branch or age right-aligned and
@@ -368,12 +368,19 @@ in any terminal:
 - **A chip names a state that needs a word**: `needs you`, `done` (unseen),
   `dead`, `quota`, `blocked`, on a dark fill of the state's colour, with half-block ends (`▐needs you▌`) so it reads rounded. Calm
   states are a dot and an age.
-- **A finished agent you have seen is warm, then cold** (*2026-11-04, #29*):
-  a green `○` while its prompt cache is still warm, since resuming it is
-  then cheap, the dim `○` once it is not. kel cannot see the cache, so the
-  lifetime is a setting, `cache_ttl` (300 s; 3600 for the one-hour cache),
-  measured from `state_since`. A `done` with no `state_since` is cold
-  (invariant 3).
+- **The first-column glyph is the state** (*revised 2026-11-07*): one line
+  per state, and the only glyph table.
+  - grey `○` idle: started, never prompted; the only colour that folds.
+  - green `●` done, unseen.
+  - green `○` done, seen; never folds.
+  - cyan `●` working, including an agent whose subagents are running.
+  - amber `●` waiting.
+  - red `●` error.
+  - red `✕` dead.
+  - violet `◌` throttled.
+  - grey `?` unknown.
+  - A `working` agent with no running subagent and no hook for 30 minutes
+    draws `◌` and `quiet`.
 - **One accent for the selected entry**, and it is not inverse video.
 - **Dots, not words, for state.** A chip appears only beside the dot, never
   as the only signal.
