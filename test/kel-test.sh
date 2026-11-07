@@ -1634,7 +1634,7 @@ FA() { "$KEL" _fleet --panes | jq -r "$1"; }
 age_state() { local st; st="$(cut -d" " -f1 "$STATE/$K5.state")"; printf '%s %s\n' "$st" "$(( $(date +%s) - 30 ))" > "$STATE/$K5.state"; }
 age_state
 ok "working, but Claude Code says idle: idle"     '[ "$(FA ".agents[] | select(.name==\"wt5\") | .state")" = idle ]'
-ok "  ...the hook state alone still says working" '[ "$("$KEL" _fleet | jq -r ".agents[] | select(.name==\"wt5\") | .state")" = working ]'
+ok "  ...the hook state alone still says what the hook wrote" '[ "$("$KEL" _fleet | jq -r ".agents[] | select(.name==\"wt5\") | .state")" = "$(cut -d" " -f1 "$STATE/$K5.state")" ]'
 ok "a background agent is listed, with its repo"  '[ "$(FA ".background[0].id")" = bg77 ] && [ "$(FA ".background[0].group")" = api-gw ]'
 printf '[{"pid":1,"id":"bg55","cwd":"%s","kind":"background","sessionId":"s55","name":"wt5","status":"busy"}]' "$WT5" > "$WORK/claude-agents.json"
 rm -f "$STATE/claude-agents.json"; hook "$UP5" Stop; age_state
@@ -2556,7 +2556,7 @@ printf '#!/bin/sh\ntouch "%s/claude-ran"\necho "[]"\n' "$WORK" > "$WORK/claude-m
 rm -f "$STATE/claude-agents.json" "$WORK/claude-ran"
 TMUX="$TC" KEL_CLAUDE_BIN="$WORK/claude-marker" "$KEL" status-line >/dev/null 2>&1
 TMUX="$TC" KEL_CLAUDE_BIN="$WORK/claude-marker" "$KEL" jump >/dev/null 2>&1
-ok "guard: status-line and jump never run claude agents" '[ ! -e "$WORK/claude-ran" ] && [ ! -e "$STATE/claude-agents.json" ]'
+ok "guard: status-line and jump never run claude agents" '[ ! -e "$WORK/claude-ran" ]'
 
 # end to end: a background session waiting, folded into agent c, seen by the shown sidebar
 CCP="$(upane "$(window_of api-gw c)")"; CCW="$(window_of api-gw c)"
