@@ -226,25 +226,20 @@ func TestLastCardSpacerIsOwned(t *testing.T) {
 	}
 }
 
-// No spacer ends the card list: each is followed by a card, a group header or a trailer.
-func TestNoSpacerAtTheEnd(t *testing.T) {
+// The last card before the footer owns its spacer too.
+func TestLastCardSpacerIsOwnedAtTheEnd(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
-	files, _ := filepath.Glob(filepath.Join(fixtures, "*.json"))
-	for _, f := range files {
-		name := strings.TrimSuffix(filepath.Base(f), ".json")
+	for _, name := range []string{"fifteen-three-repos", "done-seen", "dead-agent"} {
 		m := sbModel{doc: loadFixture(t, name), width: 32, height: 80, visible: true}
-		_, refs := hoverFrame(m)
+		lines, refs := hoverFrame(m)
+		last := -1
 		for i, r := range refs {
-			if !r.pad {
-				continue
+			if r.kind == "agent" {
+				last = i
 			}
-			if i+1 >= len(refs) {
-				t.Errorf("%s: spacer on the last row", name)
-				continue
-			}
-			if k := refs[i+1].kind; k != "agent" && k != "group" && k != "fold" {
-				t.Errorf("%s: spacer row %d is followed by %q", name, i, k)
-			}
+		}
+		if last < 0 || !refs[last].pad || strings.TrimSpace(lines[last]) != "" {
+			t.Errorf("%s: the last agent row %d is not a spacer: %+v", name, last, refs[last])
 		}
 	}
 }

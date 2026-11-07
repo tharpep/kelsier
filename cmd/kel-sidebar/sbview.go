@@ -1581,6 +1581,9 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 			one(id, lineRef{id: id, kind: "fold"}, lead(id)+"   "+dim+truncate(q.text(), avail)+reset)
 		}
 	}
+	if len(v.bgLoose) == 0 && owner != "" {
+		spacer()
+	}
 	if len(v.bgLoose) > 0 {
 		if len(v.agents) > 0 {
 			spacer()
