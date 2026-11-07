@@ -1221,7 +1221,6 @@ WTW="$(window_of api-gw wt)"; agent_up "$WTW"
 echo wip > "$WORK/repos/.kel-worktrees/api-gw-wt/scratch.txt"
 NEW api-gw main1
 MW="$(window_of api-gw main1)"
-printf '{"selected":"","expanded":{"quiet:api-gw":true}}\n' > "$STATE/sidebar.json"
 hold_client 40
 tmux select-window -t "$MW"; "$KEL" _sidebar wake
 SP="$(sbpane "$MW")"

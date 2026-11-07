@@ -177,7 +177,7 @@ func agentIDs(v sbView) []string {
 }
 
 func TestAgentWithNoStateReadsUnknown(t *testing.T) {
-	out, _ := renderView(buildView(loadFixture(t, "unknowns"), uiState{expanded: map[string]bool{quietKey("misc"): true}}), 32, 0, 0)
+	out, _ := renderView(buildView(loadFixture(t, "unknowns"), uiState{}), 32, 0, 0)
 	for _, l := range strings.Split(plain(out), "\n") {
 		if strings.Contains(l, "nostate") {
 			if !strings.HasPrefix(l, "  ? nostate") || !strings.HasSuffix(strings.TrimRight(l, " "), "unknown") {
@@ -326,8 +326,11 @@ func TestQuietKind(t *testing.T) {
 		a    fleet.Agent
 		want string
 	}{
-		{"nil state", fleet.Agent{}, "unknown"},
-		{"empty state", fleet.Agent{State: st("")}, "unknown"},
+		{"nil state, no clock", fleet.Agent{}, ""},
+		{"nil state, young", fleet.Agent{StateSince: since(60)}, ""},
+		{"nil state at 24h", fleet.Agent{StateSince: since(86400)}, "unknown"},
+		{"empty state at 24h", fleet.Agent{State: st(""), StateSince: since(90000)}, "unknown"},
+		{"unknown just under 24h", fleet.Agent{StateSince: since(86399)}, ""},
 		{"idle at 24h", fleet.Agent{State: st("idle"), StateSince: since(86400)}, "idle"},
 		{"idle just under 24h", fleet.Agent{State: st("idle"), StateSince: since(86399)}, ""},
 		{"done at 24h", fleet.Agent{State: st("done"), StateSince: since(90000)}, "idle"},
@@ -440,4 +443,64 @@ func TestQuietTrailerToggles(t *testing.T) {
 	if m.ui.expanded[quietKey("web-dashboard")] {
 		t.Error("a second enter did not fold the group")
 	}
+}
+
+func TestFoldRowsResolveTheirSpace(t *testing.T) {
+	m := needsModel(t, "density")
+	m.ui.expanded = map[string]bool{reposKey: true}
+	if sp, ok := m.selSpace(quietID("web-dashboard")); !ok || sp.label != "web-dashboard" || sp.parent != "" {
+		t.Errorf("a quiet trailer resolves to %+v, %v; want the repo's main space", sp, ok)
+	}
+	if _, ok := m.selSpace(reposID); ok {
+		t.Error("the Repos header resolves to a space")
+	}
+	m.ui.sel = reposID
+	for _, k := range []string{"n", "w", "t", "f", "g", "d"} {
+		nm, cmd := m.Update(tea.KeyPressMsg{Code: rune(k[0]), Text: k})
+		got := nm.(sbModel)
+		if cmd != nil || got.mode != modeNormal || !got.msgBad {
+			t.Errorf("%s on Repos: mode %v msgBad %v cmd %v", k, got.mode, got.msgBad, cmd != nil)
+		}
+	}
+}
+
+func TestFilteredShellKeepsItsMenu(t *testing.T) {
+	doc := loadFixture(t, "servers")
+	for i := range *doc.Panes {
+		if p := &(*doc.Panes)[i]; p.PaneID == "%3" {
+			p.Cmd, p.Ports = "vite", &[]int{5173}
+		}
+	}
+	v := buildView(doc, uiState{filter: "vite", sel: "%3"})
+	if len(v.shells) != 1 || len(v.spaces) != 0 {
+		t.Fatalf("filter vite kept %d shells, %d spaces", len(v.shells), len(v.spaces))
+	}
+	if kind, name, acts := selActions(v); kind != "pane" || name != "vite :5173" || len(acts) == 0 {
+		t.Errorf("hints: %q %q %v", kind, name, acts)
+	}
+	if title, acts := entryMenu(v); title != "vite :5173" || len(acts) == 0 {
+		t.Errorf("menu: %q %v", title, acts)
+	}
+}
+
+func TestPinnedReposHeaderFolds(t *testing.T) {
+	doc := loadFixture(t, "fifteen-three-repos")
+	ui := uiState{focused: true, sel: spaceID("/home/me/code/web-dashboard"), expanded: map[string]bool{reposKey: true}}
+	out, refs := renderView(buildView(doc, ui), 32, 16, 0)
+	rows := strings.Split(out, "\n")
+	for i, r := range refs {
+		if r.id != reposID {
+			continue
+		}
+		if strings.Contains(plain(rows[i]), "▌") || !strings.HasPrefix(plain(rows[i]), "  Repos ▾") {
+			t.Errorf("pinned Repos row %q carries the cursor or lost its label", plain(rows[i]))
+		}
+		m := sbModel{doc: doc, width: 32, height: 16, visible: true, ui: ui}
+		m.activate(reposID)
+		if m.ui.expanded[reposKey] {
+			t.Error("a click on the pinned row did not fold Repos")
+		}
+		return
+	}
+	t.Fatal("no row carries the Repos id while scrolled inside it")
 }

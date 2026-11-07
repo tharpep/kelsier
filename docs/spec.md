@@ -378,7 +378,7 @@ in any terminal:
 - **Dots, not words, for state.** A chip appears only beside the dot, never
   as the only signal.
 - **Whitespace, not box-drawing.** No borders inside the sidebar; sections are
-  separated by a blank line and a dim label (`Spaces`, `Agents`; lowercase until 2026-11-04). Repo groups under `Agents` are a blank row apart, each headed by its name and agent count.
+  separated by a blank line and a dim label (`Shells`, `Repos`, `Agents`; lowercase until 2026-11-04). Repo groups under `Agents` are a blank row apart, each headed by its name and agent count.
 - **Chrome, not a box** — the sidebar's background and border come from tmux
   per-pane styles (§5a), so it reads as part of the window, the way herdr's
   does.
