@@ -177,7 +177,7 @@ func agentIDs(v sbView) []string {
 }
 
 func TestAgentWithNoStateReadsUnknown(t *testing.T) {
-	out, _ := renderView(buildView(loadFixture(t, "unknowns"), uiState{}), 32, 0, 0)
+	out, _ := renderView(buildView(loadFixture(t, "unknowns"), uiState{expanded: map[string]bool{quietKey("misc"): true}}), 32, 0, 0)
 	for _, l := range strings.Split(plain(out), "\n") {
 		if strings.Contains(l, "nostate") {
 			if !strings.HasPrefix(l, "  ? nostate") || !strings.HasSuffix(strings.TrimRight(l, " "), "unknown") {
@@ -314,5 +314,130 @@ func TestPointerCursorFallsBackToItsAgent(t *testing.T) {
 	doc := loadFixture(t, "fifteen-three-repos")
 	if got := buildView(doc, uiState{sel: "q:@5"}).sel; got != "a:@5" {
 		t.Errorf("q: of an agent that left Needs you: %q", got)
+	}
+}
+
+func TestQuietKind(t *testing.T) {
+	const now = 1792018800
+	st := func(s string) *string { return &s }
+	since := func(ago float64) *float64 { f := float64(now) - ago; return &f }
+	for _, c := range []struct {
+		name string
+		a    fleet.Agent
+		want string
+	}{
+		{"nil state", fleet.Agent{}, "unknown"},
+		{"empty state", fleet.Agent{State: st("")}, "unknown"},
+		{"idle at 24h", fleet.Agent{State: st("idle"), StateSince: since(86400)}, "idle"},
+		{"idle just under 24h", fleet.Agent{State: st("idle"), StateSince: since(86399)}, ""},
+		{"done at 24h", fleet.Agent{State: st("done"), StateSince: since(90000)}, "idle"},
+		{"idle with no clock", fleet.Agent{State: st("idle")}, ""},
+		{"waiting for days", fleet.Agent{State: st("waiting"), StateSince: since(9e5)}, ""},
+		{"working for days", fleet.Agent{State: st("working"), StateSince: since(9e5)}, ""},
+		{"error for days", fleet.Agent{State: st("error"), StateSince: since(9e5)}, ""},
+		{"dead for days", fleet.Agent{State: st("dead"), StateSince: since(9e5)}, ""},
+		{"throttled for days", fleet.Agent{State: st("throttled"), StateSince: since(9e5)}, ""},
+	} {
+		if got := quietKind(c.a, now); got != c.want {
+			t.Errorf("%s: got %q, want %q", c.name, got, c.want)
+		}
+	}
+}
+
+func TestQuietFoldNeverHidesWhatMatters(t *testing.T) {
+	doc := loadFixture(t, "density")
+	const now = 1792018800
+	folded := func(ui uiState) map[string]bool {
+		ui.now = now
+		out := map[string]bool{}
+		for _, a := range buildView(doc, ui).agents {
+			if a.folded {
+				out[a.agent.Name] = true
+			}
+		}
+		return out
+	}
+	if got := folded(uiState{}); !got["gateway"] || !got["dashboard"] || !got["scratch"] || len(got) != 3 {
+		t.Errorf("folded: %v, want gateway dashboard scratch", got)
+	}
+	if got := folded(uiState{sel: "a:@4"}); got["gateway"] {
+		t.Error("the selected agent folded")
+	}
+	if got := folded(uiState{expanded: map[string]bool{quietKey("web-dashboard"): true}}); got["dashboard"] || got["scratch"] || !got["gateway"] {
+		t.Errorf("quiet:web-dashboard does not open that group alone: %v", got)
+	}
+	for i := range doc.Agents {
+		if doc.Agents[i].Name == "dashboard" {
+			doc.Agents[i].Unseen = true
+		}
+	}
+	if got := folded(uiState{}); got["dashboard"] {
+		t.Error("an unseen done agent, in Needs you, folded")
+	}
+	for i := range doc.Agents {
+		if doc.Agents[i].Name == "kelsier" {
+			doc.Agents[i].State = nil
+		}
+	}
+	if got := folded(uiState{}); got["kelsier"] {
+		t.Error("the agent of the window the sidebar sits in folded")
+	}
+	if got := folded(uiState{filter: "a"}); len(got) != 0 {
+		t.Errorf("a filter left agents folded: %v", got)
+	}
+}
+
+func TestQuietText(t *testing.T) {
+	for _, c := range []struct {
+		q    sbQuiet
+		want string
+	}{
+		{sbQuiet{idle: 3, unknown: 1}, "+ 3 idle 1d+ · 1 unknown"},
+		{sbQuiet{idle: 2}, "+ 2 idle 1d+"},
+		{sbQuiet{unknown: 2}, "+ 2 unknown"},
+		{sbQuiet{idle: 1, unknown: 1, open: true}, "− 1 idle 1d+ · 1 unknown"},
+	} {
+		if got := c.q.text(); got != c.want {
+			t.Errorf("got %q, want %q", got, c.want)
+		}
+	}
+}
+
+func TestDensityFrames(t *testing.T) {
+	t.Setenv("HOME", "/home/me")
+	doc := loadFixture(t, "density")
+	open := uiState{now: 1792018800, expanded: map[string]bool{reposKey: true, quietKey("web-dashboard"): true}}
+	out, _ := renderView(buildView(doc, open), 32, 0, 1792018800)
+	got := plain(out) + "\n"
+	gold := filepath.Join(fixtures, "density-open.32.golden")
+	if *update {
+		if err := os.WriteFile(gold, []byte(got), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return
+	}
+	want, err := os.ReadFile(gold)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != string(want) {
+		t.Errorf("changed:\n--- got\n%s\n--- want\n%s", got, want)
+	}
+}
+
+func TestQuietTrailerToggles(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	m := sbModel{doc: loadFixture(t, "density"), width: 32, height: 40, visible: true, ui: uiState{now: 1792018800}}
+	id := quietID("web-dashboard")
+	if m.view().indexOf(id) < 0 {
+		t.Fatalf("the trailer is not selectable: %v", m.view().entryIDs)
+	}
+	m.activate(id)
+	if !m.ui.expanded[quietKey("web-dashboard")] {
+		t.Error("enter on the trailer did not open the group")
+	}
+	m.activate(id)
+	if m.ui.expanded[quietKey("web-dashboard")] {
+		t.Error("a second enter did not fold the group")
 	}
 }

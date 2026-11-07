@@ -123,9 +123,6 @@ func TestSidebarView(t *testing.T) {
 				t.Errorf("a dead agent's shell reappeared under %s", s.label)
 			}
 		}
-		if s.open != s.current {
-			t.Errorf("space %s: open=%v current=%v; only the current space opens by default", s.label, s.open, s.current)
-		}
 	}
 	// a worktree is its own space; the main checkout sorts before its worktrees
 	want := "api-gw|api-gw kelsier|kelsier kelsier|kelsier-docs kelsier|kelsier-fix-auth misc|group:misc web-dashboard|web-dashboard web-dashboard|web-dashboard-usage-charts"
@@ -144,13 +141,12 @@ func TestSidebarView(t *testing.T) {
 		t.Errorf("default selection: got %q, want the current agent", v.sel)
 	}
 
-	// a toggle closes the current space and opens another
-	v = buildView(loadFixture(t, "fifteen-three-repos"), uiState{expanded: map[string]bool{
-		"/home/me/code/kelsier": false, "/home/me/code/api-gw": true}})
-	for _, s := range v.spaces {
-		if want := s.label == "api-gw"; s.open != want {
-			t.Errorf("after toggles, space %s open=%v", s.key, s.open)
-		}
+	if v.reposOpen || v.indexOf(spaceID("/home/me/code/api-gw")) >= 0 {
+		t.Error("Repos is folded by default: no space is selectable")
+	}
+	v = buildView(loadFixture(t, "fifteen-three-repos"), uiState{expanded: map[string]bool{reposKey: true}})
+	if !v.reposOpen || v.indexOf(spaceID("/home/me/code/api-gw")) < 0 {
+		t.Error("sec:repos opens Repos")
 	}
 
 	// unknown panes say so, in both sections
@@ -246,17 +242,17 @@ func TestSidebarKeys(t *testing.T) {
 		t.Error("the cursor is not shared through sidebar.json")
 	}
 
-	// space on the current space folds it, and the fold is shared
-	m.ui.sel = spaceID("/home/me/code/kelsier")
+	// space on the Repos header opens it, and the fold is shared
+	m.ui.sel = reposID
 	press("space")
-	for _, s := range m.view().spaces {
-		if s.key == "/home/me/code/kelsier" && s.open {
-			t.Error("space did not fold the current space")
-		}
+	if !m.view().reposOpen || !sbLoadShared().Expanded[reposKey] {
+		t.Error("space did not open Repos, or the fold is not shared")
 	}
-	if sbLoadShared().Expanded["/home/me/code/kelsier"] != false {
-		t.Error("the fold is not shared")
+	press("space")
+	if m.view().reposOpen || sbLoadShared().Expanded[reposKey] {
+		t.Error("space did not fold Repos again")
 	}
+	m.ui.expanded = map[string]bool{reposKey: true}
 
 	// / filters live; esc clears
 	press("/")
@@ -301,7 +297,7 @@ func TestSidebarKeys(t *testing.T) {
 		t.Errorf("r on a space: mode %v msg %q", m.mode, m.msg)
 	}
 
-	// a click on a space's line toggles it
+	// a click on a space selects it
 	_, refs := renderView(m.view(), m.width, m.height, 0)
 	y := -1
 	for i, r := range refs {
@@ -312,11 +308,6 @@ func TestSidebarKeys(t *testing.T) {
 	}
 	nm, _ := m.Update(tea.MouseClickMsg{X: 5, Y: y, Button: tea.MouseLeft})
 	m = nm.(sbModel)
-	for _, s := range m.view().spaces {
-		if s.key == "/home/me/code/api-gw" && !s.open {
-			t.Error("a click did not open the space")
-		}
-	}
 	if m.view().sel != spaceID("/home/me/code/api-gw") {
 		t.Error("a click did not select")
 	}
@@ -540,7 +531,7 @@ func TestWorktreesNest(t *testing.T) {
 				t.Errorf("old-ui: %+v", s)
 			}
 			// kelsier folds its idle worktrees; old-ui is selectable only open
-			ui := uiState{focused: true, sel: spaceID(s.key), expanded: map[string]bool{wtKey("/home/me/code/kelsier"): true}}
+			ui := uiState{focused: true, sel: spaceID(s.key), expanded: map[string]bool{reposKey: true, wtKey("/home/me/code/kelsier"): true}}
 			if _, acts := entryMenu(buildView(loadFixture(t, "worktrees"), ui)); len(acts) < 2 || acts[1].key != "s" {
 				t.Errorf("a merged worktree's menu does not lead with sweep: %+v", acts)
 			}
@@ -584,12 +575,12 @@ func TestWorktreeFold(t *testing.T) {
 			t.Errorf("%s changed:\n--- got\n%s\n--- want\n%s", name, got, want)
 		}
 	}
-	check("folded", frame(uiState{}))
-	check("expanded", frame(uiState{expanded: map[string]bool{wtKey(repo): true}}))
+	check("folded", frame(uiState{expanded: map[string]bool{reposKey: true}}))
+	check("expanded", frame(uiState{expanded: map[string]bool{reposKey: true, wtKey(repo): true}}))
 
 	// enter on the summary row (a click is the same call) flips the fold, in the
 	// shared map like any other, and keeps the cursor on the row
-	m := sbModel{doc: doc, width: 32, height: 30, visible: true}
+	m := sbModel{doc: doc, width: 32, height: 30, visible: true, ui: uiState{expanded: map[string]bool{reposKey: true}}}
 	m.ui.sel = wtID(repo)
 	if v := m.view(); v.indexOf(wtID(repo)) < 0 {
 		t.Fatalf("the summary row is not selectable: %v", v.entryIDs)
@@ -646,7 +637,7 @@ func TestHelpHover(t *testing.T) {
 // A long worktree name gives way to its state, at any width.
 func TestWorktreeRowKeepsState(t *testing.T) {
 	for _, w := range []int{28, 32, 40} {
-		ui := uiState{expanded: map[string]bool{wtKey("/home/me/code/kelsier"): true}}
+		ui := uiState{expanded: map[string]bool{reposKey: true, wtKey("/home/me/code/kelsier"): true}}
 		out, _ := renderView(buildView(loadFixture(t, "worktrees"), ui), w, 0, 0)
 		found := false
 		for _, l := range strings.Split(plain(out), "\n") {
@@ -950,11 +941,11 @@ func TestStickyHeaders(t *testing.T) {
 	}
 
 	// Select a space that scrolls past the top at h=16
-	vSpace := buildView(fifteenDoc, uiState{focused: true, sel: spaceID("/home/me/code/web-dashboard")})
+	vSpace := buildView(fifteenDoc, uiState{focused: true, sel: spaceID("/home/me/code/web-dashboard"), expanded: map[string]bool{reposKey: true}})
 	outSpace, _ := renderView(vSpace, 32, 16, 0)
 	linesSpace := strings.Split(plain(outSpace), "\n")
-	if i := pinnedEnd(linesSpace); len(linesSpace) <= i || linesSpace[i] != "  Spaces" {
-		t.Errorf("sticky header for scrolled spaces: want Spaces under the pinned block, got %q", linesSpace)
+	if i := pinnedEnd(linesSpace); len(linesSpace) <= i || !strings.HasPrefix(linesSpace[i], "  Repos ▾") {
+		t.Errorf("sticky header for scrolled spaces: want Repos under the pinned block, got %q", linesSpace)
 	}
 }
 
@@ -1138,9 +1129,10 @@ func TestEntryMenu(t *testing.T) {
 	if cmd == nil {
 		t.Error("h on an agent opened no history")
 	}
+	m.ui.expanded = map[string]bool{reposKey: true}
 	m.ui.sel = "s:/home/me/code/api-gw"
 	if _, cmd := m.Update(tea.KeyPressMsg{Code: 'h', Text: "h"}); cmd != nil {
-		t.Error("h on a space still closes it, with no popup")
+		t.Error("h on a space opens a popup")
 	}
 }
 
