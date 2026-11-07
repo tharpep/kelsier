@@ -365,7 +365,12 @@ with nothing in kel to assert against. Re-breaking an `unguarded` one is silent.
 - `[principle]` **`$TMUX` beats `TMUX_TMPDIR` for socket resolution**, so an
   experiment run from inside a kel pane without `-L` or `-S` reaches the real
   server; it killed the author's workspace on 2026-11-05. Use
-  `tmux -L <label> -f /dev/null`, never a bare `kill-server`.
+  `tmux -L <label> -f /dev/null`, never a bare `kill-server`, and set
+  `trap 'tmux -L <label> kill-server' EXIT` first so the socket goes with the run.
+- `[principle]` **Never run `install.sh` from a worktree.** It points
+  `~/.local/bin/kel` at that worktree and appends its `kel.conf` to
+  `~/.tmux.conf`. Removing the worktree then breaks every kel call and hook
+  (2026-11-07).
 - `[guarded]` **A removed `TMUX_TMPDIR` falls back to `/tmp`, the real socket.** tmux's
   socket path is `$TMUX_TMPDIR:/tmp/`. A TERM ran `cleanup`, which deleted the dir and
   left the script running, so every later call reached `/tmp/tmux-<uid>/default` and
