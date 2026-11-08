@@ -999,6 +999,7 @@ func (m sbModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.doc = d
 			}
 			m.ui = m.withShared()
+			m.adoptSel()
 			m.markSeen()
 			return m, tea.Batch(m.loadCmd(), tickAfter(), m.askColours())
 		}
@@ -1014,6 +1015,7 @@ func (m sbModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.loading = false
 		m.doc = msg.doc
 		m.ui = m.withShared()
+		m.adoptSel()
 		if m.visible {
 			for i := range m.doc.Agents {
 				a := &m.doc.Agents[i]
@@ -1200,6 +1202,17 @@ func (m sbModel) withShared() uiState {
 	ui.expanded = sh.Expanded
 	ui.now = time.Now().Unix()
 	return ui
+}
+
+// pinned by TestFreshSidebarAdoptsTheCurrentAgentAsItsSelection
+func (m *sbModel) adoptSel() {
+	if !m.visible || m.ui.filter != "" {
+		return
+	}
+	if v := buildView(m.doc, m.ui); v.sel != "" && v.sel != m.ui.sel {
+		m.ui.sel = v.sel
+		m.saveShared()
+	}
 }
 
 // press is a key pressed by name, as a menu item or a click presses it.
@@ -1785,6 +1798,7 @@ func runSidebar(once bool) {
 	trace(m.myPane)
 	m.doc = fleet.Load(fleet.Options{Panes: true})
 	m.ui = m.withShared()
+	m.adoptSel()
 	if m.visible {
 		m.markSeen()
 	}

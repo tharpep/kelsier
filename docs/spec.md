@@ -365,6 +365,12 @@ in any terminal:
   entry's detail inside it — context and cost, what it is doing, subagents;
   for a space, its ports and agent count. A waiting agent's reason shows
   whether or not it is selected.
+- **The selection is the target, and it follows jumps.** The highlighted
+  entry is the one held in `sidebar.json`: a sidebar that finds none, or one
+  that no longer exists, adopts the agent it sits beside and saves it, so a
+  new agent never starts in `~` under a highlight on a repo. A jump (`kel
+  jump`, the banner's ↵ go, a Needs you row, `kel new`) writes `a:<pane id>`
+  and wakes the shown sidebar; plain window switching does not.
 - **A chip names a state that needs a word**: `needs you`, `done` (unseen),
   `dead`, `quota`, `blocked`, on a dark fill of the state's colour, with half-block ends (`▐needs you▌`) so it reads rounded. Calm
   states are a dot and an age.

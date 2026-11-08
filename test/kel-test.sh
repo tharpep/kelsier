@@ -757,6 +757,17 @@ rm -f "$STATE/$DW.state"
 TMUX="$TMUX_TMPDIR/tmux-$(id -u)/default,$(tmux display-message -p '#{pid}'),0" "$KEL" jump
 cur="$(tmux list-windows -t '=keltest' -F '#{window_active} #{window_id}' | awk '$1==1 {print $2}')"
 ok "  ...and is next once none does"            '[ "$cur" = "$CW" ]'
+# the shared selection follows a jump, keeps the folds, and a plain window
+# switch leaves it alone
+printf '{"selected":"a:%%gone","expanded":{"sec:repos":true}}' > "$STATE/sidebar.json"
+tmux select-window -t "$DW"
+ok "plain select-window leaves the shared selection alone" '[ "$(jq -r .selected "$STATE/sidebar.json")" = "a:%gone" ]'
+printf 'error %s\n' "$(( $(date +%s) - 60 ))" > "$STATE/$CW.state"
+TMUX="$TMUX_TMPDIR/tmux-$(id -u)/default,$(tmux display-message -p '#{pid}'),0" "$KEL" jump
+JP="$(tmux display -p -t "$CW" '#{pane_id}')"
+ok "kel jump selects the agent it lands on" '[ "$(jq -r .selected "$STATE/sidebar.json")" = "a:$JP" ]'
+ok "  ...and keeps the folds" '[ "$(jq -r ".expanded[\"sec:repos\"]" "$STATE/sidebar.json")" = true ]'
+rm -f "$STATE/$CW.state" "$STATE/sidebar.json"
 release_client
 rm -f "$STATE/$CW.state"
 now=$(date +%s)
@@ -1994,6 +2005,7 @@ hook "$P" UserPromptSubmit
 ok "  ...and takes it down when the agent moves on" '[ ! -s "$STATE/banner" ] && [ -z "$(tmux show-options -v -t "=keltest:" status-format[0] 2>/dev/null)" ] && [ -z "$(tmux show-options -v -t "=keltest:" status 2>/dev/null)" ]'
 ok "  ...leaving no empty status-format behind, which blanks the bar" '! tmux show-options -t "=keltest:" | grep -q "^status-format"'
 NEW api-gw b
+ok "kel new selects the agent it makes" '[ "$(jq -r .selected "$STATE/sidebar.json")" = "a:$(userpane "$(window_of api-gw b)")" ]'
 hold_client 20
 tmux select-window -t "$(window_of api-gw b)"
 hook "$P" Notification permission_prompt "needs Bash"
@@ -2003,6 +2015,12 @@ ok "visiting the agent clears its line"   '[ ! -s "$STATE/banner" ]'
 tmux select-window -t "$(window_of api-gw b)"; hook "$P" UserPromptSubmit; hook "$P" Notification permission_prompt "again"
 "$KEL" _click bx '' ''
 ok "✕ dismisses it"                        '[ ! -s "$STATE/banner" ]'
+tmux select-window -t "$(window_of api-gw b)"
+printf '%s\twaiting\ta\ttext\n' "$P" > "$STATE/banner"
+printf '{"selected":"a:%%gone","expanded":{"sec:repos":true}}' > "$STATE/sidebar.json"
+"$KEL" _click bgo '' ''
+ok "a click on the banner selects the agent it lands on, folds kept" '[ "$(jq -r .selected "$STATE/sidebar.json")" = "a:$P" ] && [ "$(jq -r ".expanded[\"sec:repos\"]" "$STATE/sidebar.json")" = true ]'
+: > "$STATE/banner"
 ok "kel.conf clears it when a window is visited" 'grep -q "session-window-changed.*kel _banner seen" "$HERE/../tmux/kel.conf"'
 # #23: a line outlives what it announced when no hook says so — the pane
 # exited, or left waiting some other way. Every redraw drops those.

@@ -542,6 +542,18 @@ sidebar_wake() { # [all]
   return 0
 }
 
+# pinned by "kel jump selects the agent it lands on"
+select_agent() { # pane-or-window-id
+  [ -n "${1:-}" ] || return 0
+  local f="$STATE_DIR/sidebar.json" src=/dev/null tmp
+  [ -f "$f" ] && src="$f"
+  tmp="$(mktemp "$STATE_DIR/.sel.XXXXXX" 2>/dev/null)" || return 0
+  if jq -cn --arg s "a:$1" 'input? // {} | .selected = $s' "$src" > "$tmp" 2>/dev/null; then
+    mv -f "$tmp" "$f"
+  else rm -f "$tmp"; return 0; fi
+  sidebar_wake
+}
+
 # Give back a sidebar any kel window has lost.  `ensure` runs on creation
 # events, for the window being created, so a window whose sidebar died stayed
 # without one until some other window was made — the user saw it as "my shells
@@ -1064,6 +1076,7 @@ cmd_new() {
   say "new agent  $name  [$group]  ($isolation${branch:+, branch $branch}${split:+, split $split})"
   goto_window "$wid"
   [ -n "$split" ] && tmux select-pane -t "$pane" 2>/dev/null
+  select_agent "$pane"
   snapshot
 }
 
@@ -2428,6 +2441,7 @@ banner_go() { # client
   if [ -n "${1:-}" ]; then tmux switch-client -c "$1" -t "$wid" 2>/dev/null || tmux select-window -t "$wid" 2>/dev/null
   else tmux select-window -t "$wid" 2>/dev/null; fi
   case "$key" in %*) tmux select-pane -t "$key" 2>/dev/null ;; esac
+  select_agent "$key"
   banner_drop "$key"
 }
 
@@ -3202,6 +3216,7 @@ cmd_jump() {
   IFS=$'\t' read -r ti tw label ep tp st <<< "$tgt"
   tmux switch-client ${c[@]+"${c[@]}"} -t "=$KEL_PREFIX" \; select-window -t "$tw"
   [ -n "$tp" ] && tmux select-pane -t "$tp" 2>/dev/null
+  select_agent "${tp:-$tw}"
 
   # say where you landed and how long it has been sitting — the jump is
   # otherwise silent, and "which one was that?" is the next question

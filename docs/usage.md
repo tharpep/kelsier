@@ -227,6 +227,8 @@ Each entry is one line. The selection stands on a lighter block with a blue
 `▌` down its side and its detail inside; where you are is the name in bold. A
 doubtful `working` reads `quiet 2h` in grey italic.
 
+The selection is shared by every window's sidebar, and it is what `n`, `w`, `t` and `+ New` act on. A new sidebar starts on the agent you are in, so what is highlighted is where a new agent will start. It follows a jump: `` prefix ` ``, a click on the banner, a Needs you row, and the window `kel new` makes. Moving with `j` `k` or the pointer never switches windows, and neither does `prefix n` / `p` / a window number.
+
 | key | |
 |---|---|
 | `Ctrl-b Space` | put the keyboard in the sidebar (replaces tmux's `next-layout` on that key) |
