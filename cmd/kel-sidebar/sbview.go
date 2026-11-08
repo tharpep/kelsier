@@ -961,7 +961,7 @@ func shortNote(n string) string {
 
 type summary struct {
 	text, colour string
-	titled, wrap bool
+	wrap         bool
 }
 
 func summaryOf(a fleet.Agent) summary {
@@ -986,7 +986,9 @@ func summaryOf(a fleet.Agent) summary {
 			return summary{text: r, colour: red}
 		}
 	case "done", "idle":
-		return summary{titled: true}
+		if a.LastMessage != nil && *a.LastMessage != "" {
+			return summary{text: *a.LastMessage, colour: dim, wrap: true}
+		}
 	}
 	return summary{}
 }
@@ -1502,10 +1504,6 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 		pre := lead(id) + "   "
 		sel := id == v.sel
 		sum := summaryOf(a.agent)
-		title := ""
-		if t := a.agent.Title; t != nil {
-			title = *t
-		}
 		tasks := taskCount(a.agent.Tasks)
 		tw := 0
 		if tasks != "" {
@@ -1517,12 +1515,6 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 		}
 		var lines []string
 		switch {
-		case sum.titled && title != "" && !sel:
-			lines = []string{pre + dim + truncate(title, ta) + reset}
-		case sum.titled && title != "":
-			for _, l := range wrapWords(title, avail, 2) {
-				lines = append(lines, pre+dim+l+reset)
-			}
 		case sum.text != "" && sel && sum.wrap:
 			for _, l := range wrapWords(sum.text, avail, 2) {
 				lines = append(lines, pre+sum.colour+l+reset)
@@ -1536,11 +1528,6 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 		rows = append(rows, lines...)
 		sums := len(lines)
 		if sel {
-			if title != "" && !sum.titled {
-				for _, l := range wrapWords(title, avail, 2) {
-					rows = append(rows, pre+dim+l+reset)
-				}
-			}
 			ft := agentFacts(a.agent)
 			facts := pre + mid + truncate(ft, avail) + reset
 			if tasks != "" && len([]rune(ft)) <= avail-tw {

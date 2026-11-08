@@ -149,10 +149,10 @@ scrolls; more than four needing you fold into `+N more`.
   you`, `done`, `error`, `dead`, `quota`. **Every agent has one line under it,
   chosen by its state:** working, what it is doing (`editing sbview.go`, its last
   tool call, from the tail of Claude Code's own transcript); waiting, what it
-  waits for (`allow Bash?`); an API error, which (`Rate limit reached`); finished or idle, the
-  session's **title**, the first thing you typed to it, from the head of the same
-  transcript (none for an agent with no Claude transcript). Nothing known, no
-  line. The selected agent opens to its title in full, the model's name, context
+  waits for (`allow Bash?`); an API error, which (`Rate limit reached`); finished or idle, its
+  **last message**, the first line of its last reply, markdown stripped, from the tail of the same
+  transcript (none for an agent with no Claude transcript or no reply yet). Nothing known, no
+  line. The selected agent opens to that line in full, the model's name, context
   % and cost (`Opus 5.5 · 36% · $10.65`), and its subagents. An agent whose
   session keeps a task list shows its progress, dim, at the right of that line
   (`3/7`: done of all; on the context line when selected).

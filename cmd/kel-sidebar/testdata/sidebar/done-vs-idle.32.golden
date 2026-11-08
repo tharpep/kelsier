@@ -7,12 +7,12 @@
   [38;2;107;107;116mAgents[0m
   [38;2;161;161;170mkelsier[0m                     [38;2;85;85;94m3[0m
   [38;2;95;211;141m○[0m seen-1m                  [38;2;107;107;116m1m[0m
-    [38;2;107;107;116mFix the flaky snapshot test[0m
+    [38;2;107;107;116mI read the install script …[0m
 
   [38;2;95;211;141m○[0m seen-10m                [38;2;107;107;116m10m[0m
-    [38;2;107;107;116mPort the land check to Go[0m
+    [38;2;107;107;116mPR 59 is merged, so passes…[0m
 
   [38;2;107;107;116m○[0m resting                 [38;2;107;107;116m10m[0m
-    [38;2;107;107;116mReview the install script[0m
+    [38;2;107;107;116mBoth reviews are in; the s…[0m
 
   [38;2;107;107;116m≡ [0mSettings             [38;2;107;107;116m? [0mHelp

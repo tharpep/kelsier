@@ -43,9 +43,11 @@
     └ ● fix-auth · bg
 
   ● docs             15m ▐done▌
+    PR 59 is merged, so passes…
 
   web-dashboard               4
   ○ dashboard            49h00m
+    Tests pass. I left the fla…
 
   ● usage-charts            30s
 

@@ -39,7 +39,7 @@
    },
    "unseen": false,
    "pane_id": "%2",
-   "title": "Fix the flaky snapshot test"
+   "last_message": "I read the install script end to end and found two places it clobbers settings."
   },
   {
    "group": "kelsier",
@@ -75,7 +75,7 @@
    },
    "unseen": false,
    "pane_id": "%3",
-   "title": "Port the land check to Go"
+   "last_message": "PR 59 is merged, so passes now skip the card greeting."
   },
   {
    "group": "kelsier",
@@ -111,7 +111,7 @@
    },
    "unseen": false,
    "pane_id": "%4",
-   "title": "Review the install script"
+   "last_message": "Both reviews are in; the second one found a race in sweep."
   }
  ],
  "panes": [

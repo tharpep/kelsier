@@ -37,8 +37,7 @@
     "at": 1792018795,
     "model": "Opus 5.5 (1M context)"
    },
-   "unseen": false,
-   "title": "Go to PR 30, review, begin phase 1."
+   "unseen": false
   },
   {
    "group": "kelsier",
@@ -72,8 +71,7 @@
     "at": 1792018795,
     "model": "Opus 5.5 (1M context)"
    },
-   "unseen": false,
-   "title": "Migrate the session store to sqlite"
+   "unseen": false
   }
  ],
  "panes": [

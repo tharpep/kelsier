@@ -72,7 +72,7 @@
     "model": "Opus 5.5 (1M context)"
    },
    "unseen": true,
-   "title": "Update the changelog for the 0.9 release"
+   "last_message": "Done. The land check now runs in Go; bash only calls it and prints the result."
   }
  ],
  "panes": [

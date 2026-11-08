@@ -121,7 +121,8 @@
     "at": 1792018795,
     "model": "Opus 5.5 (1M context)"
    },
-   "unseen": true
+   "unseen": true,
+   "last_message": "PR 59 is merged, so passes now skip the card greeting."
   },
   {
    "group": "api-gw",
@@ -155,7 +156,8 @@
     "at": 1792018795,
     "model": "Opus 5.5 (1M context)"
    },
-   "unseen": false
+   "unseen": false,
+   "last_message": "Both reviews are in; the second one found a race in sweep."
   },
   {
    "group": "api-gw",
@@ -223,7 +225,8 @@
     "at": 1792018795,
     "model": "Opus 5.5 (1M context)"
    },
-   "unseen": false
+   "unseen": false,
+   "last_message": "Tests pass. I left the flaky one skipped and said why in the PR."
   },
   {
    "group": "web-dashboard",

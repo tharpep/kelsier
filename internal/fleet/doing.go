@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"unicode"
 )
 
 // What a working agent is doing now — its last tool call, in a few words
@@ -252,4 +253,117 @@ func withDoing(doc *Doc, paths []string) {
 			a.Doing = sp(d)
 		}
 	}
+}
+
+// lastMessageOf is the text of the transcript's last assistant message that
+// has any, first line, markdown stripped; "" when it cannot be read or none
+// is within the largest tail — never a guess.
+func lastMessageOf(path string) string {
+	f, err := os.Open(path)
+	if err != nil {
+		return ""
+	}
+	defer f.Close()
+	st, err := f.Stat()
+	if err != nil {
+		return ""
+	}
+	for _, n := range doingTails {
+		if m, found := lastMessageIn(f, st.Size(), n); found {
+			return m
+		}
+		if n >= st.Size() {
+			break
+		}
+	}
+	return ""
+}
+
+func lastMessageIn(f *os.File, size, n int64) (string, bool) {
+	off := size - n
+	if off < 0 {
+		off = 0
+	}
+	buf := make([]byte, size-off)
+	if _, err := f.ReadAt(buf, off); err != nil && err != io.EOF {
+		return "", false
+	}
+	lines := bytes.Split(buf, []byte("\n"))
+	if off > 0 && len(lines) > 0 {
+		lines = lines[1:]
+	}
+	for i := len(lines) - 1; i >= 0; i-- {
+		var l tline
+		if json.Unmarshal(lines[i], &l) != nil || l.Type != "assistant" {
+			continue
+		}
+		if m := firstLine(promptText(l.Message.Content)); m != "" {
+			return m, true
+		}
+	}
+	return "", false
+}
+
+// firstLine is the first line of markdown text that says something, with its
+// emphasis, code ticks, heading marks and bullet stripped.
+func firstLine(text string) string {
+	for _, raw := range strings.Split(text, "\n") {
+		s := strings.TrimSpace(raw)
+		if strings.HasPrefix(s, "```") {
+			continue
+		}
+		s = strings.TrimSpace(strings.TrimLeft(s, "#"))
+		for _, b := range []string{"- ", "* "} {
+			s = strings.TrimPrefix(s, b)
+		}
+		s = strings.NewReplacer("**", "", "`", "").Replace(s)
+		if s = cleanTitle(s); s != "" {
+			return s
+		}
+	}
+	return ""
+}
+
+// withLastMessage fills Agent.LastMessage for every done or idle agent.
+func withLastMessage(doc *Doc, paths []string) {
+	for i := range doc.Agents {
+		a := &doc.Agents[i]
+		if a.State == nil || (*a.State != "done" && *a.State != "idle") {
+			continue
+		}
+		if m := lastMessageOf(paths[i]); m != "" {
+			a.LastMessage = sp(m)
+		}
+	}
+}
+
+func cleanTitle(s string) string {
+	return strings.Join(strings.Fields(strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) {
+			return ' '
+		}
+		return r
+	}, s)), " ")
+}
+
+// promptText is a message's text: a string, or its text blocks joined.
+func promptText(raw json.RawMessage) string {
+	var s string
+	if json.Unmarshal(raw, &s) == nil {
+		return strings.TrimSpace(s)
+	}
+	var parts []struct {
+		Type string `json:"type"`
+		Text string `json:"text"`
+	}
+	if json.Unmarshal(raw, &parts) != nil {
+		return ""
+	}
+	var texts []string
+	for _, p := range parts {
+		if p.Type == "text" {
+			texts = append(texts, p.Text)
+		}
+	}
+	return strings.TrimSpace(strings.Join(texts, "\n"))
 }

@@ -57,12 +57,13 @@ type Agent struct {
 	// Doing: a working agent's last tool call in words, read from the tail
 	// of Claude Code's transcript (doing.go). Sidebar path only
 	Doing *string `json:"doing,omitempty"`
-	// Title: the first prompt of the session, from the head of the same
-	// transcript (title.go). Sidebar path only
-	Title   *string    `json:"title,omitempty"`
-	Context *Context   `json:"context"`
-	Cards   *PaneCards `json:"cards,omitempty"`
-	Mode    *string    `json:"mode"`
+	// LastMessage: a done or idle agent's last assistant message, first line,
+	// markdown stripped, from the tail of the same transcript (doing.go).
+	// Sidebar path only, absent when there is none
+	LastMessage *string    `json:"last_message,omitempty"`
+	Context     *Context   `json:"context"`
+	Cards       *PaneCards `json:"cards,omitempty"`
+	Mode        *string    `json:"mode"`
 	// Tasks: the session's task list counted (tasks.go). Sidebar path only,
 	// absent when there is none
 	Tasks *Tasks `json:"tasks,omitempty"`
@@ -627,7 +628,7 @@ func Load(o Options) Doc {
 		withTasks(&doc)
 		paths := transcriptPaths(&doc)
 		withDoing(&doc, paths)
-		withTitle(&doc, paths)
+		withLastMessage(&doc, paths)
 		withRepos(&doc, sd, o.Worktrees)
 	} else {
 		withAgy(&doc)

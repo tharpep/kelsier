@@ -342,13 +342,19 @@ in any terminal:
   buttons. It stays pinned while the list scrolls; more than four fold into
   `+N more`, which jumps to the oldest one not shown. The agents below keep their fixed order; this list is the one place
   urgency orders anything, and it holds no row long enough to be aimed at.
-- **One summary line under every agent, chosen by its state** (*2026-11-05*):
-  working, what it is doing; waiting, the reason in the bright grey; error, the error text in red; done or
-  idle, the session's **title** — the first real prompt, first line only. A
-  state with nothing known has no line, never a placeholder (invariant 3);
-  subagent and background children stay. The selected block opens with the
-  title in full (two lines at most) above the context line, which leads with the
-  model's name when known (`Opus 5.5 · 36% · $10.65`). An agent with no state (opencode,
+- **One summary line under every agent, chosen by its state** (*2026-11-05*;
+  done and idle changed *2026-11-07*): working, what it is doing; waiting, the
+  reason in the bright grey; error, the error text in red; done or idle, the
+  agent's **last message**: the text of the last assistant message in its
+  Claude Code transcript, first line, markdown stripped (`**`, backticks, a
+  leading `#` or bullet). The session's title no longer shows on the card — it
+  went stale (a first prompt about PR 30 on an agent now on PR 59). A state
+  with nothing known has no line, never a placeholder (invariant 3): an agent
+  with no Claude transcript (agy, opencode), or one with no assistant text yet,
+  has none, and the title never stands in. Subagent and background children
+  stay. The selected block wraps the line to two lines at most above the
+  context line, which leads with the model's name when known (`Opus 5.5 · 36% ·
+  $10.65`). An agent with no state (opencode,
   or a restored session before its first hook) shows dim `unknown` where the
   age would be, and its dot stays `?`; never a cause kel cannot know.
 - **Task progress sits at the right of the summary line** (*2026-11-06*): a
@@ -889,15 +895,16 @@ from `/proc` on Linux and WSL2 with no fork, and from one `lsof` + `ps` on
 macOS, cached 10 s. Unknowns stay null: no ports scan means `ports: null`, not
 `[]`; no client attached means no pane is `current`.
 
-`agents[].title` *(2026-11-05)* is the first prompt typed in the agent's
-session: the first line of the first `user` entry in Claude Code's transcript
-whose text does not start with `<` (slash-command echoes, caveats, reminders),
-is not blank and is not `isMeta`. Every control character in it, ESC and tab
-included, becomes a space, so a pasted escape sequence cannot reach the
-terminal. It is read from the first 128 KB of the transcript, on the `--panes`
-path only; a prompt that starts past that has no title. It lives in the fleet
-document, so the sidebar's `sidebar-cache.json` (0600) holds it too. Null for
-an agent with no Claude transcript (Antigravity, opencode).
+`agents[].last_message` *(2026-11-07)* is a `done` or `idle` agent's last
+assistant message: the first non-blank line of the text blocks of the last
+`assistant` entry in Claude Code's transcript that has any, with `**`, backticks,
+a leading `#` or bullet removed and every control character, ESC and tab
+included, turned into a space, so a pasted escape sequence cannot reach the
+terminal. It is read from the transcript's tail, widening 64 KB, 512 KB, 2 MB,
+on the `--panes` path only; a message further back has none. It lives in the
+fleet document, so the sidebar's `sidebar-cache.json` (0600) holds it too.
+Absent for an agent with no Claude transcript (Antigravity, opencode). The
+first-prompt `title` it replaced is gone.
 
 `--dirty` is opt-in because `git status` per worktree is the expensive part
 and the bar never shows it.

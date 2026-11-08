@@ -127,7 +127,7 @@ func hasSummary(a fleet.Agent) bool {
 	case "waiting", "error":
 		return a.Note != nil && *a.Note != ""
 	case "done", "idle":
-		return a.Title != nil && *a.Title != ""
+		return a.LastMessage != nil && *a.LastMessage != ""
 	}
 	return false
 }
@@ -189,26 +189,64 @@ func TestAgentWithNoStateReadsUnknown(t *testing.T) {
 	t.Error("no nostate row")
 }
 
-func TestSelectedBlockCarriesTitleAndModel(t *testing.T) {
+func TestSelectedBlockCarriesLastMessageAndModel(t *testing.T) {
 	doc := loadFixture(t, "one-agent")
+	done := "done"
+	doc.Agents[0].State = &done
+	doc.Agents[0].Doing = nil
+	doc.Agents[0].LastMessage = sp("PR 59 is merged, so passes now skip the card greeting and go straight on")
 	out, _ := renderView(buildView(doc, uiState{}), 32, 0, 1792018800)
 	rows := strings.Split(plain(out), "\n")
 	var at int
 	for i, l := range rows {
-		if strings.Contains(l, "Okay, so I put out PR 16 as") {
+		if strings.Contains(l, "PR 59 is merged, so passes") {
 			at = i
 		}
 	}
-	if at == 0 || !strings.Contains(rows[at+1], "an audit and exploration.") {
-		t.Fatalf("the title wraps in the block:\n%s", plain(out))
+	if at == 0 || !strings.Contains(rows[at+1], "now skip the card") {
+		t.Fatalf("the last message wraps in the block:\n%s", plain(out))
 	}
-	if !strings.Contains(rows[at+2], "Opus 5.5 · 41% · $1.20") {
-		t.Errorf("model, context and cost under the title: %q", rows[at+2])
+	if strings.Contains(plain(out), "Okay, so I put out PR 16") {
+		t.Errorf("the title is not on the card:\n%s", plain(out))
+	}
+	if !strings.Contains(plain(out), "Opus 5.5 · 41% · $1.20") {
+		t.Errorf("model, context and cost stay on the facts line:\n%s", plain(out))
 	}
 	doc.Agents[0].Context.Model = nil
 	out, _ = renderView(buildView(doc, uiState{}), 32, 0, 1792018800)
 	if !strings.Contains(plain(out), "   41% · $1.20") {
 		t.Errorf("an unknown model leaves the line as it was:\n%s", plain(out))
+	}
+}
+
+func TestSummaryLineByState(t *testing.T) {
+	doc := loadFixture(t, "one-agent")
+	a := &doc.Agents[0]
+	a.LastMessage = sp("the last words")
+	for state, want := range map[string]string{"working": "editing sbview.go", "done": "the last words", "idle": "the last words"} {
+		a.State = &state
+		a.Doing = sp("editing sbview.go")
+		if got := summaryOf(*a).text; got != want {
+			t.Errorf("%s: %q, want %q", state, got, want)
+		}
+		if state == "working" {
+			continue
+		}
+		out, _ := renderView(buildView(doc, uiState{}), 32, 0, 1792018800)
+		if !strings.Contains(plain(out), want) {
+			t.Errorf("%s: the line is not drawn:\n%s", state, plain(out))
+		}
+	}
+	for _, state := range []string{"done", "idle"} {
+		a.State = &state
+		a.LastMessage = nil
+		if got := summaryOf(*a); got.text != "" {
+			t.Errorf("%s with no message has a line: %q", state, got.text)
+		}
+		out, _ := renderView(buildView(doc, uiState{}), 32, 0, 1792018800)
+		if strings.Contains(plain(out), "Okay, so I put out PR 16") {
+			t.Errorf("%s: the title stands in for a missing message:\n%s", state, plain(out))
+		}
 	}
 }
 

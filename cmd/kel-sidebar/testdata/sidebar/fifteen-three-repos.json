@@ -38,7 +38,10 @@
     "model": "Opus 5.5 (1M context)"
    },
    "unseen": false,
-   "tasks": {"done": 3, "total": 7},
+   "tasks": {
+    "done": 3,
+    "total": 7
+   },
    "subagents": [
     {
      "id": "t1",
@@ -54,8 +57,7 @@
      "label": "Run the tests",
      "startTime": 1
     }
-   ],
-   "title": "Go to PR 30, review, begin phase 1."
+   ]
   },
   {
    "group": "kelsier",
@@ -90,8 +92,7 @@
     "model": "Opus 5.5 (1M context)"
    },
    "unseen": false,
-   "mode": "plan",
-   "title": "Okay, so I put out PR 16 as an audit and exploration. I want you to take a look"
+   "mode": "plan"
   },
   {
    "group": "kelsier",
@@ -126,8 +127,11 @@
     "model": "Opus 5.5 (1M context)"
    },
    "unseen": true,
-   "tasks": {"done": 7, "total": 7},
-   "title": "Rewrite the setup guide so a new user can get from install to first agent"
+   "tasks": {
+    "done": 7,
+    "total": 7
+   },
+   "last_message": "Tests pass. I left the flaky one skipped and said why in the PR."
   },
   {
    "group": "api-gw",
@@ -162,7 +166,7 @@
     "model": "Opus 5.5 (1M context)"
    },
    "unseen": false,
-   "title": "Add rate limiting to the gateway's token endpoint"
+   "last_message": "Changelog updated for 0.9 and the release notes link to it now."
   },
   {
    "group": "api-gw",
@@ -196,8 +200,7 @@
     "at": 1792018795,
     "model": "Opus 5.5 (1M context)"
    },
-   "unseen": false,
-   "title": "Back off on 429s from the upstream billing API"
+   "unseen": false
   },
   {
    "group": "web-dashboard",
@@ -231,8 +234,7 @@
     "at": 1792018795,
     "model": "Opus 5.5 (1M context)"
    },
-   "unseen": false,
-   "title": "Build the usage dashboard skeleton: routes, layout, empty states"
+   "unseen": false
   },
   {
    "group": "web-dashboard",
@@ -267,8 +269,10 @@
     "model": "Opus 5.5 (1M context)"
    },
    "unseen": false,
-   "tasks": {"done": 1, "total": 4},
-   "title": "Chart token spend per day, stacked by model",
+   "tasks": {
+    "done": 1,
+    "total": 4
+   },
    "doing": "editing UsageChart.tsx"
   },
   {
@@ -329,8 +333,7 @@
     "at": 1792018795,
     "model": "Opus 5.5 (1M context)"
    },
-   "unseen": false,
-   "title": "Fix the refresh-token race in the auth middleware"
+   "unseen": false
   }
  ],
  "panes": [

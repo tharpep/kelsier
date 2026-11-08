@@ -400,7 +400,7 @@ func TestSidebarHover(t *testing.T) {
 	// its two lines, one lifted unit
 	lit := 0
 	for _, l := range strings.Split(out, "\n") {
-		if strings.HasPrefix(l, soft) {
+		if strings.HasPrefix(l, soft) && strings.TrimSpace(strings.TrimPrefix(plain(l), "▏")) != "" {
 			lit++
 		}
 	}
