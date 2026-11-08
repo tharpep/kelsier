@@ -174,7 +174,7 @@ worktree, split right, split down. `⋯` opens kel's own: next that needs you,
 usage, pull requests, a kel command, restore (while a previous workspace
 waits), all keys, quit. **Right-click any space, agent or pane** (or press `→`
 on an agent, pane or background agent) to open its drawer beneath it, pushing the rows below
-down: everything it can do. An agent's has go to it,
+down: everything it can do. An agent's has go to it, peek,
 diff, files, edit last file, plan, history, cards, zoom, own window, rename,
 kill, and relaunch when it is dead, under its git position when known. Every
 item shows its key on the right, so the keys are there when you want them,
@@ -247,6 +247,7 @@ The selection is shared by every window's sidebar, and it is what `n`, `w`, `t` 
 | `j` / `k` | move |
 | `enter` | jump to an agent or pane · open or fold Repos or a quiet trailer |
 | `space` / `l` / `h` | fold, open, close Repos or a quiet trailer |
+| `space` on an agent or pane | peek: a read-only popup of its screen as it is now, in colour, titled `peek · name · ↵ go · esc closes`. `enter` jumps there and selects it; `esc` or `q` closes; no other key does anything and nothing is sent to the pane. A pane that is gone, or an agent that is dead, says so in the footer and opens no popup. The drawer's `Peek` is the same |
 | `/` | filter by name, live · `esc` clears |
 | `n` / `w` | new agent / new worktree agent in the selected entry's space — `enter` at once, or type a name first |
 | `r` | rename the selected agent |
@@ -276,7 +277,8 @@ yazi opened for you. It says so in every popup's title. Quitting the tool
 itself closes it too (`q` in yazi and lazygit, where `esc` also works, `:q` in
 nvim). yazi and lazygit keep running when closed with `Ctrl-b q`, so
 reopening them lands where you left off; the diff, plan and editor popups are
-made fresh each time. Outside a popup `Ctrl-b q` is tmux's usual
+made fresh each time; a peek is a picture taken when it opens, not live, and
+closes with `esc`, `q` or `Ctrl-b q`. Outside a popup `Ctrl-b q` is tmux's usual
 `display-panes`. A tool that is not installed is said in
 the footer (`kel doctor` lists them as optional). The browser is `$BROWSER`,
 else `open` / `xdg-open` / `wslview`, else Windows' `start` from WSL.

@@ -244,11 +244,17 @@ opens it for you, in the right place; it still never renders a tree itself.
 `lazygit` + the editor, embedded in the panel. LAND gives the *status* of a
 branch, never a viewer or a conflict check.
 
-### R6. Quick peek — `kel peek`  ·  `[obsoleted]`
+### R6. Quick peek — `kel peek`  ·  `[reversed 2026-11-07]`
 
 Cut 2026-08-30: `kel top`'s LAST OUTPUT column showed every agent at once. In
 the sidebar design selecting a row *is* the peek — it shows the
 real pane. Original design at the `v0.9.0` tag.
+
+*Reversed 2026-11-07* (`docs/review-2026-11-07.md`, W7 decision M1 → A): with
+panes in a window that is not shown, "selecting a row" is not a look. Peek is
+back as a read-only popup of the agent's or pane's screen — `capture-pane`, never
+a key sent — opened by `space` or the drawer's `Peek`; `enter` jumps, `esc`
+closes. `spec.md` §5f. The cut rationale above stays as the record.
 
 ### R7. A browser inside the terminal  ·  `[violates]`
 

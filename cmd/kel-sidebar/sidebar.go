@@ -457,7 +457,7 @@ func kelBin() string {
 
 // runKel runs a kel command and reports its last line. stderr is where kel's
 // refusals go — the file a kill would lose — so it is what the footer shows.
-func runKel(dir string, env []string, args ...string) tea.Cmd {
+var runKel = func(dir string, env []string, args ...string) tea.Cmd {
 	return runKelSaying("", dir, env, args...)
 }
 
@@ -876,6 +876,34 @@ func (m sbModel) panel(what string) (sbModel, tea.Cmd) {
 	return m, runKel(dir, nil, "_panel", what, dir, title)
 }
 
+func (m sbModel) peekable(id string) bool {
+	if _, ok := m.agentOf(id); ok {
+		return true
+	}
+	_, ok := m.paneOf(id)
+	return ok
+}
+
+// peek opens a read-only popup of the selected agent's or pane's screen.
+func (m sbModel) peek() (sbModel, tea.Cmd) {
+	sel := m.view().sel
+	sp, ok := m.selSpace(sel)
+	if !ok {
+		m.msg, m.msgBad = "select something first", true
+		return m, nil
+	}
+	var name, key string
+	if a, ok := m.agentOf(sel); ok {
+		name, key = a.agent.Name, a.pane
+		if key == "" {
+			key = a.wid
+		}
+	} else if p, ok := m.paneOf(sel); ok {
+		name, key = paneLabel(p), p.PaneID
+	}
+	return m, runKel(sp.dir(), nil, "_panel", "peek", sp.dir(), name, key)
+}
+
 // browse opens the selected server's lowest port — a server pane's own, else
 // its space's — and names the rest, which are often a debugger.
 func (m sbModel) browse() (sbModel, tea.Cmd) {
@@ -1229,8 +1257,11 @@ func (m *sbModel) adoptSel() {
 
 // press is a key pressed by name, as a menu item or a click presses it.
 func (m sbModel) press(k string) (tea.Model, tea.Cmd) {
-	if k == "enter" {
+	switch k {
+	case "enter":
 		return m.key(tea.KeyPressMsg{Code: tea.KeyEnter})
+	case "space":
+		return m.key(tea.KeyPressMsg{Code: tea.KeySpace, Text: " "})
 	}
 	return m.key(tea.KeyPressMsg{Code: rune(k[0]), Text: k})
 }
@@ -1506,6 +1537,9 @@ func (m sbModel) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, c
 	case "space", "l", "right", "h", "left":
 		v := m.view()
+		if k == "space" && m.peekable(v.sel) {
+			return m.peek()
+		}
 		if k == "right" && !strings.HasPrefix(v.sel, "s:") {
 			m.openDrawer()
 			return m, nil
@@ -1685,6 +1719,7 @@ var sbHelp = [][2]string{
 	{"/", "filter by name"},
 	{"esc", "back to your pane"},
 	{"#", "an agent"},
+	{"space", "peek at its screen"},
 	{"d", "diff"},
 	{"f", "files"},
 	{"e", "edit its last file"},
@@ -1697,6 +1732,7 @@ var sbHelp = [][2]string{
 	{"z", "zoom"},
 	{"m", "own window"},
 	{"#", "a pane"},
+	{"space", "peek at its screen"},
 	{"x", "close"},
 	{"z", "zoom"},
 	{"#", "a space"},

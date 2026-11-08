@@ -866,8 +866,8 @@ func TestSidebarRelaunchDeadAgent(t *testing.T) {
 	if !hasRelaunch {
 		t.Errorf("dead agent actions missing R relaunch: %+v", actsDead)
 	}
-	if acts := entryMenu(vDead); len(acts) < 2 || acts[1].key != "R" {
-		t.Errorf("a dead agent's menu does not lead with relaunch: %+v", acts)
+	if acts := entryMenu(vDead); len(acts) < 3 || acts[2].key != "R" {
+		t.Errorf("a dead agent's menu does not lead with relaunch, after Go to it and Peek: %+v", acts)
 	}
 
 	// a:@1 is live ("kelsier")

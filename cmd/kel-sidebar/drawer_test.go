@@ -69,7 +69,9 @@ func TestDrawerOpens(t *testing.T) {
 // ← esc, enter on an item, a left click outside, a selection that moves and
 // an entry that leaves the fleet each close it.
 func TestDrawerCloses(t *testing.T) {
-	m := press(drawerModel(t, "a:@2"), "right")
+	m := drawerModel(t, "a:@2")
+	m.height = 50
+	m = press(m, "right")
 	if m.drawer == nil {
 		t.Fatal("did not open")
 	}

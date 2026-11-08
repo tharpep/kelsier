@@ -1589,6 +1589,40 @@ mkdir -p "$TD"; printf '{"id":"1","subject":"solo","status":"pending","blockedBy
 ok "tasks alone are enough for p, the plan said missing" '"$KEL" _panel plan "$WT5" t "$W5" >/dev/null 2>&1 && grep -q "has not written one" "$V" && grep -q "solo" "$V"'
 unset CLAUDE_CONFIG_DIR
 
+# ---- peek: a read-only popup of a pane's screen, before you jump to it
+PKW="$(tmux new-window -d -P -F '#{window_id}' -t "=keltest:" "printf 'PEEKLINE-xyz\n\033[31mred\033[0m\n'; sleep 600")"
+PKP="$(tmux list-panes -t "$PKW" -F '#{pane_id}' | head -1)"
+wait_until 'tmux capture-pane -p -t "$PKP" | grep -q PEEKLINE-xyz'
+PK0="$(tmux capture-pane -e -p -t "$PKP")"
+: > "$KEL_POPUP_TRACE"
+"$KEL" _panel peek "$WT5" 'api-gw/a#b%Y' "$PKP" >/dev/null 2>&1
+ok "peek opens a popup titled with the name and its keys" 'grep -q "^$WT5	peek · api-gw/a##b%%Y · ↵ go · esc closes	" "$KEL_POPUP_TRACE"'
+ok "  ...of the pane's own screen"               'grep -q PEEKLINE-xyz "$STATE/$PKP.view"'
+ok "  ...in its colours"                         'grep -q "$(printf "\033")\[31mred" "$STATE/$PKP.view"'
+ok "  ...and typed nothing into the pane"        '[ "$(tmux capture-pane -e -p -t "$PKP")" = "$PK0" ]'
+PKOUT="$(printf 'q' | "$KEL" _peek_view "$STATE/$PKP.view" "$PKP" 2>/dev/null)"
+ok "  ...and shows the screen's text, not the blank rows under it" '[[ "$PKOUT" == *PEEKLINE-xyz* ]]'
+printf '\n' | "$KEL" _peek_view "$STATE/$PKP.view" "$PKP" >/dev/null 2>&1
+ok "enter in a peek jumps to that pane's window" '[ "$(tmux display-message -p -t "=keltest:" "#{window_id}")" = "$PKW" ]'
+ok "  ...and selects it in the sidebar"         '[ "$(jq -r .selected "$STATE/sidebar.json")" = "$PKP" ]'
+tmux select-window -t "$W5"
+printf 'q' | "$KEL" _peek_view "$STATE/$PKP.view" "$PKP" >/dev/null 2>&1
+ok "q closes a peek and goes nowhere"           '[ "$(tmux display-message -p -t "=keltest:" "#{window_id}")" = "$W5" ]'
+printf '\033' | "$KEL" _peek_view "$STATE/$PKP.view" "$PKP" >/dev/null 2>&1
+ok "esc closes a peek and goes nowhere"         '[ "$(tmux display-message -p -t "=keltest:" "#{window_id}")" = "$W5" ]'
+printf 'xj ' | "$KEL" _peek_view "$STATE/$PKP.view" "$PKP" >/dev/null 2>&1
+ok "no other key does anything"                 '[ "$(tmux display-message -p -t "=keltest:" "#{window_id}")" = "$W5" ]'
+tmux kill-window -t "$PKW"
+: > "$KEL_POPUP_TRACE"
+PKMSG="$("$KEL" _panel peek "$WT5" t "$PKP" 2>&1)"
+ok "a pane that is gone says so, and opens no popup" '[[ "$PKMSG" == *"gone"* ]] && [ ! -s "$KEL_POPUP_TRACE" ]'
+PKD="$(tmux new-window -d -P -F '#{pane_id}' -t "=keltest:" 'bash --norc')"
+tmux set-option -p -t "$PKD" @kel-agent api-gw/ghost
+wait_until '[ "$(tmux display-message -p -t "$PKD" "#{pane_current_command}")" = bash ]'
+PKMSG="$("$KEL" _panel peek "$WT5" t "$PKD" 2>&1)"
+ok "a dead agent says so, and opens no popup"   '[[ "$PKMSG" == *"dead"* ]] && [ ! -s "$KEL_POPUP_TRACE" ]'
+tmux kill-pane -t "$PKD"
+
 # the hosted session behind every real popup: a popup takes every key, so it
 # attaches to a small session of its own where prefix q works. Drawing needs a
 # terminal client the suite lacks — its control client is hung up by one — so

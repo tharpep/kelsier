@@ -2076,6 +2076,9 @@ func entryMenu(v sbView) []sbAct {
 		return nil
 	}
 	out := []sbAct{{"enter", "Go to it"}}
+	if what == "agent" || what == "pane" {
+		out = append(out, sbAct{"space", "Peek"})
+	}
 	for _, a := range acts {
 		if a.key == "enter" {
 			continue

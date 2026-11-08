@@ -490,6 +490,17 @@ the agent's environment) and R3 (kel rendering documentation).
   `Write` records the last file each agent touched (§9), and `e` opens it, at
   the line. The IDE features — tree, signs, search — are Neovim plugins the
   user already chose.
+- **Peek: `space` reads a screen** *(2026-11-07, M1; reverses backlog R6)*.
+  A read-only popup of an agent's or pane's visible screen, so you can read it
+  before you jump: `tmux capture-pane -e -p`, taken once when it opens, with
+  colours, never refreshed. `enter` jumps to that pane and selects it in the
+  sidebar, as the sidebar's own go-to does, and closes; `esc` or `q` closes;
+  no other key is read. It only reads — nothing is sent to the target, so
+  invariant 4 is untouched. A gone pane or a dead agent is said in the footer
+  and opens no popup. `space` on an agent or pane row and the drawer's `Peek`
+  (first after `Go to it`) open it; `space` on Repos or a quiet trailer still
+  folds. It is `kel _panel peek <dir> <name> <pane>`, a popup like the others,
+  not a second surface (invariant 6).
 - **Diffs: `d` reviews a worktree** against its land base — committed and
   uncommitted, what the agent changed — `nvim -c "DiffviewOpen <base>"` when
   `diffview.nvim` is installed, else `git diff --merge-base <base> | delta`
