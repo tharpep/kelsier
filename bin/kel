@@ -1357,6 +1357,16 @@ agent_resume_cmd() { # record
   else printf '%s' "$agent"; fi
 }
 
+# pinned by the "a resumed agy" suite cases
+seed_agy_idle() { # pane record
+  [ -n "$1" ] || return 0
+  case "$(jq -r '.agent // "claude"' "$2" 2>/dev/null)" in agy|*/agy) ;; *) return 0 ;; esac
+  [ -n "$(jq -r '.claude_session // ""' "$2" 2>/dev/null)" ] || return 0
+  local t; t="$(mktemp "$STATE_DIR/.${1#%}.XXXXXX" 2>/dev/null)" || return 0
+  printf 'idle %s \n' "$(date +%s)" > "$t" && mv -f "$t" "$STATE_DIR/$1.state"
+  tmux set-option -p -t "$1" @kel-state idle 2>/dev/null
+}
+
 # --------------------------------------------------------------------------
 # kel snapshot  — save the whole workspace shape (windows/panes/layouts)
 # --------------------------------------------------------------------------
@@ -1596,6 +1606,7 @@ restore_from_snapshot() {   # file resume(1|0)
         # resuming is why you restore, so it is the default (v0.10); invariant 4's
         # one sanctioned send-keys besides launch
         [ "$resume" = 1 ] && tmux send-keys -t "${pids[$j]}" "$(agent_resume_cmd "$meta")" Enter
+        [ "$resume" = 1 ] && seed_agy_idle "${pids[$j]}" "$meta"
         continue
       fi
       case " $KEL_RESTORE_CMDS " in *" ${cmds[$j]} "*) tmux send-keys -t "${pids[$j]}" "${cmds[$j]}" Enter ;; esac
@@ -1665,6 +1676,7 @@ cmd_restore() {
     meta_update "$meta" '.window_id=$w | .pane_id=$p' --arg w "$wid" --arg p "$(agent_pane "$wid")"
     stamp_pane "$(agent_pane "$wid")" "$grp" "$n"
     [ "$resume" = 1 ] && tmux send-keys -t "$(agent_pane "$wid")" "$(agent_resume_cmd "$meta")" Enter
+    [ "$resume" = 1 ] && seed_agy_idle "$(agent_pane "$wid")" "$meta"
     restored=$((restored+1))
   done <<< "$names"
 
@@ -1730,10 +1742,10 @@ cmd_relaunch() {
   local cid
   cid="$(jq -r '.claude_session // ""' "$meta")"
 
-  # drop the stale reading; the relaunched agent's SessionStart sets it again
   rm -f "$STATE_DIR/$pane.state" "$STATE_DIR/$pane.ctx" "$STATE_DIR/$pane.log" "$STATE_DIR/$wid.state" "$STATE_DIR/$wid.ctx"
   tmux set-option -pu -t "$pane" @kel-state 2>/dev/null
   tmux send-keys -t "$pane" "$(agent_resume_cmd "$meta")" Enter
+  seed_agy_idle "$pane" "$meta"
   tmux refresh-client -S 2>/dev/null || true
   say "relaunching $group/$name${cid:+  (resuming $cid)}"
 }

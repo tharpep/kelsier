@@ -1978,6 +1978,39 @@ ok "  ...leaves the record otherwise as-is" '[ "$(jq -Sc "del(.compactions)" "$M
 ok "an unknown name is refused"             '! "$KEL" relaunch nope-not-here >/dev/null 2>&1'
 ok "the old 'restart' name is gone"        '! "$KEL" restart api-gw/a >/dev/null 2>&1'
 
+section "a resumed agy reads idle, not unknown"
+reset
+K api-gw new ag --agent agy >/dev/null 2>&1
+AGM="$SESSIONS/api-gw/ag.json"
+AGP="$(pane_of api-gw ag)"
+wait_until '[ "$(tmux display -p -t "$AGP" "#{pane_current_command}")" = sleep ]'
+ok "a fresh agy with no hook yet reads unknown, not a guess" '[ "$(state_of ag)" = - ]'
+jq '.claude_session="s-agy"' "$AGM" > "$AGM.t" && mv "$AGM.t" "$AGM"
+"$KEL" relaunch -f api-gw/ag >/dev/null 2>&1
+wait_until '[ -f "$STATE/$AGP.state" ]'
+ok "a relaunched agy (no SessionStart on --conversation) reads idle" '[ "$(cut -d" " -f1 "$STATE/$AGP.state")" = idle ]'
+ok "  ...and the pane option agrees" '[ "$(tmux show-options -pqv -t "$AGP" @kel-state)" = idle ]'
+mkdir -p "$STATE/.stash"; printf '%s' "$AGP" > "$STATE/.stash/s-agy"
+printf '{"conversationId":"s-agy","workspacePaths":["%s"]}\n' "$WORK" | env -u TMUX_PANE "$KEL" hook agy PreInvocation >/dev/null
+ok "an agy hook with no TMUX_PANE resolves through its SessionStart stash" '[ "$(cut -d" " -f1 "$STATE/$AGP.state")" = working ]'
+rm -f "$STATE/.stash/s-agy" "$STATE/$AGP.state"
+printf '{"conversationId":"s-agy","workspacePaths":["%s"]}\n' "$WORK" | env -u TMUX_PANE "$KEL" hook agy PreInvocation >/dev/null
+ok "  ...and with neither it writes nothing, never a cwd guess" '[ ! -f "$STATE/$AGP.state" ]'
+NEW api-gw cl
+CLM="$SESSIONS/api-gw/cl.json"; CLP="$(pane_of api-gw cl)"
+jq '.claude_session="s-cl"' "$CLM" > "$CLM.t" && mv "$CLM.t" "$CLM"
+"$KEL" relaunch -f api-gw/cl >/dev/null 2>&1
+ok "a relaunched non-agy agent is not seeded: its hooks own the state" '[ ! -f "$STATE/$CLP.state" ]'
+"$KEL" snapshot >/dev/null 2>&1
+tmux kill-server 2>/dev/null; sleep 0.6
+( cd "$WORK" && "$KEL" < /dev/null ) >/dev/null 2>&1
+wait_until '[ -n "$(tmux capture-pane -p -t "$(tmux list-windows -t =keltest -F "#{window_id}" | head -1)" | grep .)" ]' 50
+"$KEL" restore >/dev/null 2>&1
+wait_until '[ -n "$(window_of api-gw ag)" ]'
+AGP2="$(pane_of api-gw ag)"
+wait_until '[ -f "$STATE/$AGP2.state" ]'
+ok "a restored agy reads idle" '[ "$(cut -d" " -f1 "$STATE/$AGP2.state")" = idle ]'
+
 section "fleet notifications (#1)"
 reset
 NEW api-gw a
