@@ -232,11 +232,12 @@ func TestSidebarKeys(t *testing.T) {
 	if m.view().sel != "a:@1" {
 		t.Fatalf("start: %q", m.view().sel)
 	}
-	press("j")
-	press("j")
-	// kelsier, then fix-auth, then fix-auth's background agent under it
+	for range 4 {
+		press("j")
+	}
+	// kelsier, its nvim pane, fix-auth, its bash pane, then fix-auth's background agent
 	if sel := m.view().sel; sel != "b:bg1" {
-		t.Errorf("j j from kelsier: %q, want fix-auth's background agent", sel)
+		t.Errorf("j x4 from kelsier: %q, want fix-auth's background agent", sel)
 	}
 	if sbLoadShared().Selected != "b:bg1" {
 		t.Error("the cursor is not shared through sidebar.json")

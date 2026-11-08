@@ -4,14 +4,10 @@
   ● docs  done              15m
   ● fix-auth  allow Bash?    6m
 
-  Shells                      7
+  Shells                      3
   ▪ python3 :8000        api-gw
-  ▸ nvim                kelsier
-  $ bash                kelsier
   $ bash                      ~
   ▸ htop                      ~
-  ▪ node :3000 :3001  web-dash…
-  ▪ node :5173    web-dashboard
   Repos ▾                    12
   ◌ api-gw              main ↓4
   ● kelsier          main ↑2 ●3
@@ -37,19 +33,23 @@
 ▌   └ ● Reading parser.go · Ex… 
 ▌   └ ✓ Run the tests           
 ▌   └ ▐Diff▌▐Files▌▐⋯▌          
-▌                               
-  ● fix-auth     6m ▐needs you▌
+    └ ▸ nvim
+
+  ● fix-auth wt  6m ▐needs you▌
     allow Bash?
+    └ $ bash
     └ ● fix-auth · bg
 
-  ● docs             15m ▐done▌
+  ● docs wt          15m ▐done▌
     PR 59 is merged, so passes…
 
   web-dashboard               4
   ○ dashboard            49h00m
     Tests pass. I left the fla…
+    └ ▪ node :3000 :3001
 
-  ● usage-charts            30s
+  ● usage-charts wt         30s
+    └ ▪ node :5173
 
   ✕ spike          2h00m ▐dead▌
 

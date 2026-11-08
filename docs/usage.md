@@ -119,8 +119,10 @@ it or press `enter` and you are at that agent, and its own row below is
 selected. Nothing needs you, no section. Needs you stays pinned while the list
 scrolls; more than four needing you fold into `+N more`.
 
-- **`Shells`** — every pane that is not an agent (servers, shells, programs),
-  one row each with the repo or directory it stands in on the right.
+- **`Shells`** — every pane that is not an agent (servers, shells, programs)
+  in a window with no agent, one row each with the repo or directory it stands
+  in on the right. A pane in an agent's window is not here: it nests under that
+  agent's card in `agents`.
 - **`Repos`** — where things are, folded to `Repos ▸  4 · 2 merged` until you
   open it with `enter` or a click: one entry per repo checkout or worktree,
   with its branch, `↑` unpushed / `↓` behind, `●` uncommitted files and the
@@ -145,7 +147,11 @@ scrolls; more than four needing you fold into `+N more`.
   long, right-aligned; an agent with no state (opencode, or a restored session before
   its first hook) reads dim `unknown` there and keeps a grey `?`. An agent
   not in the default permission mode carries it, faint, after its name:
-  `plan`, `edits`, `bypass`, `dontask`. A state that needs a word gets a chip: `needs
+  `plan`, `edits`, `bypass`, `dontask`; one working in a linked git worktree
+  carries a faint `wt` after that. The panes of its window nest under the
+  card, one row each, `└ ▪ python3 :18765` or `└ $ bash`, with their drawer
+  and keys; a window with two agents nests them under the first, and an
+  agent folded into the `idle 1d+` row hands its panes back to `Shells`. A state that needs a word gets a chip: `needs
   you`, `done`, `error`, `dead`, `quota`. **Every agent has one line under it,
   chosen by its state:** working, what it is doing (`editing sbview.go`, its last
   tool call, from the tail of Claude Code's own transcript); waiting, what it
@@ -275,7 +281,7 @@ made fresh each time. Outside a popup `Ctrl-b q` is tmux's usual
 the footer (`kel doctor` lists them as optional). The browser is `$BROWSER`,
 else `open` / `xdg-open` / `wslview`, else Windows' `start` from WSL.
 
-`kel _fleet` reports each agent's permission mode (`plan`, `acceptEdits`, `bypassPermissions`…) as `mode`, null for the default; the sidebar does not show it yet.
+`kel _fleet` reports each agent's permission mode (`plan`, `acceptEdits`, `bypassPermissions`…) as `mode`, null for the default.
 
 A finished agent is a green `●` until its window has been shown, then a green `○`; after 12 h it dims. A waiting agent says what it waits for — `waiting 6m · allow Bash? git push origin main` — the command, or the file an edit names, cut to 80 characters. An
 agent kel has heard nothing from for half an hour while "working", with no subagent running, reads

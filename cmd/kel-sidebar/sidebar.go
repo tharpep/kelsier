@@ -687,12 +687,7 @@ func (m sbModel) agentOf(id string) (sbAgent, bool) {
 }
 
 func (m sbModel) paneOf(id string) (fleet.Pane, bool) {
-	for _, sh := range buildView(m.doc, m.ui).shells {
-		if sh.pane.PaneID == id {
-			return sh.pane, true
-		}
-	}
-	return fleet.Pane{}, false
+	return buildView(m.doc, m.ui).paneByID(id)
 }
 
 func (m sbModel) entryName(id string) string {

@@ -366,6 +366,21 @@ in any terminal:
   mode lowercased, faint; nothing for `default` (invariant 3: a mode kel was
   not told is not drawn). The name truncates to make room, as it does for the
   inline hover buttons.
+- **`wt` follows the mode** (*2026-11-07*, F11): a faint `wt` marks an agent
+  whose pane stands in a linked git worktree (or whose record says
+  `isolation: worktree`). Tags are added in order, mode then `wt`, each only
+  while the whole name and every tag so far fit; the last to arrive is the
+  first dropped, and the name is never cut for a tag.
+- **A window's panes nest under its agent** (*2026-11-07*, F10): a server,
+  shell or program pane in an agent's window is one row under that agent's
+  card, `└ ▪ python3 :18765`, with the kind glyph, ports and hover buttons it
+  had in `Shells` (a port is never cut) but not the repo, which the card
+  already names. Its id is the pane's, so the drawer, `x`, `z`, `f`, `g`, `o`
+  act as before. `Shells` keeps the panes of windows with no agent and counts
+  what it lists. Two agents in one window: the first, in the order `agents`
+  lists them, owns the panes. An agent folded into the quiet trailer owns none:
+  its panes are in `Shells`, so a running server is never hidden. A dead
+  agent's window keeps its panes under it.
 - **The selection is a raised block**, opencode's way: a lighter fill with a
   blank row above and below, the accent bar down its whole height, and the
   entry's detail inside it — context and cost, what it is doing, subagents;

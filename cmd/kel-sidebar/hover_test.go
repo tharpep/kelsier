@@ -247,12 +247,12 @@ func TestLastCardSpacerIsOwnedAtTheEnd(t *testing.T) {
 // The selected card's spacer is raised and carries the bar.
 func TestSelectedSpacerIsRaised(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
-	m := sbModel{doc: loadFixture(t, "fifteen-three-repos"), width: 32, height: 60, visible: true, ui: uiState{sel: "a:@1"}}
+	m := sbModel{doc: loadFixture(t, "fifteen-three-repos"), width: 32, height: 60, visible: true, ui: uiState{sel: "a:@3"}}
 	out, refs := renderView(m.view(), m.width, m.height, 0)
 	rows := strings.Split(out, "\n")
 	found := false
 	for i, r := range refs {
-		if r.pad && r.id == "a:@1" {
+		if r.pad && r.id == "a:@3" {
 			found = true
 			if !strings.Contains(rows[i], raised) || !strings.Contains(rows[i], "▌") {
 				t.Errorf("spacer not raised: %q", rows[i])
@@ -260,7 +260,7 @@ func TestSelectedSpacerIsRaised(t *testing.T) {
 		}
 	}
 	if !found {
-		t.Fatal("a:@1 has no spacer")
+		t.Fatal("a:@3 has no spacer")
 	}
 }
 

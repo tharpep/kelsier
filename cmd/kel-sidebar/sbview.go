@@ -95,6 +95,10 @@ type sbAgent struct {
 	cwd     string
 }
 
+func (a sbAgent) worktree() bool {
+	return a.git != nil && a.git.Worktree || a.agent.Isolation != nil && *a.agent.Isolation == "worktree"
+}
+
 type sbShell struct {
 	pane  fleet.Pane
 	where string
@@ -152,6 +156,7 @@ func quietKind(a fleet.Agent, now int64) string {
 
 type sbView struct {
 	shells    []sbShell
+	under     map[string][]sbShell // agent key -> the panes of its window, nested under its card
 	reposOpen bool
 	quiet     map[string]sbQuiet // by repo: the group's quiet fold, if it has one
 	spaces    []sbSpace
@@ -539,24 +544,6 @@ func buildView(doc fleet.Doc, ui uiState) sbView {
 		}
 	}
 	v.needs = needsYou(v.agents)
-	for _, a := range v.needs {
-		v.entryIDs = append(v.entryIDs, needID(a.key))
-	}
-	for _, sh := range v.shells {
-		v.entryIDs = append(v.entryIDs, sh.pane.PaneID)
-	}
-	if !v.unknown {
-		v.entryIDs = append(v.entryIDs, reposID)
-	}
-	for _, s := range v.spaces {
-		if s.folded || !v.reposOpen {
-			continue
-		}
-		v.entryIDs = append(v.entryIDs, spaceID(s.key))
-		if s.wtSummary() {
-			v.entryIDs = append(v.entryIDs, wtID(s.key))
-		}
-	}
 	if ui.filter == "" {
 		var inNeeds map[string]bool
 		for i := range v.agents {
@@ -591,9 +578,31 @@ func buildView(doc fleet.Doc, ui uiState) sbView {
 			a.folded = !q.open
 		}
 	}
+	v.nestPanes()
+	for _, a := range v.needs {
+		v.entryIDs = append(v.entryIDs, needID(a.key))
+	}
+	for _, sh := range v.shells {
+		v.entryIDs = append(v.entryIDs, sh.pane.PaneID)
+	}
+	if !v.unknown {
+		v.entryIDs = append(v.entryIDs, reposID)
+	}
+	for _, s := range v.spaces {
+		if s.folded || !v.reposOpen {
+			continue
+		}
+		v.entryIDs = append(v.entryIDs, spaceID(s.key))
+		if s.wtSummary() {
+			v.entryIDs = append(v.entryIDs, wtID(s.key))
+		}
+	}
 	for i, a := range v.agents {
 		if !a.folded {
 			v.entryIDs = append(v.entryIDs, agentID(a.key))
+			for _, sh := range v.under[a.key] {
+				v.entryIDs = append(v.entryIDs, sh.pane.PaneID)
+			}
 			for _, b := range v.bgUnder[a.key] {
 				v.entryIDs = append(v.entryIDs, bgID(b.ID))
 			}
@@ -624,6 +633,43 @@ func buildView(doc fleet.Doc, ui uiState) sbView {
 		}
 	}
 	return v
+}
+
+func (v *sbView) nestPanes() {
+	owner := map[string]string{}
+	for _, a := range v.agents {
+		if _, ok := owner[a.wid]; !ok && !a.folded {
+			owner[a.wid] = a.key
+		}
+	}
+	var rest []sbShell
+	for _, sh := range v.shells {
+		if k, ok := owner[sh.pane.WindowID]; ok {
+			if v.under == nil {
+				v.under = map[string][]sbShell{}
+			}
+			v.under[k] = append(v.under[k], sh)
+		} else {
+			rest = append(rest, sh)
+		}
+	}
+	v.shells = rest
+}
+
+func (v sbView) paneByID(id string) (fleet.Pane, bool) {
+	for _, sh := range v.shells {
+		if sh.pane.PaneID == id {
+			return sh.pane, true
+		}
+	}
+	for _, shs := range v.under {
+		for _, sh := range shs {
+			if sh.pane.PaneID == id {
+				return sh.pane, true
+			}
+		}
+	}
+	return fleet.Pane{}, false
 }
 
 // applyFilter keeps what matches by name.
@@ -1220,7 +1266,7 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 	// detail. A strip is never inserted, because an inserted row moved the
 	// rows above the pointer (the author, 2026-11-05). The selection's block
 	// carries its own strip, so only a selected row without one draws them
-	inline := func(id, kind string, used int, block bool) (string, int, []hit) {
+	inline := func(id, kind string, used, need int, block bool) (string, int, []hit) {
 		if v.hover == 0 || v.menu != nil || id != v.hoverID || (id == v.sel && block) {
 			return "", -1, nil
 		}
@@ -1231,7 +1277,7 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 			}
 			return
 		}
-		for len(btns) > 1 && used+4+bw()+2 > w {
+		for len(btns) > 1 && (used+4+bw()+2 > w || w-used-bw()-2 < need) {
 			btns = btns[1:]
 		}
 		fc := lifted
@@ -1300,30 +1346,42 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 	for _, sh := range v.shells {
 		seen[paneLabel(sh.pane)]++
 	}
-	for _, sh := range v.shells {
+	paneRow := func(sh sbShell, nested bool) {
 		p := sh.pane
 		pr := lineRef{id: p.PaneID, kind: "pane"}
-		lw, rw := fitPair(paneLabel(p), len([]rune(sh.where)), avail)
+		pre, indent, aw := " ", "   ", avail
+		if nested {
+			pre, indent, aw = "   "+dim+"└"+reset+" ", "       ", avail-4
+		}
+		where := sh.where
+		if nested {
+			where = ""
+		}
+		lw, rw := fitPair(paneLabel(p), len([]rune(where)), aw)
 		if n := len([]rune(paneLabel(p))); p.Kind == "server" && lw < n {
-			lw = min(n, avail)
-			if rw = avail - lw - 2; rw < 4 {
+			lw = min(n, aw)
+			if rw = aw - lw - 2; rw < 4 {
 				rw = 0
 			}
 		}
 		right := ""
 		if rw > 0 {
-			right = dim + truncate(sh.where, rw) + reset
+			right = dim + truncate(where, rw) + reset
 		}
-		if btns, bn, hits := inline(p.PaneID, "pane", 4, false); bn >= 0 {
+		need := 0
+		if p.Kind == "server" {
+			need = len([]rune(paneLabel(p))) - len([]rune(p.Cmd)) + 2
+		}
+		if btns, bn, hits := inline(p.PaneID, "pane", avail-aw+4, need, false); bn >= 0 {
 			right, lw, pr.hits = btns, bn, hits
 		}
 		lbl := paneLabelFit(p, lw)
-		if seen[paneLabel(p)] > 1 && p.WindowName != "" {
+		if !nested && seen[paneLabel(p)] > 1 && p.WindowName != "" {
 			if room := lw - len([]rune(lbl)) - 3; room > 0 {
 				lbl += dim + " · " + truncate(p.WindowName, room) + reset
 			}
 		}
-		one(p.PaneID, pr, spread(lead(p.PaneID)+" "+paneGlyph(p.Kind)+" "+weight(lbl, p.Current), right, w))
+		one(p.PaneID, pr, spread(lead(p.PaneID)+pre+paneGlyph(p.Kind)+" "+weight(lbl, p.Current), right, w))
 		pr.hits = nil
 		if p.Cards != nil && p.Cards.Unseen && p.Cards.Latest != nil {
 			latest := p.Cards.Latest
@@ -1331,8 +1389,11 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 			if latest.Kind == "decision" {
 				col = yellow
 			}
-			one(p.PaneID, pr, lead(p.PaneID)+"   "+col+truncate("▸ "+latest.Kind+": "+latest.Title, avail)+reset)
+			one(p.PaneID, pr, lead(p.PaneID)+indent+col+truncate("▸ "+latest.Kind+": "+latest.Title, aw)+reset)
 		}
+	}
+	for _, sh := range v.shells {
+		paneRow(sh, false)
 	}
 	if !v.unknown {
 		name, tail := "Repos ▸", fmt.Sprint(len(v.spaces))
@@ -1380,7 +1441,7 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 			if d != "" && len([]rune(s.label))+2+dw > av {
 				lw = max(av-2-dw, 8)
 			}
-			btns, bn, hits := inline(id, "space", 5, false)
+			btns, bn, hits := inline(id, "space", 5, 0, false)
 			if bn >= 0 {
 				lw = bn
 			}
@@ -1404,7 +1465,7 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 			if rw > 0 {
 				right = dim + truncate(pos, rw) + reset
 			}
-			if btns, bn, hits := inline(id, "space", 4, true); bn >= 0 {
+			if btns, bn, hits := inline(id, "space", 4, 0, true); bn >= 0 {
 				right, lw, r.hits = btns, bn, hits
 			}
 			rows := []string{spread(lead(id)+" "+dot+" "+weight(truncate(s.label, lw), s.current), right, w)}
@@ -1478,27 +1539,39 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 				right = ""
 			}
 		}
-		btns, bn, hits := inline(id, "agent", 4, true)
+		btns, bn, hits := inline(id, "agent", 4, 0, true)
 		if bn >= 0 {
 			right, lw, r.hits = btns, bn, hits
 		}
-		mw := modeWord(a.agent.Mode)
+		var tags []string
+		if mw := modeWord(a.agent.Mode); mw != "" {
+			tags = append(tags, mw)
+		}
+		if a.worktree() {
+			tags = append(tags, "wt")
+		}
 		nameW := lw
-		if mw != "" {
-			extra := len([]rune(mw)) + 1
-			budget := lw
-			if bn < 0 {
-				budget = max(lw, avail-2-visWidth(right))
+		budget := lw
+		if bn < 0 {
+			budget = max(lw, avail-2-visWidth(right))
+		}
+		shown := tags[:0:0]
+		if n := len([]rune(a.agent.Name)); n <= lw {
+			used := n
+			for _, t := range tags {
+				if used+1+len([]rune(t)) > budget {
+					break
+				}
+				used += 1 + len([]rune(t))
+				shown = append(shown, t)
 			}
-			if n := len([]rune(a.agent.Name)); n <= lw && n+extra <= budget {
+			if len(shown) > 0 {
 				nameW = n
-			} else {
-				mw = ""
 			}
 		}
 		left := lead(id) + " " + c + d + reset + " " + weight(truncate(a.agent.Name, nameW), a.current)
-		if mw != "" {
-			left += " " + faint + mw + reset
+		for _, t := range shown {
+			left += " " + faint + t + reset
 		}
 		rows := []string{spread(left, right, w)}
 		pre := lead(id) + "   "
@@ -1553,7 +1626,10 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 			rows = append(rows, pre+col+truncate("▸ "+latest.Kind+": "+latest.Title, avail)+reset)
 		}
 		entry(id, r, rows, sums)
-		owner, ownerRaised = id, len(v.bgUnder[a.key]) == 0
+		for _, sh := range v.under[a.key] {
+			paneRow(sh, true)
+		}
+		owner, ownerRaised = id, len(v.bgUnder[a.key]) == 0 && len(v.under[a.key]) == 0
 		for _, b := range v.bgUnder[a.key] {
 			bd, bc, _ := bgLook(b)
 			bid := bgID(b.ID)
@@ -1881,11 +1957,7 @@ func selActions(v sbView) (string, string, []sbAct) {
 			return what, s.label, acts
 		}
 	default:
-		for _, sh := range v.shells {
-			p := sh.pane
-			if p.PaneID != v.sel {
-				continue
-			}
+		if p, ok := v.paneByID(v.sel); ok {
 			acts := []sbAct{{"enter", "go to it"}}
 			if p.Kind == "server" {
 				acts = append(acts, sbAct{"o", "browser"})
