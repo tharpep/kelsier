@@ -20,6 +20,8 @@ import (
 //	dirty N    uncommitted work      -> commit it
 //	unpushed N commits only you have -> push
 //	merged     its PR landed         -> sweepable
+//	fresh      no commits of its own -> never swept
+//	detached   HEAD on a base commit -> never swept
 //	review     PR open               -> wait, or nudge
 //	behind N   base moved under you  -> rebase
 //	no_pr      pushed, no PR         -> open one
@@ -291,6 +293,40 @@ func mergedByPR(dir, base string) bool {
 	return strings.TrimSpace(out) == "0"
 }
 
+// noOwnCommits is true when nothing was ever committed on the branch: its
+// oldest reflog entry is its tip, or no reflog entry records a commit made on
+// it (a sync with main adds entries but no work). No reflog reads false, which
+// is the old answer (merged) — the failure sweeps, it never destroys work.
+func noOwnCommits(dir, branch string) bool {
+	out, ok := git(dir, "reflog", "show", "--format=%H %gs", "refs/heads/"+branch)
+	if !ok {
+		return false
+	}
+	rows := lines(out)
+	if len(rows) == 0 {
+		return false
+	}
+	head, ok := git(dir, "rev-parse", "HEAD")
+	if !ok {
+		return false
+	}
+	if strings.Fields(rows[len(rows)-1])[0] == strings.TrimSpace(head) {
+		return true
+	}
+	for _, r := range rows {
+		_, subj, _ := strings.Cut(r, " ")
+		for _, p := range []string{"commit", "cherry-pick", "revert", "am"} {
+			if strings.HasPrefix(subj, p) {
+				return false
+			}
+		}
+		if strings.Contains(subj, ": Merge made") {
+			return false
+		}
+	}
+	return true
+}
+
 // localState is what the working tree alone can say: is it a repo, how many
 // files are uncommitted, how many commits are on no remote. One read serves
 // the dirty count, the two land codes that need no PR, and the privacy
@@ -349,6 +385,12 @@ func landFrom(dir, branch string, wantPR bool, ls localState) *Land {
 	// ancestor test cannot see it.
 	if base != "" && branch != strings.TrimPrefix(base, "origin/") {
 		if exec.Command("git", "-C", dir, "merge-base", "--is-ancestor", "HEAD", base).Run() == nil {
+			if branch == "HEAD" {
+				return &Land{Code: "detached"}
+			}
+			if noOwnCommits(dir, branch) {
+				return &Land{Code: "fresh"}
+			}
 			return &Land{Code: "merged"}
 		}
 	}

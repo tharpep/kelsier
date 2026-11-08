@@ -216,21 +216,14 @@ func pick(all map[string]Repo, mains map[string]bool) []Repo {
 	return out
 }
 
-// withRepos adds doc.Repos for every repo a pane or a background agent
-// stands in.
+// withRepos adds doc.Repos for every repo a kel pane stands in. A background
+// session's repo is not one: Repos and sweep stay inside kel's windows.
 func withRepos(doc *Doc, sd string, fresh bool) {
 	var roots []string
 	if doc.Panes != nil {
 		for _, p := range *doc.Panes {
 			if p.Git != nil {
 				roots = append(roots, p.Git.Root)
-			}
-		}
-	}
-	if doc.Background != nil {
-		for _, b := range *doc.Background {
-			if b.Git != nil { // withClaude already walked it to its repo
-				roots = append(roots, b.Git.Root)
 			}
 		}
 	}

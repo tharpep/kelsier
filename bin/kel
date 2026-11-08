@@ -1754,6 +1754,8 @@ land_why() { # land code
   case "$1" in
     dirty)    printf 'uncommitted work' ;;
     unpushed) printf 'commits that are only here' ;;
+    fresh)    printf 'no commits of its own yet' ;;
+    detached) printf 'a detached HEAD, nothing of its own' ;;
     review)   printf 'its PR is still open' ;;
     no_pr)    printf 'no PR — nothing has merged it' ;;
     behind)   printf 'behind its base, not merged' ;;

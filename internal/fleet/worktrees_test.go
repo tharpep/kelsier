@@ -24,8 +24,8 @@ func TestParseWorktrees(t *testing.T) {
 	}
 }
 
-// Every worktree is found from any of them, and a fresh one is merged — there
-// is nothing in it the base lacks — while one with a commit of its own is not.
+// Every worktree is found from any of them; a fresh one reads fresh, never
+// merged (F6), and one with a commit of its own reads neither.
 func TestLoadRepos(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("no git")
@@ -61,7 +61,7 @@ func TestLoadRepos(t *testing.T) {
 	for _, w := range rs[0].Worktrees {
 		got[*w.Branch] = w.Land.Code
 	}
-	if got["fresh"] != "merged" || got["work"] == "merged" {
+	if got["fresh"] != "fresh" || got["work"] == "merged" || got["work"] == "fresh" {
 		t.Errorf("land: %v", got)
 	}
 	// the cache answers the second ask, the same
@@ -94,5 +94,29 @@ func TestReposCacheSeesNewWorktree(t *testing.T) {
 	run("worktree", "add", "-q", "-b", "b", filepath.Join(d, "b"))
 	if rs := loadRepos(d, []string{r}, false); len(rs[0].Worktrees) != 2 {
 		t.Errorf("a cached read hid the new worktree: %+v", rs[0].Worktrees)
+	}
+}
+
+// F13: a background session's repo adds nothing to Repos.
+func TestWithReposIgnoresBackgroundRepos(t *testing.T) {
+	d, _ := filepath.EvalSymlinks(t.TempDir())
+	mk := func(name string) string {
+		r := filepath.Join(d, name)
+		_ = os.MkdirAll(r, 0o755)
+		for _, a := range [][]string{{"init", "-q", "-b", "main"}, {"-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "i"}} {
+			if out, err := exec.Command("git", append([]string{"-C", r}, a...)...).CombinedOutput(); err != nil {
+				t.Fatalf("git %v: %v %s", a, err, out)
+			}
+		}
+		return r
+	}
+	kelRepo, bgRepo := mk("kelrepo"), mk("bgrepo")
+	doc := &Doc{
+		Panes:      &[]Pane{{Git: &Git{Root: kelRepo}}},
+		Background: &[]Background{{Git: &Git{Root: bgRepo}}},
+	}
+	withRepos(doc, t.TempDir(), true)
+	if doc.Repos == nil || len(*doc.Repos) != 1 || (*doc.Repos)[0].Root != kelRepo {
+		t.Fatalf("repos: %+v", doc.Repos)
 	}
 }

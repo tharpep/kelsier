@@ -1313,3 +1313,12 @@ func TestRunningSubagentsKeepWorkingGlyph(t *testing.T) {
 		t.Errorf("running subagent: glyph %q %q, want the working glyph", d, c)
 	}
 }
+
+func TestWorktreeDetailLandLabels(t *testing.T) {
+	for code, want := range map[string]string{"fresh": "no commits", "detached": "detached"} {
+		got := worktreeDetail(sbSpace{closed: true, land: &fleet.Land{Code: code}})
+		if plain(got) != want || !strings.Contains(got, dim+want+reset) {
+			t.Fatalf("%s: got %q, want dim %q", code, got, want)
+		}
+	}
+}

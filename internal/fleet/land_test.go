@@ -171,3 +171,86 @@ func TestSquashMergedAncestorReachable(t *testing.T) {
 		t.Fatalf("other work: got %q (n=%v), want unpushed 1", l.Code, l.N)
 	}
 }
+
+func gitRepo(t *testing.T) (string, func(d string, args ...string) string) {
+	t.Helper()
+	d, _ := filepath.EvalSymlinks(t.TempDir())
+	run := func(dir string, args ...string) string {
+		t.Helper()
+		out, err := exec.Command("git", append([]string{"-C", dir, "-c", "user.email=t@t", "-c", "user.name=t"}, args...)...).CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	r := filepath.Join(d, "repo")
+	_ = os.MkdirAll(r, 0o755)
+	run(r, "init", "-q", "-b", "main")
+	run(r, "commit", "-q", "--allow-empty", "-m", "base")
+	return r, run
+}
+
+// F6: a branch with no commits past its fork point is fresh, not merged,
+// whether or not main has moved on since.
+func TestLandFreshBranchIsNotMerged(t *testing.T) {
+	r, run := gitRepo(t)
+	wt := filepath.Join(filepath.Dir(r), "wt")
+	run(r, "worktree", "add", "-q", "-b", "feat", wt)
+	if l := landOf(wt, "feat", false); l.Code != "fresh" {
+		t.Fatalf("new branch: got %q, want fresh", l.Code)
+	}
+	run(r, "commit", "-q", "--allow-empty", "-m", "main moves on")
+	if l := landOf(wt, "feat", false); l.Code != "fresh" {
+		t.Fatalf("after main moved: got %q, want fresh", l.Code)
+	}
+}
+
+func TestLandDetachedAtBaseCommit(t *testing.T) {
+	r, run := gitRepo(t)
+	run(r, "commit", "-q", "--allow-empty", "-m", "two")
+	wt := filepath.Join(filepath.Dir(r), "old")
+	run(r, "worktree", "add", "-q", "--detach", wt, "HEAD~1")
+	if l := landOf(wt, "", false); l.Code != "detached" {
+		t.Fatalf("detached on an old commit: got %q, want detached", l.Code)
+	}
+}
+
+// A branch whose commit main took in (fast-forward) is still merged.
+func TestLandFastForwardedBranchStaysMerged(t *testing.T) {
+	r, run := gitRepo(t)
+	wt := filepath.Join(filepath.Dir(r), "wt")
+	run(r, "worktree", "add", "-q", "-b", "feat", wt)
+	run(wt, "commit", "-q", "--allow-empty", "-m", "work")
+	run(r, "merge", "-q", "--ff-only", "feat")
+	if l := landOf(wt, "feat", false); l.Code != "merged" {
+		t.Fatalf("merged branch: got %q, want merged", l.Code)
+	}
+}
+
+// A zero-commit branch synced with main before any work is still fresh.
+func TestLandSyncedZeroCommitBranchIsFresh(t *testing.T) {
+	for _, sync := range [][]string{{"merge", "-q", "--ff-only", "main"}, {"rebase", "-q", "main"}} {
+		r, run := gitRepo(t)
+		wt := filepath.Join(filepath.Dir(r), "wt")
+		run(r, "worktree", "add", "-q", "-b", "feat", wt)
+		run(r, "commit", "-q", "--allow-empty", "-m", "main moves on")
+		run(wt, sync...)
+		if l := landOf(wt, "feat", false); l.Code != "fresh" {
+			t.Fatalf("after git %v: got %q, want fresh", sync, l.Code)
+		}
+	}
+}
+
+// A branch that made a commit, then rebased, then was fast-forwarded into main, is merged.
+func TestLandRebasedCommitFastForwardedStaysMerged(t *testing.T) {
+	r, run := gitRepo(t)
+	wt := filepath.Join(filepath.Dir(r), "wt")
+	run(r, "worktree", "add", "-q", "-b", "feat", wt)
+	run(wt, "commit", "-q", "--allow-empty", "-m", "work")
+	run(r, "commit", "-q", "--allow-empty", "-m", "main moves on")
+	run(wt, "rebase", "-q", "main")
+	run(r, "merge", "-q", "--ff-only", "feat")
+	if l := landOf(wt, "feat", false); l.Code != "merged" {
+		t.Fatalf("rebased then merged: got %q, want merged", l.Code)
+	}
+}

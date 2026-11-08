@@ -64,8 +64,10 @@ kel url [dir|agent]    a worktree's dev-server URLs, one per line; exit 1 for no
 kel sweep [-n] [-f]    close out every finished agent whose branch has landed,
                        and every landed worktree no window or Claude session is
                        in (with its branch, if git agrees it merged); a gone
-                       one is pruned. Dirty, unpushed or unmerged is never
-                       touched. -n shows the plan first
+                       one is pruned. Dirty, unpushed, unmerged, a branch with no
+                       commits yet or a detached HEAD is never touched, and
+                       only repos where a kel window stands are looked at.
+                       -n shows the plan first
 kel sweep <path>       the same, for one worktree — says why when it won't
 kel relaunch [name]    relaunch ONE crashed agent in its existing window
 kel restore [<n>]      bring back a previous workspace — windows, splits,
@@ -126,7 +128,9 @@ scrolls; more than four needing you fold into `+N more`.
   repo nests under it** — kel's, Claude Code's own (`.claude/worktrees`) and
   ones made by hand, open in a window or not — one line each: `└ ● fix-auth
   ↑1 · review`, grey when no window stands there, `merged` in green when it
-  has landed. `s` sweeps a landed one (`s` elsewhere: everything landed),
+  has landed, `no commits` or `detached` in grey when there is nothing to land
+  yet (never swept). Only repos with a kel window appear; a background Claude
+  session adds none. `s` sweeps a landed one (`s` elsewhere: everything landed),
   asking first. A checkout two or more agents work in says so (`2 agents`)
   — said, never refused. A repo with **more than three** worktrees folds
   them behind one row, `└ +10 worktrees  30 unpushed` (the commits on no

@@ -826,6 +826,10 @@ func worktreeDetail(s sbSpace) string {
 		switch l.Code {
 		case "merged":
 			parts = append(parts, green+"merged"+reset)
+		case "fresh":
+			parts = append(parts, dim+"no commits"+reset)
+		case "detached":
+			parts = append(parts, dim+"detached"+reset)
 		case "review":
 			parts = append(parts, dim+"review"+reset)
 		case "no_pr":

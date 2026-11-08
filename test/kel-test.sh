@@ -512,20 +512,23 @@ reset
 git init -q --bare -b main "$WORK/origin.git"
 git init -q -b main "$WORK/sw" && ( cd "$WORK/sw" && git remote add origin "$WORK/origin.git" \
   && echo a>f && git add -A && git -c user.email=t@t -c user.name=t commit -qm i && git push -qu origin main ) >/dev/null 2>&1
-for n in landed openwork messy; do ( cd "$WORK/sw" && "$KEL" new "$n" -w --agent 'sleep 9999' ) >/dev/null 2>&1; done
+for n in landed openwork messy fresh; do ( cd "$WORK/sw" && "$KEL" new "$n" -w --agent 'sleep 9999' ) >/dev/null 2>&1; done
 SWT="$WORK/.kel-worktrees"
 ( cd "$SWT/sw-landed" && echo x>x && git add -A && git -c user.email=t@t -c user.name=t commit -qm x && git push -q origin landed ) >/dev/null 2>&1
 ( cd "$WORK/sw" && git fetch -q && git merge -q --no-edit origin/landed && git push -q origin main ) >/dev/null 2>&1
 ( cd "$SWT/sw-landed" && git fetch -q ) >/dev/null 2>&1
 ( cd "$SWT/sw-openwork" && echo y>y && git add -A && git -c user.email=t@t -c user.name=t commit -qm y && git push -q origin openwork && git fetch -q ) >/dev/null 2>&1
 ( cd "$SWT/sw-messy" && echo z>z )
-for n in landed openwork messy; do hook "$(pane_of sw "$n")" Stop; done
+for n in landed openwork messy fresh; do hook "$(pane_of sw "$n")" Stop; done
 ok "merged is detected without gh"       '[ "$("$KEL" _fleet --land | jq -r ".agents[]|select(.name==\"landed\")|.land.code")" = merged ]'
 ok "-n sweeps nothing"                   '"$KEL" sweep -n >/dev/null 2>&1; [ -d "$SWT/sw-landed" ]'
 ok "  ...but says what it would take"    '[[ "$("$KEL" sweep -n 2>&1)" == *"would sweep"*landed* ]]'
 "$KEL" sweep >/dev/null 2>&1
 ok "sweep removes the merged worktree"   '[ ! -d "$SWT/sw-landed" ]'
 ok "  ...and its record"                 '[ ! -f "$SESSIONS/sw/landed.json" ]'
+ok "a done agent with no commits reads fresh, not merged" '[ "$("$KEL" _fleet --land | jq -r ".agents[]|select(.name==\"fresh\")|.land.code")" = fresh ]'
+ok "  ...is not listed by sweep -n"      '[[ "$("$KEL" sweep -n 2>&1)" != *"would sweep"*fresh* ]]'
+ok "  ...and survives a real sweep -f"   '"$KEL" sweep -f >/dev/null 2>&1; [ -d "$SWT/sw-fresh" ] && [ -f "$SESSIONS/sw/fresh.json" ]'
 ok "keeps the unmerged one"              '[ -d "$SWT/sw-openwork" ] && [ -f "$SESSIONS/sw/openwork.json" ]'
 ok "keeps the dirty one"                 '[ -d "$SWT/sw-messy" ] && [ -f "$SESSIONS/sw/messy.json" ]'
 ok "  ...and says why for each"          'o="$("$KEL" sweep 2>&1)"; [[ "$o" == *"uncommitted work"* ]]'
@@ -533,17 +536,22 @@ ok "-f still refuses uncommitted work"   '"$KEL" sweep -f >/dev/null 2>&1; [ -d 
 # phase 2: worktrees no window stands in — by hand here, as Claude Code
 # makes its own — are listed under their repo, and swept once they landed
 GW() { git -C "$WORK/sw" worktree add -q -b "$1" "$WORK/sw-$1" >/dev/null 2>&1; }
-GW hm                                                   # nothing of its own: merged
+GWM() { GW "$1"; ( cd "$WORK/sw-$1" && echo "$1">"m-$1" && git add -A && git -c user.email=t@t -c user.name=t commit -qm "$1" && cd "$WORK/sw" && git merge -q --ff-only "$1" && git push -q origin main ) >/dev/null 2>&1; }
+GWM hm                                                  # a commit of its own, taken into main
+GW hf                                                   # no commits: fresh, never swept
+git -C "$WORK/sw" worktree add -q --detach "$WORK/sw-hdt" >/dev/null 2>&1   # detached on a main commit
 GW hw; ( cd "$WORK/sw-hw" && echo w>w && git add -A && git -c user.email=t@t -c user.name=t commit -qm w ) >/dev/null 2>&1
-GW hd; echo u > "$WORK/sw-hd/untracked"                 # merged, but holding a new file
+GW hd; echo u > "$WORK/sw-hd/untracked"
 GW hg; rm -rf "$WORK/sw-hg"                             # its directory gone
-GW hb                                                   # a Claude Code session is in it
-GW ho; tmux new-window -d -t '=keltest:' -n hoshell -c "$WORK/sw-ho"
+GWM hb                                                  # a Claude Code session is in it
+GWM ho; tmux new-window -d -t '=keltest:' -n hoshell -c "$WORK/sw-ho"
 printf '[{"pid":1,"cwd":"%s","kind":"background","sessionId":"x","name":"hb","status":"busy","id":"b1"}]' \
   "$(cd "$WORK/sw-hb" && pwd -P)" > "$WORK/claude-agents.json"
 rm -f "$STATE/claude-agents.json"
 WTL() { "$KEL" _fleet --panes | jq -r --arg b "$1" '.repos[].worktrees[] | select(.branch == $b) | .land.code // "-"'; }
 ok "a worktree with no window is listed under its repo" '[ "$(WTL hm)" = merged ] && [ "$(WTL hw)" != merged ]'
+ok "  ...a branch with no commits reads fresh"  '[ "$(WTL hf)" = fresh ]'
+ok "  ...a detached HEAD reads detached"        '[ "$("$KEL" _fleet --panes | jq -r ".repos[].worktrees[] | select(.branch == null) | .land.code")" = detached ]'
 ok "  ...and the Claude Code session in one is counted" '[ "$("$KEL" _fleet --panes | jq -r ".repos[].worktrees[] | select(.branch == \"hb\") | .sessions")" = 1 ]'
 o="$("$KEL" sweep -n 2>&1)"
 ok "sweep -n names the landed and the gone"  '[[ "$o" == *"would sweep  hm"* && "$o" == *"would prune  hg"* ]] && [ -d "$WORK/sw-hm" ]'
@@ -557,6 +565,19 @@ ok "  ...prunes one whose directory is gone"  '! git -C "$WORK/sw" worktree list
 ok "  ...leaves one with a new file in it"     '[ -f "$WORK/sw-hd/untracked" ] && [[ "$("$KEL" sweep "$WORK/sw-hd" 2>&1)" == *"kept  hd  — uncommitted work"* ]]'
 ok "  ...and one a Claude Code session is using" '[ -d "$WORK/sw-hb" ] && [[ "$o" == *"kept  hb  — a Claude Code session"* ]]'
 ok "  ...and the unmerged one, without a word"  '[ -d "$WORK/sw-hw" ] && [[ "$o" != *"kept  hw"* ]]'
+ok "  ...and a fresh or detached one, without a word" '[ -d "$WORK/sw-hf" ] && [ -d "$WORK/sw-hdt" ] && [[ "$o" != *"kept  hf"* && "$o" != *"swept  hf"* && "$o" != *"hdt"* ]]'
+rm -f "$WORK/claude-agents.json" "$STATE/claude-agents.json"
+
+# F13: a repo known only through a background session is neither listed nor swept
+git init -q -b main "$WORK/bgrepo" && ( cd "$WORK/bgrepo" && git -c user.email=t@t -c user.name=t commit -qm i --allow-empty \
+  && git worktree add -q -b bgw "$WORK/bgrepo-bgw" && cd "$WORK/bgrepo-bgw" && echo b>b && git add -A \
+  && git -c user.email=t@t -c user.name=t commit -qm b && cd "$WORK/bgrepo" && git merge -q --ff-only bgw ) >/dev/null 2>&1
+printf '[{"pid":1,"cwd":"%s","kind":"background","sessionId":"y","name":"bgonly","status":"busy","id":"b2"}]' \
+  "$(cd "$WORK/bgrepo" && pwd -P)" > "$WORK/claude-agents.json"
+rm -f "$STATE/claude-agents.json"
+ok "a background session's repo is not a Repos entry" '[ "$("$KEL" _fleet --panes | jq -r "[.repos[].name] | index(\"bgrepo\")")" = null ] && [ "$("$KEL" _fleet --panes | jq -r ".background | length")" = 1 ]'
+o="$("$KEL" sweep -n 2>&1)"
+ok "  ...and sweep leaves its merged worktree alone"  '[[ "$o" != *bgw* ]] && { "$KEL" sweep >/dev/null 2>&1; [ -d "$WORK/bgrepo-bgw" ]; }'
 rm -f "$WORK/claude-agents.json" "$STATE/claude-agents.json"
 
 # a stale claude-agents.json is read at once and refreshed by a detached kel-fleet

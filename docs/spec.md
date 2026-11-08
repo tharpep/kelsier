@@ -275,7 +275,7 @@ where it already is** — which is exactly what a sidebar per window does.
 
 | question | decision |
 |---|---|
-| worktrees | *built 2026-10-16 (phase 2).* **Every worktree of each repo the workspace stands in nests under the repo** — from `git worktree list`, so kel's, Claude Code's (`.claude/worktrees`) and hand-made ones alike, open or not — with its land state. The author found worktrees hard to keep track of and works on parallel things in one checkout, so two agents in one checkout is **counted, never refused or warned about** (`2 agents`). `s` / `kel sweep` remove a landed one: never forced (git refuses changes), the branch only via `git branch -d`, and never where a window or a Claude Code session (`claude agents --json`, which sees other terminals too) stands. `kel-fleet` adds `repos` on the sidebar's path, cached in `worktrees.json` for 20 s but re-read the moment `.git/worktrees` changes |
+| worktrees | *built 2026-10-16 (phase 2).* **Every worktree of each repo the workspace stands in nests under the repo** — from `git worktree list`, so kel's, Claude Code's (`.claude/worktrees`) and hand-made ones alike, open or not — with its land state. The author found worktrees hard to keep track of and works on parallel things in one checkout, so two agents in one checkout is **counted, never refused or warned about** (`2 agents`). `s` / `kel sweep` remove a landed one: never forced (git refuses changes), the branch only via `git branch -d`, and never where a window or a Claude Code session (`claude agents --json`, which sees other terminals too) stands. Repos and `kel sweep` cover only repos where a kel window stands; a background Claude session adds no repo. `kel-fleet` adds `repos` on the sidebar's path, cached in `worktrees.json` for 20 s but re-read the moment `.git/worktrees` changes |
 | groups | *built (M0).* **One `kel` tmux session for everything.** The sidebar groups by repo → worktree from each pane's directory; sessions-per-repo would only duplicate that and make navigation two-level. `group` stays in the records as the repo label (no format change); `.kel/group` keeps working as a display grouping; restore merges old per-repo sessions into the one |
 | the panel | **a `display-popup` first** (~90%) for `yazi`, `lazygit`, plan and tasks — no layout cost, nothing resizes. A pinned right-hand pane only if the popup gets reopened constantly. *Revised 2026-10-15, after the author was trapped:* a popup takes every key, prefix included, so when yazi handed them to vim, the title's "q closes" started a vim macro. **Each popup now hosts a small tmux session of its own** (`_kelpop_<n>`, status off, marked `@kel-popup`) and attaches to it; inside, tmux's keys work again and `prefix q` detaches — closing the popup whatever runs there. The `_` name keeps it out of every kel filter (sidebar, fleet, snapshot, restore). yazi and lazygit keep their session between opens; the diff, plan and edit views are made fresh |
 | sidebar width | *built (M2).* **Fixed, 32 columns by default**, `sidebar_width` in config, identical in every window. Hide/show applies to every window at once and resizes the user's panes, so it is a rare gesture. *Held in place 2026-10-21:* tmux's own pane commands move the sidebar like any pane — `select-layout` (prefix M-1..5) stretched it, `rotate-window` and main-vertical put it on the right, `swap-pane` gave the agent its 32 columns. A `window-layout-changed` hook, guarded by a format so bash starts only when a sidebar is out of place, runs `kel _sidebar fit`: a sidebar off the left or short of full height is closed and made again (`join-pane -f` postdates the 3.0 floor), one at the wrong width resized. *Docked, 2026-11-05 (#33):* left, top, and the bottom edge or within one row of the window's height — one row because of the border status line. A window shorter than its client never touched the bottom edge, so `fit` re-made the sidebar on every layout change, each re-make fired the hook again, and the loop ran 3.5 times a second. The trigger was not reproduced in the suite; the proven guard is `.refit`, which caps re-making at once per 30 s per window. The hook keeps the old three-edge guard: a permissive guard only costs a bash start, and a correct `fit` kills nothing. `resize-window -A` was rejected: it resizes the user's panes (invariant 4). `rotate-window` fires no layout hook, so its two keys call fit themselves. A dragged sidebar edge springs back — the author's call: the width is fixed. A `break-pane` of the sidebar left a window holding only it; heal now reaps first |
@@ -911,14 +911,19 @@ the next action.
 |---|---|---|
 | `dirty N` | uncommitted work | commit it |
 | `unpushed N` | commits only you have | push |
-| `merged` | its PR landed, or HEAD is in the base | sweep it |
+| `merged` | its PR landed, or a branch with commits of its own is in the base | sweep it |
+| `fresh` | the branch still points where it was created (no commits yet) | work, or remove it by hand; never swept |
+| `detached` | detached HEAD on a commit the base holds | never swept |
 | `review` | PR open | wait, or nudge |
 | `behind N` | base moved under you | rebase |
 | `no_pr` | pushed, nothing opened | open one |
 | `clean` | nothing to say | — |
 | `unknown` | `gh` could not answer the PR half | — |
 
-Precedence is that order. `merged` asks **git first** (ancestry); `gh` only
+Precedence is that order, with `fresh` and `detached` answered where `merged`
+would have been: an ancestor of the base that never moved off its creation
+commit (its oldest reflog entry is its tip, or no reflog entry records a commit made on it — a sync with main adds entries, not work), or whose HEAD is detached, is not
+"landed". No reflog reads `merged`. `merged` asks **git first** (ancestry); `gh` only
 adds the squash-merge case. So the column degrades without a token rather than
 going dark. PR state is **one request per repo**, cached under `pr-cache/` for
 `KEL_PR_TTL` (default 300s); only `--pr` may refresh it, and a repo whose
