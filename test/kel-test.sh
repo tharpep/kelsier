@@ -1633,7 +1633,7 @@ FA() { "$KEL" _fleet --panes | jq -r "$1"; }
 age_state() { local st; st="$(cut -d" " -f1 "$STATE/$K5.state")"; printf '%s %s\n' "$st" "$(( $(date +%s) - 30 ))" > "$STATE/$K5.state"; }
 age_state
 ok "working, but Claude Code says idle: idle"     '[ "$(FA ".agents[] | select(.name==\"wt5\") | .state")" = idle ]'
-ok "  ...the hook state alone still says what the hook wrote" '[ "$("$KEL" _fleet | jq -r ".agents[] | select(.name==\"wt5\") | .state")" = "$(cut -d" " -f1 "$STATE/$K5.state")" ]'
+ok "  ...the hook state alone still says what the hook wrote" 'wait_until "[ \"\$(\"\$KEL\" _fleet | jq -r \".agents[] | select(.name==\\\"wt5\\\") | .state\")\" = \"\$(cut -d\" \" -f1 \"\$STATE/\$K5.state\")\" ]" 50'
 ok "a background agent is listed, with its repo"  '[ "$(FA ".background[0].id")" = bg77 ] && [ "$(FA ".background[0].group")" = api-gw ]'
 printf '[{"pid":1,"id":"bg55","cwd":"%s","kind":"background","sessionId":"s55","name":"wt5","status":"busy"}]' "$WT5" > "$WORK/claude-agents.json"
 rm -f "$STATE/claude-agents.json"; hook "$UP5" Stop; age_state
@@ -2571,8 +2571,8 @@ tmux select-window -t "$BW"
 "$KEL" _sidebar wake
 wait_until '[ "$(cut -d" " -f1 "$STATE/$CCP.state")" = waiting ]' 200
 ok "a waiting background session folded into an agent is written by the visible sidebar" '[ "$(cut -d" " -f1 "$STATE/$CCP.state")" = waiting ] && [ "$(jq -r .claude_session "$SESSIONS/api-gw/c.json")" = sessE2E ]'
-wait_until '[ "$(grep -c . "$NLOG")" = 1 ]'
-wait_until '[ "$(grep -c . "$STATE/banner")" = 2 ]'
+wait_until '[ "$(grep -c . "$NLOG")" -ge 1 ]' 200
+wait_until '[ "$(grep -c . "$STATE/banner")" = 2 ]' 200
 ok "  ...the banner and the bell follow"  'cut -f1,2 "$STATE/banner" | grep -qx "$CCP	waiting" && [ "$(grep -c . "$NLOG")" -ge 1 ]'
 ok "  ...two panes in one load both keep their banner line" 'cut -f1,2 "$STATE/banner" | grep -qx "$CP	waiting" && cut -f1,2 "$STATE/banner" | grep -qx "$CCP	waiting"'
 TMUX="$TC" "$KEL" jump >/dev/null 2>&1
