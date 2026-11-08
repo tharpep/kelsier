@@ -10,7 +10,7 @@
   $ bash                kelsier
   $ bash                      ~
   ▸ htop                      ~
-  ▪ node :3000 :…  web-dashboa…
+  ▪ node :3000 :3001  web-dash…
   ▪ node :5173    web-dashboard
   Repos ▾                    12
   ◌ api-gw              main ↓4

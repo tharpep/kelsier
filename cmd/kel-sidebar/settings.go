@@ -6,6 +6,7 @@ package main
 
 import (
 	"fmt"
+	"os"
 	"strconv"
 	"strings"
 )
@@ -27,6 +28,7 @@ type setRow struct {
 	kind               setKind
 	on                 bool
 	opts               []string // a choice's options; value is the chosen one
+	env                bool     // an exported KEL_* var decides it; the file's value is not what runs
 }
 
 // configDefaults are bin/kel's, for a key the file does not set.
@@ -52,7 +54,25 @@ func isOn(v string) bool {
 
 var prTTLs = []int{60, 120, 300, 600, 1800}
 
-func settingRows(c map[string]string) []setRow {
+// effectiveConfig is c with every exported KEL_<KEY> laid over it, as bin/kel
+// does (an unset or empty var never overrides), and the keys that won.
+var envKeys = []string{"notify", "notify_bell", "notify_desktop", "notify_banner", "sidebar_width", "sidebar_bg", "ctx_warn", "pr", "pr_ttl", "agent", "worktrees"}
+
+func effectiveConfig(c map[string]string) (map[string]string, map[string]bool) {
+	eff, over := map[string]string{}, map[string]bool{}
+	for k, v := range c {
+		eff[k] = v
+	}
+	for _, k := range envKeys {
+		if v := os.Getenv("KEL_" + strings.ToUpper(k)); v != "" {
+			eff[k], over[k] = v, true
+		}
+	}
+	return eff, over
+}
+
+func settingRows(file map[string]string) []setRow {
+	c, over := effectiveConfig(file)
 	states := " " + cfgGet(c, "notify") + " "
 	has := func(s string) bool { return strings.Contains(states, " "+s+" ") }
 	wt := cfgGet(c, "worktrees")
@@ -64,7 +84,7 @@ func settingRows(c map[string]string) []setRow {
 		bg = "Fixed"
 	}
 	ttl, _ := strconv.Atoi(cfgGet(c, "pr_ttl"))
-	return []setRow{
+	rows := []setRow{
 		{kind: setHead, label: "Tell me when an agent"},
 		{name: "notify:waiting", label: "needs me", kind: setToggle, on: has("waiting")},
 		{name: "notify:error", label: "hits an error", kind: setToggle, on: has("error")},
@@ -88,11 +108,40 @@ func settingRows(c map[string]string) []setRow {
 		{kind: setBlank},
 		{name: "open", label: "Open config.toml", kind: setButton},
 	}
+	for i, r := range rows {
+		key := strings.SplitN(r.name, ":", 2)[0]
+		rows[i].env = r.name != "" && over[key]
+	}
+	return rows
 }
 
 // settable reports whether a row does something when chosen.
 func (r setRow) settable() bool {
-	return r.kind == setToggle || r.kind == setStep || r.kind == setChoice || r.kind == setButton
+	return !r.env && (r.kind == setToggle || r.kind == setStep || r.kind == setChoice || r.kind == setButton)
+}
+
+func envTag(r setRow) string {
+	if r.env {
+		return dim + "env " + reset
+	}
+	return ""
+}
+
+func envW(r setRow) int {
+	if r.env {
+		return 4
+	}
+	return 0
+}
+
+// backRow is the top row of a screen that replaces the lists: Back, and the
+// screen's name on the right. Settings and Help both wear it.
+func backRow(title string, w, hover, hoverX int) line {
+	back := accent + "‹ Back" + reset
+	if hover == 1 && hoverX >= 2 && hoverX < 8 {
+		back = accent + bold + "‹ Back" + reset
+	}
+	return line{spread("  "+back, bold+title+reset, w), lineRef{kind: "set", id: "set:back", hits: []hit{{2, 8, "back"}}}}
 }
 
 // renderSettings draws the screen: Back on top, the rows, the foot. sel is
@@ -100,11 +149,7 @@ func (r setRow) settable() bool {
 // whose row lifts so it reads as something to click.
 func renderSettings(c map[string]string, w, h, sel, hover, hoverX int) (string, []lineRef) {
 	var body []line
-	back := accent + "‹ Back" + reset
-	if hover == 1 && hoverX >= 2 && hoverX < 8 {
-		back = accent + bold + "‹ Back" + reset
-	}
-	body = append(body, line{spread("  "+back, bold+"Settings"+reset, w), lineRef{kind: "set", id: "set:back", hits: []hit{{2, 8, "back"}}}}, line{"", lineRef{}})
+	body = append(body, backRow("Settings", w, hover, hoverX), line{"", lineRef{}})
 	for i, r := range settingRows(c) {
 		lead := " "
 		if i == sel && r.settable() {
@@ -122,11 +167,14 @@ func renderSettings(c map[string]string, w, h, sel, hover, hoverX int) (string, 
 			if r.on {
 				sw = accent + "━━" + reset + bold + "●" + reset
 			}
-			s = spread(lead+"   "+truncate(r.label, w-10), sw, w)
+			s = spread(lead+"   "+truncate(r.label, w-10-envW(r)), envTag(r)+sw, w)
 			ref.hits = []hit{{0, w, "toggle"}}
 		case setStep:
 			right := accent + "‹ " + reset + bold + r.value + reset + accent + " ›" + reset
-			s = spread(lead+"   "+truncate(r.label, w-12), right, w)
+			if r.env {
+				right = envTag(r) + bold + r.value + reset
+			}
+			s = spread(lead+"   "+truncate(r.label, w-12-envW(r)), right, w)
 			x := w - 1 - visWidth(right)
 			ref.hits = []hit{{x, x + 2, "dec"}, {w - 3, w - 1, "inc"}}
 		case setChoice:
@@ -144,13 +192,16 @@ func renderSettings(c map[string]string, w, h, sel, hover, hoverX int) (string, 
 				ref.hits = append(ref.hits, hit{x, x + n, "opt:" + o})
 				x += n
 			}
-			s = spread(lead+"   "+truncate(r.label, w-20), right, w)
+			s = spread(lead+"   "+truncate(r.label, w-20-envW(r)), envTag(r)+right, w)
 		case setShow:
-			s = spread(lead+"   "+truncate(r.label, w-16), dim+truncate(r.value, 14)+reset, w)
+			s = spread(lead+"   "+truncate(r.label, w-16-envW(r)), envTag(r)+dim+truncate(r.value, 14)+reset, w)
 			ref = lineRef{}
 		case setButton:
 			s = lead + "   " + button(r.label)
 			ref.hits = []hit{{4, 4 + len([]rune(r.label)) + 2, "open"}}
+		}
+		if r.env {
+			ref.hits = nil
 		}
 		if hover == len(body)+1 && r.settable() {
 			s = fill(s, w, raised)

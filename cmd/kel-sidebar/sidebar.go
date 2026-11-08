@@ -94,8 +94,9 @@ type sbModel struct {
 	cands  string // tab's choices when a typed directory is ambiguous
 	hist   int    // how far back ;'s history is, 0 = what is being typed
 	target string // the entry a pending kill or rename acts on
-	msg    string // the last command's result, shown until the next key
+	msg    string // the last command's result, shown until the next key or toastFor
 	msgBad bool
+	msgAt  time.Time
 	help   bool
 
 	pending tea.Cmd // a command activate() started, returned by the caller
@@ -922,9 +923,22 @@ func (m sbModel) Init() tea.Cmd {
 	return tea.Batch(tickAfter(), m.askColours())
 }
 
+const toastFor = 8 * time.Second
+
 func (m sbModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	nm, cmd := m.update(msg)
 	s, ok := nm.(sbModel)
+	if ok && s.msg != "" {
+		switch msg.(type) {
+		case tea.KeyPressMsg, sbDone:
+			s.msgAt = time.Now()
+		default:
+			if s.msg != m.msg {
+				s.msgAt = time.Now()
+			}
+		}
+		nm = s
+	}
 	if !ok || s.drawer == nil {
 		return nm, cmd
 	}
@@ -963,6 +977,9 @@ func (m sbModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case sbTick:
+		if m.msg != "" && time.Since(m.msgAt) > toastFor {
+			m.msg, m.msgBad = "", false
+		}
 		was := m.visible
 		m.checkVisible()
 		if was && !m.visible {
@@ -1074,6 +1091,15 @@ func (m sbModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.settings {
 			return m.settingsClick(msg)
 		}
+		if m.help { // the keys list: a key clicked is pressed; elsewhere closes it
+			m.help = false
+			if msg.Y >= 1 && msg.Y <= len(sbHelp) {
+				if k := helpKey(sbHelp[msg.Y-1][0]); k != "" {
+					return m.key(tea.KeyPressMsg{Code: rune(k[0]), Text: k})
+				}
+			}
+			return m, nil
+		}
 		_, refs := renderView(m.view(), m.width, m.height, time.Now().Unix())
 		hit := func() lineRef {
 			if msg.Y >= 0 && msg.Y < len(refs) {
@@ -1136,15 +1162,6 @@ func (m sbModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.help = true
 			case "open:settings":
 				m.settings, m.setSel = true, 1
-			}
-			return m, nil
-		}
-		if m.help { // the keys list: a key clicked is pressed; elsewhere closes it
-			m.help = false
-			if msg.Y >= 1 && msg.Y <= len(sbHelp) {
-				if k := helpKey(sbHelp[msg.Y-1][0]); k != "" {
-					return m.key(tea.KeyPressMsg{Code: rune(k[0]), Text: k})
-				}
 			}
 			return m, nil
 		}
@@ -1698,7 +1715,7 @@ var sbHelp = [][2]string{
 	{"s", "sweep if landed"},
 	{"#", "kel"},
 	{"n", "new agent (tab: dir)"},
-	{"n x -- …", "…with claude flags"},
+	{"n x -- …", "with claude flags"},
 	{"w", "new worktree agent"},
 	{"|", "split right"},
 	{"-", "split down"},
@@ -1726,7 +1743,7 @@ func (m sbModel) draw() (string, []lineRef) {
 	}
 	if m.help {
 		var b strings.Builder
-		b.WriteString(dim + truncate("keys", m.width) + reset + "\n")
+		b.WriteString(backRow("keys", m.width, m.ui.hover, m.ui.hoverX).s + "\n")
 		pk := m.ui.prefix
 		if pk == "" {
 			pk = "Ctrl-b"

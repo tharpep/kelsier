@@ -138,7 +138,7 @@ func TestDrawerFactsOmitUnknowns(t *testing.T) {
 	text := func(git *fleet.Git) string {
 		d := &sbDrawer{items: []sbAct{{"enter", "Go to it"}}}
 		var ss []string
-		for _, l := range drawerLines(d, git, "/x", 32, " ") {
+		for _, l := range drawerLines(d, git, "/x", "", 32, " ") {
 			ss = append(ss, strings.TrimRight(plain(l.s), " "))
 		}
 		return strings.Join(ss, "\n")

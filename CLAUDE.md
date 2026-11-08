@@ -193,7 +193,7 @@ column exists rather than a trailing sentence.
 ```sh
 bash -n bin/kel && bash -n install.sh      # syntax
 go vet ./... && go build ./... && go test ./...
-test/kel-test.sh                            # ~1 min; it prints its own count
+test/kel-test.sh                            # ~8 min on WSL2; it prints its own count
 ```
 
 Go is **required**. The suite builds `kel-fleet` and `kel-sidebar` from this

@@ -725,6 +725,18 @@ func paneLabel(p fleet.Pane) string {
 	return l
 }
 
+// paneLabelFit is the label in w columns. A server gives up its command's
+// letters before its ports: the port is what the row is for.
+func paneLabelFit(p fleet.Pane, w int) string {
+	label := paneLabel(p)
+	if p.Kind == "server" && len([]rune(label)) > w {
+		if tail := label[len(p.Cmd):]; w >= len([]rune(tail))+2 {
+			return truncate(p.Cmd, w-len([]rune(tail))) + tail
+		}
+	}
+	return truncate(label, w)
+}
+
 func paneGlyph(kind string) string {
 	switch kind {
 	case "server":
@@ -1162,13 +1174,13 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 	drawn := func(id string) bool { return v.drawer != nil && v.drawer.id == id && id == v.sel }
 	drawer := func(id string) {
 		var git *fleet.Git
-		var cwd string
+		var cwd, name string
 		for _, a := range v.agents {
 			if agentID(a.key) == id {
-				git, cwd = a.git, a.cwd
+				git, cwd, name = a.git, a.cwd, a.agent.Name
 			}
 		}
-		for _, l := range drawerLines(v.drawer, git, cwd, w, lead(id)) {
+		for _, l := range drawerLines(v.drawer, git, cwd, name, w, lead(id)) {
 			add(l.s, l.ref)
 		}
 	}
@@ -1290,6 +1302,12 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 		p := sh.pane
 		pr := lineRef{id: p.PaneID, kind: "pane"}
 		lw, rw := fitPair(paneLabel(p), len([]rune(sh.where)), avail)
+		if n := len([]rune(paneLabel(p))); p.Kind == "server" && lw < n {
+			lw = min(n, avail)
+			if rw = avail - lw - 2; rw < 4 {
+				rw = 0
+			}
+		}
 		right := ""
 		if rw > 0 {
 			right = dim + truncate(sh.where, rw) + reset
@@ -1297,7 +1315,7 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 		if btns, bn, hits := inline(p.PaneID, "pane", 4, false); bn >= 0 {
 			right, lw, pr.hits = btns, bn, hits
 		}
-		lbl := truncate(paneLabel(p), lw)
+		lbl := paneLabelFit(p, lw)
 		if seen[paneLabel(p)] > 1 && p.WindowName != "" {
 			if room := lw - len([]rune(lbl)) - 3; room > 0 {
 				lbl += dim + " · " + truncate(p.WindowName, room) + reset
@@ -1944,14 +1962,20 @@ type sbDrawer struct {
 	sel   int
 }
 
-func drawerLines(d *sbDrawer, git *fleet.Git, cwd string, w int, bar string) []line {
+func drawerLines(d *sbDrawer, git *fleet.Git, cwd, name string, w int, bar string) []line {
 	avail := max(w-5, 0)
 	row := func(s string, r lineRef) line { return line{fill(s, w, drawerBg), r} }
 	blank := row(bar, lineRef{kind: "drawer"})
 	pre := bar + "   "
 	out := []line{blank}
 	if git != nil {
-		out = append(out, row(pre+mid+truncate(spacePos(sbSpace{git: git, cwd: cwd}), avail)+reset, lineRef{kind: "drawer"}), blank)
+		pos := spacePos(sbSpace{git: git, cwd: cwd})
+		if git.Branch != nil && *git.Branch == name {
+			pos = strings.TrimSpace(strings.TrimPrefix(pos, name))
+		}
+		if pos != "" {
+			out = append(out, row(pre+mid+truncate(pos, avail)+reset, lineRef{kind: "drawer"}), blank)
+		}
 	}
 	for i, it := range d.items {
 		k := it.key

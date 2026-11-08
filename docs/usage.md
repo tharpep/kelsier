@@ -189,8 +189,10 @@ banner), the sidebar's width and background (from the terminal, or fixed),
 the context warning, PR lookups and how often. Each click writes your
 `config.toml` at once, keeping its comments; width refits every sidebar, and
 a background change restarts them. The agent command and worktree folder are
-shown, and `Open config.toml` edits the rest. `‹ Back` or esc returns. Help
-lists every key.
+shown, and `Open config.toml` edits the rest. A setting that an exported
+`KEL_*` var decides shows that var's value with a dim `env` tag and cannot be
+clicked, since a write to `config.toml` would not take effect. `‹ Back` or
+esc returns. Help lists every key and has the same `‹ Back` row.
 
 **The keyboard gets into the sidebar only on purpose:** `Ctrl-b then space`, or
 a click. Moving between panes (`Ctrl-b o`, `Ctrl-b ←`, vim-tmux-navigator's
