@@ -159,6 +159,9 @@ SELF="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)/$(basename "${BA
 # commands worth re-running per pane on restore (agents handled separately)
 KEL_RESTORE_CMDS="${KEL_RESTORE_CMDS:-nvim vim hx nano lazygit lazydocker htop btop k9s}"
 KEL_SIDEBAR_WIDTH="${KEL_SIDEBAR_WIDTH:-32}"      # identical in every window (spec.md §5c)
+KEL_SIDEBAR_RAIL_BELOW="${KEL_SIDEBAR_RAIL_BELOW:-120}"
+KEL_SIDEBAR_HIDE_BELOW="${KEL_SIDEBAR_HIDE_BELOW:-80}"
+KEL_RAIL_WIDTH=4
 # the sidebar paints itself, in surfaces built from the terminal's own colours
 # (kel-sidebar asks; spec.md §5d). sidebar_bg = "#rrggbb" names the background
 # to build from instead, for a terminal that does not answer.
@@ -504,6 +507,8 @@ sidebar_ensure() { # wid
   sidebar_enabled || return 0
   [ "$(tmux display-message -p -t "$wid" '#{session_name}' 2>/dev/null)" = "$KEL_PREFIX" ] || return 0
   [ -n "$(sidebar_pane "$wid")" ] && return 0
+  local size; size="$(sidebar_size "$wid")"
+  [ "$size" = hidden ] && return 0
   sidebar_width_opts
   # No else-branch, and the condition inverted, ON PURPOSE: an empty branch
   # ('') is an error tmux shows in view-mode on the window's active pane — the
@@ -512,15 +517,35 @@ sidebar_ensure() { # wid
   # stderr goes to sidebar-fail.log: four sidebars split cleanly and then died
   # (2026-10-20), and tmux reports nothing about a pane whose process exits.
   tmux if-shell -F -t "$wid" '#{?#{P:#{?@kel-sidebar,1,}},,1}' \
-    "split-window -hbdf -l $KEL_SIDEBAR_WIDTH -t '$wid' -c '#{pane_current_path}' -e 'KEL_BIN=$SELF' -e 'KEL_SIDEBAR_BG=$KEL_SIDEBAR_BG' \"exec '$KEL_SIDEBAR_BIN' 2>>'$STATE_DIR/sidebar-fail.log'\" ; set-option -p -t '$wid.{top-left}' @kel-sidebar 1" \
+    "split-window -hbdf -l $(size_width "$size") -t '$wid' -c '#{pane_current_path}' -e 'KEL_BIN=$SELF' -e 'KEL_SIDEBAR_BG=$KEL_SIDEBAR_BG' \"exec '$KEL_SIDEBAR_BIN' 2>>'$STATE_DIR/sidebar-fail.log'\" ; set-option -p -t '$wid.{top-left}' @kel-sidebar 1" \
     2>/dev/null || true
   banner_apply
 }
 
 sidebar_width_opts() {
-  local w="$KEL_SIDEBAR_WIDTH"
-  tmux set-option -g @kel-sidebar-width "$w" \; \
-       set-option -g @kel-hint-blank "$(printf '%*s' "$w" '')" 2>/dev/null
+  tmux set-option -g @kel-sidebar-width "$KEL_SIDEBAR_WIDTH" \; \
+       set-option -g @kel-rail-width "$KEL_RAIL_WIDTH" 2>/dev/null
+}
+
+size_by_width() { # columns
+  case "$1" in ''|*[!0-9]*) echo full; return ;; esac
+  if [ "$1" -lt "$KEL_SIDEBAR_HIDE_BELOW" ]; then echo hidden
+  elif [ "$1" -lt "$KEL_SIDEBAR_RAIL_BELOW" ]; then echo rail
+  else echo full; fi
+}
+
+size_of() { # choice columns
+  case "$1" in full|rail|hidden) echo "$1" ;; *) size_by_width "$2" ;; esac
+}
+
+size_width() { # full|rail
+  if [ "$1" = rail ]; then echo "$KEL_RAIL_WIDTH"; else echo "$KEL_SIDEBAR_WIDTH"; fi
+}
+
+sidebar_size() { # wid
+  local out
+  out="$(tmux display-message -p -t "$1" '#{@kel-sidebar-size}|#{window_width}' 2>/dev/null)" || return 0
+  size_of "${out%%|*}" "${out#*|}"
 }
 
 
@@ -565,10 +590,15 @@ select_agent() { # pane-or-window-id
 # it on the agent's own path.  Only kel's session: a popup's _kelpop_* session
 # or a window of yours elsewhere is not missing anything.
 sidebar_heal() {
-  local wid
   sidebar_enabled || return 0
   sidebar_width_opts
   sidebar_reap
+  sidebar_missing
+}
+
+sidebar_missing() {
+  local wid
+  sidebar_enabled || return 0
   tmux list-panes -s -t "=$KEL_PREFIX" -F '#{window_id} #{@kel-sidebar}' 2>/dev/null \
   | awk '{ seen[$1]; if ($2 == 1) has[$1] } END { for (w in seen) if (!(w in has)) print w }' \
   | while read -r wid; do
@@ -589,23 +619,41 @@ sidebar_refit() { # wid -> 0 and stamps <wid>.refit, unless it was stamped under
 }
 
 sidebar_fit() {
-  local flag id w wid zoomed l t b ph wh pos
+  local flag id w wid zoomed l t b ph wh ww pick pos size want
   sidebar_width_opts
-  tmux list-panes -a -F '#{@kel-sidebar} #{pane_id} #{pane_width} #{window_id} #{window_zoomed_flag} #{pane_at_left} #{pane_at_top} #{pane_at_bottom} #{pane_height} #{window_height}' 2>/dev/null \
-  | while read -r flag id w wid zoomed l t b ph wh; do
+  tmux list-panes -a -F '#{@kel-sidebar} #{pane_id} #{pane_width} #{window_id} #{window_zoomed_flag} #{pane_at_left} #{pane_at_top} #{pane_at_bottom} #{pane_height} #{window_height} #{window_width} #{@kel-sidebar-size}' 2>/dev/null \
+  | while read -r flag id w wid zoomed l t b ph wh ww pick; do
       [ "$flag" = 1 ] || continue
+      size="$(size_of "$pick" "$ww")"
+      want="$(size_width "$size")"
       pos=moved
-      if [ "$zoomed" = 1 ]; then pos=zoomed
+      if [ "$size" = hidden ]; then pos=hidden
+      elif [ "$zoomed" = 1 ]; then pos=zoomed
       elif [ "$l" = 1 ] && [ "$t" = 1 ] && { [ "$b" = 1 ] || [ "$ph" -ge $((wh - 1)) ]; }; then pos=docked
       fi
       case "$pos" in
+        hidden) tmux kill-pane -t "$id" 2>/dev/null ;;
         moved)  sidebar_refit "$wid" || { printf 'fit: %s re-made under 30s ago, left alone\n' "$wid" >> "$STATE_DIR/sidebar-fail.log"; continue; }
                 tmux kill-pane -t "$id" 2>/dev/null; sidebar_ensure "$wid" ;;
-        docked) [ "$w" != "$KEL_SIDEBAR_WIDTH" ] \
-                  && tmux resize-pane -t "$id" -x "$KEL_SIDEBAR_WIDTH" 2>/dev/null ;;
+        docked) [ "$w" != "$want" ] \
+                  && tmux resize-pane -t "$id" -x "$want" 2>/dev/null ;;
       esac
     done
+  sidebar_missing
   return 0
+}
+
+# invariant 4: only the sidebar's own pane is resized or killed here
+sidebar_size_set() { # wid full|rail|hidden|cycle
+  local wid="${1:-}" to="${2:-cycle}"
+  [ -n "$wid" ] || return 0
+  case "$to" in
+    cycle) case "$(sidebar_size "$wid")" in full) to=rail ;; rail) to=hidden ;; *) to=full ;; esac ;;
+    full|rail|hidden) ;;
+    *) die "usage: kel _sidebar size <window> full|rail|hidden|cycle" ;;
+  esac
+  tmux set-option -w -t "$wid" @kel-sidebar-size "$to" 2>/dev/null || return 0
+  sidebar_fit
 }
 
 # prefix Space: put the keyboard in the sidebar of the window you are in,
@@ -4503,9 +4551,10 @@ main() {
                     wake)   sidebar_wake "${2:-}" ;;
                     heal)   sidebar_heal ;;
                     fit)    sidebar_fit ;;
+                    size)   sidebar_size_set "${2:-}" "${3:-cycle}" ;;
                     reap)   sidebar_reap ;;
                     focus)  sidebar_focus "${2:-}" ;;
-                    *)      die "kel _sidebar ensure|wake [all]|heal|fit|reap|focus" ;;
+                    *)      die "kel _sidebar ensure|wake [all]|heal|fit|size|reap|focus" ;;
                   esac ;;
     doctor)       cmd_doctor "$@" ;;
     config)       cmd_config ;;

@@ -34,7 +34,7 @@ type setRow struct {
 // configDefaults are bin/kel's, for a key the file does not set.
 var configDefaults = map[string]string{
 	"notify": "waiting error", "notify_bell": "on", "notify_desktop": "on", "notify_banner": "on",
-	"sidebar_width": "32", "ctx_warn": "70", "pr": "on", "pr_ttl": "300", "agent": "claude",
+	"sidebar_width": "32", "sidebar_rail_below": "120", "sidebar_hide_below": "80", "ctx_warn": "70", "pr": "on", "pr_ttl": "300", "agent": "claude",
 }
 
 func cfgGet(c map[string]string, k string) string {
@@ -56,7 +56,7 @@ var prTTLs = []int{60, 120, 300, 600, 1800}
 
 // effectiveConfig is c with every exported KEL_<KEY> laid over it, as bin/kel
 // does (an unset or empty var never overrides), and the keys that won.
-var envKeys = []string{"notify", "notify_bell", "notify_desktop", "notify_banner", "sidebar_width", "sidebar_bg", "ctx_warn", "pr", "pr_ttl", "agent", "worktrees"}
+var envKeys = []string{"notify", "notify_bell", "notify_desktop", "notify_banner", "sidebar_width", "sidebar_rail_below", "sidebar_hide_below", "sidebar_bg", "ctx_warn", "pr", "pr_ttl", "agent", "worktrees"}
 
 func effectiveConfig(c map[string]string) (map[string]string, map[string]bool) {
 	eff, over := map[string]string{}, map[string]bool{}
@@ -95,6 +95,8 @@ func settingRows(file map[string]string) []setRow {
 		{kind: setBlank},
 		{kind: setHead, label: "Sidebar"},
 		{name: "sidebar_width", label: "Width", kind: setStep, value: cfgGet(c, "sidebar_width")},
+		{name: "sidebar_rail_below", label: "Rail below", kind: setStep, value: cfgGet(c, "sidebar_rail_below")},
+		{name: "sidebar_hide_below", label: "Hide below", kind: setStep, value: cfgGet(c, "sidebar_hide_below")},
 		{name: "sidebar_bg", label: "Background", kind: setChoice, value: bg, opts: []string{"Terminal", "Fixed"}},
 		{kind: setBlank},
 		{kind: setHead, label: "Agents"},
@@ -267,6 +269,9 @@ func applySetting(path, name, how string, termBg string) (refit bool, err error)
 		n, _ := strconv.Atoi(cfgGet(c, name))
 		n = step(n, how, 2, 24, 48)
 		return true, setConfig(path, name, strconv.Itoa(n))
+	case name == "sidebar_rail_below", name == "sidebar_hide_below":
+		n, _ := strconv.Atoi(cfgGet(c, name))
+		return true, setConfig(path, name, strconv.Itoa(step(n, how, 10, 0, 200)))
 	case name == "ctx_warn":
 		n, _ := strconv.Atoi(cfgGet(c, name))
 		return false, setConfig(path, name, strconv.Itoa(step(n, how, 5, 50, 95)))

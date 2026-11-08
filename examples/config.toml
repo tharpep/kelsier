@@ -19,7 +19,9 @@
 # ctx_warn     = 70             # context % at which the status bar starts showing it
 # sidebar      = "on"           # the pane on the left of every kel window
                                 # ("off" here, or `kel sidebar off` for now)
-# sidebar_width = 32            # identical in every window
+# sidebar_width = 32            # the full sidebar's width
+# sidebar_rail_below = 120      # a window narrower than this gets a 4-column rail
+# sidebar_hide_below = 80       # ...and one narrower than this, no sidebar
 # sidebar_bg   = "#1e1e2e"      # the background its colours are built from, for a
 #                               # terminal that does not answer kel's query (WezTerm on WSL)
 

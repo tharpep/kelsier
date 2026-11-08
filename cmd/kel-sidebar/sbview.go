@@ -155,6 +155,7 @@ func quietKind(a fleet.Agent, now int64) string {
 }
 
 type sbView struct {
+	servers   bool // some pane in the workspace runs a server
 	shells    []sbShell
 	under     map[string][]sbShell // agent key -> the panes of its window, nested under its card
 	reposOpen bool
@@ -298,6 +299,9 @@ func buildView(doc fleet.Doc, ui uiState) sbView {
 	byWin := map[string][]fleet.Pane{}
 	for _, p := range *doc.Panes {
 		byWin[p.WindowID] = append(byWin[p.WindowID], p)
+		if p.Kind == "server" {
+			v.servers = true
+		}
 		if p.Agent {
 			if _, ok := agentPane[p.WindowID]; !ok {
 				agentPane[p.WindowID] = p.PaneID
@@ -1193,6 +1197,9 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 	if w <= 0 && h <= 0 {
 		w = 32
 	}
+	if isRail(w) {
+		return renderRail(v, w, h, now)
+	}
 	var body []line
 	add := func(s string, r lineRef) { body = append(body, line{s, r}) }
 	// every entry line starts with one column, the selection bar. Where you
@@ -1863,6 +1870,11 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 			}
 		}
 	}
+	return joinLines(body, w)
+}
+
+// joinLines is the frame's text and, line for line, what a click on each hits.
+func joinLines(body []line, w int) (string, []lineRef) {
 	var b strings.Builder
 	refs := make([]lineRef, len(body))
 	for i, l := range body {

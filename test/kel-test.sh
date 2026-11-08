@@ -38,6 +38,8 @@ export KEL_CLAUDE_BIN="$WORK/claude-stub"
 # v0.10 count panes, and a sidebar is one more.  The sidebar's own section
 # turns it on and re-checks what matters with it present.
 export KEL_SIDEBAR=off
+# a detached window is 80 columns: without these every sidebar the suite makes would be a rail
+export KEL_SIDEBAR_RAIL_BELOW=0 KEL_SIDEBAR_HIDE_BELOW=0
 
 # tmux resolves its socket under $TMUX_TMPDIR, and bin/kel inherits it — so the
 # suite and the tool under test share one throwaway server and `kill-server`
@@ -64,7 +66,7 @@ mkdir -p "$WORK/shim"
 TMUX_BIN="$(command -v tmux)"
 SOCK="$TMUX_TMPDIR/tmux-$(id -u)/default"
 mkdir -m 700 "${SOCK%/*}"
-printf '#!/bin/sh\ncase "$1" in display-message|new-session) [ -n "$KEL_TEST_TMUX_LOG" ] && printf "%%s\\n" "$*" >> "$KEL_TEST_TMUX_LOG" ;; esac\nexec %s -S %s -f /dev/null "$@"\n' "$TMUX_BIN" "$SOCK" > "$WORK/shim/tmux"
+printf '#!/bin/sh\ncase "$1" in display-message|new-session|resize-pane) [ -n "$KEL_TEST_TMUX_LOG" ] && printf "%%s\\n" "$*" >> "$KEL_TEST_TMUX_LOG" ;; esac\nexec %s -S %s -f /dev/null "$@"\n' "$TMUX_BIN" "$SOCK" > "$WORK/shim/tmux"
 chmod +x "$WORK/shim/tmux"
 export PATH="$WORK/shim:$PATH"
 printf '#!/bin/sh\n[ "$1 $2" = "agents --json" ] && { cat "%s/claude-agents.json" 2>/dev/null || echo "[]"; }\n' "$WORK" > "$WORK/claude-stub"
@@ -1126,6 +1128,48 @@ rm -f "$STATE/$LW.refit"
 tmux select-layout -t "$LW" main-vertical
 ok "  ...a layout change re-docks by itself"      "wait_until 'docked $LW'"
 ok "  ...rotate's keys re-dock too (it fires no layout hook)" '[ "$(grep -c "rotate-window.*_sidebar fit" "$HERE/../tmux/kel.conf")" = 2 ]'
+
+# F9: the window's width picks full, rail or none (spec §5b)
+NW="$(tmux new-window -d -P -F '#{window_id}' -t '=keltest:' -c "$WORK/repos/api-gw" 'sleep 9999')"
+"$KEL" _sidebar ensure "$NW"
+NA="$(userpane "$NW")"
+tmux set-option -w -t "$NW" window-size manual
+export KEL_SIDEBAR_RAIL_BELOW=120 KEL_SIDEBAR_HIDE_BELOW=80
+tmux set-environment -g KEL_SIDEBAR_RAIL_BELOW 120; tmux set-environment -g KEL_SIDEBAR_HIDE_BELOW 80
+sbw() { tmux list-panes -t "$1" -F '#{@kel-sidebar}:#{pane_width}' | sed -n 's/^1://p'; }
+fitat() { tmux resize-window -t "$NW" -x "$1" -y 30; rm -f "$STATE/$NW.refit"; KEL_TEST_TMUX_LOG="$WORK/resize.log" "$KEL" _sidebar fit; }
+: > "$WORK/resize.log"
+fitat 150
+ok "fit gives a 150-column window the full sidebar"    '[ "$(sbw "$NW")" = 32 ]'
+fitat 100
+ok "  ...a 100-column window a 4-column rail"          '[ "$(sbw "$NW")" = 4 ]'
+ok "  ...which is the same sidebar, resized"           '[ "$(sbcount "$NW")" = 1 ]'
+fitat 70
+ok "  ...a 70-column window none"                      '[ "$(sbcount "$NW")" = 0 ]'
+ok "  ...leaving the user's pane running, with its id" '[ "$(tmux display -p -t "$NA" "#{pane_current_command}")" = sleep ] && [ "$(userpane "$NW")" = "$NA" ]'
+ok "  ...and sidebar-off alone"                        '[ ! -e "$STATE/sidebar-off" ]'
+"$KEL" _sidebar ensure "$NW"
+ok "  ...which ensure does not undo"                   '[ "$(sbcount "$NW")" = 0 ]'
+fitat 150
+ok "  ...and widening brings the full sidebar back"    '[ "$(sbw "$NW")" = 32 ]'
+ok "kel never resizes a user pane"                     '[ -s "$WORK/resize.log" ] && ! grep -q -- "-t $NA " "$WORK/resize.log"'
+ok "kel.conf binds prefix b to cycle the window"       'grep -q "^bind-key b run-shell.*_sidebar size .#{window_id}. cycle" "$HERE/../tmux/kel.conf"'
+ok "  ...and hooks client-resized to fit"              'grep -q "^set-hook -g client-resized.*_sidebar fit" "$HERE/../tmux/kel.conf"'
+"$KEL" _sidebar size "$NW" cycle
+ok "prefix b takes full to rail"                       '[ "$(sbw "$NW")" = 4 ]'
+fitat 150
+ok "  ...which a following fit leaves alone"          '[ "$(sbw "$NW")" = 4 ]'
+"$KEL" _sidebar size "$NW" cycle
+ok "  ...rail to hidden"                               '[ "$(sbcount "$NW")" = 0 ]'
+fitat 150
+ok "  ...which sticks through a fit at 150"            '[ "$(sbcount "$NW")" = 0 ]'
+"$KEL" _sidebar size "$NW" cycle
+ok "  ...hidden to full"                               '[ "$(sbw "$NW")" = 32 ]'
+tmux set-option -wu -t "$NW" @kel-sidebar-size
+tmux kill-window -t "$NW"
+export KEL_SIDEBAR_RAIL_BELOW=0 KEL_SIDEBAR_HIDE_BELOW=0
+tmux set-environment -g KEL_SIDEBAR_RAIL_BELOW 0; tmux set-environment -g KEL_SIDEBAR_HIDE_BELOW 0
+
 hold_client 20
 tmux select-window -t "$LW"; "$KEL" _sidebar wake; tmux select-pane -t "$LA"
 wait_until '[ "$(tmux display -p -t "$(sidebar_of "$LW")" "#{alternate_on}")" = 1 ]' 30

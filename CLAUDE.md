@@ -149,6 +149,12 @@ and a new binary's first macOS launch is slow — and wake signals only those, a
 only the shown one (`_sidebar wake all` for every one; `KEL_WAKE_TRACE` records
 the panes signalled).
 
+A window's sidebar is full, a 4-column rail, or absent, by the window's width
+(`sidebar_rail_below` 120, `sidebar_hide_below` 80). `prefix b` and the rail's `≡`
+set the tmux window option `@kel-sidebar-size`, which beats the width and dies
+with its window. A hidden window has no sidebar pane, so `ensure`, `heal` and
+`fit` make none there; `sidebar-off` stays the only global switch.
+
 **Read it through `fleet_json`, never by re-deriving.** `kel _fleet [--dirty]
 [--land] [--pr]` — that is, `kel-fleet` — turns all of the above into one JSON
 document, and `ls` / `--json` / `status-line` / the completions / the sidebar

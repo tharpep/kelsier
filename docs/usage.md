@@ -25,7 +25,7 @@ kel displaced, and leaves `~/.local/state/kel` alone — uninstalling must not b
 able to lose work. `--uninstall --purge` removes that too, after asking.
 
 **Upgrading from v0.9:** a running tmux server keeps the old bindings
-(`Ctrl+Space`, `Ctrl-b b`, `Ctrl-b m`, `Ctrl-b k`) until it restarts —
+(`Ctrl+Space`, `Ctrl-b m`) until it restarts —
 `source-file` adds bindings, it does not remove them. `tmux kill-server` (after
 `kel snapshot`) or unbind them by hand. v0.9's per-repo sessions
 (`kel/<group>`) are no longer read: restart the tmux server once, and `kel
@@ -97,6 +97,7 @@ Keys below use `Ctrl-b`, tmux's default prefix; if you changed yours, kel's own 
 |---|---|
 | `` Ctrl-b ` `` | jump to the next agent that **needs you** — any group: waiting or stopped on an API error first, then finished ones you have not looked at; press again to work through them |
 | `Ctrl-b 1..9` / `n` / `p` / `w` | move between windows — every agent is in one session (native tmux) |
+| `Ctrl-b b` | cycle this window's sidebar: full, rail, hidden. The choice sticks for the window until you change it again |
 | `Ctrl-b ,` | rename this window (routes through `kel rename`) |
 | `Ctrl-b \|` / `-` | split, keeping the current directory |
 | `Ctrl-b [` | scroll mode for a shell pane (`q` to leave) |
@@ -204,6 +205,8 @@ esc returns. Help lists every key and has the same `‹ Back` row.
 a click. Moving between panes (`Ctrl-b o`, `Ctrl-b ←`, vim-tmux-navigator's
 Ctrl-h) passes over it, so typing meant for an agent never lands there.
 
+**The sidebar follows the window's width.** From `sidebar_rail_below` columns (120) it is the full sidebar; from `sidebar_hide_below` (80) up to that, a **rail** four columns wide; narrower, none. The window's width decides, so shrinking the terminal changes every window at once. The rail shows what needs you (`●2`), a dot per agent in the list's order, `▪` when a server runs, and `≡` at the foot. Click a dot to jump to that agent, the count to jump to the first that needs you, `≡` to bring the full sidebar back. There is no hover or drawer in it. `Ctrl-b b` cycles full, rail, hidden for the window you are in, and that choice stays for the window (until the server restarts) whatever its width. Hiding a window's sidebar does not touch `kel sidebar off`, which stays global, and kel still never resizes your own panes: tmux hands the sidebar's columns to them.
+
 **The sidebar stays where it is.** tmux's layout keys (`Ctrl-b M-1..5`,
 `Ctrl-b Ctrl-o`, `Ctrl-b {` / `}`) rearrange your panes as usual and the
 sidebar goes back to the left at its width; drag the dividers between your own
@@ -307,7 +310,7 @@ terminal's bell and shows a desktop notification (a Windows toast on WSL) —
 see `setup.md` §5b to change either. A background session that waits on you rings only while a sidebar is visible; with the sidebar off, only the hooks notify. Hidden sidebars do no work of their own; the one you can see refreshes every two
 seconds and at once when an agent changes state. `kel sidebar off` removes it
 everywhere (and new windows get none) until `kel sidebar on`; `sidebar =
-"off"` in config disables it outright; `sidebar_width` sets the width and
+"off"` in config disables it outright; `sidebar_width` sets the width, `sidebar_rail_below` and `sidebar_hide_below` the window widths where it becomes a rail and where it goes, and
 `sidebar_bg` the background its colours are built from: by default it asks
 the terminal, and a terminal that does not answer (WezTerm on WSL) needs
 `sidebar_bg = "#1e1e2e"`, your theme's background.

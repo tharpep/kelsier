@@ -1163,6 +1163,9 @@ func (m sbModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.Button != tea.MouseLeft {
 			return m, nil
 		}
+		if hit.id == railFullID {
+			return m, runKel("", nil, "_sidebar", "size", m.ui.myWindow, "full")
+		}
 		for _, b := range hit.hits {
 			if msg.X >= b.x0 && msg.X < b.x1 {
 				// a row's button: on that row, whatever was selected
@@ -1768,6 +1771,9 @@ func (m sbModel) render() string {
 }
 
 func (m sbModel) draw() (string, []lineRef) {
+	if isRail(m.width) {
+		return renderView(m.view(), m.width, m.height, time.Now().Unix())
+	}
 	if m.settings {
 		s, _ := renderSettings(readConfig(kelConfigPath()), m.width, m.height, m.setSel, m.ui.hover, m.ui.hoverX)
 		return s, nil

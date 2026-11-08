@@ -51,7 +51,7 @@ func TestSidebarGolden(t *testing.T) {
 		for _, c := range []struct {
 			w, h    int
 			focused bool
-		}{{28, 0, false}, {32, 0, false}, {40, 0, false}, {32, 0, true}, {32, 30, true}} {
+		}{{28, 0, false}, {32, 0, false}, {40, 0, false}, {32, 0, true}, {32, 30, true}, {4, 0, false}, {4, 20, false}} {
 			w := c.w
 			got, err := fixtureFrame(f, w, c.h, c.focused)
 			if err != nil {
@@ -64,6 +64,9 @@ func TestSidebarGolden(t *testing.T) {
 			if c.h > 0 {
 				// at a real height: the actions group at the foot
 				gold = filepath.Join(fixtures, name+".focused."+itoa(w)+"x"+itoa(c.h)+".golden")
+			}
+			if w == 4 {
+				gold = filepath.Join(fixtures, name+".rail.4"+map[bool]string{true: "x" + itoa(c.h), false: ""}[c.h > 0]+".golden")
 			}
 			if *update {
 				if err := os.WriteFile(gold, []byte(got+"\n"), 0o644); err != nil {
