@@ -197,6 +197,66 @@ jumping to its output is bookkeeping. Only the second is in scope.
 **Gate:** the sidebar, panel, plan and tasks are daily-driven (`rollout.md`
 step 4.6).
 
+The six entries below come from the 2026-11-07 hands-on review. They were left
+unbuilt when W1–W7 landed (`e4438b2..9006762`).
+
+### 44. Per-pane files outlive the tmux server  ·  `[defect]`
+
+After a server restart a reused pane id inherits the old agent's `.mode` and
+`.state`. Records are guarded by `@kel-agent`, and W2's session field guards
+`.ctx`, but those two files have no guard. Measured: a fresh fake agent read
+the previous server's mode, model and cost until W2. It reads the old mode
+and state today. The fix ties each file to the agent's session id or to the
+pane's start time.
+
+**Gate:** a restarted workspace shows a state or mode that belongs to an agent
+no longer there.
+
+### 45. Waiting shows in four places at once  ·  `[fits]`
+
+The Needs you row, the card's chip and reason, the banner and the bar's
+`needs you` all say the same thing. Spec §7 gives the waiting *count* one home,
+the footer (`spec.md:523`), so this may already hold. The question is whether
+the banner and Needs you row still pay their way.
+
+**Gate:** the repetition reads as noise in daily use, or one of the four goes
+unnoticed.
+
+### 46. Shell echo when an agent starts  ·  `[borderline]`
+
+Every agent pane opens with two lines of shell: the prompt and the
+`claude --name …` that `kel new` sent with `send-keys`. Hiding them means
+starting the pane on the command itself (`new-window … claude`) rather than
+typing into a shell. That changes what is left when the agent exits, so it
+borders invariant 4.
+
+**Gate:** the echo gets in the way, not just looks untidy.
+
+### 47. `d` asks for a base every time  ·  `[fits]`
+
+The diff key prompts for the base branch even when the default is right. The
+prompt could be skipped when the base is unambiguous, with a modifier to ask.
+
+**Gate:** the prompt is answered with the default more often than not.
+
+### 48. An agent's PR on its row  ·  `[fits]`
+
+`pr-cache` already maps a commit to its PR. The agent row could show the
+number and state. Weighed for the card line (F8) and not chosen. #43's
+**Changes** note is the same idea.
+
+**Gate:** you open a browser or `gh` to find which PR an agent's branch has.
+
+### 49. `kel doctor` reports Claude Code's fullscreen TUI  ·  `[fits]`
+
+Claude Code turns its fullscreen TUI off after a failed launch (seen after a
+WSL crash). The clickable chat box then quietly disappears from kel panes.
+`kel doctor` could report whether it is on (`/tui fullscreen`,
+`CLAUDE_CODE_NO_FLICKER=1`) and print the hint. It reports and never sets: kel
+must not configure Claude Code.
+
+**Gate:** the chat box goes missing again and costs time to explain.
+
 ---
 
 ## Known interactions — not features, things that will bite
@@ -250,7 +310,7 @@ Cut 2026-08-30: `kel top`'s LAST OUTPUT column showed every agent at once. In
 the sidebar design selecting a row *is* the peek — it shows the
 real pane. Original design at the `v0.9.0` tag.
 
-*Reversed 2026-11-07* (`docs/review-2026-11-07.md`, W7 decision M1 → A): with
+*Reversed 2026-11-07* (the hands-on review, landed in `87f5e76`): with
 panes in a window that is not shown, "selecting a row" is not a look. Peek is
 back as a read-only popup of the agent's or pane's screen — `capture-pane`, never
 a key sent — opened by `space` or the drawer's `Peek`; `enter` jumps, `esc`
