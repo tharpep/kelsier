@@ -492,7 +492,7 @@ func TestHelpClick(t *testing.T) {
 	row := func(k string) int {
 		for i, h := range sbHelp {
 			if h[0] == k {
-				return i + 1
+				return i + 2
 			}
 		}
 		t.Fatalf("no row %q", k)
@@ -630,8 +630,8 @@ func TestWorktreeFoldKeepsAgents(t *testing.T) {
 func TestHelpHover(t *testing.T) {
 	m := sbModel{help: true, width: 32, height: 40}
 	for i, h := range sbHelp {
-		m.ui.hover = i + 2
-		line := strings.Split(plain(m.render()), "\n")[i+1]
+		m.ui.hover = i + 3
+		line := strings.Split(plain(m.render()), "\n")[i+2]
 		if bar := strings.HasPrefix(line, "▏"); bar != (helpKey(h[0]) != "") {
 			t.Errorf("row %q hovered: %q", h[0], line)
 		}

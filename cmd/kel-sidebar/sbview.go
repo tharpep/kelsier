@@ -660,6 +660,28 @@ func (v *sbView) nestPanes() {
 	v.shells = rest
 }
 
+func (v sbView) windowPanes(wid string) int {
+	n := 0
+	for _, a := range v.agents {
+		if a.wid == wid && a.pane != "" {
+			n++
+		}
+	}
+	for _, sh := range v.shells {
+		if sh.pane.WindowID == wid {
+			n++
+		}
+	}
+	for _, shs := range v.under {
+		for _, sh := range shs {
+			if sh.pane.WindowID == wid {
+				n++
+			}
+		}
+	}
+	return n
+}
+
 func (v sbView) paneByID(id string) (fleet.Pane, bool) {
 	for _, sh := range v.shells {
 		if sh.pane.PaneID == id {
@@ -1926,8 +1948,8 @@ func selActions(v sbView) (string, string, []sbAct) {
 		for _, a := range v.agents {
 			if agentID(a.key) == v.sel {
 				acts := []sbAct{{"d", "diff"}, {"f", "files"}, {"e", "edit file"}, {"p", "plan"}, {"h", "history"}, {"i", "cards"}, {"z", "zoom"}}
-				if a.shared {
-					acts = append(acts, sbAct{"m", "own window"})
+				if v.windowPanes(a.wid) > 1 {
+					acts = append(acts, sbAct{"m", "own window"}, sbAct{"S", "swap with…"})
 				}
 				acts = append(acts, sbAct{"r", "rename"}, sbAct{"x", "kill"})
 				if a.agent.State != nil && *a.agent.State == "dead" {
@@ -1973,6 +1995,13 @@ func selActions(v sbView) (string, string, []sbAct) {
 			acts := []sbAct{{"enter", "go to it"}}
 			if p.Kind == "server" {
 				acts = append(acts, sbAct{"o", "browser"})
+			}
+			if v.windowPanes(p.WindowID) > 1 {
+				acts = append(acts, sbAct{"m", "own window"})
+			}
+			acts = append(acts, sbAct{"M", "move beside…"})
+			if v.windowPanes(p.WindowID) > 1 {
+				acts = append(acts, sbAct{"S", "swap with…"})
 			}
 			acts = append(acts, sbAct{"f", "files"}, sbAct{"g", "git"}, sbAct{"e", "nvim"}, sbAct{"i", "cards"}, sbAct{"x", "close"}, sbAct{"z", "zoom"})
 			return "pane", paneLabel(p), acts
@@ -2069,7 +2098,7 @@ func drawerLines(d *sbDrawer, git *fleet.Git, cwd, name string, w int, bar strin
 
 // newMenu holds what makes something.
 func newMenu() []sbAct {
-	return []sbAct{{"n", "New agent"}, {"w", "Agent in a worktree"}, {"|", "Split right"}, {"-", "Split down"}}
+	return []sbAct{{"n", "New agent"}, {"w", "Agent in a worktree"}, {"|", "Split right"}, {"-", "Split down"}, {"t", "Shell window"}}
 }
 
 // kelMenu holds kel's own: what the key grid's kel half was.

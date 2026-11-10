@@ -75,6 +75,7 @@ const (
 	modeSweep
 	modeCommand
 	modeDiff
+	modePick
 )
 
 type sbModel struct {
@@ -94,6 +95,7 @@ type sbModel struct {
 	cands  string // tab's choices when a typed directory is ambiguous
 	hist   int    // how far back ;'s history is, 0 = what is being typed
 	target string // the entry a pending kill or rename acts on
+	pickVerb string
 	msg    string // the last command's result, shown until the next key or toastFor
 	msgBad bool
 	msgAt  time.Time
@@ -625,6 +627,16 @@ func (m sbModel) view() sbView {
 		ask("close "+m.entryName(m.target)+"?", yellow, "y yes · n no")
 	case modeWhere:
 		ask("new agent where?", "", "enter window · | right · - down · esc")
+	case modePick:
+		q, hint := "move "+m.entryName(m.target)+" beside…", "enter right · - below · esc"
+		if m.pickVerb == "swap" {
+			q, hint = "swap "+m.entryName(m.target)+" with…", "enter swap · esc"
+		}
+		c := ""
+		if m.msgBad && m.msg != "" {
+			q, c = m.msg, red
+		}
+		ask(q, c, hint)
 	case modeQuit:
 		ask("quit kel?", yellow, "y yes · n no")
 	case modeSweep:
@@ -1116,8 +1128,8 @@ func (m sbModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.help { // the keys list: a key clicked is pressed; elsewhere closes it
 			m.help = false
-			if msg.Y >= 1 && msg.Y <= len(sbHelp) {
-				if k := helpKey(sbHelp[msg.Y-1][0]); k != "" {
+			if msg.Y >= 2 && msg.Y <= len(sbHelp)+1 {
+				if k := helpKey(sbHelp[msg.Y-2][0]); k != "" {
 					return m.key(tea.KeyPressMsg{Code: rune(k[0]), Text: k})
 				}
 			}
@@ -1130,6 +1142,10 @@ func (m sbModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return lineRef{}
 		}()
+		if m.mode == modePick && msg.Button == tea.MouseLeft && (hit.kind == "agent" || hit.kind == "pane") {
+			m.ui.sel = hit.id
+			return m.pick(false)
+		}
 		if m.drawer != nil {
 			if hit.kind == "drawer" {
 				if k := strings.TrimPrefix(hit.id, "dr:"); k != hit.id && msg.Button == tea.MouseLeft {
@@ -1361,6 +1377,18 @@ func (m sbModel) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			return m, closePaneCmd(m.target)
 		}
 		return m, nil
+	case modePick:
+		switch k {
+		case "up", "k":
+			m.move(-1)
+		case "down", "j":
+			m.move(1)
+		case "enter", "-":
+			return m.pick(k == "-")
+		case "esc":
+			m.mode, m.msg, m.msgBad = modeNormal, "", false
+		}
+		return m, nil
 	case modeWhere:
 		args, dir := m.pendArgs, m.pendDir
 		switch k {
@@ -1580,9 +1608,28 @@ func (m sbModel) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "z":
 		return m, zoomCmd(m.ui.myWindow, m.zoomTarget())
 	case "m":
-		if a, ok := m.agentOf(m.view().sel); ok && a.shared {
+		v := m.view()
+		if a, ok := m.agentOf(v.sel); ok && v.windowPanes(a.wid) > 1 {
 			return m, runKel("", nil, "_own", a.pane)
 		}
+		if p, ok := m.paneOf(v.sel); ok && v.windowPanes(p.WindowID) > 1 {
+			return m, runKel("", nil, "_own", p.PaneID)
+		}
+	case "M", "shift+m", "S", "shift+s":
+		v := m.view()
+		verb, win := "move", ""
+		if k == "S" || k == "shift+s" {
+			verb = "swap"
+		}
+		if p, ok := m.paneOf(v.sel); ok {
+			win = p.WindowID
+		} else if a, ok := m.agentOf(v.sel); ok && verb == "swap" {
+			win = a.wid
+		}
+		if win == "" || verb == "swap" && v.windowPanes(win) < 2 {
+			return m, nil
+		}
+		m.mode, m.target, m.pickVerb, m.msg, m.msgBad = modePick, v.sel, verb, "", false
 	case "r", "x":
 		v := m.view()
 		if p, ok := m.paneOf(v.sel); ok && k == "x" {
@@ -1734,8 +1781,12 @@ var sbHelp = [][2]string{
 	{"R", "relaunch crashed"},
 	{"z", "zoom"},
 	{"m", "own window"},
+	{"S", "swap places with…"},
 	{"#", "a pane"},
 	{"space", "peek at its screen"},
+	{"m", "own window"},
+	{"M", "move beside… (pick)"},
+	{"S", "swap places with…"},
 	{"x", "close"},
 	{"z", "zoom"},
 	{"#", "a space"},
@@ -1781,6 +1832,7 @@ func (m sbModel) draw() (string, []lineRef) {
 	if m.help {
 		var b strings.Builder
 		b.WriteString(backRow("keys", m.width, m.ui.hover, m.ui.hoverX).s + "\n")
+		b.WriteString(dim + truncate("click a bold key to run it", m.width) + reset + "\n")
 		pk := m.ui.prefix
 		if pk == "" {
 			pk = "Ctrl-b"
@@ -1803,15 +1855,14 @@ func (m sbModel) draw() (string, []lineRef) {
 			if helpKey(k) != "" {
 				kc = bold
 				// the same hover bar as every other button: what a click
-				// would run shows before the click (line i+1, hover is +1)
-				if m.ui.hover == i+2 {
+				// would run shows before the click (line i+2, hover is +1)
+				if m.ui.hover == i+3 {
 					lead = dim + "▏" + reset
 				}
 			}
 			b.WriteString(lead + kc + truncate(pad(k, 8), m.width-1) + reset + dim + truncate(h[1], m.width-9) + reset + "\n")
 		}
-		b.WriteString(dim + truncate("click a bold key to run it", m.width) + reset)
-		return b.String(), nil
+		return strings.TrimSuffix(b.String(), "\n"), nil
 	}
 	return renderView(m.view(), m.width, m.height, time.Now().Unix())
 }
@@ -2121,7 +2172,7 @@ func helpKey(row string) string {
 		return ""
 	default:
 		switch f[0] {
-		case "/", "n", "w", "r", "x", "t", ";", "`", "s", "q", "f", "g", "d", "e", "o", "p", "c", "v", "u", "|", "-", "z", "m", "R", "i", "h":
+		case "/", "n", "w", "r", "x", "t", ";", "`", "s", "q", "f", "g", "d", "e", "o", "p", "c", "v", "u", "|", "-", "z", "m", "M", "S", "R", "i", "h":
 			return f[0]
 		}
 	}
@@ -2289,4 +2340,40 @@ func (m sbModel) settingsKey(k string) (tea.Model, tea.Cmd) {
 		return m.setting(rows[m.setSel].name, how)
 	}
 	return m, nil
+}
+
+func (m sbModel) pick(below bool) (tea.Model, tea.Cmd) {
+	src, srcWin := m.target, ""
+	if p, ok := m.paneOf(m.target); ok {
+		src, srcWin = p.PaneID, p.WindowID
+	} else if a, ok := m.agentOf(m.target); ok {
+		src, srcWin = a.pane, a.wid
+	}
+	dst, dstWin := "", ""
+	if a, ok := m.agentOf(m.ui.sel); ok {
+		dst, dstWin = a.pane, a.wid
+	} else if p, ok := m.paneOf(m.ui.sel); ok {
+		dst, dstWin = p.PaneID, p.WindowID
+	}
+	bad := func(s string) (tea.Model, tea.Cmd) {
+		m.msg, m.msgBad = s, true
+		return m, nil
+	}
+	switch {
+	case dst == "":
+		return bad("pick an agent or a pane")
+	case m.pickVerb == "swap" && (dstWin != srcWin || dst == src):
+		return bad("pick another pane in its window")
+	case m.pickVerb == "move" && dstWin == srcWin:
+		return bad("pick a pane in another window")
+	}
+	m.mode, m.msg, m.msgBad = modeNormal, "", false
+	if m.pickVerb == "swap" {
+		return m, runKel("", nil, "_swap", src, dst)
+	}
+	side := "right"
+	if below {
+		side = "down"
+	}
+	return m, runKel("", nil, "_join", src, dst, side)
 }

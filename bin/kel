@@ -456,6 +456,44 @@ own_window() { # pane
   say "$name has a window of its own"
 }
 
+pane_is_agent() { # pane
+  local f
+  f="$(tmux display-message -p -t "$1" '#{@kel-agent}|#{pane_current_command}' 2>/dev/null)" || return 1
+  [ -n "${f%%|*}" ] && return 0
+  case "${f#*|}" in claude|agy|codex|aider|opencode) return 0 ;; esac
+  [ -n "${KEL_AGENT:-}" ] && [ "${f#*|}" = "$KEL_AGENT" ]
+}
+
+# invariant 4: these move a user's pane only because the user asked, in the sidebar
+join_beside() { # pane target right|down
+  local pane="${1:-}" dst="${2:-}" flag=-h sw dw
+  [ "${3:-right}" = down ] && flag=-v
+  sw="$(tmux display-message -p -t "$pane" '#{window_id}' 2>/dev/null)" || die "no pane $pane"
+  dw="$(tmux display-message -p -t "$dst" '#{window_id}' 2>/dev/null)" || die "no pane $dst"
+  [ -z "$(tmux display-message -p -t "$pane" '#{@kel-sidebar}' 2>/dev/null)" ] \
+    && [ -z "$(tmux display-message -p -t "$dst" '#{@kel-sidebar}' 2>/dev/null)" ] || die "the sidebar stays put"
+  pane_is_agent "$pane" && die "an agent moves only to a window of its own (m)"
+  [ "$sw" != "$dw" ] || die "it is in that window already"
+  tmux join-pane -d "$flag" -s "$pane" -t "$dst" 2>/dev/null || die "could not move it"
+  sidebar_reap
+  sidebar_fit
+  snapshot
+  say "moved"
+}
+
+swap_panes() { # pane other
+  local a="${1:-}" b="${2:-}" aw bw
+  aw="$(tmux display-message -p -t "$a" '#{window_id}' 2>/dev/null)" || die "no pane $a"
+  bw="$(tmux display-message -p -t "$b" '#{window_id}' 2>/dev/null)" || die "no pane $b"
+  [ "$aw" = "$bw" ] || die "swap works within one window"
+  [ "$a" != "$b" ] || die "pick another pane"
+  [ -z "$(tmux display-message -p -t "$a" '#{@kel-sidebar}' 2>/dev/null)" ] \
+    && [ -z "$(tmux display-message -p -t "$b" '#{@kel-sidebar}' 2>/dev/null)" ] || die "the sidebar stays put"
+  tmux swap-pane -d -s "$a" -t "$b" 2>/dev/null || die "could not swap them"
+  snapshot
+  say "swapped"
+}
+
 window_state() { # wid -> the most urgent state among its agents
   local p best='' r br=9 st
   for p in $(tmux list-panes -t "$1" -F '#{@kel-sidebar}|#{pane_id}' 2>/dev/null | awk -F'|' '$1 == "" {print $2}') "$1"; do
@@ -4546,6 +4584,8 @@ main() {
                     *)     die "usage: kel _banner seen|clear" ;;
                   esac ;;
     _own)         own_window "${1:-}" ;;
+    _join)        join_beside "${1:-}" "${2:-}" "${3:-right}" ;;
+    _swap)        swap_panes "${1:-}" "${2:-}" ;;
     _sidebar)     case "${1:-}" in
                     ensure) sidebar_ensure "${2:-}" ;;
                     wake)   sidebar_wake "${2:-}" ;;

@@ -361,6 +361,20 @@ release_client
 OW2="$(jq -r .window_id "$SESSIONS/api-gw/guest.json")"
 ok "_own moves an agent to a window of its own" '[ "$OW2" != "$HW2" ] && [ "$(tmux display -p -t "$GP" "#{window_id}")" = "$OW2" ]'
 ok "  ...named after it, still running"         '[ "$(tmux display -p -t "$OW2" "#{window_name}")" = guest ] && [ "$(tmux display -p -t "$GP" "#{pane_current_command}")" = sleep ]'
+SP="$(tmux split-window -d -h -t "$HP" -P -F '#{pane_id}')"
+"$KEL" _own "$SP" >/dev/null 2>&1
+SW="$(tmux display -p -t "$SP" '#{window_id}')"
+ok "_own gives a plain pane a window of its own" '[ "$SW" != "$HW2" ] && [ "$(tmux display -p -t "$SW" "#{@kel-group}")" = api-gw ]'
+"$KEL" _join "$SP" "$HP" down >/dev/null 2>&1
+ok "_join moves it back, below the agent"       '[ "$(tmux display -p -t "$SP" "#{window_id}")" = "$HW2" ] && [ "$(tmux display -p -t "$SP" "#{pane_top}")" -gt "$(tmux display -p -t "$HP" "#{pane_top}")" ]'
+ok "  ...and the window it left is gone"        '! tmux list-windows -a -F "#{window_id}" | grep -qxF "$SW"'
+JOUT="$("$KEL" _join "$GP" "$HP" 2>&1)"
+ok "_join refuses to move an agent"             '[[ "$JOUT" == *"window of its own"* ]] && [ "$(tmux display -p -t "$GP" "#{window_id}")" = "$OW2" ]'
+"$KEL" _swap "$SP" "$HP" >/dev/null 2>&1
+ok "_swap trades two panes' places"             '[ "$(tmux display -p -t "$SP" "#{pane_top}")" -lt "$(tmux display -p -t "$HP" "#{pane_top}")" ]'
+JOUT="$("$KEL" _swap "$SP" "$GP" 2>&1)"
+ok "  ...within one window only"                '[[ "$JOUT" == *"one window"* ]]'
+tmux kill-pane -t "$SP"
 tmux join-pane -h -s "$GP" -t "$HP"
 jq --arg w "$HW2" '.window_id = $w' "$SESSIONS/api-gw/guest.json" > "$WORK/g" && mv "$WORK/g" "$SESSIONS/api-gw/guest.json"
 "$KEL" kill api-gw/guest >/dev/null 2>&1

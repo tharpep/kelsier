@@ -171,13 +171,13 @@ scrolls; more than four needing you fold into `+N more`.
 ```
 
 `+ New` opens a menu of what makes something: a new agent, an agent in a
-worktree, split right, split down. `⋯` opens kel's own: next that needs you,
+worktree, split right, split down, a shell window in the selected space. `⋯` opens kel's own: next that needs you,
 usage, pull requests, a kel command, restore (while a previous workspace
 waits), all keys, quit. **Right-click any space, agent or pane** (or press `→`
 on an agent, pane or background agent) to open its drawer beneath it, pushing the rows below
 down: everything it can do. An agent's has go to it, peek,
-diff, files, edit last file, plan, history, cards, zoom, own window, rename,
-kill, and relaunch when it is dead, under its git position when known. Every
+diff, files, edit last file, plan, history, cards, zoom, own window and swap
+with… (when it shares its window), rename, kill, and relaunch when it is dead, under its git position when known. Every
 item shows its key on the right, so the keys are there when you want them,
 learned by using the mouse. **The entry under the pointer shows its buttons on its own row**, in place of
 its age, branch or chip, and its name shortens to make room: `Diff · Files · ⋯`
@@ -328,10 +328,19 @@ The group is what `kel ls` sorts by, what `kel kill <group>/<name>` names, and
 the label each of the sidebar's spaces carries.
 
 **window vs pane:** `kel new` makes a **window** — one agent. `Ctrl-b | / -`
-(or `|` / `-` in the sidebar) makes a **pane** inside it, for your own editor,
-shell or tests. kel tracks state per window, so a second agent belongs in its
-own window. A pane selected in the sidebar has `x close` (a shell at once,
-anything else asks) and `z zoom`; while a window is zoomed the bar says
+(or `|` / `-` in the sidebar, or `+ New`) makes a **pane** inside it, for your
+own editor, shell or tests. State is kept per pane, so a second agent can share
+a window (`kel new --split`). A pane selected in the sidebar has:
+
+| key | does |
+|---|---|
+| `m` own window | takes the pane out into a window of its own, when its window holds another pane |
+| `M` move beside… | the list becomes a picker: click or walk to an agent or pane in another window, `enter` puts it to the right, `-` below. The window it left closes if nothing but the sidebar remains. Not for agents: a resize leaves stale lines in Claude Code's scrollback (backlog #42) |
+| `S` swap with… | the same picker, inside its own window; agents have it too |
+| `x` close | a shell at once, anything else asks |
+| `z` zoom | |
+
+kel moves a pane only when you choose one of these. While a window is zoomed the bar says
 `⤢ zoomed · click to restore`. Dragging a divider turns it blue and heavy
 until you let go. Once a window has more than one pane, each pane's title
 names it — an agent pane by its name and state, `● 3 · guest waiting`, in

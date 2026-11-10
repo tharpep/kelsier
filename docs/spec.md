@@ -145,7 +145,10 @@ you made. Each window carries its own sidebar pane at a fixed width on the
 left, all running the same Go program over the same state, so the sidebar
 reads as one persistent thing that is simply always there. Selecting a row is
 `select-window` (plus `select-pane` for a pane row): **nothing is moved, swapped
-or resized.**
+or resized.** A pane moves only on a verb you choose for it in the sidebar —
+own window, move beside…, swap with…, zoom (*2026-11-10*, the panes hybrid:
+`break-pane`, `join-pane`, `swap-pane`). Move beside… is refused for an agent,
+whose resize leaves stale scrollback (§5b, backlog #42).
 
 - **Sidebar** — a Go TUI (Bubble Tea v2), grown from `kel top`. **Two
   sections**, after herdr (`herdrdev/herdr`), which answers the same question
