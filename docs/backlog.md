@@ -257,6 +257,20 @@ must not configure Claude Code.
 
 **Gate:** the chat box goes missing again and costs time to explain.
 
+### 50. A map of the window in the drawer  ·  `[fits]`  ·  **parked 2026-11-10**
+
+Step B of the panes hybrid. An agent's drawer would draw its window to scale
+from tmux's `pane_left/top/width/height`, each pane named in its cell. A
+pane's drawer would get a 12-column locator with its own cell filled and its
+place in words ("right, top"). Built to frames
+(https://claude.ai/artifact/GuDSpFTUW3iXrgiqFbMWWc), then reverted. It cost
+about six rows per drawer, it repeats the window beside the sidebar, and peek
+shows another window better. The sidebar already names every pane under its
+agent. Pane geometry left `_fleet --panes` with it.
+
+**Gate:** in a window of three or more panes, you lose track of which pane is
+where, or pick the wrong one in Swap with… or Move beside….
+
 ---
 
 ## Known interactions — not features, things that will bite
