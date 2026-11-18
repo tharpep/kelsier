@@ -147,8 +147,12 @@ reads as one persistent thing that is simply always there. Selecting a row is
 `select-window` (plus `select-pane` for a pane row): **nothing is moved, swapped
 or resized.** A pane moves only on a verb you choose for it in the sidebar —
 own window, move beside…, swap with…, zoom (*2026-11-10*, the panes hybrid:
-`break-pane`, `join-pane`, `swap-pane`). Move beside… is refused for an agent,
-whose resize leaves stale scrollback (§5b, backlog #42).
+`break-pane`, `join-pane`, `swap-pane`). *Since 2026-11-18* move beside… and
+swap with… also rearrange inside one window, for any pane. One rule for an
+agent: it moves and swaps inside its own window, which a split, `S` or a
+border drag already resizes, and never into another window, where the resize
+of a running Claude was the objection (§5b, backlog #42). No move targets the
+sidebar or lands left of it; `fit` re-docks it after.
 
 - **Sidebar** — a Go TUI (Bubble Tea v2), grown from `kel top`. *Since
   2026-11-18 (the hybrid, §5d):* one list of agents grouped under their repo,

@@ -62,9 +62,14 @@ func TestMoveBesidePicksATarget(t *testing.T) {
 		t.Errorf("- on a shell ran %q", *rec)
 	}
 	m, rec = peekModel(t, "%2")
-	m = pickTo(press(m, "M"), "a:@1", "enter")
+	pickTo(press(m, "M"), "a:@1", "enter")
+	if *rec != "_join %2 %1 right" {
+		t.Errorf("a target in the same window ran %q", *rec)
+	}
+	m, rec = peekModel(t, "%2")
+	m = pickTo(press(m, "M"), "%2", "enter")
 	if *rec != "" || m.mode != modePick || !m.msgBad {
-		t.Errorf("a target in the same window ran %q, mode %v", *rec, m.mode)
+		t.Errorf("the pane itself as target ran %q, mode %v", *rec, m.mode)
 	}
 	if m = press(m, "esc"); m.mode != modeNormal || *rec != "" {
 		t.Errorf("esc left mode %v, ran %q", m.mode, *rec)
@@ -84,12 +89,28 @@ func TestSwapStaysInItsWindow(t *testing.T) {
 	}
 }
 
-func TestAgentsOfferNoMove(t *testing.T) {
-	m := atModel(t, "a:@1")
-	for _, a := range entryMenu(m.view()) {
-		if a.key == "M" {
-			t.Errorf("an agent offers %v (backlog #42)", a)
-		}
+func TestAgentsMoveOnlyInTheirWindow(t *testing.T) {
+	var offered bool
+	for _, a := range entryMenu(atModel(t, "a:@1").view()) {
+		offered = offered || a.key == "M"
+	}
+	if !offered {
+		t.Errorf("an agent sharing its window offers no move beside…")
+	}
+	m, rec := peekModel(t, "a:@1")
+	pickTo(press(m, "M"), "%2", "-")
+	if *rec != "_join %1 %2 down" {
+		t.Errorf("an agent moved below a pane of its window ran %q", *rec)
+	}
+	m, rec = peekModel(t, "a:@1")
+	press(press(press(m, "M"), "1"), "enter")
+	if *rec != "_join %1 %2 right" {
+		t.Errorf("1 then enter in the picker ran %q, want its window's first pane", *rec)
+	}
+	m, rec = peekModel(t, "a:@1")
+	m = pickTo(press(m, "M"), "a:@3", "enter")
+	if *rec != "" || m.mode != modePick || !m.msgBad {
+		t.Errorf("an agent moved into another window ran %q (backlog #42)", *rec)
 	}
 }
 
@@ -107,7 +128,7 @@ func TestPaneFramesGolden(t *testing.T) {
 	menu.menu = &sbMenu{title: "New", items: newMenu(), y: 1}
 	pick := press(at("%2"), "M")
 	pick.ui.sel = "a:@2"
-	refused := pickTo(press(at("%2"), "M"), "a:@1", "enter")
+	refused := pickTo(press(at("a:@1"), "M"), "a:@3", "enter")
 	for name, m := range map[string]sbModel{
 		"new-menu":     menu,
 		"pane-menu":    press(at("%2"), "right"),

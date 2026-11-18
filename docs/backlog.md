@@ -170,7 +170,9 @@ so an agent could join the split you are working in, as Orca drags a tab to a
 pane's edge. Left out of M7 (`rollout.md`): Claude Code is not an
 alternate-screen program, and every resize pushed stale lines into its
 scrollback when measured (`spec.md` §5b); a move is a resize. Starting an
-agent as a split (`n`, then `|` or `-`) avoids it.
+agent as a split (`n`, then `|` or `-`) avoids it. *2026-11-18:* moving or
+swapping an agent inside its own window is allowed, since splits and border
+drags resize it there anyway; only a move into another window stays out.
 
 **Gate:** wanting an agent beside you that is already running elsewhere, and
 starting a fresh one being the worse choice.

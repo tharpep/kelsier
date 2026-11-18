@@ -1596,7 +1596,7 @@ func selActions(v sbView) (string, string, []sbAct) {
 			if agentID(a.key) == v.sel {
 				acts := []sbAct{{"d", "diff"}, {"f", "files"}, {"e", "edit file"}, {"p", "plan"}, {"h", "history"}, {"i", "cards"}, {"z", "zoom"}}
 				if v.windowPanes(a.wid) > 1 {
-					acts = append(acts, sbAct{"m", "own window"}, sbAct{"S", "swap with…"})
+					acts = append(acts, sbAct{"m", "own window"}, sbAct{"M", "move beside…"}, sbAct{"S", "swap with…"})
 				}
 				acts = append(acts, sbAct{"r", "rename"}, sbAct{"x", "kill"})
 				if a.agent.State != nil && *a.agent.State == "dead" {

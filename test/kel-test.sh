@@ -405,7 +405,7 @@ ok "_own gives a plain pane a window of its own" '[ "$SW" != "$HW2" ] && [ "$(tm
 ok "_join moves it back, below the agent"       '[ "$(tmux display -p -t "$SP" "#{window_id}")" = "$HW2" ] && [ "$(tmux display -p -t "$SP" "#{pane_top}")" -gt "$(tmux display -p -t "$HP" "#{pane_top}")" ]'
 ok "  ...and the window it left is gone"        '! tmux list-windows -a -F "#{window_id}" | grep -qxF "$SW"'
 JOUT="$("$KEL" _join "$GP" "$HP" 2>&1)"
-ok "_join refuses to move an agent"             '[[ "$JOUT" == *"window of its own"* ]] && [ "$(tmux display -p -t "$GP" "#{window_id}")" = "$OW2" ]'
+ok "_join refuses to move an agent to another window" '[[ "$JOUT" == *"within its window"* ]] && [ "$(tmux display -p -t "$GP" "#{window_id}")" = "$OW2" ]'
 "$KEL" _swap "$SP" "$HP" >/dev/null 2>&1
 ok "_swap trades two panes' places"             '[ "$(tmux display -p -t "$SP" "#{pane_top}")" -lt "$(tmux display -p -t "$HP" "#{pane_top}")" ]'
 JOUT="$("$KEL" _swap "$SP" "$GP" 2>&1)"
@@ -1208,6 +1208,26 @@ rm -f "$STATE/$LW.refit"
 tmux select-layout -t "$LW" main-vertical
 ok "  ...a layout change re-docks by itself"      "wait_until 'docked $LW'"
 ok "  ...rotate's keys re-dock too (it fires no layout hook)" '[ "$(grep -c "rotate-window.*_sidebar fit" "$HERE/../tmux/kel.conf")" = 2 ]'
+
+# rearranging inside one window: any pane, the agent too (backlog #42 forbids
+# only another window); the layout hook above is live, so fit runs as it would
+NEW api-gw rearr
+RW="$(window_of api-gw rearr)"; RA="$(userpane "$RW")"
+wait_until "docked $RW"
+RS="$(tmux split-window -d -v -t "$RA" -c "$WORK/repos/api-gw" -P -F '#{pane_id}')"
+"$KEL" _join "$RS" "$RA" right >/dev/null 2>&1
+ok "_join moves a pane beside another in its window" '[ "$(tmux display -p -t "$RS" "#{window_id}")" = "$RW" ] && [ "$(tmux display -p -t "$RS" "#{pane_left}")" -gt "$(tmux display -p -t "$RA" "#{pane_left}")" ]'
+ok "  ...the sidebar still docked at its width"   "wait_until 'docked $RW'"
+JOUT="$("$KEL" _join "$RS" "$RA" left 2>&1)"
+ok "  ...left of the leftmost pane is right of the sidebar" '[ "$(tmux display -p -t "$RS" "#{pane_left}")" -lt "$(tmux display -p -t "$RA" "#{pane_left}")" ] && wait_until "docked $RW"'
+ok "  ...and says where it went"                  '[[ "$JOUT" == *"moved left of rearr"* ]]'
+"$KEL" _join "$RA" "$RS" up >/dev/null 2>&1
+ok "an agent moves within its own window"         '[ "$(tmux display -p -t "$RA" "#{pane_top}")" -lt "$(tmux display -p -t "$RS" "#{pane_top}")" ] && [ "$(tmux display -p -t "$RA" "#{window_id} #{pane_current_command}")" = "$RW sleep" ]'
+ok "  ...the sidebar still docked"                "wait_until 'docked $RW'"
+JOUT="$("$KEL" _join "$RS" "$(sidebar_of "$RW")" right 2>&1)"
+ok "  ...nothing moves beside the sidebar"        '[[ "$JOUT" == *"sidebar stays put"* ]]'
+JOUT="$("$KEL" _join "$RS" "$RS" right 2>&1)"
+ok "  ...nor beside itself"                       '[[ "$JOUT" == *"another pane"* ]]'
 
 # F9: the window's width picks full, rail or none (spec §5b)
 NW="$(tmux new-window -d -P -F '#{window_id}' -t '=keltest:' -c "$WORK/repos/api-gw" 'sleep 9999')"

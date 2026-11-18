@@ -1438,6 +1438,9 @@ func (m sbModel) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.move(1)
 		case "enter", "-":
 			return m.pick(k == "-")
+		case "1", "2", "3", "4", "5", "6", "7", "8", "9":
+			// the window's own panes have no row: the inspector's numbers reach them
+			m.paneKey(int(k[0] - '0'))
 		case "esc":
 			m.mode, m.msg, m.msgBad = modeNormal, "", false
 		}
@@ -1635,12 +1638,15 @@ func (m sbModel) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		if k == "S" || k == "shift+s" {
 			verb = "swap"
 		}
+		// an agent moves only inside its own window (backlog #42), so it
+		// needs a second pane there; a pane may go to any window
+		inWindow := verb == "swap"
 		if p, ok := m.paneOf(v.sel); ok {
 			win = p.WindowID
-		} else if a, ok := m.agentOf(v.sel); ok && verb == "swap" {
-			win = a.wid
+		} else if a, ok := m.agentOf(v.sel); ok {
+			win, inWindow = a.wid, true
 		}
-		if win == "" || verb == "swap" && v.windowPanes(win) < 2 {
+		if win == "" || inWindow && v.windowPanes(win) < 2 {
 			return m, nil
 		}
 		m.mode, m.target, m.pickVerb, m.msg, m.msgBad = modePick, v.sel, verb, "", false
@@ -1788,6 +1794,7 @@ var sbHelp = [][2]string{
 	{"R", "relaunch crashed"},
 	{"z", "zoom"},
 	{"m", "own window"},
+	{"M", "move beside… (its window)"},
 	{"S", "swap places with…"},
 	{"1-9", "its window's panes"},
 	{"#", "a pane"},
@@ -2498,13 +2505,16 @@ func (m sbModel) pick(below bool) (tea.Model, tea.Cmd) {
 		m.msg, m.msgBad = s, true
 		return m, nil
 	}
+	_, srcAgent := m.agentOf(m.target)
 	switch {
 	case dst == "":
 		return bad("pick an agent or a pane")
-	case m.pickVerb == "swap" && (dstWin != srcWin || dst == src):
+	case dst == src:
+		return bad("pick another pane")
+	case m.pickVerb == "swap" && dstWin != srcWin:
 		return bad("pick another pane in its window")
-	case m.pickVerb == "move" && dstWin == srcWin:
-		return bad("pick a pane in another window")
+	case m.pickVerb == "move" && srcAgent && dstWin != srcWin:
+		return bad("an agent stays in its window")
 	}
 	m.mode, m.msg, m.msgBad = modeNormal, "", false
 	if m.pickVerb == "swap" {

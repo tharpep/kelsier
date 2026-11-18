@@ -179,9 +179,8 @@ usage, pull requests, a kel command, restore (while a previous workspace
 waits), all keys, quit. **Right-click any agent, pane or repo heading** (or
 press `→`, or click the inspector's `⋯`) to open its menu over the inspector:
 everything it can do. An agent's has go to it, peek, diff, files, edit last
-file, plan, history, cards, zoom, own window and swap with… (when it shares
-its window), rename, kill, and relaunch when it is dead; a pane's adds move
-beside…. Every item shows its key on the right, so the keys are there when
+file, plan, history, cards, zoom, own window, move beside… and swap with…
+(when it shares its window), rename, kill, and relaunch when it is dead. Every item shows its key on the right, so the keys are there when
 you want them, learned by using the mouse. A menu draws over what is there,
 so no row moves. It closes on `←`, esc, a click outside it or the wheel; `↑`
 `↓` and enter walk it, and a letter it lists runs its item. The header menus
@@ -402,7 +401,7 @@ a window (`kel new --split`). A pane selected in the sidebar has:
 | key | does |
 |---|---|
 | `m` own window | takes the pane out into a window of its own, when its window holds another pane |
-| `M` move beside… | the list becomes a picker: click or walk to an agent or pane in another window, `enter` puts it to the right, `-` below. The window it left closes if nothing but the sidebar remains. Not for agents: a resize leaves stale lines in Claude Code's scrollback (backlog #42) |
+| `M` move beside… | the list becomes a picker: click or walk to an agent or pane, or press `1`–`9` for a pane of the window the inspector numbers; `enter` puts it to the right, `-` below. Its own window or another; the window it left closes if nothing but the sidebar remains. An agent has it too, inside its own window only: a move into another window is refused (backlog #42) |
 | `S` swap with… | the same picker, inside its own window; agents have it too |
 | `x` close | asks first, a shell at its prompt too |
 | `z` zoom | |
