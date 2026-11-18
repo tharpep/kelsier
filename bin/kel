@@ -1734,6 +1734,13 @@ restore_from_snapshot() {   # file resume(1|0)
       | (["W", .name, (.group // ""), (.layout // ""), (if .last then "1" else "" end)] | join($us)),
         (.panes[] | ["P", (.cwd // ""), (.cmd // ""), (if .sidebar then "1" else "" end), (.agent // "")] | join($us))' "$snap" 2>/dev/null)"
 
+  # A snapshot from before M7 names no pane's agent, so its first pane was
+  # taken to be the window's agent.  One whose panes do name theirs never
+  # guesses: a shell left of the agent was resumed as the agent too, and both
+  # were stamped (2026-11-18).
+  local named=0
+  printf '%s\n' "$plan" | awk -F"$US" '$1 == "P" && $5 != "" {f=1} END {exit !f}' && named=1
+
   local first_wid='' dest_wid='' wid='' wname='' wg='' wlayout='' wlast='' meta='' wsb=''
   local -a cwds=() cmds=() ags=()
   # build one window from what has been collected for it
@@ -1767,7 +1774,7 @@ restore_from_snapshot() {   # file resume(1|0)
     local ag ag_g ag_n
     for ((j = 0; j < ${#cmds[@]}; j++)); do
       ag="${ags[$j]:-}"
-      [ -z "$ag" ] && [ "$j" = 0 ] && [ -n "$wg" ] && ag="$wg/$wname"
+      [ -z "$ag" ] && [ "$named" = 0 ] && [ "$j" = 0 ] && [ -n "$wg" ] && ag="$wg/$wname"
       meta=''
       if [ -n "$ag" ]; then
         ag_g="${ag%/*}"; ag_n="${ag##*/}"

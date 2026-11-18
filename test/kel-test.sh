@@ -1011,6 +1011,24 @@ printf '{"saved_at":"x","last_group":"api-gw","last_window":"a","groups":{"api-g
 "$KEL" restore --no-resume >/dev/null 2>&1
 ok "a v0.9 snapshot restores into one session" '[ "$(grps)" = 1 ] && [ -n "$(window_of api-gw a)" ] && [ -n "$(window_of coppermind b)" ]'
 
+# a shell left of the agent: the first pane was guessed to be the agent, so
+# restore launched it twice and stamped both.  Only a snapshot that names no
+# pane's agent (pre-M7) guesses
+reset
+K api-gw new solo --agent "KEL_ARGV=solo $WORK/argv-agent --name solo" >/dev/null 2>&1
+agent_up "$(window_of api-gw solo)"
+tmux split-window -d -hb -t "$(pane_of api-gw solo)" -c "$WORK/repos/api-gw"
+"$KEL" snapshot >/dev/null 2>&1
+ok "a snapshot of a shell left of its agent names only the agent" '[ "$(jq -r "[.windows[0].panes[] | .agent // \"-\"] | join(\",\")" "$STATE/snapshot.json")" = "-,api-gw/solo" ]'
+rm -f "$WORK"/argv.*
+"$KEL" quit -f >/dev/null 2>&1
+(cd "$WORK" && "$KEL" < /dev/null) >/dev/null 2>&1
+wait_until '[ -n "$(tmux capture-pane -p -t "$(tmux list-windows -t =keltest -F "#{window_id}" | head -1)" | grep .)" ]' 50
+"$KEL" restore >/dev/null 2>&1
+wait_until '[ -s "$WORK/argv.solo" ]'
+SOW="$(window_of api-gw solo)"
+ok "restore stamps and resumes the agent, not the shell beside it" '[ "$(tmux list-panes -t "$SOW" -F "#{@kel-agent}" | grep -c .)" = 1 ] && [ "$(tmux list-panes -t "$SOW" -F "#{@kel-agent}" | tail -1)" = api-gw/solo ] && [ "$(grep -c . "$WORK/argv.solo")" = 1 ]'
+
 section "the fleet learns every pane (v0.10 M1)"
 reset
 R="$WORK/repos/api-gw"
