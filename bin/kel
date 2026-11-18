@@ -836,7 +836,10 @@ meta_update() { # path jq-filter [jq args...]
 # the same name exists in several groups.
 resolve_agent() { # name [preferred-group]
   local want="$1" pref="${2:-}" g nm f hits
+  # 3: not a name at all.  Split on the first and last '/', a/b/c read as
+  # group a, name c and acted on it, b dropped unsaid (backlog #22).
   case "$want" in
+    */*/*|/*|*/) return 3 ;;
     */*) g="${want%%/*}"; nm="${want##*/}"; f="$(meta_path "$g" "$nm")"
          [ -f "$f" ] || return 1
          printf '%s\t%s\t%s\n' "$g" "$nm" "$f"; return 0 ;;
@@ -1215,6 +1218,7 @@ cmd_kill() {
   local meta='' wid iso='inplace' cwd='' branch='' repo='' group=''
   local bare="${orig_name##*/}" rr rc=0
   rr="$(resolve_agent "$name")" || rc=$?
+  [ "$rc" = 3 ] && die "'$name' is not a name — say <name> or <group>/<name>"
   [ "$rc" = 2 ] && die "'$name' is ambiguous — say which: kel kill <group>/<name>"
   if [ -n "$rr" ]; then
     IFS=$'\t' read -r group name meta <<< "$rr"
@@ -1835,6 +1839,7 @@ cmd_relaunch() {
     IFS=$'\t' read -r group name meta <<< "$rr"
   else
     rr="$(resolve_agent "$name")" || rc=$?
+    [ "$rc" = 3 ] && die "'$name' is not a name — say <name> or <group>/<name>"
     [ "$rc" = 2 ] && die "'$name' is ambiguous — say which: kel relaunch <group>/<name>"
     [ -n "$rr" ] || die "no agent '$name'"
     IFS=$'\t' read -r group name meta <<< "$rr"

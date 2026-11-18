@@ -78,7 +78,11 @@ witness a process that exits leaves.
 The gate: a line in `sidebar-fail.log` that names a cause. Fix that, then
 delete the `2>>` redirect. If the log stays empty through daily use, the heal
 is the whole fix and the redirect still goes.
-### 22. `resolve_agent` silently drops a middle path segment  ·  `[defect]`
+### 22. `resolve_agent` silently drops a middle path segment  ·  **fixed 2026-11-18**
+
+*Fixed:* a name with two `/`, or a leading or trailing one, is refused by
+`kill` and `relaunch` with the name quoted back (`rollout.md`). What follows
+is the defect as filed.
 
 `resolve_agent` splits on the first and last `/` (`${want%%/*}`,
 `${want##*/}`), so `kel kill a/b/c` looks up group `a`, name `c`, silently

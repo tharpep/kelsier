@@ -221,6 +221,11 @@ section "ambiguity is reported, never guessed"
 out="$("$KEL" kill docs 2>&1)"
 ok "a bare ambiguous kill refuses"      '[[ "$out" == *ambiguous* ]]'
 ok "  ...and names the candidates"      '[[ "$out" == *api-gw/docs* && "$out" == *coppermind/docs* ]]'
+out="$("$KEL" kill -f api-gw/x/docs 2>&1)"; rc=$?
+ok "a three-segment name is refused, not read as group/name (#22)" '[ "$rc" != 0 ] && [ -f "$SESSIONS/api-gw/docs.json" ] && [ "$(wins)" = 2 ]'
+ok "  ...naming what it could not resolve" '[[ "$out" == *"api-gw/x/docs"* ]]'
+out="$("$KEL" relaunch api-gw/x/docs 2>&1)"; rc=$?
+ok "  ...by relaunch too"                 '[ "$rc" != 0 ] && [[ "$out" == *"api-gw/x/docs"* ]]'
 "$KEL" kill coppermind/docs >/dev/null 2>&1
 ok "group/name kills exactly one"       '[ "$(wins)" = 1 ]'
 ok "  ...and it is the right one"       '[ -f "$SESSIONS/api-gw/docs.json" ] && [ ! -f "$SESSIONS/coppermind/docs.json" ]'
