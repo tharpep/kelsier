@@ -30,7 +30,10 @@ kel uses `MAJOR.MINOR.PATCH` with the usual meaning for a `0.x` project:
   required means a machine with no toolchain otherwise cannot install it.
 
 Tags so far: **`v0.9.0`**, cut 2026-10-14 as the marker for the old design
-before the pivot. The next tag is `v0.10.0`, when the sidebar is usable.
+before the pivot. **`v0.10.0`** (2026-11-18, at `d331872`): the pivot as
+daily-driven, the last commit before the rework. **`v0.11.0`** (2026-11-18,
+at `499f86c`): the hybrid sidebar and the tile-wall board, CI green on both
+platforms.
 
 ---
 
