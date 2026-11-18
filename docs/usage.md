@@ -350,6 +350,10 @@ sweeps it, after `y`, through `kel sweep <path>`: a worktree with work in
 it, a window or a Claude session standing in it is kept, and the reason is
 on the last line.
 
+A board taller than its popup scrolls by whole rows of tiles to keep the
+selection in view. The last line says what is out of sight in those rows,
+with worktrees apart: `↑1`, `↓2 · 3 worktrees`, `↓3 worktrees`.
+
 ```
  worktrees · kelsier
    ● fix-auth                  merged                      ~/code/kelsier-fix-auth

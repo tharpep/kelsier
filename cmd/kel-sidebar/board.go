@@ -154,7 +154,7 @@ func renderBoard(v sbView, w, h int, now int64, o boardOpts) (string, []lineRef)
 
 	head := []line{{boardHeader(v, ts, w, now), lineRef{kind: "head"}}, {}}
 	var body []line
-	above, below := 0, 0
+	var above, below unseen
 	switch {
 	case v.unknown:
 		body = []line{{" " + dim + truncate("? panes unknown", w-2) + reset, lineRef{}}}
@@ -190,9 +190,9 @@ func renderBoard(v sbView, w, h int, now int64, o boardOpts) (string, []lineRef)
 		for i, b := range blocks {
 			switch {
 			case i < first:
-				above += len(b.tiles)
+				above.add(b)
 			case i >= last:
-				below += len(b.tiles)
+				below.add(b)
 			default:
 				body = append(body, b.lines(v, w, tw, now, o)...)
 			}
@@ -212,6 +212,37 @@ func renderBoard(v sbView, w, h int, now int64, o boardOpts) (string, []lineRef)
 		all = all[:h]
 	}
 	return joinLines(all, w)
+}
+
+// unseen is what the wall scrolled out of sight, in the units it scrolls
+// by: rows of tiles, and worktree rows, which are said apart
+type unseen struct{ rows, worktrees int }
+
+func (u *unseen) add(b boardBlock) {
+	if b.tiles[0].wt != nil {
+		u.worktrees += len(b.tiles)
+	} else {
+		u.rows++
+	}
+}
+
+// hint is `↓2`, `↓2 · 3 worktrees`, `↓1 worktree`, or "" with nothing hidden
+func (u unseen) hint(arrow string) string {
+	var parts []string
+	if u.rows > 0 {
+		parts = append(parts, fmt.Sprintf("%s%d", arrow, u.rows))
+	}
+	if u.worktrees > 0 {
+		w := fmt.Sprintf("%d worktree", u.worktrees)
+		if u.worktrees > 1 {
+			w += "s"
+		}
+		if u.rows == 0 {
+			w = arrow + w
+		}
+		parts = append(parts, w)
+	}
+	return strings.Join(parts, " · ")
 }
 
 func (b boardBlock) lines(v sbView, w, tw int, now int64, o boardOpts) []line {
@@ -958,10 +989,10 @@ func boardHeader(v sbView, ts []boardTile, w int, now int64) string {
 	return truncateStyled(title+"  "+counts(false), w)
 }
 
-// boardFooter: the keys, and on the right which face is showing, with how
-// many tiles are scrolled out of sight. A prompt (a kill's question, the
+// boardFooter: the keys, and on the right which face is showing, with what
+// is scrolled out of sight: rows of tiles, and worktrees apart. A prompt (a kill's question, the
 // filter, d's base) or the last command's word takes the line instead.
-func boardFooter(v sbView, w int, f face, above, below int) line {
+func boardFooter(v sbView, w int, f face, above, below unseen) line {
 	if v.promptTitle != "" {
 		c := v.promptColour
 		if c == "" {
@@ -998,14 +1029,13 @@ func boardFooter(v sbView, w int, f face, above, below int) line {
 	}
 	right := strings.Join(fs, faint+" · "+reset)
 	var more []string
-	if above > 0 {
-		more = append(more, fmt.Sprintf("↑%d", above))
-	}
-	if below > 0 {
-		more = append(more, fmt.Sprintf("↓%d", below))
+	for _, s := range []string{above.hint("↑"), below.hint("↓")} {
+		if s != "" {
+			more = append(more, s)
+		}
 	}
 	if len(more) > 0 {
-		right = dim + strings.Join(more, " ") + reset + "   " + right
+		right = dim + strings.Join(more, "  ") + reset + "   " + right
 	}
 	if v.filter != "" {
 		right = accent + "/" + v.filter + reset + dim + "  esc clears" + reset + "   " + right

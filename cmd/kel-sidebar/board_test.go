@@ -244,3 +244,51 @@ func TestNeedYouCountsAgree(t *testing.T) {
 		t.Error("no fixture has a blocked background session of its own")
 	}
 }
+
+// The scroll hint counts in the units the wall scrolls by: rows of tiles,
+// with worktree rows said apart, never as tiles. The worktrees fixture with
+// two more agents, so a row of tiles can be hidden too.
+func TestBoardScrollHintSaysWorktreesApart(t *testing.T) {
+	t.Setenv("HOME", "/home/me")
+	doc, now := loadBoardFixture(t, "worktrees")
+	a0 := doc.Agents[0]
+	for _, n := range []string{"2", "3"} {
+		a := a0
+		a.Name, a.WindowID, a.PaneID = a0.Name+"-"+n, sp("@9"+n), sp("%9"+n)
+		doc.Agents = append(doc.Agents, a)
+		if doc.Panes != nil && a0.PaneID != nil {
+			for _, p := range *doc.Panes {
+				if p.PaneID == *a0.PaneID {
+					p.PaneID, p.WindowID = "%9"+n, "@9"+n
+					*doc.Panes = append(*doc.Panes, p)
+					break
+				}
+			}
+		}
+	}
+	cases := []struct {
+		h    int
+		hint string
+	}{{12, "↓1 · 7 worktrees"}, {20, "↓7 worktrees"}}
+	for _, c := range cases {
+		got, _ := renderBoard(buildView(doc, uiState{now: now}), 100, c.h, now, boardOpts{face: faceCard, loc: time.UTC})
+		rows := strings.Split(plain(got), "\n")
+		if foot := rows[len(rows)-1]; !strings.Contains(foot, c.hint+"   card") {
+			t.Errorf("at %d rows the hint is not %q: %q", c.h, c.hint, foot)
+		}
+		gold := filepath.Join(boardFixtures, "worktrees.scroll."+itoa(c.h)+".golden")
+		if *update {
+			if err := os.WriteFile(gold, []byte(got+"\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			continue
+		}
+		want, err := os.ReadFile(gold)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got+"\n" != string(want) {
+			t.Errorf("worktrees at 100x%d changed:\n--- got\n%s\n--- want\n%s", c.h, plain(got), plain(string(want)))
+		}
+	}
+}

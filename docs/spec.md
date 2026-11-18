@@ -440,7 +440,10 @@ in any terminal:
   later. The top edge has glyph, name and age; the bottom edge has the model,
   the PR with its CI (`#61 ✓`) and the diff against the merge base. A tile's
   place depends only on the fleet and the width, never on its face, state or
-  selection. The wall scrolls by whole rows to keep the selection in view.
+  selection. The wall scrolls by whole rows to keep the selection in view, and the
+  last line says what is out of sight in those units: rows of tiles
+  (`↑1`, `↓2`), with worktree rows apart (`↓2 · 3 worktrees`). *2026-11-18:*
+  it had counted tiles and worktrees together, as tiles.
   Unknown is `?` or absent, and an hour the log does not cover is blank,
   not idle. The selected tile's inside is the raised surface. Below every
   tile, each repo's linked worktrees are one row each under a dim
