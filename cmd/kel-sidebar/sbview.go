@@ -159,6 +159,8 @@ type sbView struct {
 	hoverX               int
 	restore              bool
 	menu                 *sbMenu // open over the rows, or nil
+	quota                *fleet.Quota
+	spend                *float64 // today's, for the board's header
 }
 
 // lineRef says which entry a screen line belongs to — what a click hits.
@@ -238,7 +240,7 @@ func spaceKey(p fleet.Pane) (key, label string) {
 
 func buildView(doc fleet.Doc, ui uiState) sbView {
 	v := sbView{sel: ui.sel, filter: ui.filter, focused: ui.focused, hover: ui.hover, hoverX: ui.hoverX,
-		restore: ui.restore}
+		restore: ui.restore, quota: doc.Quota, spend: doc.SpendToday}
 	if doc.Panes == nil {
 		v.unknown = true
 		return v

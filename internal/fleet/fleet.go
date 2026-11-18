@@ -83,6 +83,12 @@ type Agent struct {
 	// Subagents: the agent panel's rows, from `kel substatus` (claude.go).
 	// Empty when none are showing; recorded within subsFresh or not at all
 	Subagents []Subagent `json:"subagents,omitempty"`
+	// The board's facts (board.go). Absent means kel could not tell, never
+	// zero or none (invariant 3); nothing fills them yet but the fixtures
+	Diff    *Diff         `json:"diff,omitempty"`
+	PR      *PR           `json:"pr,omitempty"`
+	History *[]Transition `json:"history,omitempty"`
+	Screen  *[]string     `json:"screen,omitempty"`
 }
 
 type Current struct {
@@ -107,6 +113,9 @@ type Doc struct {
 	// Repos: every repo a pane stands in, with all its worktrees and their
 	// land state (worktrees.go). Only with Options.Panes or Worktrees
 	Repos *[]Repo `json:"repos,omitempty"`
+	// SpendToday is the dollars every session spent since local midnight,
+	// for the board's header; absent until kel keeps a daily ledger
+	SpendToday *float64 `json:"spend_today,omitempty"`
 }
 
 // record is the on-disk agent record, sessions/<group>/<name>.json.

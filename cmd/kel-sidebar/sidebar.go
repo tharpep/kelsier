@@ -1834,31 +1834,74 @@ func runSidebar(once bool) {
 // approves before the sidebar is wired to anything live (spec.md §5e). "now"
 // is the document's own generated_at, so ages never drift between runs.
 func fixtureFrame(path string, w, h int, focused bool) (string, error) {
-	b, err := os.ReadFile(path)
+	doc, now, err := readFixture(path)
 	if err != nil {
 		return "", err
-	}
-	var doc fleet.Doc
-	if err := json.Unmarshal(b, &doc); err != nil {
-		return "", fmt.Errorf("%s: %v", path, err)
-	}
-	var now int64
-	if t, err := time.Parse(time.RFC3339, doc.GeneratedAt); err == nil {
-		now = t.Unix()
 	}
 	out, _ := renderView(buildView(doc, uiState{focused: focused, now: now}), w, h, now)
 	return out, nil
 }
 
-// runFixtures prints every fixture at every width, labelled — what
-// test/sidebar-frames.sh runs for a review.
-func runFixtures(path string, widths []int, h int) {
+func readFixture(path string) (fleet.Doc, int64, error) {
+	var doc fleet.Doc
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return doc, 0, err
+	}
+	if err := json.Unmarshal(b, &doc); err != nil {
+		return doc, 0, fmt.Errorf("%s: %v", path, err)
+	}
+	var now int64
+	if t, err := time.Parse(time.RFC3339, doc.GeneratedAt); err == nil {
+		now = t.Unix()
+	}
+	return doc, now, nil
+}
+
+// boardFrame is a fixture drawn as the board, its clock times in UTC so a
+// frame reads the same on every machine.
+func boardFrame(path string, w, h int, fc face) (string, error) {
+	doc, now, err := readFixture(path)
+	if err != nil {
+		return "", err
+	}
+	out, _ := renderBoard(buildView(doc, uiState{now: now}), w, h, now, boardOpts{face: fc, loc: time.UTC})
+	return out, nil
+}
+
+// runBoardFixtures prints every fixture as the board, at every width, in
+// every face asked for.
+func runBoardFixtures(path string, widths []int, h int, faces []face) {
+	for _, f := range fixtureFiles(path) {
+		name := strings.TrimSuffix(filepath.Base(f), ".json")
+		for _, w := range widths {
+			for _, fc := range faces {
+				out, err := boardFrame(f, w, h, fc)
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "kel-sidebar: %v\n", err)
+					os.Exit(1)
+				}
+				fmt.Printf("%s── %s · board · %s · %dx%d %s%s\n", dim, name, faceNames[fc], w, h, strings.Repeat("─", max(0, 12-len(name))), reset)
+				fmt.Println(out)
+				fmt.Println()
+			}
+		}
+	}
+}
+
+func fixtureFiles(path string) []string {
 	files := []string{path}
 	if fi, err := os.Stat(path); err == nil && fi.IsDir() {
 		files, _ = filepath.Glob(filepath.Join(path, "*.json"))
 		sort.Strings(files)
 	}
-	for _, f := range files {
+	return files
+}
+
+// runFixtures prints every fixture at every width, labelled — what
+// test/sidebar-frames.sh runs for a review.
+func runFixtures(path string, widths []int, h int) {
+	for _, f := range fixtureFiles(path) {
 		for _, w := range widths {
 			for _, focused := range []bool{false, true} {
 				out, err := fixtureFrame(f, w, h, focused)

@@ -5,6 +5,7 @@
 //	kel-sidebar --once               render one frame to stdout and exit
 //	kel-sidebar --fixture FILE|DIR   render saved fleet documents, for
 //	    [--width N] [--height N]     the golden frames (spec.md §5e)
+//	    [--board [--face F]]         the same, drawn as the board
 package main
 
 import (
@@ -142,12 +143,13 @@ func pad(s string, n int) string {
 
 func main() {
 	once := false
-	fixture, widths, height := "", []int{28, 32, 40}, 0
+	fixture, widths, height := "", []int(nil), -1
+	board, faces := false, []face{faceCard, faceScreen, faceTimeline}
 	args := os.Args[1:]
 	for i := 0; i < len(args); i++ {
 		a := args[i]
 		switch a {
-		case "--fixture", "--width", "--height":
+		case "--fixture", "--width", "--height", "--face":
 			if i+1 >= len(args) {
 				fmt.Fprintf(os.Stderr, "kel-sidebar: %s needs a value\n", a)
 				os.Exit(2)
@@ -156,6 +158,13 @@ func main() {
 			switch a {
 			case "--fixture":
 				fixture = args[i]
+			case "--face":
+				fc, ok := parseFace(args[i])
+				if !ok {
+					fmt.Fprintf(os.Stderr, "kel-sidebar: --face is card, screen or timeline\n")
+					os.Exit(2)
+				}
+				faces = []face{fc}
 			case "--width":
 				var w int
 				fmt.Sscanf(args[i], "%d", &w)
@@ -165,16 +174,31 @@ func main() {
 			}
 		case "--once":
 			once = true
+		case "--board":
+			board = true
 		case "-h", "--help":
-			fmt.Fprintln(os.Stderr, "usage: kel-sidebar [--once] [--fixture FILE|DIR [--width N] [--height N]]")
+			fmt.Fprintln(os.Stderr, "usage: kel-sidebar [--once] [--fixture FILE|DIR [--width N] [--height N] [--board [--face card|screen|timeline]]]")
 			return
 		default:
 			fmt.Fprintf(os.Stderr, "kel-sidebar: unknown flag %s\n", a)
 			os.Exit(2)
 		}
 	}
+	if fixture != "" && board {
+		if widths == nil {
+			widths = []int{150, 100, 60}
+		}
+		if height < 0 {
+			height = 40
+		}
+		runBoardFixtures(fixture, widths, height, faces)
+		return
+	}
 	if fixture != "" {
-		runFixtures(fixture, widths, height)
+		if widths == nil {
+			widths = []int{28, 32, 40}
+		}
+		runFixtures(fixture, widths, max(height, 0))
 		return
 	}
 	runSidebar(once)
