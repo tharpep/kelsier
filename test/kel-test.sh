@@ -2483,6 +2483,20 @@ rm -f "$STATE/quota" "$STATE/quota-cmd" "$STATE/quota-cmd.at"
 sleep 0.2
 ok "failing quota_cmd leaves .quota.spend null" '[ "$("$KEL" _fleet | jq -r .quota.spend)" = null ]'
 
+# #58: a failed run backs off min(30 s, ttl), not a whole ttl; KEL_QUOTA_RETRY shortens the 30 s
+QC="$WORK/quota-count"; rm -f "$QC"
+export KEL_QUOTA_CMD="n=\$(cat $QC 2>/dev/null || echo 0); echo \$((n+1)) > $QC; [ \$n -ge 1 ] && echo 42 0"
+export KEL_QUOTA_TTL=600 KEL_QUOTA_RETRY=1
+rm -f "$STATE/quota" "$STATE/quota-cmd" "$STATE/quota-cmd.at"
+"$KEL" _fleet >/dev/null 2>&1
+wait_until '[ "$(cut -d" " -f2 "$STATE/quota-cmd.at" 2>/dev/null)" = fail ]' 30
+ok "a failed quota_cmd run marks its stamp as failed" '[ "$(cut -d" " -f2 "$STATE/quota-cmd.at")" = fail ]'
+sleep 1.2
+"$KEL" _fleet >/dev/null 2>&1
+wait_until '[ -f "$STATE/quota-cmd" ]' 30
+ok "  ...and is retried once the backoff passes, not the ttl" '[ "$("$KEL" _fleet | jq -r .quota.spend.pct)" = 42 ]'
+export KEL_QUOTA_TTL=60; unset KEL_QUOTA_RETRY
+
 # pr = off suppresses quota_cmd
 MARKER="$WORK/quota-ran"
 export KEL_QUOTA_CMD="touch $MARKER && echo 42 0"

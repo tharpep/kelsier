@@ -47,6 +47,16 @@ func quotaTTL() int64 {
 	return 300
 }
 
+func quotaRetry(ttl int64) int64 {
+	retry := int64(30)
+	if v := os.Getenv("KEL_QUOTA_RETRY"); v != "" {
+		if n, err := strconv.ParseInt(v, 10, 64); err == nil && n > 0 {
+			retry = n
+		}
+	}
+	return min(retry, ttl)
+}
+
 func quotaPROff() bool {
 	switch os.Getenv("KEL_PR") {
 	case "0", "off", "no", "false":
@@ -64,9 +74,15 @@ func refreshQuotaCmd(sd string, now int64) {
 	ttl := quotaTTL()
 	atFile := filepath.Join(sd, "quota-cmd.at")
 	if b, err := os.ReadFile(atFile); err == nil {
-		if ts, err := strconv.ParseInt(strings.TrimSpace(string(b)), 10, 64); err == nil {
-			if now-ts < ttl {
-				return
+		if f := strings.Fields(string(b)); len(f) > 0 {
+			if ts, err := strconv.ParseInt(f[0], 10, 64); err == nil {
+				wait := ttl
+				if len(f) > 1 && f[1] == "fail" {
+					wait = quotaRetry(ttl)
+				}
+				if now-ts < wait {
+					return
+				}
 			}
 		}
 	}
@@ -74,18 +90,19 @@ func refreshQuotaCmd(sd string, now int64) {
 	_ = os.WriteFile(atFile, []byte(strconv.FormatInt(now, 10)+"\n"), 0o644)
 
 	target := filepath.Join(sd, "quota-cmd")
-	script := fmt.Sprintf(`out=$(%s 2>/dev/null) || exit 0
+	script := fmt.Sprintf(`fail() { printf '%%s fail\n' "$(date +%%s)" > "%s"; exit 0; }
+out=$(%s 2>/dev/null) || fail
 set -- $out
 pct=$1; reset=${2:-0}
 case "$pct" in
-  ''|*[!0-9.]*) exit 0 ;;
+  ''|*[!0-9.]*) fail ;;
 esac
 case "$reset" in
   ''|*[!0-9]*) reset=0 ;;
 esac
-tmp=$(mktemp "%s/.qcmd.XXXXXX" 2>/dev/null) || exit 0
+tmp=$(mktemp "%s/.qcmd.XXXXXX" 2>/dev/null) || fail
 printf '%%s %%s %%d\n' "$pct" "$reset" %d > "$tmp" && mv -f "$tmp" "%s"
-`, cmdStr, sd, now, target)
+`, atFile, cmdStr, sd, now, target)
 
 	cmd := exec.Command("sh", "-c", script)
 	if err := cmd.Start(); err == nil {
@@ -95,7 +112,8 @@ printf '%%s %%s %%d\n' "$pct" "$reset" %d > "$tmp" && mv -f "$tmp" "%s"
 
 // loadQuota reads `<pct5> <at5> <pct7> <at7> <spend> <atspend> <epoch>`; -1
 // is "not reported", 0 for a reset is "not given". If spend is not reported in
-// quota, quota-cmd (from KEL_QUOTA_CMD) is checked as a fallback.
+// quota, quota-cmd (from KEL_QUOTA_CMD) is
+// checked as a fallback.
 func loadQuota(sd string, now int64) *Quota {
 	var q *Quota
 	b, err := os.ReadFile(filepath.Join(sd, "quota"))

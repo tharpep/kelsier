@@ -148,3 +148,31 @@ func TestQuotaCmd(t *testing.T) {
 		t.Fatalf("future reset with sample older than 2*ttl should be null: got %+v", q)
 	}
 }
+
+func TestQuotaCmdRetry(t *testing.T) {
+	t.Setenv("KEL_QUOTA_TTL", "300")
+	t.Setenv("KEL_PR", "")
+	now := time.Now().Unix()
+
+	ran := func(stamp string) bool {
+		sd := t.TempDir()
+		marker := filepath.Join(sd, "ran")
+		t.Setenv("KEL_QUOTA_CMD", "touch "+marker)
+		os.WriteFile(filepath.Join(sd, "quota-cmd.at"), []byte(stamp), 0o644)
+		refreshQuotaCmd(sd, now)
+		for i := 0; i < 50; i++ {
+			if _, err := os.Stat(marker); err == nil {
+				return true
+			}
+			time.Sleep(20 * time.Millisecond)
+		}
+		return false
+	}
+
+	if !ran(fmt.Sprintf("%d fail\n", now-40)) {
+		t.Error("a failed run 40 s ago must be retried under a 300 s ttl")
+	}
+	if ran(fmt.Sprintf("%d\n", now-40)) {
+		t.Error("a successful run 40 s ago must not be repeated under a 300 s ttl")
+	}
+}
