@@ -2642,10 +2642,15 @@ popup() {
     printf '%s\t%s\t%s\n' "$dir" "$title" "$*" >> "$KEL_POPUP_TRACE"
     return 0
   fi
-  local cmd='' a name sock="${TMUX%%,*}" tdir="${dir//#/##}"
+  local cmd='' a name sock="${TMUX%%,*}" tdir="${dir//#/##}" tool="$1"
+  name="_kelpop_$(printf '%s|%s' "$dir" "$1" | cksum | cut -d' ' -f1)"
+  # A command that fails keeps its popup until a key, so its error can be
+  # read (claude attach with no auth vanished at once); one that exits 0
+  # closes at once. No # or % in the hold: tmux could read either as a format.
+  # set -m gives the tool the foreground, so the pane is named after it
+  set -- bash -c 'set -m; "$@"; s=$?; [ "$s" = 0 ] && exit 0; printf "\n\033[2mexit $s · any key closes\033[0m"; IFS= read -rsn1 _; exit "$s"' kelpop "$@"
   for a in "$@"; do cmd="$cmd $(printf '%q' "$a")"; done
   cmd="${cmd# }"
-  name="_kelpop_$(printf '%s|%s' "$dir" "$1" | cksum | cut -d' ' -f1)"
   [ -n "${KEL_POPUP_KEEP:-}" ] || tmux kill-session -t "=$name" 2>/dev/null
   # `=name:` with the colon where a pane is the target (set-option): without
   # it tmux reads `=name` as a pane and finds no such session
@@ -2661,7 +2666,7 @@ popup() {
          set-option -t "=$name:" window-status-current-format "" \; \
          set-option -w -t "=$name:" pane-border-status off \; \
          set-option -t "=$name:" @kel-popup 1 >/dev/null 2>&1 \
-      || die "could not start $1"
+      || die "could not start $tool"
   fi
   # Two E flags, not one: a lone one closes the popup the moment its command
   # exits, a failure included, so its error would never be read ("errors

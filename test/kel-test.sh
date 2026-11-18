@@ -1750,7 +1750,20 @@ ok "a popup's directory is doubled for tmux, which expands -c and -d" 'grep -q "
 ok "  ...so the hosted session opens in the real path" '[ "$(tmux display -p -t "=$POP:" "#{pane_current_path}")" = "$(cd "$XD" && pwd -P)" ]'
 ok "  ...and no file was touched" '! [ -e p ] && ! [ -e "$WORK/p" ] && ! [ -e "$XD/p" ]'
 tmux kill-session -t "=$POP" 2>/dev/null
+# a failing command's popup stays to show its error; a clean exit closes at once
+printf '#!/bin/sh\necho "yazi: no auth here"\nexit 3\n' > "$WORK/shim/yazi"
+( unset KEL_POPUP_TRACE; KEL_POPUP_NODRAW=1 TMUX="$TMUX_TMPDIR/tmux-$(id -u)/default,1,0" "$KEL" _panel files "$WT5" api-gw/wt5 ) >/dev/null 2>&1
+POP="$(tmux list-sessions -F '#{session_name}' | grep '^_kelpop_' | head -1)"
+wait_until '[[ "$(tmux capture-pane -p -t "=$POP:" 2>/dev/null)" == *"any key closes"* ]]'
+ok "a failed popup stays open, showing its output" '[ -n "$POP" ] && [[ "$(tmux capture-pane -p -t "=$POP:")" == *"yazi: no auth here"* ]]'
+ok "  ...and its exit status, with how to close it" '[[ "$(tmux capture-pane -p -t "=$POP:")" == *"exit 3 · any key closes"* ]]'
+tmux send-keys -t "=$POP:" x
+wait_until '! tmux has-session -t "=$POP" 2>/dev/null'
+ok "  ...until any key closes it"                  '! tmux has-session -t "=$POP" 2>/dev/null'
 printf '#!/bin/sh\nexit 0\n' > "$WORK/shim/yazi"
+( unset KEL_POPUP_TRACE; KEL_POPUP_NODRAW=1 TMUX="$TMUX_TMPDIR/tmux-$(id -u)/default,1,0" "$KEL" _panel files "$WT5" api-gw/wt5 ) >/dev/null 2>&1
+wait_until '[ "$(tmux list-sessions -F "#{session_name}" | grep -c "^_kelpop_")" = 0 ]'
+ok "a popup whose command exits 0 closes at once" '[ "$(tmux list-sessions -F "#{session_name}" | grep -c "^_kelpop_")" = 0 ]'
 # read from kel.conf itself: on CI's macOS runner (Homebrew tmux 3.7) a
 # throwaway server's list-keys printed nothing at all, start-server or a real
 # session alike, while Ubuntu's 3.4 printed the binding. The file loading on

@@ -277,7 +277,9 @@ nvim). yazi and lazygit keep running when closed with `Ctrl-b q`, so
 reopening them lands where you left off; the diff, plan and editor popups are
 made fresh each time; a peek is a picture taken when it opens, not live, and
 closes with `esc`, `q` or `Ctrl-b q`. Outside a popup `Ctrl-b q` is tmux's usual
-`display-panes`. A tool that is not installed is said in
+`display-panes`. A command that fails keeps its popup open on its output,
+under a dim `exit N · any key closes`, so its error can be read (`claude
+attach` with no auth); one that exits cleanly closes at once. A tool that is not installed is said in
 the footer (`kel doctor` lists them as optional). The browser is `$BROWSER`,
 else `open` / `xdg-open` / `wslview`, else Windows' `start` from WSL.
 
