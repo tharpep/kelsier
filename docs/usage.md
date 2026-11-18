@@ -339,16 +339,30 @@ its subagent or server, an hour of state, context, cost, tasks), the
 hour with clock times, the last two changes, how many waits today). The face
 is remembered for the next board.
 
+Below the tiles, each repo's worktrees, one row each: the branch, what
+landing it needs (`merged`, `review`, `●3 uncommitted`, `↑2 unpushed`,
+`missing`…, `?` when kel cannot tell) and where it is. Select one and `s`
+sweeps it, after `y`, through `kel sweep <path>`: a worktree with work in
+it, a window or a Claude session standing in it is kept, and the reason is
+on the last line.
+
+```
+ worktrees · kelsier
+   ● fix-auth                  merged                      ~/code/kelsier-fix-auth
+   ○ feature/board-worktrees   review                      ~/code/kelsier-board-wt
+```
+
 | key | |
 |---|---|
-| `h` `j` `k` `l` / arrows | move between tiles: `h` `l` in reading order, `j` `k` down and up a column |
-| `enter` | go to the agent and close the board; you answer it in its own pane |
+| `h` `j` `k` `l` / arrows | move between tiles, then the worktree rows: `h` `l` in reading order, `j` `k` down and up a column |
+| `enter` | go to the agent and close the board; you answer it in its own pane. On a background tile, open it (`claude attach`) over the board |
+| `s` | on a worktree row, sweep that worktree, after `y` |
 | `space` | peek at its screen |
 | `v` | every tile to the next face |
 | `a` | mark it seen without going there |
 | `d` | its diff, against a base you are asked for |
 | `x` | kill it, after `y`, with the sidebar's refusal of unsaved work |
-| `/` | filter by name · `esc` clears |
+| `/` | filter by name; the last line says the filter while it holds · `esc` clears |
 | `esc` / `q` | close the board |
 | click | select a tile; click the selected one again (or double-click) to go there |
 
@@ -477,9 +491,10 @@ Everything lives in `${XDG_STATE_HOME:-~/.local/state}/kel/`, mode `0700`:
 
 Field layouts are in `CLAUDE.md` under *The on-disk contract*.
 
-**Two network calls**, both through `gh`. `gh api repos/<slug>/pulls`, only
-from `kel sweep` (the `--pr` path): never for a repo whose `origin` is not on
-`github.com`, and never for one whose work is still uncommitted or unpushed.
+**Two network calls**, both through `gh`. `gh api repos/<slug>/pulls`, from
+`kel sweep` (the `--pr` path), and from the open board when that cache is
+past its five minutes, in the background: never for a repo whose `origin` is
+not on `github.com`, and never for one whose work is still uncommitted.
 And, only while the board is open, `gh pr checks <n>` for each open PR an
 agent's commit heads, cached for five minutes (`pr-cache/<slug>.ci.json`).
 `pr = "off"` stops both. Nothing else leaves the machine; kel does not wrap

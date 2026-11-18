@@ -147,3 +147,129 @@ func TestBoardIgnoresTheSidebarsOtherKeys(t *testing.T) {
 		t.Errorf("the kill question is not on the board:\n%s", plain(nm.render()))
 	}
 }
+
+// A filter that hides the selected tile moves the selection to the first
+// tile it shows: enter must never jump to an agent the board is not drawing.
+func TestBoardFilterNeverActsOnAHiddenTile(t *testing.T) {
+	m := boardModel(t)
+	m.ui.sel = "a:@2"
+	m.ui.filter = "dash"
+	if got := m.view().sel; got != "a:@6" {
+		t.Fatalf("filtered to dash, the selection is %s", got)
+	}
+	got := recordJumps(t)
+	boardPress(m, "enter")
+	if len(*got) != 1 || !strings.HasPrefix((*got)[0], "@6|") {
+		t.Errorf("enter jumped %v, want the dashboard shown", *got)
+	}
+}
+
+// A background tile is a tile, whatever the sidebar's background fold:
+// selectable from the grid and by a click, and enter opens it (claude
+// attach), the board staying open beneath.
+func TestBoardBackgroundTilesActFoldedOrNot(t *testing.T) {
+	for _, open := range []bool{false, true} {
+		m := boardModel(t)
+		m.ui.expanded = map[string]bool{bgKey: open}
+		m.ui.sel = "a:@7"
+		m, _ = boardPress(m, "j")
+		if got := m.view().sel; got != "b:bg2" {
+			t.Fatalf("fold open=%v: j from usage-charts landed on %s", open, got)
+		}
+		var args []string
+		old := runKel
+		runKel = func(dir string, env []string, a ...string) tea.Cmd {
+			args = a
+			return func() tea.Msg { return nil }
+		}
+		jumps := recordJumps(t)
+		nm, c := boardPress(m, "enter")
+		runKel = old
+		if strings.Join(args, " ") != "_panel attach /home/me/code/api-gw nightly bg2" || quits(c) || len(*jumps) != 0 {
+			t.Errorf("fold open=%v: enter asked kel %q, quit=%v, jumps %v", open, args, quits(c), *jumps)
+		}
+		if nm.ui.expanded[bgKey] != open {
+			t.Errorf("fold open=%v: enter on a tile flipped the list's fold", open)
+		}
+	}
+}
+
+// Worktrees are rows below the tiles: j walks into them, s on one asks and
+// then sweeps that one path through kel sweep, and s anywhere else sweeps
+// nothing. Enter on a worktree jumps nowhere.
+func TestBoardSweepsOneWorktree(t *testing.T) {
+	m := needsModel(t, "fifteen-three-repos")
+	m.doc, _ = loadBoardFixture(t, "worktrees")
+	m.board, m.width, m.height = true, 150, 40
+	m.ui.sel = "a:@1"
+	var args []string
+	old := runKel
+	runKel = func(dir string, env []string, a ...string) tea.Cmd { args = a; return nil }
+	t.Cleanup(func() { runKel = old })
+	if nm, _ := boardPress(m, "s"); nm.mode != modeNormal || args != nil {
+		t.Fatalf("s on an agent: mode %d, kel %q", nm.mode, args)
+	}
+	m, _ = boardPress(m, "j")
+	m, _ = boardPress(m, "j")
+	if got := m.view().sel; got != "w:/home/me/code/kelsier-fix-auth" {
+		t.Fatalf("j j from the tile landed on %s", got)
+	}
+	jumps := recordJumps(t)
+	if nm, c := boardPress(m, "enter"); len(*jumps) != 0 || quits(c) || nm.mode != modeNormal {
+		t.Errorf("enter on a worktree jumped %v, quit=%v", *jumps, quits(c))
+	}
+	m, _ = boardPress(m, "s")
+	if out := plain(m.render()); m.mode != modeSweep || !strings.Contains(out, "sweep fix-auth?") {
+		t.Fatalf("s on a worktree asks nothing:\n%s", out)
+	}
+	m, _ = boardPress(m, "y")
+	if strings.Join(args, " ") != "sweep /home/me/code/kelsier-fix-auth" {
+		t.Errorf("y asked kel for %q", args)
+	}
+	if out := plain(m.render()); strings.Contains(out, "need you") || !strings.Contains(out, "1 working") {
+		t.Errorf("worktrees counted as agents in the header:\n%s", out)
+	}
+}
+
+// A click on a board heading folds nothing: the list's folds are not the
+// board's, and a click there once shut the repo in the sidebar beneath.
+func TestBoardHeadingClickFoldsNothing(t *testing.T) {
+	m := boardModel(t)
+	for y, r := range m.clickRefs() {
+		if r.kind != "group" {
+			continue
+		}
+		nm, _ := m.Update(tea.MouseClickMsg{Button: tea.MouseLeft, X: 3, Y: y})
+		if got := nm.(sbModel).ui.expanded; len(got) != 0 {
+			t.Fatalf("a click on heading line %d set folds %v", y, got)
+		}
+	}
+}
+
+// A worktree row added or gone never moves a tile: the rows sit below the
+// whole wall.
+func TestBoardWorktreesNeverMoveTiles(t *testing.T) {
+	with, now := loadBoardFixture(t, "worktrees")
+	without := with
+	without.Repos = nil
+	for _, sz := range boardSizes {
+		a, ra := renderBoard(buildView(without, uiState{now: now}), sz[0], sz[1], now, boardOpts{})
+		b, rb := renderBoard(buildView(with, uiState{now: now}), sz[0], sz[1], now, boardOpts{})
+		pa, pb := tilePlaces(t, a, ra), tilePlaces(t, b, rb)
+		for id, p := range pa {
+			if pb[id] != p {
+				t.Errorf("%dx%d: worktrees moved %s from %v to %v", sz[0], sz[1], id, p, pb[id])
+			}
+		}
+	}
+}
+
+// The filter, once kept, says so on the board's last line, as the sidebar's
+// does: else a board of three tiles reads as a fleet of three.
+func TestBoardSaysItsFilter(t *testing.T) {
+	m := boardModel(t)
+	m.ui.filter = "dash"
+	if out := plain(m.render()); !strings.Contains(out, "/dash  esc clears") {
+		t.Errorf("the board hides its filter:\n%s", out)
+	}
+}

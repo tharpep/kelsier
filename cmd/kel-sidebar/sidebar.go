@@ -591,8 +591,14 @@ func (m sbModel) view() sbView {
 	v.menu = m.menu
 	if m.board {
 		// the list's folds are not the board's: a tile in a shut group or a
-		// quiet trailer stays selected
-		for _, t := range boardTiles(v) {
+		// quiet trailer stays selected. One the filter hides gives way to
+		// the first tile shown, never to a heading: enter on the board must
+		// act on a tile it draws
+		ts := boardTiles(v)
+		if len(ts) > 0 {
+			v.sel = ts[0].id
+		}
+		for _, t := range ts {
 			if t.id == m.ui.sel {
 				v.sel = t.id
 			}
@@ -655,6 +661,10 @@ func (m sbModel) view() sbView {
 	case modeQuit:
 		ask("quit kel?", yellow, "y yes · n no")
 	case modeSweep:
+		if w, ok := m.worktreeOf(m.target); ok {
+			ask("sweep "+wtLabel(w)+"?", yellow, "y yes · n no")
+			break
+		}
 		ask("sweep everything landed?", yellow, "y yes · n no")
 	default:
 		if m.msg != "" {
@@ -697,6 +707,21 @@ func (m *sbModel) toggle(key string, open bool) {
 	}
 	m.ui.expanded[key] = !open
 	m.saveShared()
+}
+
+// worktreeOf is the linked worktree a board row's id names.
+func (m sbModel) worktreeOf(id string) (fleet.Worktree, bool) {
+	if !strings.HasPrefix(id, "w:") || m.doc.Repos == nil {
+		return fleet.Worktree{}, false
+	}
+	for _, r := range *m.doc.Repos {
+		for _, w := range r.Worktrees {
+			if wtID(w.Path) == id {
+				return w, true
+			}
+		}
+	}
+	return fleet.Worktree{}, false
 }
 
 // agentOf reads the built view, not view(): view() draws the kill prompt,
@@ -1249,7 +1274,15 @@ func (m *sbModel) adoptSel() {
 	if !m.visible || m.ui.filter != "" || m.board {
 		return
 	}
-	if v := buildView(m.doc, m.ui); v.sel != "" && v.sel != m.ui.sel {
+	v := buildView(m.doc, m.ui)
+	// a selection the list only folded away is still the board's tile: the
+	// list highlights its heading, the shared selection keeps the tile
+	for _, t := range boardTiles(v) {
+		if t.id == m.ui.sel {
+			return
+		}
+	}
+	if v.sel != "" && v.sel != m.ui.sel {
 		m.ui.sel = v.sel
 		m.saveShared()
 	}
@@ -1320,6 +1353,9 @@ func (m sbModel) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			// kel sweep decides, fresh: it removes only what landed, and git
 			// itself refuses a worktree with changes in it (invariant 1)
 			m.msg = "sweeping…"
+			if w, ok := m.worktreeOf(m.target); ok {
+				return m, runKel("", nil, "sweep", w.Path)
+			}
 			return m, runKel("", nil, "sweep")
 		}
 		return m, nil
@@ -1757,6 +1793,21 @@ func (m sbModel) boardOpts() boardOpts { return boardOpts{face: m.ui.face, loc: 
 // sidebar's own handling, for the keys the two share (space, d, x, /).
 // Every other key does nothing on the board.
 func (m sbModel) boardKey(k string) (tea.Model, tea.Cmd, bool) {
+	if strings.HasPrefix(m.view().sel, "w:") {
+		switch k {
+		case "s":
+			// that one worktree, through kel sweep and its checks: never
+			// forced, never where a window or a Claude session stands
+			m.mode, m.target = modeSweep, m.view().sel
+			return m, nil, true
+		case "enter", "space", "a", "d", "x":
+			m.msg, m.msgBad = "a worktree: s sweeps it once it has landed", false
+			return m, nil, true
+		}
+	} else if k == "s" {
+		m.msg, m.msgBad = "select a worktree to sweep", true
+		return m, nil, true
+	}
 	switch k {
 	case "left", "h", "right", "l", "up", "k", "down", "j":
 		cols, _ := boardCols(m.width)

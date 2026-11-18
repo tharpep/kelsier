@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"math"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
@@ -54,10 +55,15 @@ type boardTile struct {
 	repo string
 	a    *sbAgent
 	bg   *fleet.Background
+	wt   *fleet.Worktree // a worktree's row, below the tiles
 }
 
+const wtHeading = "worktrees · "
+
 // boardTiles is every agent in the list's order — folds and quiet trailers
-// are the list's, not the board's — then the background sessions.
+// are the list's, not the board's — then the background sessions, then each
+// repo's linked worktrees, one row each: below every tile, so a worktree
+// added or swept never moves one.
 func boardTiles(v sbView) []boardTile {
 	var ts []boardTile
 	for i := range v.agents {
@@ -68,7 +74,27 @@ func boardTiles(v sbView) []boardTile {
 		b := &v.bgLoose[i]
 		ts = append(ts, boardTile{id: bgID(b.ID), repo: "background", bg: b})
 	}
+	for _, r := range v.repos {
+		for i := range r.Worktrees {
+			w := &r.Worktrees[i]
+			if v.filter != "" && !strings.Contains(strings.ToLower(wtLabel(*w)), strings.ToLower(v.filter)) {
+				continue
+			}
+			ts = append(ts, boardTile{id: wtID(w.Path), repo: wtHeading + r.Name, wt: w})
+		}
+	}
 	return ts
+}
+
+func wtID(path string) string { return "w:" + path }
+
+// wtLabel names a worktree by its branch, as the list named it; Claude
+// Code's own are named by their folder, which their branch only prefixes.
+func wtLabel(w fleet.Worktree) string {
+	if w.Branch != nil && !strings.Contains(w.Path, "/.claude/worktrees/") {
+		return *w.Branch
+	}
+	return filepath.Base(w.Path)
 }
 
 func boardCols(w int) (cols, tileW int) {
@@ -85,10 +111,17 @@ type boardBlock struct {
 }
 
 func (b boardBlock) height() int {
-	if b.heading != "" {
-		return 1 + tileH
+	h := tileH
+	if b.tiles[0].wt != nil {
+		h = 1
+		if b.heading != "" {
+			h++ // the blank above a repo's worktrees
+		}
 	}
-	return tileH
+	if b.heading != "" {
+		h++
+	}
+	return h
 }
 
 func boardBlocks(ts []boardTile, cols int) []boardBlock {
@@ -97,7 +130,7 @@ func boardBlocks(ts []boardTile, cols int) []boardBlock {
 		switch {
 		case i == 0 || ts[i-1].repo != t.repo:
 			out = append(out, boardBlock{heading: t.repo})
-		case len(out[len(out)-1].tiles) == cols:
+		case len(out[len(out)-1].tiles) == cols, t.wt != nil:
 			out = append(out, boardBlock{})
 		}
 		out[len(out)-1].tiles = append(out[len(out)-1].tiles, t)
@@ -183,12 +216,20 @@ func renderBoard(v sbView, w, h int, now int64, o boardOpts) (string, []lineRef)
 
 func (b boardBlock) lines(v sbView, w, tw int, now int64, o boardOpts) []line {
 	var out []line
+	if b.heading != "" && b.tiles[0].wt != nil {
+		out = append(out, line{})
+	}
 	if b.heading != "" {
-		id := groupID(b.heading)
-		if b.heading == "background" && b.tiles[0].bg != nil {
-			id = bgHeadID
+		// no id: the list's folds are not the board's, so a click on a
+		// heading here must not open or shut one in the sidebar
+		out = append(out, line{" " + dim + truncate(b.heading, w-2) + reset, lineRef{kind: "group"}})
+	}
+	if t := b.tiles[0]; t.wt != nil {
+		row := wtRow(*t.wt, w-2)
+		if t.id == v.sel {
+			row = fill(row, w-2, raised)
 		}
-		out = append(out, line{" " + dim + truncate(b.heading, w-2) + reset, lineRef{id: id, kind: "group"}})
+		return append(out, line{" " + row, lineRef{kind: "worktree", hits: []hit{{1, w - 1, "sel:" + t.id}}}})
 	}
 	drawn := make([][]string, len(b.tiles))
 	for i, t := range b.tiles {
@@ -256,6 +297,65 @@ func boardStep(v sbView, cols int, k string) string {
 		}
 	}
 	return ""
+}
+
+// wtRow is a worktree in n columns: its land state's dot, its branch, what
+// landing it needs, and where it is. `s` sweeps one that has landed.
+func wtRow(w fleet.Worktree, n int) string {
+	dot, word := dim+"○"+reset, landWord(w)
+	switch {
+	case w.Missing:
+		dot = red + "✕" + reset
+	case w.Land != nil && w.Land.Code == "merged":
+		dot = green + "●" + reset
+	}
+	lw := min(32, max(8, n/4))
+	s := "  " + dot + " " + fit(truncate(wtLabel(w), lw), lw) + "  " + fit(word, 26) + "  " + dim + tildify(w.Path) + reset
+	return fit(s, n)
+}
+
+// landWord is what landing the worktree needs, as kel sweep would judge it;
+// an answer kel does not have is ?, never clean (invariant 3).
+func landWord(w fleet.Worktree) string {
+	if w.Missing {
+		return red + "missing" + reset
+	}
+	l := w.Land
+	if l == nil {
+		l = &fleet.Land{Code: "?"}
+	}
+	n := 0
+	if l.N != nil {
+		n = int(*l.N)
+	}
+	s := ""
+	switch l.Code {
+	case "merged":
+		s = green + "merged" + reset
+	case "dirty":
+		s = yellow + fmt.Sprintf("●%d uncommitted", n) + reset
+	case "unpushed":
+		s = yellow + fmt.Sprintf("↑%d unpushed", n) + reset
+	case "fresh":
+		s = dim + "no commits" + reset
+	case "review":
+		s = mid + "review" + reset
+	case "behind":
+		s = dim + fmt.Sprintf("behind %d", n) + reset
+	case "no_pr":
+		s = dim + "no PR" + reset
+	case "detached", "clean":
+		s = dim + l.Code + reset
+	default:
+		s = dim + "?" + reset
+	}
+	switch {
+	case w.Sessions > 0:
+		s += dim + " · claude" + reset
+	case w.Locked:
+		s += dim + " · locked" + reset
+	}
+	return s
 }
 
 // ---------------------------------------------------------------- a tile
@@ -780,6 +880,9 @@ var countOrder = []countLook{
 }
 
 func tileCount(t boardTile) string {
+	if t.wt != nil {
+		return ""
+	}
 	if t.bg != nil {
 		switch {
 		case t.bg.State == "blocked":
@@ -878,7 +981,11 @@ func boardFooter(v sbView, w int, f face, above, below int) line {
 		}
 		return line{" " + c + truncate(v.footer, w-2) + reset, lineRef{kind: "foot"}}
 	}
-	keys := chips([]sbAct{{"enter", "go"}, {"space", "peek"}, {"v", "face"}, {"a", "seen"}, {"d", "diff"}, {"x", "kill"}, {"/", "filter"}})
+	acts := []sbAct{{"enter", "go"}, {"space", "peek"}, {"v", "face"}, {"a", "seen"}, {"d", "diff"}, {"x", "kill"}, {"/", "filter"}}
+	if strings.HasPrefix(v.sel, "w:") {
+		acts = []sbAct{{"s", "sweep"}, {"v", "face"}, {"/", "filter"}}
+	}
+	keys := chips(acts)
 	var fs []string
 	for i, n := range faceNames {
 		if face(i) == f {
@@ -897,6 +1004,9 @@ func boardFooter(v sbView, w int, f face, above, below int) line {
 	}
 	if len(more) > 0 {
 		right = dim + strings.Join(more, " ") + reset + "   " + right
+	}
+	if v.filter != "" {
+		right = accent + "/" + v.filter + reset + dim + "  esc clears" + reset + "   " + right
 	}
 	keys.right = right
 	var hits []hit

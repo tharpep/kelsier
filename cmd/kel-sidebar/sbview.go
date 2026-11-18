@@ -145,6 +145,7 @@ type sbView struct {
 	// agent dispatched it, and a same-named one is how the author makes them
 	bgUnder  map[string][]fleet.Background // agent window id -> its children
 	bgLoose  []fleet.Background            // no such agent: listed on their own
+	repos    []fleet.Repo                  // every repo's worktrees and land state: the board's last section
 	unknown  bool                          // the fleet could not list panes: say so, never "nothing open"
 	sel      string
 	filter   string
@@ -241,6 +242,9 @@ func spaceKey(p fleet.Pane) (key, label string) {
 func buildView(doc fleet.Doc, ui uiState) sbView {
 	v := sbView{sel: ui.sel, filter: ui.filter, focused: ui.focused, hover: ui.hover, hoverX: ui.hoverX,
 		restore: ui.restore, quota: doc.Quota}
+	if doc.Repos != nil {
+		v.repos = *doc.Repos
+	}
 	if doc.Panes == nil {
 		v.unknown = true
 		return v

@@ -437,7 +437,18 @@ in any terminal:
   place depends only on the fleet and the width, never on its face, state or
   selection. The wall scrolls by whole rows to keep the selection in view.
   Unknown is `?` or absent, and an hour the log does not cover is blank,
-  not idle. The selected tile's inside is the raised surface.
+  not idle. The selected tile's inside is the raised surface. Below every
+  tile, each repo's linked worktrees are one row each under a dim
+  `worktrees · <repo>` heading: a dot (green merged, red missing), the
+  branch, what landing needs (the land code as words, `?` when unknown) and
+  the path. Being below the wall, a worktree added or swept never moves a
+  tile. `s` on one asks, then runs `kel sweep <path>`, whose checks stand:
+  never forced, never where a window or a Claude session stands. A
+  background tile acts whatever the list's `background` fold (*2026-11-18*:
+  the shown sidebar's reload had taken a folded-away selection back to its
+  heading). A click on a board heading folds nothing, and a filter that
+  hides the selected tile moves the selection to the first tile shown, and
+  says itself on the last line.
 - The accent is never inverse video.
 - **Dots, not words, for state.** A word in the right slot appears only beside
   the dot, never as the only signal.
@@ -1257,6 +1268,12 @@ GitHub release are the fix. Versioning policy is in `rollout.md`.
 <n>` for each open PR an agent's HEAD heads, at most once per PR and head
 commit per `pr-cache` TTL (30 s after a failure). The PR is already on
 GitHub, so it says nothing about local work, and `pr = "off"` stops it too.
+The board also refreshes a `pr-cache` past its TTL, off its load: a
+goroutine in the board, a detached `kel-fleet --refresh-pr <dir>` from `kel
+_fleet --board`, one per repo at a time (`.refreshing`, 60 s), never for a
+checkout with uncommitted files, never under `pr = "off"`. The popup's
+session takes the tmux server's environment, so `kel board` hands `KEL_PR`
+to it by name.
 
 The rest go online only when you ask: `v` opens gh dash (GitHub, for every
 open space's repo), `u` runs ccusage, `kel doctor` runs `gh auth status`,
