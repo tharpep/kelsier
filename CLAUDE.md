@@ -223,6 +223,14 @@ The shim pins `-S`, and a signal exits after cleanup. Never wrap the suite in
 `timeout` or run several copies on one machine: four copies took 17 minutes
 instead of 2, and the timeout kill is what leaked.
 
+**`test/live-rig.sh` is for seeing what a person sees** — a popup, the board,
+a real client's frame — which the suite cannot draw. It is a manual tool, not
+a CI step. `up` builds both binaries from the checkout and starts two servers
+on their own sockets: an outer one whose pane is a real client attached to an
+inner one running `kel.conf` unmodified over a fake fleet. It is isolated as
+the suite is, plus a fake `HOME`. `keys …` types, `shot <name>` appends an ANSI
+capture under a header line to `$KEL_RIG_SHOTS`, and `down` removes it all.
+
 **An attached client is testable after all:** `( sleep N ) | tmux -C attach`
 is a control-mode client with no terminal, holding the attach open as long as
 its stdin. The suite uses it for "current pane"; the notifications section
