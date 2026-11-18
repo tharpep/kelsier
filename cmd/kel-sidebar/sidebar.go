@@ -654,7 +654,13 @@ func (m sbModel) view() sbView {
 		}
 		v.input = typed
 	case modeKill:
-		ask("kill "+m.entryName(m.target)+"?", yellow, "y yes · n no")
+		// what goes, said before y: the agent's pane, or its window with it
+		// when nothing else of yours is in it (kel kill decides the same way)
+		q := "kill " + m.entryName(m.target) + " + window?"
+		if a, ok := m.agentOf(m.target); ok && v.windowPanes(a.wid) > 1 {
+			q = "kill " + m.entryName(m.target) + " (pane only)?"
+		}
+		ask(q, yellow, "y yes · n no")
 	case modeClose:
 		ask("close "+m.entryName(m.target)+"?", yellow, "y yes · n no")
 	case modeWhere:
@@ -1630,7 +1636,7 @@ func (m sbModel) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.target = v.sel
-		if a, ok := m.agentOf(v.sel); ok && k == "x" && !a.agent.Managed && a.shared {
+		if a, ok := m.agentOf(v.sel); ok && k == "x" && !a.agent.Managed && (a.shared || v.windowPanes(a.wid) > 1) {
 			m.mode, m.target = modeClose, a.pane
 			return m, nil
 		}

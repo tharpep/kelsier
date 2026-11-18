@@ -897,7 +897,9 @@ ok "  ...the agents running again"         'agent_up "$(window_of coppermind saz
 ok "  ...and the archive entry is used up" '[ -z "$(ls "$STATE/snapshots" 2>/dev/null)" ]'
 ok "  ...and the untouched fresh-start shell is closed" '[ "$(wins)" = 2 ]'
 ok "  ...and no stale lock is left"      '[ ! -e "$STATE/.restoring" ]'
-# a repo with no agent yet: bare kel starts one and names it, never asking
+# a repo with no agent yet: bare kel starts one and names it, never asking.
+# The split goes first: a kill beside another pane leaves the window
+tmux kill-pane -t "$(tmux list-panes -t "$(window_of api-gw auth-fix)" -F '#{pane_id}' | tail -1)"
 "$KEL" kill -f api-gw/auth-fix >/dev/null 2>&1
 out="$( (cd "$WORK/repos/api-gw" && KEL_AGENT='sleep 9999' "$KEL" < /dev/null) 2>&1 )"
 ok "kel in a repo with no agent starts one, named for it" '[ -f "$SESSIONS/api-gw/api-gw-1.json" ] && [ -n "$(window_of api-gw api-gw-1)" ]'
@@ -1466,8 +1468,8 @@ for _ in 1 2 3 4 5 6 7 8; do
   wait_until '[ "$(jq -r .selected "$STATE/sidebar.json" 2>/dev/null)" != "$cur" ]' 30
 done
 tmux send-keys -t "$SW" x
-wait_until 'sbtext "$SW" | grep -q "kill wt?"'
-ok "x asks before killing, and says how to answer" 'sbtext "$SW" | grep -q "kill wt?" && sbtext "$SW" | grep -q "y yes · n no"'
+wait_until 'sbtext "$SW" | grep -q "kill wt + window?"'
+ok "x asks before killing, and says how to answer" 'sbtext "$SW" | grep -q "kill wt + window?" && sbtext "$SW" | grep -q "y yes · n no"'
 tmux send-keys -t "$SW" y
 wait_until 'sbtext "$SW" | grep -q "at risk"' 80
 ok "  ...and a dirty worktree is refused"        '[ -n "$(window_of api-gw wt)" ]'
@@ -1996,6 +1998,33 @@ out="$("$KEL" kill api-gw/wt2 2>&1)"
 ok "kill still succeeds"                '[[ "$out" == *killed* ]]'
 ok "  ...and the phantom entry is gone" '! git -C "$WORK/repos/api-gw" worktree list | grep -q wt2'
 ok "  ...so the branch can be deleted"  'git -C "$WORK/repos/api-gw" branch -D wt2 >/dev/null 2>&1'
+
+# The sidebar's x runs kel inside the window it closes, so the kill hung that
+# kel up: the window went, the record and the worktree stayed, and k1 read
+# dead.  A pane marked as the sidebar, running kel kill the way it does (in
+# its process group, output through a pipe), stands in for the real one.
+section "a kill closes the agent's pane, and its window only when it was the last"
+reset
+K api-gw new k1 -w --agent 'sleep 9999' >/dev/null 2>&1
+K1W="$(window_of api-gw k1)"; agent_up "$K1W"
+K1P="$(tmux split-window -d -h -t "$K1W" -P -F '#{pane_id}' "while [ ! -e '$WORK/go' ]; do sleep 0.1; done; '$KEL' kill api-gw/k1 2>&1 | cat > '$WORK/k1.out'")"
+tmux set-option -p -t "$K1P" @kel-sidebar 1
+touch "$WORK/go"
+wait_until '[ ! -f "$SESSIONS/api-gw/k1.json" ]' 50
+ok "a kill asked from the agent's own window finishes" '[ ! -f "$SESSIONS/api-gw/k1.json" ] && [ -z "$(window_of api-gw k1)" ]'
+ok "  ...worktree and all"                    'wait_until "[ ! -d \"$WORK/repos/.kel-worktrees/api-gw-k1\" ]" 30'
+NEW api-gw k3
+K3W="$(window_of api-gw k3)"; K3P="$(pane_of api-gw k3)"
+tmux split-window -d -h -t "$K3P" -c "$WORK/repos/api-gw" 'sleep 8888'
+"$KEL" kill api-gw/k3 >/dev/null 2>&1
+ok "a kill beside an editor closes only the agent's pane" '! tmux list-panes -a -F "#{pane_id}" | grep -qxF "$K3P" && [ "$(tmux list-panes -t "$K3W" -F "#{pane_current_command}")" = sleep ] && [ ! -f "$SESSIONS/api-gw/k3.json" ]'
+ok "  ...and the window takes the name of what stays" '[ "$(tmux display -p -t "$K3W" "#{window_name}")" = sleep ]'
+NEW api-gw docs
+DCW="$(window_of api-gw docs)"; DCP="$(pane_of api-gw docs)"
+tmux split-window -d -h -t "$DCP" -c "$WORK/repos/api-gw"
+"$KEL" _own "$DCP" >/dev/null 2>&1
+ok "_own leaves no window named after the agent it moved" '[ "$(tmux display -p -t "$DCW" "#{window_name}")" = api-gw ] && [ "$(tmux display -p -t "$DCP" "#{window_name}")" = docs ]'
+ok "  ...and no agent named for it in the old one" '[ "$("$KEL" _fleet | jq --arg w "$DCW" "[.agents[] | select(.window_id == \$w and (.managed or .name == \"docs\"))] | length")" = 0 ]'
 
 # kel prune had the identical bug, reached a different way: a DEAD agent
 # (its window gone, not killed through kel) whose worktree directory was also

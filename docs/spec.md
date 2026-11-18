@@ -289,7 +289,7 @@ where it already is** — which is exactly what a sidebar per window does.
 | restore | *built (M2).* **Rebuild windows and splits as today, sidebars included, under the existing `.restoring` lock.** A snapshot records each sidebar as a `@kel-sidebar` pane (its geometry is part of the window's layout string, so skipping it would break `select-layout`), and restore relaunches it rather than replaying a command — so a restore cannot duplicate one. The author found the old restore hard to work with — the rebuild is a chance to simplify it, not just extend it |
 | scope | **only kel's session.** Panes in other tmux sessions are not part of the workspace |
 | focus | *built (M3).* **One key to focus the sidebar** (`prefix Space`, taking tmux's `next-layout`); `enter` jumps to the selected pane, `esc` returns where you were. `` prefix ` `` is unchanged. *Only on purpose, 2026-10-21:* the sidebar's keys are bare letters, and `select-pane -L` from your leftmost pane (Ctrl-h under vim-tmux-navigator) or `prefix o` put a sentence meant for Claude into it — `t` opened a shell. `prefix Space` and a click (kel's `MouseDown1Pane`: tmux's own, plus the mark) set the window option `@kel-via`; a `pane-focus-in` hook moves any other arrival on to the next pane — your first, since the sidebar is pane 1 — and focusing your own pane clears it. Pure tmux, no kel start on a pane change |
-| keys | *built (M3, M5).* `j`/`k` move · `enter` jump · `/` filter · `n` new agent · `w` new worktree agent · `x` kill (kill-safety intact) · `r` rename · `f` files · `g` git · `d` the worktree's diff · `e` edit what the agent last touched · `o` a server in the browser · `p` plan and tasks · `?` help. None deeper than one key. *M7 (2026-10-21):* an agent pane's title is `● <index> · <name> <state>` in the state's colour, from the pane options the hook sets (`@kel-state`, `@kel-name`) and computed by tmux; `n` then asks where — `enter` a window, `|` / `-` a split of the pane you were in — and `m` gives an agent sharing a window one of its own (`break-pane`) |
+| keys | *built (M3, M5).* `j`/`k` move · `enter` jump · `/` filter · `n` new agent · `w` new worktree agent · `x` kill (kill-safety intact; the question says whether the window goes too, *2026-11-18*) · `r` rename · `f` files · `g` git · `d` the worktree's diff · `e` edit what the agent last touched · `o` a server in the browser · `p` plan and tasks · `?` help. None deeper than one key. *M7 (2026-10-21):* an agent pane's title is `● <index> · <name> <state>` in the state's colour, from the pane options the hook sets (`@kel-state`, `@kel-name`) and computed by tmux; `n` then asks where — `enter` a window, `|` / `-` a split of the pane you were in — and `m` gives an agent sharing a window one of its own (`break-pane`) |
 | sections | *built (M3).* **`spaces` above `agents`** (§5), after herdr, replacing the single repo → worktree → pane tree |
 | mouse | *built (M3).* **First-class.** A click selects and jumps; the wheel scrolls; every gesture a key does on a row, a click can reach. Bubble Tea v2 reports mouse events; tmux passes them to the pane under the pointer with `mouse on`, which kel's config already sets |
 | done, until seen | *built (M3).* **`done` stays loud until you have looked at the agent**, then quietens — herdr's semantics, and what makes the dots worth reading. A **flag on `done`, not a new state**: the notifications and every reader that matches on state are untouched (`kel jump` reads the flag since 2026-11-03). When "looked at" happened is recorded from the window-change event the sidebar already receives (§9) |
@@ -1077,6 +1077,17 @@ what it was asking and were just trying to move on. So:
 **`kel kill` on a worktree refuses** when there are uncommitted or unpushed
 changes, and names what is at risk. Deleting an agent's only copy of its work
 is the one unforgivable bug in this category of tool (invariant 1).
+
+**`kel kill` closes the agent's pane, and its window only when the agent was
+its last pane of yours** (*2026-11-18*). Closing the window took an editor
+split beside the agent, unsaved buffer and all, because only other agents
+counted. A window left behind is named for what stays: the next agent, else
+its first pane's program, or the directory for a shell, as `kel shell` names
+one. `m` (own window) renames the window it leaves the same way, which
+otherwise read as the agent it lost (`docs (unmanaged)`). A kill asked from
+the window it closes (the sidebar's `x` there) ignores the hangup that closing
+sends it, and finishes: it died half-way, the window gone and the record and
+worktree left.
 
 ### 10a. Cards — agents reporting to you  ·  *designed 2026-10-31, built 2026-11-01*
 

@@ -48,7 +48,8 @@ kel new [name] --no-agent      just make the window, don't start the agent
 kel new [name] --split right|down [--at PANE]
                                as a split of PANE (default: the pane you are in)
 kel new [name] --agent CMD     run CMD instead of `claude`
-kel kill <name>        close the window; remove the worktree if it was one
+kel kill <name>        close its pane, and its window when nothing else of
+                       yours is in it; remove the worktree if it was one
 kel kill <name> -f     ...even with uncommitted / unpushed work
 kel ls [--json]        every agent, grouped by repo (state, context %, cost);
                        --json is the fleet document {generated_at, current, agents}

@@ -450,13 +450,32 @@ own_window() { # pane
   sidebar_ensure "$nw"
   m="$(meta_path "$g" "$name")"
   [ -n "$stamp" ] && [ -f "$m" ] && meta_update "$m" '.window_id=$w' --arg w "$nw"
-  if [ "$(tmux display-message -p -t "$wid" '#{window_name}' 2>/dev/null)" = "$name" ]; then
-    local next; next="$(other_agents "$wid" "")"
-    [ -n "$next" ] && tmux rename-window -t "$wid" "${next%%$'\n'*}" 2>/dev/null
-  fi
+  rename_left_behind "$wid" "$name"
   goto_window "$nw"
   snapshot
   say "$name has a window of its own"
+}
+
+# A window still named after the agent that left it read as that agent,
+# `docs (unmanaged)`, beside the real one.  It takes the name of what stays:
+# the next agent, else its first pane's program, or the directory when that is
+# a shell, which is what `kel shell` names a window.
+rename_left_behind() { # wid name
+  [ "$(tmux display-message -p -t "$1" '#{window_name}' 2>/dev/null)" = "$2" ] || return 0
+  local next p c
+  next="$(other_agents "$1" "")"
+  if [ -n "$next" ]; then
+    next="${next%%$'\n'*}"
+  else
+    IFS='|' read -r p c <<< "$(user_panes "$1" | head -1)"
+    [ -n "$p" ] || return 0
+    case "$c" in
+      bash|zsh|fish|sh|dash|tmux|'') next="$(tmux display-message -p -t "$p" '#{pane_current_path}' 2>/dev/null)"; next="${next##*/}" ;;
+      *) next="$c" ;;
+    esac
+  fi
+  [ -n "$next" ] && tmux rename-window -t "$1" "$next" 2>/dev/null
+  return 0
 }
 
 pane_is_agent() { # pane
@@ -1276,15 +1295,24 @@ cmd_kill() {
     die "commit & push, or run: kel kill $name --force"
   fi
 
-  local kpane='' others=''
+  # The agent's pane goes, and its window only when nothing else of yours is
+  # in it: closing the window took an editor split beside the agent, unsaved
+  # buffer and all, when only other agents counted (2026-11-18).
+  local kpane='' rest=0
   [ -n "$meta" ] && [ -n "$wid" ] && kpane="$(record_pane "$wid" "$meta")"
-  [ -n "$kpane" ] && others="$(other_agents "$wid" "$kpane")"
-  if [ -n "$others" ]; then
+  [ -n "$kpane" ] && rest="$(user_panes "$wid" | cut -d'|' -f1 | grep -cvxF "$kpane")"
+  if [ "$rest" -gt 0 ]; then
     tmux kill-pane -t "$kpane" 2>/dev/null || true
-    [ "$(tmux display-message -p -t "$wid" '#{window_name}' 2>/dev/null)" = "$name" ] \
-      && tmux rename-window -t "$wid" "${others%%$'\n'*}" 2>/dev/null
-  else
-    [ -n "$wid" ] && tmux kill-window -t "$wid" 2>/dev/null || true
+    rename_left_behind "$wid" "$name"
+  elif [ -n "$wid" ]; then
+    # Asked from the window being closed (its own sidebar's x), this kel is
+    # in that pane's process group: the kill hangs it up, and it died before
+    # the record and the worktree went, leaving the agent `dead` with its
+    # worktree.  So it stops listening for the hangup, and for the pipe to
+    # the sidebar that goes with it.
+    [ -n "${TMUX_PANE:-}" ] && [ "$(tmux display-message -p -t "$TMUX_PANE" '#{window_id}' 2>/dev/null)" = "$wid" ] \
+      && trap '' HUP PIPE
+    tmux kill-window -t "$wid" 2>/dev/null || true
   fi
 
   if [ "$iso" = "worktree" ] && [ -n "$repo" ] && [ -n "$cwd" ]; then

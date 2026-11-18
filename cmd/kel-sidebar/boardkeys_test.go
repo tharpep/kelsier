@@ -143,7 +143,7 @@ func TestBoardIgnoresTheSidebarsOtherKeys(t *testing.T) {
 	if nm, _ := boardPress(m, "x"); nm.mode != modeKill || nm.target != "a:@2" {
 		t.Errorf("x asks no kill question: mode %d target %s", nm.mode, nm.target)
 	}
-	if nm, _ := boardPress(m, "x"); !strings.Contains(plain(nm.render()), "kill fix-auth?") {
+	if nm, _ := boardPress(m, "x"); !strings.Contains(plain(nm.render()), "kill fix-auth") {
 		t.Errorf("the kill question is not on the board:\n%s", plain(nm.render()))
 	}
 }

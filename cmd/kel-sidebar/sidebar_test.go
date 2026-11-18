@@ -271,7 +271,7 @@ func TestSidebarKeys(t *testing.T) {
 	// x asks first, and anything but y leaves the agent alone
 	m.ui.sel = "a:@2"
 	press("x")
-	if m.mode != modeKill || !strings.Contains(plain(m.render()), "kill fix-auth?") || !strings.Contains(plain(m.render()), "y yes · n no") {
+	if m.mode != modeKill || !strings.Contains(plain(m.render()), "kill fix-auth") || !strings.Contains(plain(m.render()), "y yes · n no") {
 		t.Errorf("x did not ask:\n%s", plain(m.render()))
 	}
 	press("n")
