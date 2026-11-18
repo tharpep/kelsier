@@ -337,6 +337,10 @@ A tile's border is its state's colour. Its top edge has its age; its bottom
 edge has its model, its PR with CI (`✓` pass, `✕` fail, `◌` running, `?` gh
 could not say) and its diff against the branch it lands on. Tiles never
 move: not when a state changes, not on another face, not when you select one.
+A working tile's dot turns between `●` and `◉` about once a second, so
+what is busy reads at a glance; nothing else on the board moves, and the
+sidebar stays still.
+
 `v` turns every tile to its next face: the **card** (what it says or does,
 its subagent or server, an hour of state, context, cost, tasks), the
 **screen** (the pane's last five lines, read-only), the **timeline** (that

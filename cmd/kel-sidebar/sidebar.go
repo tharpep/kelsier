@@ -48,6 +48,9 @@ import (
 )
 
 type sbTick struct{}
+
+// sbPulse flips the board's working dots; only the board asks for it
+type sbPulse struct{}
 type sbWake struct{}
 type sbLoaded struct{ doc fleet.Doc }
 type sbBase struct{ ref string } // d's default base, worked out off the key path
@@ -111,7 +114,9 @@ type sbModel struct {
 	termBg, termFg *rgb // the terminal's colours, once it has answered
 	fixedBg        bool // KEL_SIDEBAR_BG names the background: nothing to ask
 
-	board bool // drawn as the board, in kel board's popup (board.go)
+	board    bool // drawn as the board, in kel board's popup (board.go)
+	pulse    bool // the board's working dots read ◉ this second (sbPulse)
+	pulseOff bool // no working tile: no pulse asked for until a load has one
 }
 
 // ---------------------------------------------------------------- state dir
@@ -584,6 +589,12 @@ func tickAfter() tea.Cmd {
 	return tea.Tick(2*time.Second, func(time.Time) tea.Msg { return sbTick{} })
 }
 
+const pulseEvery = time.Second
+
+func pulseAfter() tea.Cmd {
+	return tea.Tick(pulseEvery, func(time.Time) tea.Msg { return sbPulse{} })
+}
+
 // ---------------------------------------------------------------- entries
 
 func (m sbModel) view() sbView {
@@ -966,7 +977,7 @@ func (m sbModel) browse() (sbModel, tea.Cmd) {
 
 func (m sbModel) Init() tea.Cmd {
 	if m.board {
-		return tickAfter()
+		return tea.Batch(tickAfter(), pulseAfter())
 	}
 	if !m.visible {
 		return nil
@@ -1026,6 +1037,17 @@ func (m sbModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, m.pause()
 		}
 
+	case sbPulse:
+		if !m.board {
+			return m, nil
+		}
+		if !boardWorking(m.view(), time.Now().Unix()) {
+			m.pulse, m.pulseOff = false, true
+			return m, nil
+		}
+		m.pulse = !m.pulse
+		return m, pulseAfter()
+
 	case sbTick:
 		if m.msg != "" && time.Since(m.msgAt) > toastFor {
 			m.msg, m.msgBad = "", false
@@ -1083,6 +1105,10 @@ func (m sbModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.doc = msg.doc
 		m.ui = m.withShared()
 		m.adoptSel()
+		if m.board && m.pulseOff && boardWorking(m.view(), time.Now().Unix()) {
+			m.pulseOff = false
+			return m, pulseAfter()
+		}
 		if m.visible && !m.board {
 			for i := range m.doc.Agents {
 				a := &m.doc.Agents[i]
@@ -1787,7 +1813,9 @@ func (m sbModel) clickRefs() []lineRef {
 	return refs
 }
 
-func (m sbModel) boardOpts() boardOpts { return boardOpts{face: m.ui.face, loc: time.Local} }
+func (m sbModel) boardOpts() boardOpts {
+	return boardOpts{face: m.ui.face, loc: time.Local, pulse: m.pulse}
+}
 
 // boardKey is a key the board answers itself; ok false hands it to the
 // sidebar's own handling, for the keys the two share (space, d, x, /).

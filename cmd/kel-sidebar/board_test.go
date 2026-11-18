@@ -292,3 +292,69 @@ func TestBoardScrollHintSaysWorktreesApart(t *testing.T) {
 		}
 	}
 }
+
+// The board's one motion: on the pulse a working tile's dot reads ◉ and
+// nothing else in the frame changes. The sidebar ignores the pulse.
+func TestBoardPulseMovesOnlyWorkingDots(t *testing.T) {
+	t.Setenv("HOME", "/home/me")
+	doc, now := loadBoardFixture(t, "fifteen-three-repos")
+	v := buildView(doc, uiState{now: now})
+	still, _ := renderBoard(v, 150, 0, now, boardOpts{loc: time.UTC})
+	moved, _ := renderBoard(v, 150, 0, now, boardOpts{loc: time.UTC, pulse: true})
+	working := 0
+	for _, a := range v.agents {
+		if d, _ := agentDot(a.agent, now); d == "●" && a.agent.State != nil && *a.agent.State == "working" {
+			working++
+		}
+	}
+	for _, b := range v.bgLoose {
+		if _, _, w := bgLook(b); w == "working" {
+			working++
+		}
+	}
+	if working == 0 {
+		t.Fatal("the fixture has no working tile")
+	}
+	if strings.Contains(still, "◉") {
+		t.Error("the still frame has a ◉")
+	}
+	if n := strings.Count(moved, "◉"); n != working {
+		t.Errorf("%d dots pulse, want one per working tile (%d)", n, working)
+	}
+	if strings.ReplaceAll(moved, "◉", "●") != still {
+		t.Error("the pulse changed more than the working dots")
+	}
+	m := sbModel{doc: doc, width: 32, height: 40, visible: true}
+	nm, cmd := m.update(sbPulse{})
+	if nm.(sbModel).pulse || cmd != nil {
+		t.Error("the sidebar answered the pulse")
+	}
+	m.board = true
+	nm, cmd = m.update(sbPulse{})
+	if !nm.(sbModel).pulse || cmd == nil {
+		t.Error("the board did not flip and ask for the next pulse")
+	}
+}
+
+// With no working tile the board stops asking for pulses, and the load that
+// brings one back starts them again.
+func TestBoardPulseStopsWithNothingWorking(t *testing.T) {
+	t.Setenv("HOME", "/home/me")
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	busy, _ := loadBoardFixture(t, "fifteen-three-repos")
+	calm, _ := loadBoardFixture(t, "fifteen-three-repos")
+	calm.Background = nil
+	for i := range calm.Agents {
+		calm.Agents[i].State = sp("idle")
+	}
+	m := sbModel{doc: calm, width: 150, height: 40, visible: true, board: true, pulse: true}
+	nm, cmd := m.update(sbPulse{})
+	m = nm.(sbModel)
+	if cmd != nil || m.pulse || !m.pulseOff {
+		t.Fatal("a board with nothing working kept pulsing")
+	}
+	nm, cmd = m.update(sbLoaded{busy})
+	if m = nm.(sbModel); cmd == nil || m.pulseOff {
+		t.Error("a load with a working tile did not start the pulse again")
+	}
+}

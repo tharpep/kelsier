@@ -428,7 +428,12 @@ in any terminal:
   `esc` closes). Same fleet document, same selection in `sidebar.json`, so
   the rail, the list and the board are one surface at three widths. One
   rounded tile per agent, its border in its state's colour (grey for idle),
-  under its repo in the list's order, then `background`. A tile is at least
+  under its repo in the list's order, then `background`. *2026-11-18:* the
+  board's one motion is a working tile's dot alternating `●` and `◉` about
+  once a second, as Crystal, herdr, Orca and Superset animate only the
+  working state. Nothing else moves, the sidebar never does, and with no
+  working tile the board stops ticking until a load brings one. It costs
+  about 0.7% of a core while it runs (measured in the rig). A tile is at least
   40 columns: three across at 150, two at 100, one below 85. The header has
   `kel board`, the agents counted by state and the 5h quota. Every face
   fills the same five rows, and `v` turns every tile to the next one. The

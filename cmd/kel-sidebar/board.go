@@ -46,8 +46,36 @@ const (
 )
 
 type boardOpts struct {
-	face face
-	loc  *time.Location // clock times in the timeline; UTC in the fixtures
+	face  face
+	loc   *time.Location // clock times in the timeline; UTC in the fixtures
+	pulse bool           // the half second a working tile's dot reads ◉
+}
+
+// pulseDot is the one motion on the board: a working tile's dot alternates
+// ● and ◉ about once a second. The sidebar never moves.
+func pulseDot(dot string, working bool, o boardOpts) string {
+	if working && o.pulse && dot == "●" {
+		return "◉"
+	}
+	return dot
+}
+
+// boardWorking: is any tile's dot one the pulse moves? With none, the board
+// stops asking for pulses until a load brings one.
+func boardWorking(v sbView, now int64) bool {
+	for _, t := range boardTiles(v) {
+		switch {
+		case t.a != nil:
+			if d, _ := agentDot(t.a.agent, now); d == "●" && t.a.agent.State != nil && *t.a.agent.State == "working" {
+				return true
+			}
+		case t.bg != nil:
+			if _, _, w := bgLook(*t.bg); w == "working" {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 type boardTile struct {
@@ -398,6 +426,7 @@ func (t boardTile) draw(v sbView, tw int, now int64, o boardOpts, selected bool)
 	var rows []string
 	if t.bg != nil {
 		dot, c, word := bgLook(*t.bg)
+		dot = pulseDot(dot, word == "working", o)
 		border = strings.ReplaceAll(c, bold, "")
 		tl = c + dot + reset + " " + bold + t.bg.Name + reset
 		tr = dim + "bg" + reset
@@ -416,6 +445,7 @@ func (t boardTile) draw(v sbView, tw int, now int64, o boardOpts, selected bool)
 	} else {
 		a := t.a.agent
 		dot, c := agentDot(a, now)
+		dot = pulseDot(dot, a.State != nil && *a.State == "working", o)
 		border = strings.ReplaceAll(c, bold, "")
 		tl = c + dot + reset + " " + bold + a.Name + reset
 		tr = dim + agentAge(a, now) + reset
