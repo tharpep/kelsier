@@ -2,10 +2,10 @@ package main
 
 import (
 	"encoding/json"
-	"fmt"
-	"os/exec"
 	"flag"
+	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -144,17 +144,13 @@ func TestSidebarView(t *testing.T) {
 		t.Errorf("default selection: got %q, want the current agent", v.sel)
 	}
 
-	if v.reposOpen || v.indexOf(spaceID("/home/me/code/api-gw")) >= 0 {
-		t.Error("Repos is folded by default: no space is selectable")
-	}
-	v = buildView(loadFixture(t, "fifteen-three-repos"), uiState{expanded: map[string]bool{reposKey: true}})
-	if !v.reposOpen || v.indexOf(spaceID("/home/me/code/api-gw")) < 0 {
-		t.Error("sec:repos opens Repos")
+	if v.indexOf(spaceID("/home/me/code/api-gw")) >= 0 {
+		t.Error("a space is selectable: the sidebar draws no Repos section")
 	}
 
-	// unknown panes say so, in both sections
+	// unknown panes say so
 	out, _ := renderView(buildView(fleet.Doc{}, uiState{}), 32, 0, 0)
-	if strings.Count(plain(out), "? panes unknown") != 2 {
+	if strings.Count(plain(out), "? panes unknown") != 1 {
 		t.Errorf("a doc with no panes list must read unknown, not empty:\n%s", plain(out))
 	}
 }
@@ -165,14 +161,17 @@ func TestSidebarLineRefs(t *testing.T) {
 	out, refs := renderView(v, 32, 12, 0)
 	lines := strings.Split(plain(out), "\n")
 	for i, l := range lines {
-		if strings.Contains(l, "working") && refs[i].id != "a:@1" {
+		if strings.HasPrefix(strings.TrimLeft(l, " ▌"), "● kelsier") && refs[i].id != "a:@1" {
 			t.Errorf("line %d %q maps to %+v", i, l, refs[i])
 		}
-		if strings.Contains(l, "main ↑2") && refs[i].kind != "space" {
+		if strings.Contains(l, "▾ kelsier") && refs[i].id != "g:kelsier" {
 			t.Errorf("line %d %q maps to %+v", i, l, refs[i])
+		}
+		if strings.Contains(l, "Opus") && (refs[i].kind != "inspector" || refs[i].id != "") {
+			t.Errorf("inspector line %d %q maps to %+v", i, l, refs[i])
 		}
 	}
-	if !strings.Contains(lines[len(lines)-1], "Settings") {
+	if !strings.Contains(lines[len(lines)-1], "≡") {
 		t.Error("the footer is not pinned to the last line")
 	}
 }
@@ -199,7 +198,6 @@ func TestParseVisible(t *testing.T) {
 		}
 	}
 }
-
 
 func TestSummarise(t *testing.T) {
 	refusal := "\x1b[1;33mkel\x1b[0m refusing to kill 'x' — the worktree has work that isn't safe to lose:\n" +
@@ -238,25 +236,24 @@ func TestSidebarKeys(t *testing.T) {
 	for range 4 {
 		press("j")
 	}
-	// kelsier, its nvim pane, fix-auth, its bash pane, then fix-auth's background agent
-	if sel := m.view().sel; sel != "b:bg1" {
-		t.Errorf("j x4 from kelsier: %q, want fix-auth's background agent", sel)
+	// fix-auth, docs, web-dashboard's heading, dashboard: one row each
+	if sel := m.view().sel; sel != "a:@6" {
+		t.Errorf("j x4 from kelsier: %q, want dashboard", sel)
 	}
-	if sbLoadShared().Selected != "b:bg1" {
+	if sbLoadShared().Selected != "a:@6" {
 		t.Error("the cursor is not shared through sidebar.json")
 	}
 
-	// space on the Repos header opens it, and the fold is shared
-	m.ui.sel = reposID
+	// space on the shells heading opens it, and the fold is shared
+	m.ui.sel = shellsID
 	press("space")
-	if !m.view().reposOpen || !sbLoadShared().Expanded[reposKey] {
-		t.Error("space did not open Repos, or the fold is not shared")
+	if !m.view().shOpen || !sbLoadShared().Expanded[shellsKey] {
+		t.Error("space did not open shells, or the fold is not shared")
 	}
 	press("space")
-	if m.view().reposOpen || sbLoadShared().Expanded[reposKey] {
-		t.Error("space did not fold Repos again")
+	if m.view().shOpen || sbLoadShared().Expanded[shellsKey] {
+		t.Error("space did not fold shells again")
 	}
-	m.ui.expanded = map[string]bool{reposKey: true}
 
 	// / filters live; esc clears
 	press("/")
@@ -282,8 +279,6 @@ func TestSidebarKeys(t *testing.T) {
 		t.Error("n did not cancel the kill")
 	}
 
-	m.ui.sel = spaceID("/home/me/code/kelsier")
-	press("l")
 	m.ui.sel = "%2"
 	press("x")
 	if m.mode != modeClose || !strings.Contains(plain(m.render()), "close nvim?") {
@@ -295,28 +290,20 @@ func TestSidebarKeys(t *testing.T) {
 	}
 
 	// r and x need an agent
-	m.ui.sel = spaceID("/home/me/code/api-gw")
+	m.ui.sel = "g:api-gw"
 	press("r")
 	if m.mode != modeNormal || !strings.Contains(m.msg, "select an agent") {
-		t.Errorf("r on a space: mode %v msg %q", m.mode, m.msg)
+		t.Errorf("r on a heading: mode %v msg %q", m.mode, m.msg)
 	}
 
-	// a click on a space selects it
-	_, refs := renderView(m.view(), m.width, m.height, 0)
-	y := -1
-	for i, r := range refs {
-		if r.id == spaceID("/home/me/code/api-gw") {
-			y = i
-			break
-		}
-	}
-	nm, _ := m.Update(tea.MouseClickMsg{X: 5, Y: y, Button: tea.MouseLeft})
+	// a click on a heading selects it and folds the group
+	m.ui.sel = "a:@1"
+	nm, _ := m.Update(tea.MouseClickMsg{X: 5, Y: rowOf(t, m, "g:api-gw"), Button: tea.MouseLeft})
 	m = nm.(sbModel)
-	if m.view().sel != spaceID("/home/me/code/api-gw") {
-		t.Error("a click did not select")
+	if m.view().sel != "g:api-gw" || !m.view().shut["api-gw"] {
+		t.Errorf("a click on a heading: sel %q shut %v", m.view().sel, m.view().shut)
 	}
 }
-
 
 // A main checkout is named by its directory, not its window's group.
 func TestSidebarSpaceLabel(t *testing.T) {
@@ -361,7 +348,7 @@ func TestErrorAgent(t *testing.T) {
 		}
 	}
 	out, _ := renderView(v, 32, 0, 0)
-	if !strings.Contains(out, red+"●") || !strings.Contains(plain(out), "▐error▌") || !strings.Contains(plain(out), "Rate limit reached") {
+	if !strings.Contains(out, red+"●") || !strings.Contains(out, red+"Rate limit reached") {
 		t.Errorf("error agent not drawn as one:\n%s", plain(out))
 	}
 }
@@ -396,20 +383,20 @@ func TestSidebarHover(t *testing.T) {
 			break
 		}
 	}
-	out, _ := renderView(buildView(doc, uiState{hover: y + 1, hoverID: "a:@2"}), 32, 40, 0)
+	out, _ := renderView(buildView(doc, uiState{hover: y + 1}), 32, 40, 0)
 	soft := lifted.mix(baseBg, 0.25).bg()
 	if !strings.HasPrefix(strings.Split(out, "\n")[y], soft) {
 		t.Errorf("hovered line is not lifted: %q", plain(strings.Split(out, "\n")[y]))
 	}
-	// its two lines, one lifted unit
+	// one line: an entry is one line
 	lit := 0
 	for _, l := range strings.Split(out, "\n") {
 		if strings.HasPrefix(l, soft) && strings.TrimSpace(strings.TrimPrefix(plain(l), "▏")) != "" {
 			lit++
 		}
 	}
-	if lit != 2 {
-		t.Errorf("hover lifts the whole entry (2 lines), got %d", lit)
+	if lit != 1 {
+		t.Errorf("hover lifts the entry's one line, got %d", lit)
 	}
 }
 
@@ -516,112 +503,31 @@ func TestHelpClick(t *testing.T) {
 	}
 }
 
-// Phase 2: a repo's worktrees follow it, open or not; a nested worktree's
-// agents belong to the repo, not to a group named after the branch.
+// A repo's worktrees are spaces, open or not, for the menus and n; a nested
+// worktree's agents belong to the repo, not to a group named after the branch.
 func TestWorktreesNest(t *testing.T) {
 	v := buildView(loadFixture(t, "worktrees"), uiState{})
 	var order []string
 	for _, s := range v.spaces {
 		order = append(order, s.label)
 	}
-	got := strings.Join(order, " ")
-	if !strings.Contains(got, "kelsier agent-af1a1567ab46ddb66 docs fix-auth gone old-ui") {
-		t.Errorf("kelsier's worktrees do not follow it: %s", got)
+	if got := strings.Join(order, " "); !strings.Contains(got, "old-ui") || !strings.Contains(got, "notes") {
+		t.Errorf("a repo's worktrees are not spaces: %s", got)
 	}
 	for _, s := range v.spaces {
 		switch s.label {
 		case "old-ui":
-			if !s.closed || s.repoName() != "kelsier" || s.land.Code != "merged" {
+			if !s.closed || s.repoName() != "kelsier" {
 				t.Errorf("old-ui: %+v", s)
-			}
-			// kelsier folds its idle worktrees; old-ui is selectable only open
-			ui := uiState{focused: true, sel: spaceID(s.key), expanded: map[string]bool{reposKey: true, wtKey("/home/me/code/kelsier"): true}}
-			if acts := entryMenu(buildView(loadFixture(t, "worktrees"), ui)); len(acts) < 2 || acts[1].key != "s" {
-				t.Errorf("a merged worktree's menu does not lead with sweep: %+v", acts)
 			}
 		case "fix-auth":
 			if s.closed || s.title() != "kelsier/fix-auth" {
 				t.Errorf("fix-auth: closed %v title %q", s.closed, s.title())
 			}
 		case "notes":
-			if !s.closed || spaceDetail(s) != "main · no window" {
-				t.Errorf("a repo known only from a worktree: %q", spaceDetail(s))
+			if !s.closed || spacePos(s) != "main" {
+				t.Errorf("a repo known only from a worktree: %q", spacePos(s))
 			}
-		}
-	}
-}
-
-// A repo with more than three worktrees folds them behind one summary row; the
-// row opens the list and closes it again. The frames are plain text.
-func TestWorktreeFold(t *testing.T) {
-	t.Setenv("HOME", "/home/me")
-	t.Setenv("XDG_STATE_HOME", t.TempDir())
-	const repo = "/home/me/code/orca"
-	doc := loadFixture(t, "folds/many-worktrees")
-	frame := func(ui uiState) string {
-		out, _ := renderView(buildView(doc, ui), 32, 0, 0)
-		return plain(out) + "\n"
-	}
-	check := func(name, got string) {
-		t.Helper()
-		gold := filepath.Join(fixtures, "folds", "many-worktrees."+name+".32.golden")
-		if *update {
-			if err := os.WriteFile(gold, []byte(got), 0o644); err != nil {
-				t.Fatal(err)
-			}
-			return
-		}
-		want, err := os.ReadFile(gold)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if got != string(want) {
-			t.Errorf("%s changed:\n--- got\n%s\n--- want\n%s", name, got, want)
-		}
-	}
-	check("folded", frame(uiState{expanded: map[string]bool{reposKey: true}}))
-	check("expanded", frame(uiState{expanded: map[string]bool{reposKey: true, wtKey(repo): true}}))
-
-	// enter on the summary row (a click is the same call) flips the fold, in the
-	// shared map like any other, and keeps the cursor on the row
-	m := sbModel{doc: doc, width: 32, height: 30, visible: true, ui: uiState{expanded: map[string]bool{reposKey: true}}}
-	m.ui.sel = wtID(repo)
-	if v := m.view(); v.indexOf(wtID(repo)) < 0 {
-		t.Fatalf("the summary row is not selectable: %v", v.entryIDs)
-	}
-	m.activate(wtID(repo))
-	if !m.ui.expanded[wtKey(repo)] || m.ui.sel != wtID(repo) {
-		t.Errorf("after enter: expanded %v, sel %q", m.ui.expanded, m.ui.sel)
-	}
-	if v := m.view(); v.indexOf(spaceID("/home/me/code/orca-a")) < 0 {
-		t.Errorf("an open list should select worktrees: %v", v.entryIDs)
-	}
-	m.activate(wtID(repo))
-	if m.ui.expanded[wtKey(repo)] {
-		t.Errorf("a second enter should fold again: %v", m.ui.expanded)
-	}
-
-	// three worktrees do not fold
-	three := doc
-	three.Repos = &[]fleet.Repo{(*doc.Repos)[0]}
-	(*three.Repos)[0].Worktrees = (*three.Repos)[0].Worktrees[:3]
-	for _, s := range buildView(three, uiState{}).spaces {
-		if s.folded || s.wtSummary() {
-			t.Errorf("%s: three worktrees folded", s.label)
-		}
-	}
-}
-
-// A worktree with an agent in it stays on screen while its repo is folded.
-func TestWorktreeFoldKeepsAgents(t *testing.T) {
-	v := buildView(loadFixture(t, "worktrees"), uiState{})
-	shown := map[string]bool{}
-	for _, s := range v.spaces {
-		shown[s.label] = !s.folded
-	}
-	for label, want := range map[string]bool{"docs": true, "fix-auth": true, "agent-af1a1567ab46ddb66": false, "old-ui": false, "gone": false} {
-		if shown[label] != want {
-			t.Errorf("%s shown=%v, want %v", label, shown[label], want)
 		}
 	}
 }
@@ -634,26 +540,6 @@ func TestHelpHover(t *testing.T) {
 		line := strings.Split(plain(m.render()), "\n")[i+2]
 		if bar := strings.HasPrefix(line, "▏"); bar != (helpKey(h[0]) != "") {
 			t.Errorf("row %q hovered: %q", h[0], line)
-		}
-	}
-}
-
-// A long worktree name gives way to its state, at any width.
-func TestWorktreeRowKeepsState(t *testing.T) {
-	for _, w := range []int{28, 32, 40} {
-		ui := uiState{expanded: map[string]bool{reposKey: true, wtKey("/home/me/code/kelsier"): true}}
-		out, _ := renderView(buildView(loadFixture(t, "worktrees"), ui), w, 0, 0)
-		found := false
-		for _, l := range strings.Split(plain(out), "\n") {
-			if strings.Contains(l, "agent-af1a") {
-				found = true
-				if !strings.HasSuffix(l, "●3") || len([]rune(l)) > w {
-					t.Errorf("at %d: %q", w, l)
-				}
-			}
-		}
-		if !found {
-			t.Errorf("at %d: no Claude worktree row", w)
 		}
 	}
 }
@@ -702,16 +588,14 @@ func TestPromptClickOff(t *testing.T) {
 	}
 }
 
-
 // A working agent says what it is doing; its tag is the repo it stands in.
 func TestAgentDoing(t *testing.T) {
 	doc := loadFixture(t, "one-agent")
 	doc.Agents[0].Doing = sp("editing sbview.go")
-	out, _ := renderView(buildView(doc, uiState{}), 32, 0, 0)
-	if !strings.Contains(plain(out), "   editing sbview.go") {
-		t.Errorf("no doing line:\n%s", plain(out))
+	if got := inspectorText(buildView(doc, uiState{})); !strings.Contains(got, "\n editing sbview.go") {
+		t.Errorf("no doing line in the inspector:\n%s", got)
 	}
-	// and on a working agent that is not selected, in dim
+	// and on a working agent that is not selected, nowhere: rows are one line
 	doc = loadFixture(t, "fifteen-three-repos")
 	st := "working"
 	for i := range doc.Agents {
@@ -719,9 +603,9 @@ func TestAgentDoing(t *testing.T) {
 			doc.Agents[i].Doing, doc.Agents[i].State = sp("running the tests"), &st
 		}
 	}
-	out, _ = renderView(buildView(doc, uiState{sel: "a:@1"}), 32, 0, 0)
-	if !strings.Contains(out, dim+"running the tests") {
-		t.Errorf("an unselected working agent shows no doing line:\n%s", plain(out))
+	out, _ := renderView(buildView(doc, uiState{sel: "a:@1"}), 32, 0, 0)
+	if strings.Contains(out, "running the tests") {
+		t.Errorf("an unselected working agent shows a doing line:\n%s", plain(out))
 	}
 }
 
@@ -736,44 +620,41 @@ func TestAgentMode(t *testing.T) {
 	}
 	doc := loadFixture(t, "one-agent")
 	doc.Agents[0].Mode = sp("acceptEdits")
-	out, _ := renderView(buildView(doc, uiState{}), 32, 0, 0)
-	if !strings.Contains(plain(out), "kelsier edits") || !strings.Contains(out, faint+"edits") {
-		t.Errorf("no faint mode after the name:\n%s", plain(out))
+	v := buildView(doc, uiState{})
+	var facts string
+	for _, l := range v.inspector(32, 0) {
+		if strings.Contains(plain(l.s), "$1.20") {
+			facts = l.s
+		}
+	}
+	if !strings.HasSuffix(strings.TrimRight(plain(facts), " "), " edits") || !strings.Contains(facts, faint+"edits") {
+		t.Errorf("no faint mode on the inspector's facts: %q", plain(facts))
 	}
 	doc.Agents[0].Mode = nil
-	out, _ = renderView(buildView(doc, uiState{}), 32, 0, 0)
+	out, _ := renderView(buildView(doc, uiState{}), 32, 0, 0)
 	if strings.Contains(plain(out), "edits") || strings.Contains(plain(out), "plan") {
 		t.Errorf("a null mode drew something:\n%s", plain(out))
 	}
-	doc.Agents[0].Name = "a-long-agent-name-that-cannot-fit"
-	doc.Agents[0].Mode = sp("bypassPermissions")
-	out, _ = renderView(buildView(doc, uiState{}), 28, 0, 0)
-	bare := doc
-	bare.Agents = append([]fleet.Agent(nil), doc.Agents...)
-	bare.Agents[0].Mode = nil
-	outBare, _ := renderView(buildView(bare, uiState{}), 28, 0, 0)
-	if plain(out) != plain(outBare) {
-		t.Errorf("a name that cannot fit whole must lose the mode, not width:\n%s\nwant\n%s", plain(out), plain(outBare))
-	}
-	doc = loadFixture(t, "fifteen-three-repos")
-	out, _ = renderView(buildView(doc, uiState{}), 32, 0, 0)
-	if !strings.Contains(plain(out), "● fix-auth ") || strings.Contains(plain(out), "fix-a…") && strings.Contains(plain(out), "plan") {
-		t.Errorf("name, age and chip come before the mode:\n%s", plain(out))
-	}
 }
 
+// Task progress is the inspector's, dim at the right of what the agent is
+// doing; a row never carries it.
 func TestAgentTasks(t *testing.T) {
 	doc := loadFixture(t, "fifteen-three-repos")
-	out, _ := renderView(buildView(doc, uiState{sel: "a:@2"}), 32, 0, 0)
+	out, _ := renderView(buildView(doc, uiState{sel: "a:@7"}), 32, 30, 0)
 	p := plain(out)
 	if !regexp.MustCompile(`editing UsageChart\.tsx +1/4 *$`).MatchString(strings.Split(p, "\n")[findRow(p, "editing Usage")]) || !strings.Contains(out, dim+"1/4") {
 		t.Errorf("no dim 1/4 right-aligned on the summary line:\n%s", p)
 	}
+	out, _ = renderView(buildView(doc, uiState{sel: "a:@2"}), 32, 30, 0)
+	if strings.Contains(plain(out), "1/4") {
+		t.Errorf("an unselected agent's row carries its count:\n%s", plain(out))
+	}
 	doc = loadFixture(t, "one-agent")
 	out, _ = renderView(buildView(doc, uiState{sel: "a:@1"}), 32, 0, 0)
 	p = plain(out)
-	if !regexp.MustCompile(`\$1\.20 +3/7 `).MatchString(p) || strings.Count(p, "3/7") != 1 {
-		t.Errorf("the selected block's context line lacks the count, once:\n%s", p)
+	if strings.Count(p, "3/7") != 1 {
+		t.Errorf("the inspector lacks the count, once:\n%s", p)
 	}
 	doc.Agents[0].Tasks = nil
 	out, _ = renderView(buildView(doc, uiState{sel: "a:@1"}), 32, 0, 0)
@@ -905,68 +786,12 @@ func TestSidebarRelaunchDeadAgent(t *testing.T) {
 	// right-click the dead agent, then Relaunch in its menu
 	nm, _ = m.Update(tea.MouseClickMsg{X: 4, Y: rowOf(t, m, m.ui.sel), Button: tea.MouseRight})
 	m = nm.(sbModel)
-	nmClick, cmdClick := m.Update(tea.MouseClickMsg{X: 4, Y: rowOf(t, m, "dr:R"), Button: tea.MouseLeft})
+	nmClick, cmdClick := m.Update(tea.MouseClickMsg{X: 4, Y: rowOf(t, m, "mi:R"), Button: tea.MouseLeft})
 	if nmClick.(sbModel).msg != "relaunching crashed…" {
 		t.Errorf("Relaunch in the menu: got msg %q", nmClick.(sbModel).msg)
 	}
 	if cmdClick == nil {
 		t.Error("Relaunch in the menu did not return a tea.Cmd")
-	}
-}
-
-// pinnedEnd is the first line under the kel header, its blank and the pinned
-// Needs you block (header, rows, blank) when there is one.
-func pinnedEnd(lines []string) int {
-	if len(lines) > 2 && strings.HasPrefix(lines[2], "  Needs you") {
-		for i := 3; i < len(lines); i++ {
-			if lines[i] == "" {
-				return i + 1
-			}
-		}
-	}
-	return 2
-}
-
-func TestStickyHeaders(t *testing.T) {
-	t.Setenv("XDG_STATE_HOME", t.TempDir())
-
-	// 2. Sticky Section Headers
-	fifteenDoc := loadFixture(t, "fifteen-three-repos")
-
-	// Select last agent "spike" (@8) at tight height h=16
-	vSpike := buildView(fifteenDoc, uiState{focused: true, sel: "a:@8"})
-	outSpike, _ := renderView(vSpike, 32, 16, 0)
-	linesSpike := strings.Split(plain(outSpike), "\n")
-	if i := pinnedEnd(linesSpike); len(linesSpike) <= i || linesSpike[i] != "  Agents" {
-		t.Errorf("sticky header for scrolled agents: want Agents under the pinned block, got %q", linesSpike)
-	}
-	if !strings.Contains(plain(outSpike), "spike") {
-		t.Errorf("selected agent spike was scrolled off screen")
-	}
-
-	// Select a space that scrolls past the top at h=16
-	vSpace := buildView(fifteenDoc, uiState{focused: true, sel: spaceID("/home/me/code/web-dashboard"), expanded: map[string]bool{reposKey: true}})
-	outSpace, _ := renderView(vSpace, 32, 16, 0)
-	linesSpace := strings.Split(plain(outSpace), "\n")
-	if i := pinnedEnd(linesSpace); len(linesSpace) <= i || !strings.HasPrefix(linesSpace[i], "  Repos ▾") {
-		t.Errorf("sticky header for scrolled spaces: want Repos under the pinned block, got %q", linesSpace)
-	}
-}
-
-// A scrolled list pins the header of the section it shows, and never a
-// second header above the real one.
-func TestStickyHeaderNamesTheShownSection(t *testing.T) {
-	doc := loadFixture(t, "fifteen-three-repos")
-	for _, id := range buildView(doc, uiState{}).entryIDs {
-		for h := 8; h <= 24; h++ {
-			out, _ := renderView(buildView(doc, uiState{focused: true, sel: id}), 32, h, 0)
-			l := strings.Split(plain(out), "\n")
-			for i := 0; i < 10 && i+1 < len(l); i++ {
-				if l[i] == "  Spaces" && (l[i+1] == "  Agents" || (l[i+1] == "" && i+2 < len(l) && l[i+2] == "  Agents")) {
-					t.Errorf("sel %s at h=%d: spaces pinned above agents:\n%s", id, h, strings.Join(l[:4], "\n"))
-				}
-			}
-		}
 	}
 }
 
@@ -1010,13 +835,11 @@ func TestPaintFrameCoversEveryCell(t *testing.T) {
 // keepPalette puts the colours back as they were, so the golden frames do not
 // depend on which test ran first.
 func keepPalette(t *testing.T) {
-	bb, bf, b, d, m, f, r, dr := baseBg, baseFg, base, dim, mid, faint, raised, drawerBg
-	li, lt := lifted, lit
-	y, rd, g, p := yellowBg, redBg, greenBg, purpleBg
+	bb, bf, b, d, m, f, r := baseBg, baseFg, base, dim, mid, faint, raised
+	li, lt, ad := lifted, lit, amberDim
 	t.Cleanup(func() {
-		baseBg, baseFg, base, dim, mid, faint, raised, drawerBg = bb, bf, b, d, m, f, r, dr
-		lifted, lit = li, lt
-		yellowBg, redBg, greenBg, purpleBg = y, rd, g, p
+		baseBg, baseFg, base, dim, mid, faint, raised = bb, bf, b, d, m, f, r
+		lifted, lit, amberDim = li, lt, ad
 	})
 }
 
@@ -1031,41 +854,6 @@ func rowOf(t *testing.T, m sbModel, id string) int {
 	}
 	t.Fatalf("no row for %q", id)
 	return -1
-}
-
-// The foot is Settings and Help, each a click, focused or not, whatever
-// waits.
-func TestSidebarFooter(t *testing.T) {
-	t.Setenv("XDG_STATE_HOME", t.TempDir())
-	doc := loadFixture(t, "one-agent")
-	for _, ui := range []uiState{{}, {focused: true}} {
-		out, refs := renderView(buildView(doc, ui), 32, 30, 0)
-		l := strings.Split(plain(out), "\n")
-		last, r := l[len(l)-1], refs[len(refs)-1]
-		if !strings.HasPrefix(last, "  ≡ Settings") || !strings.HasSuffix(last, "? Help") {
-			t.Errorf("footer: %q", last)
-		}
-		if r.at(4) != "open:settings" || r.at(29) != "open:help" || r.at(0) != "" {
-			t.Errorf("footer clicks: %+v", r)
-		}
-	}
-	m := sbModel{doc: doc, width: 32, height: 30, visible: true}
-	nm, _ := m.Update(tea.MouseClickMsg{X: 29, Y: 29, Button: tea.MouseLeft})
-	if !nm.(sbModel).help {
-		t.Error("Help did not open the keys")
-	}
-	// someone waiting changes nothing here: the alarm lives on tmux's bar
-	out, _ := renderView(buildView(loadFixture(t, "fifteen-three-repos"), uiState{}), 32, 30, 0)
-	if l := strings.Split(plain(out), "\n"); !strings.HasPrefix(l[len(l)-1], "  ≡ Settings") {
-		t.Errorf("foot while an agent waits: %q", l[len(l)-1])
-	}
-	for w := 1; w <= 40; w++ {
-		out, _ := renderView(buildView(doc, uiState{}), w, 30, 0)
-		l := strings.Split(plain(out), "\n")
-		if len([]rune(l[len(l)-1])) > w {
-			t.Errorf("width %d: footer %q overflows", w, l[len(l)-1])
-		}
-	}
 }
 
 // The header's + and ⋯ open kel's menus; an item clicked is its key, and a
@@ -1109,74 +897,6 @@ func TestKelMenus(t *testing.T) {
 	}
 }
 
-// A right-click on an entry selects it and opens its drawer beneath it.
-func TestEntryMenu(t *testing.T) {
-	t.Setenv("XDG_STATE_HOME", t.TempDir())
-	m := sbModel{doc: loadFixture(t, "fifteen-three-repos"), width: 32, height: 40, visible: true}
-	y := rowOf(t, m, "a:@2")
-	nm, _ := m.Update(tea.MouseClickMsg{X: 4, Y: y, Button: tea.MouseRight})
-	m = nm.(sbModel)
-	if m.ui.sel != "a:@2" || m.drawer == nil || m.drawer.id != "a:@2" || m.menu != nil {
-		t.Fatalf("right-click fix-auth: sel %q drawer %+v", m.ui.sel, m.drawer)
-	}
-	nm, _ = m.Update(tea.MouseClickMsg{X: 4, Y: rowOf(t, m, "dr:x"), Button: tea.MouseLeft})
-	if got := nm.(sbModel); got.mode != modeKill || got.target != "a:@2" || got.drawer != nil {
-		t.Errorf("Kill: mode %v target %q drawer %+v", got.mode, got.target, got.drawer)
-	}
-	acts := entryMenu(buildView(m.doc, uiState{sel: "a:@2"}))
-	has := false
-	for _, a := range acts {
-		has = has || a == sbAct{"h", "History"}
-	}
-	if !has {
-		t.Errorf("an agent's menu lacks h History: %+v", acts)
-	}
-	_, cmd := m.Update(tea.KeyPressMsg{Code: 'h', Text: "h"})
-	if cmd == nil {
-		t.Error("h on an agent opened no history")
-	}
-	m.ui.expanded = map[string]bool{reposKey: true}
-	m.ui.sel = "s:/home/me/code/api-gw"
-	if _, cmd := m.Update(tea.KeyPressMsg{Code: 'h', Text: "h"}); cmd != nil {
-		t.Error("h on a space opens a popup")
-	}
-}
-
-// The entry under the pointer shows its buttons in place of its detail; the
-// pointer can move along the row and keep them; a button clicked acts on that
-// entry, whatever was selected, and ⋯ opens its menu.
-func TestRowButtons(t *testing.T) {
-	t.Setenv("XDG_STATE_HOME", t.TempDir())
-	m := sbModel{doc: loadFixture(t, "fifteen-three-repos"), width: 32, height: 40, visible: true}
-	y := rowOf(t, m, "a:@2")
-	nm, _ := m.Update(tea.MouseMotionMsg{X: 4, Y: y})
-	m = nm.(sbModel)
-	out, refs := renderView(m.view(), 32, 40, 0)
-	r := refs[y]
-	head := strings.Split(plain(out), "\n")[y]
-	if r.id != "a:@2" || len(r.hits) != 3 || r.hits[2].key != "menu" {
-		t.Fatalf("row %d: %+v", y, r)
-	}
-	for _, h := range r.hits {
-		if h.key == "d" && !strings.HasPrefix(string([]rune(head)[h.x0:]), "▐Diff▌") {
-			t.Errorf("Diff is not where its hit is (%d): %q", h.x0, head)
-		}
-	}
-	nm, _ = m.Update(tea.MouseMotionMsg{X: r.hits[1].x0, Y: y})
-	m = nm.(sbModel)
-	if _, r2 := renderView(m.view(), 32, 40, 0); len(r2[y].hits) != 3 || r2[y].id != "a:@2" {
-		t.Errorf("moving along the row lost the buttons: %+v", r2[y])
-	}
-	nm, cmd := m.Update(tea.MouseClickMsg{X: r.hits[1].x0 + 1, Y: y, Button: tea.MouseLeft})
-	if nm.(sbModel).ui.sel != "a:@2" || cmd == nil {
-		t.Errorf("Files: sel %q, cmd %v", nm.(sbModel).ui.sel, cmd)
-	}
-	nm, _ = m.Update(tea.MouseClickMsg{X: r.hits[2].x0, Y: y, Button: tea.MouseLeft})
-	if d := nm.(sbModel).drawer; d == nil || d.id != "a:@2" {
-		t.Errorf("⋯ opened %+v", d)
-	}
-}
-
 // config.toml is read with bin/kel's rules and written in place: a key's
 // line keeps its indent and comment, a new key goes at the end, and every
 // other line is left as it was.
@@ -1205,7 +925,7 @@ func TestSettingsScreen(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	m := sbModel{doc: loadFixture(t, "one-agent"), width: 32, height: 40, visible: true}
-	nm, _ := m.Update(tea.MouseClickMsg{X: 4, Y: 39, Button: tea.MouseLeft})
+	nm, _ := m.Update(tea.MouseClickMsg{X: 27, Y: 39, Button: tea.MouseLeft})
 	m = nm.(sbModel)
 	if !m.settings {
 		t.Fatal("Settings did not open")
@@ -1240,18 +960,6 @@ func TestSettingsScreen(t *testing.T) {
 	nm, _ = m.Update(tea.MouseClickMsg{X: 3, Y: 0, Button: tea.MouseLeft})
 	if nm.(sbModel).settings {
 		t.Error("Back did not close the screen")
-	}
-}
-
-// What an agent is doing wraps onto a second line at a space, and only what
-// still does not fit is cut.
-func TestWrapWords(t *testing.T) {
-	got := wrapWords("track hovered entry so the strip persists across pointer moves", 27, 2)
-	if len(got) != 2 || got[0] != "track hovered entry so the" || !strings.HasSuffix(got[1], "…") {
-		t.Errorf("wrapped: %q", got)
-	}
-	if got := wrapWords("editing sbview.go", 27, 2); len(got) != 1 {
-		t.Errorf("a short one stays one line: %q", got)
 	}
 }
 
@@ -1310,19 +1018,10 @@ func TestRunningSubagentsKeepWorkingGlyph(t *testing.T) {
 	if quietFor(running, now) != 0 {
 		t.Error("an agent with a running subagent is marked quiet")
 	}
-	if age, _, _, _ := agentAge(running, now); strings.Contains(age, "quiet") {
+	if age, _ := slotText(running, now); strings.Contains(age, "quiet") {
 		t.Errorf("age %q carries the quiet marker", age)
 	}
 	if d, c := stateLook(running.State, false, nil, now); d != "●" || c != cyan {
 		t.Errorf("running subagent: glyph %q %q, want the working glyph", d, c)
-	}
-}
-
-func TestWorktreeDetailLandLabels(t *testing.T) {
-	for code, want := range map[string]string{"fresh": "no commits", "detached": "detached"} {
-		got := worktreeDetail(sbSpace{closed: true, land: &fleet.Land{Code: code}})
-		if plain(got) != want || !strings.Contains(got, dim+want+reset) {
-			t.Fatalf("%s: got %q, want dim %q", code, got, want)
-		}
 	}
 }

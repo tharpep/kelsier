@@ -1,62 +1,33 @@
-  kel               ▐+ New▌ ▐⋯▌
+ kel                ▐+ New▌ ▐⋯▌
 
-  Needs you                   2
-  ● docs  done              15m
-  ● fix-auth  allow Bash?    6m
+ ▾ api-gw
+ ◌ rate-limits            quota
+   + 1 idle 1d+
 
-  Shells                      3
-  ▪ python3 :8000        api-gw
-  $ bash                      ~
-  ▸ htop                      ~
-  Repos ▾                    12
-  ◌ api-gw              main ↓4
-  ● kelsier          main ↑2 ●3
-  └  +3 worktrees
-  └● docs
-  └● fix-auth       ↑1 · review
-  · misc                      ~
-  · notes                  main
-  └· wip            ↑4 unpushed
-  ○ web-dashboard          main
-  └● usage-charts    ●5 · no PR
+ ▾ kelsier
+▌● kelsier                   2m 
+ ● fix-auth         allow Bash?
+ ● docs                     15m
 
-  Agents
-  api-gw                      2
-  ◌ rate-limits     10m ▐quota▌
+ ▾ web-dashboard
+ ○ dashboard           ▪ 49h00m
+ ● usage-charts           ▪ 30s
+ ✕ spike                   dead
+ ? scratch              unknown
+   − 1 idle 1d+ · 1 unknown
 
-    + 1 idle 1d+
+ ▾ background
+ ● nightly              blocked
 
-  kelsier                     3
-▌                               
-▌ ● kelsier                  2m 
-▌   Opus 5.5 · 36% · $10.65     
-▌   └ ● Reading parser.go · Ex… 
-▌   └ ✓ Run the tests           
-▌   └ ▐Diff▌▐Files▌▐⋯▌          
-    └ ▸ nvim
+ ▾ shells
+ ▪ python3 :8000         api-gw
+ $ bash                       ~
+ ▸ htop                       ~
 
-  ● fix-auth wt  6m ▐needs you▌
-    allow Bash?
-    └ $ bash
-    └ ● fix-auth · bg
+ kelsier  working            2m 
+ Reading parser.go              
+ Opus 5.5 · 36% · $10.65        
+ ▸ nvim · 1 subagent            
+ ↵ go  ␣ peek  ⋯                
 
-  ● docs wt          15m ▐done▌
-    PR 59 is merged, so passes…
-
-  web-dashboard               4
-  ○ dashboard            49h00m
-    Tests pass. I left the fla…
-    └ ▪ node :3000 :3001
-
-  ● usage-charts wt         30s
-    └ ▪ node :5173
-
-  ✕ spike          2h00m ▐dead▌
-
-  ? scratch             unknown
-
-    − 1 idle 1d+ · 1 unknown
-
-  background                  1
-  ● nightly           ▐blocked▌
-  ≡ Settings             ? Help
+ ●2 need you               ≡  ?

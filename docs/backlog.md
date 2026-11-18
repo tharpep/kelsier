@@ -212,7 +212,13 @@ pane's start time.
 **Gate:** a restarted workspace shows a state or mode that belongs to an agent
 no longer there.
 
-### 45. Waiting shows in four places at once  ·  `[fits]`
+### 45. Waiting shows in four places at once  ·  *answered 2026-11-18*
+
+*Answered by the hybrid sidebar (`rollout.md`, GitHub #59).* The Needs you
+section and the chip are gone: a waiting agent is its amber row with its
+reason in the right slot, the footer counts `●N need you`, and the banner
+names who. What follows is the question as filed.
+
 
 The Needs you row, the card's chip and reason, the banner and the bar's
 `needs you` all say the same thing. Spec §7 gives the waiting *count* one home,

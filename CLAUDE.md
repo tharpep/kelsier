@@ -84,7 +84,7 @@ change; migrate old records in `migrate_meta`.
 | `.waiting/<claude-session-id>` | empty; present while that session waits, so `PostToolUse` (every tool) can end the wait with no tmux call |
 | `doctor.json` | cached probe results |
 | `pr-cache/<owner>__<repo>.sha.json` | every PR's head commit, merged and state, from `gh` (paged), plus `.at` with the fetch epoch. Keyed by commit, not branch: a local branch need not be called what its PR's head is |
-| `sidebar.json` | `{selected: <entry id>, expanded: {<fold key>: bool}}` — the sidebar's cursor (`s:<space>`, `a:<window id>`, `q:<window id>` for a Needs you pointer, `r:repos`, `x:<repo>` for a quiet trailer, or a pane id) and the folds opened or shut by hand, shared so every window's sidebar shows the same thing. Fold keys: `wt:<space>` a repo's worktrees, `sec:repos` the Repos section (shut by default), `quiet:<repo>` a repo group's idle-1d+ and unknown agents (shut by default) |
+| `sidebar.json` | `{selected: <entry id>, expanded: {<fold key>: bool}}` — the sidebar's cursor (`a:<pane id>`, `g:<repo>` a repo group's heading, `h:background` / `h:shells` those groups' headings, `x:<repo>` a quiet trailer, `b:<id>` a background session, or a pane id) and the folds opened or shut by hand, shared so every window's sidebar shows the same thing. Fold keys: `grp:<repo>` a repo group (open by default), `sec:background` (shut by default), `sec:shells` (shut by default while there are agents), `quiet:<repo>` a repo group's idle-1d+ and unknown agents (shut by default) |
 | `sidebar-cache.json` | the last fleet document the visible sidebar loaded, so a sidebar just shown draws at once, before git is asked anything |
 | `palette` | `<bg> <fg>` as `#rrggbb`: the terminal's colours as a sidebar last heard them, so a new sidebar draws in them at once |
 | `quota` | `<5h%> <5h reset> <7d%> <7d reset> <spend%> <spend reset> <epoch seen>`, space-separated; `-1` = not reported, `0` reset = not given. Written by `kel statusline` only from a payload carrying rate limits; `kel-fleet` reads it as `quota`, nulling a figure whose window reset or that is older than its window |
@@ -102,7 +102,7 @@ change; migrate old records in `migrate_meta`.
 | `<pane-id>.subs` | two lines: the epoch, then the agent panel's subagent rows as JSON, from `kel substatus`; older than 30 s means none now |
 | `restore-offer` | present while an archived workspace waits: set by a fresh `kel`, cleared by `kel restore`; the sidebar offers `b` |
 | `sidebar-off` | present after `kel sidebar off`; no new sidebars until `kel sidebar on` |
-| `worktrees.json` | `{at, repos:{<main root>: repo}, stamps:{<main root>: ns}}` — every repo's worktrees with land state, for the sidebar's `repos`; reused for 20 s unless `.git/worktrees` changed (its mtime is the stamp). `kel sweep` reads fresh |
+| `worktrees.json` | `{at, repos:{<main root>: repo}, stamps:{<main root>: ns}}` — every repo's worktrees with land state, for the sidebar's repo menus and `n`; reused for 20 s unless `.git/worktrees` changed (its mtime is the stamp). `kel sweep` reads fresh |
 | `banner` | one line per agent the banner above tmux's bar shows: `<pane-id> TAB <state> TAB <name> TAB <text>`. Written by the state hook or `_claude_state` on a notifying transition, dropped when the agent moves on, when a client shows its window (`session-window-changed` → `kel _banner seen`) or on ✕ (`_click bx`); empty = tmux's bar back to its one line |
 | `prompt-history` | the last twenty commands typed at the sidebar's `;`, one per line |
 | `gh-dash.yml` | the config `v` writes for gh dash each time — every open space's repos; not the user's own |
@@ -466,7 +466,10 @@ suite check what a popup would open without a terminal client. **M6 is
 done**: `p` shows the agent's plan and Claude Code's own task list, read from
 `~/.claude/tasks/<session>/` (undocumented — a file that will not parse reads
 unreadable). Automations stay gated (`backlog.md` #38); `v0.10.0` is the
-author's call. After M6, a batch from daily use: `kel quit` / `kel shell`,
+author's call. *2026-11-18, the hybrid:* every sidebar entry is one line,
+detail in an inspector above the footer, the entry menu over it, the footer's
+`●N need you`; Needs you, Repos and the drawer are gone, and the tile-wall
+board is next (`rollout.md`). After M6, a batch from daily use: `kel quit` / `kel shell`,
 the sidebar's actions group, `prefix k` for kel commands, `idle_prompt`
 ending a stuck `working`, spaces named by their repo. The
 sidebar's look is held by golden frames (`cmd/kel-sidebar/testdata/sidebar`);

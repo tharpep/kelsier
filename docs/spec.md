@@ -150,10 +150,11 @@ own window, move beside…, swap with…, zoom (*2026-11-10*, the panes hybrid:
 `break-pane`, `join-pane`, `swap-pane`). Move beside… is refused for an agent,
 whose resize leaves stale scrollback (§5b, backlog #42).
 
-- **Sidebar** — a Go TUI (Bubble Tea v2), grown from `kel top`. **Two
-  sections**, after herdr (`herdrdev/herdr`), which answers the same question
-  in the terminal, and above them, only while it is not empty, **`Needs you`**
-  (§5d) — a pointer to each agent that wants a look:
+- **Sidebar** — a Go TUI (Bubble Tea v2), grown from `kel top`. *Since
+  2026-11-18 (the hybrid, §5d):* one list of agents grouped under their repo,
+  each one line, an inspector for the selected entry above the footer, and the
+  footer's `●N need you`. The two sections it grew from, after herdr
+  (`herdrdev/herdr`), which answers the same question in the terminal:
   - **`spaces`** — *where*: one entry per repo / worktree, its git position
     (branch, ahead/behind, dirty, land) and the ports its servers listen on.
     Expanding an entry lists its panes — agent, server, shell, program — so
@@ -165,8 +166,10 @@ whose resize leaves stale scrollback (§5b, backlog #42).
     split.
 
   Each entry is one line — the name, and where it stands right-aligned; the
-  selected entry opens to its detail (§5d). It is **the only kel surface**: no
-  board, no menus, no cheat sheet.
+  selected entry's detail is in the inspector (§5d). The spaces list left the
+  sidebar on 2026-11-18; its data path stays, and it returns on the board
+  (`rollout.md`). It is **the only kel surface**: no board, no menus, no cheat
+  sheet.
 - **The window's own panes** — untouched. Agents stay byte-identical; an
   `[agent | nvim]` pair stays a pair.
 - **Panel** — files (`yazi`), git (`lazygit`), the session's plan and its task
@@ -278,7 +281,7 @@ where it already is** — which is exactly what a sidebar per window does.
 
 | question | decision |
 |---|---|
-| worktrees | *built 2026-10-16 (phase 2).* **Every worktree of each repo the workspace stands in nests under the repo** — from `git worktree list`, so kel's, Claude Code's (`.claude/worktrees`) and hand-made ones alike, open or not — with its land state. The author found worktrees hard to keep track of and works on parallel things in one checkout, so two agents in one checkout is **counted, never refused or warned about** (`2 agents`). `s` / `kel sweep` remove a landed one: never forced (git refuses changes), the branch only via `git branch -d`, and never where a window or a Claude Code session (`claude agents --json`, which sees other terminals too) stands. Repos and `kel sweep` cover only repos where a kel window stands; a background Claude session adds no repo. `kel-fleet` adds `repos` on the sidebar's path, cached in `worktrees.json` for 20 s but re-read the moment `.git/worktrees` changes |
+| worktrees | *built 2026-10-16 (phase 2).* **Every worktree of each repo the workspace stands in nests under the repo** — from `git worktree list`, so kel's, Claude Code's (`.claude/worktrees`) and hand-made ones alike, open or not — with its land state. The author found worktrees hard to keep track of and works on parallel things in one checkout, so two agents in one checkout is **counted, never refused or warned about** (`2 agents`). `s` / `kel sweep` remove a landed one: never forced (git refuses changes), the branch only via `git branch -d`, and never where a window or a Claude Code session (`claude agents --json`, which sees other terminals too) stands. Repos and `kel sweep` cover only repos where a kel window stands; a background Claude session adds no repo. `kel-fleet` adds `repos` on the sidebar's path, cached in `worktrees.json` for 20 s but re-read the moment `.git/worktrees` changes. *2026-11-18:* the sidebar no longer draws them (the hybrid, §5d); the data stays for repo menus and `kel sweep`, and the board shows them next |
 | groups | *built (M0).* **One `kel` tmux session for everything.** The sidebar groups by repo → worktree from each pane's directory; sessions-per-repo would only duplicate that and make navigation two-level. `group` stays in the records as the repo label (no format change); `.kel/group` keeps working as a display grouping; restore merges old per-repo sessions into the one |
 | the panel | **a `display-popup` first** (~90%) for `yazi`, `lazygit`, plan and tasks — no layout cost, nothing resizes. A pinned right-hand pane only if the popup gets reopened constantly. *Revised 2026-10-15, after the author was trapped:* a popup takes every key, prefix included, so when yazi handed them to vim, the title's "q closes" started a vim macro. **Each popup now hosts a small tmux session of its own** (`_kelpop_<n>`, status off, marked `@kel-popup`) and attaches to it; inside, tmux's keys work again and `prefix q` detaches — closing the popup whatever runs there. The `_` name keeps it out of every kel filter (sidebar, fleet, snapshot, restore). yazi and lazygit keep their session between opens; the diff, plan and edit views are made fresh |
 | sidebar width | *built (M2).* **32 columns by default** (`sidebar_width`) in a window of 120 columns or more; a **4-column rail** from 80 to 119; **none** below 80 (*F9, 2026-11-07*, `sidebar_rail_below` and `sidebar_hide_below`, 120 and 80). The window's width decides, not the client's, and `fit` re-decides on `window-resized`, `client-resized` and `window-layout-changed`. `prefix b` cycles full, rail, hidden for the window you are in, and a choice made by hand (or the rail's `≡`, which asks for full) sticks in the window option `@kel-sidebar-size` until changed again. The option lives and dies with its window, so a restore starts over from the width. A hidden window has no sidebar pane, `sidebar-off` stays global and a hidden window's `ensure` makes nothing. `fit` resizes or kills only the sidebar's own pane, never a user's (invariant 4); a hide or show is not capped by `.refit`, because the decision reads the window's width, which the sidebar's presence does not change. `kel sidebar off` and `on` still apply to every window at once. *Held in place 2026-10-21:* tmux's own pane commands move the sidebar like any pane — `select-layout` (prefix M-1..5) stretched it, `rotate-window` and main-vertical put it on the right, `swap-pane` gave the agent its 32 columns. A `window-layout-changed` hook, guarded by a format so bash starts only when a sidebar is out of place, runs `kel _sidebar fit`: a sidebar off the left or short of full height is closed and made again (`join-pane -f` postdates the 3.0 floor), one at the wrong width resized. *Docked, 2026-11-05 (#33):* left, top, and the bottom edge or within one row of the window's height — one row because of the border status line. A window shorter than its client never touched the bottom edge, so `fit` re-made the sidebar on every layout change, each re-make fired the hook again, and the loop ran 3.5 times a second. The trigger was not reproduced in the suite; the proven guard is `.refit`, which caps re-making at once per 30 s per window. The hook keeps the old three-edge guard: a permissive guard only costs a bash start, and a correct `fit` kills nothing. `resize-window -A` was rejected: it resizes the user's panes (invariant 4). `rotate-window` fires no layout hook, so its two keys call fit themselves. A dragged sidebar edge springs back — the author's call: the width is fixed. A `break-pane` of the sidebar left a window holding only it; heal now reaps first |
@@ -291,7 +294,7 @@ where it already is** — which is exactly what a sidebar per window does.
 | mouse | *built (M3).* **First-class.** A click selects and jumps; the wheel scrolls; every gesture a key does on a row, a click can reach. Bubble Tea v2 reports mouse events; tmux passes them to the pane under the pointer with `mouse on`, which kel's config already sets |
 | done, until seen | *built (M3).* **`done` stays loud until you have looked at the agent**, then quietens — herdr's semantics, and what makes the dots worth reading. A **flag on `done`, not a new state**: the notifications and every reader that matches on state are untouched (`kel jump` reads the flag since 2026-11-03). When "looked at" happened is recorded from the window-change event the sidebar already receives (§9) |
 | footer | *built 2026-10-15, after daily use.* **The keys for what is selected, and only while the sidebar has the keyboard.** The author did not want to remember keys and did not want a busier sidebar, so the one footer line teaches them: an agent shows `e edit · p plan · x kill · ?`, a space `f files · g git · d diff · ?`, a server `o open · …`, as many as fit, then `?` for the rest; `enter` is left out as the key everybody tries. Without the keyboard it reads `click, or Ctrl-b then space` — how to get in, with "then" because `Ctrl-b space` read as one chord (2026-10-16) — or, while an agent waits, `1 waiting 6m · Ctrl-b then \``, the alarm tmux's bar used to carry — it names the key rather than the click (2026-10-19) because a click teaches nothing, and `` ` `` is a prefix key, so two presses; clicking it still jumps. Focus comes from the terminal's focus events (kel sets `focus-events on`), else `#{pane_active}` on each tick, and any key or click proves it *Replaced 2026-11-04:* see actions. |
-| actions | *built 2026-10-15, after daily use.* **The keys that do not depend on the selection, at the foot of the sidebar, clickable** — `n` new agent · `w` worktree agent · `t` shell · `Q` quit · `?` all keys. Only when the lists leave room; the same keys as everywhere, so one surface still (invariant 6). The author found the lower half empty and the keys hard to recall. *Revised 2026-10-16:* two grids, two keys to a line — the selected thing's verbs under what it is and its name, then kel's own — so the keys sit where they apply; no key needs shift (`q` quit, `v` PRs, `b` restore). *2026-10-21:* `|` split right and `-` split down join kel's own — the author wanted to click a pane into being. They split the pane you were in (tmux's last pane) at its directory, and the new shell takes the keyboard, as `prefix |` / `-` do. Dividers between your panes drag as tmux's do *Replaced 2026-11-04:* mouse first — the header's `+ New` and `⋯` menus and each entry's right-click drawer (inline beneath the entry, *2026-11-07*) hold what the grid and the key footer listed, each item with its key; the foot is `≡ Settings · ? Help`. The author found the grid prioritised keys over clicking. *2026-11-05:* the hover strip became inline — the buttons replace the hovered row's detail and the selection's block carries its own in its foot row — because inserting a row moved rows: a strip closing above the pointer slid the rows above it up by one (a property test of random pointer walks saw it in 1–4% of moves), and in a body taller than the pane the strip pushed the last row, an agent, out of the frame. Nothing is inserted any more. |
+| actions | *built 2026-10-15, after daily use.* **The keys that do not depend on the selection, at the foot of the sidebar, clickable** — `n` new agent · `w` worktree agent · `t` shell · `Q` quit · `?` all keys. Only when the lists leave room; the same keys as everywhere, so one surface still (invariant 6). The author found the lower half empty and the keys hard to recall. *Revised 2026-10-16:* two grids, two keys to a line — the selected thing's verbs under what it is and its name, then kel's own — so the keys sit where they apply; no key needs shift (`q` quit, `v` PRs, `b` restore). *2026-10-21:* `|` split right and `-` split down join kel's own — the author wanted to click a pane into being. They split the pane you were in (tmux's last pane) at its directory, and the new shell takes the keyboard, as `prefix |` / `-` do. Dividers between your panes drag as tmux's do *Replaced 2026-11-04:* mouse first — the header's `+ New` and `⋯` menus and each entry's right-click drawer (inline beneath the entry, *2026-11-07*) hold what the grid and the key footer listed, each item with its key; the foot is `≡ Settings · ? Help`. The author found the grid prioritised keys over clicking. *2026-11-05:* the hover strip became inline — the buttons replace the hovered row's detail and the selection's block carries its own in its foot row — because inserting a row moved rows: a strip closing above the pointer slid the rows above it up by one (a property test of random pointer walks saw it in 1–4% of moves), and in a body taller than the pane the strip pushed the last row, an agent, out of the frame. Nothing is inserted any more. *Replaced 2026-11-18 (the hybrid, §5d):* the drawer and the hover strips are gone; an entry's verbs are its menu, drawn over the inspector, opened by right-click, `→` or the inspector's `⋯`; the foot is `●N need you`, `≡` and `?`. |
 | `kel>` prompt | *built 2026-10-15.* **`prefix k`** runs a typed kel command from wherever you are — the author asked where kel commands are meant to be typed when every pane is an agent. A one-line answer is a message, a longer one a popup, never view-mode on your pane |
 | visual language | *built (M3).* §5d. Settled on rendered frames, approved by the author, before M3 was wired to live data; the background was true black (`#000000` — `colour16` was the first try, but base16-style themes such as Catppuccin repurpose palette slot 16 as an accent), the author's call after `colour234` read as grey. *Revised 2026-11-03:* kel's own theme on a `#131316` surface, one line per entry, chosen from three mockups (current, opencode-style, herdr-style) |
 
@@ -333,71 +336,66 @@ in any terminal:
   dim. Agents sit under a dim heading naming their repo.
 - **Rows never move on their own** (*2026-11-03*): repos by name, as spaces
   are, agents by window index. Sorting by urgency moved the row under the
-  pointer whenever a state changed; chips, the banner and `` prefix ` `` carry
-  urgency instead.
-- **`Needs you` lists and never reorders** (*2026-11-05*). A section above
-  `Spaces`, present only when non-empty, headed in the waiting colour with a
-  faint count: one row per agent that is `waiting`, `error`, or `done` and
-  unseen, ordered by `state_since`, oldest first — `● name  reason  age`, the
-  reason being the waiting note, the error text, or `done`. A row is a pointer:
-  a click or `enter` jumps as the agent's own row does and selects that row
-  (`a:<window>`), and the agent stays where it was in its repo group. It has no
-  buttons. It stays pinned while the list scrolls; more than four fold into
-  `+N more`, which jumps to the oldest one not shown. The agents below keep their fixed order; this list is the one place
-  urgency orders anything, and it holds no row long enough to be aimed at.
-- **One summary line under every agent, chosen by its state** (*2026-11-05*;
-  done and idle changed *2026-11-07*): working, what it is doing; waiting, the
-  reason in the bright grey; error, the error text in red; done or idle, the
-  agent's **last message**: the text of the last assistant message in its
-  Claude Code transcript, first line, markdown stripped (`**`, backticks, a
-  leading `#` or bullet). The session's title no longer shows on the card — it
-  went stale (a first prompt about PR 30 on an agent now on PR 59). A state
-  with nothing known has no line, never a placeholder (invariant 3): an agent
-  with no Claude transcript (agy, opencode), or one with no assistant text yet,
-  has none, and the title never stands in. Subagent and background children
-  stay. The selected block wraps the line to two lines at most above the
-  context line, which leads with the model's name when known (`Opus 5.5 · 36% ·
-  $10.65`). An agent with no state (opencode,
-  or a restored session before its first hook) shows dim `unknown` where the
-  age would be, and its dot stays `?`; never a cause kel cannot know.
-- **Task progress sits at the right of the summary line** (*2026-11-06*): a
-  dim `3/7`, done of all, from the session's task list. A selected agent shows
-  it on the context line's right instead, when the line holds it whole; an
-  agent with no summary line shows no count, because it has no line to hold it.
-- **A permission mode follows the name** (*2026-11-06*): `plan`, `edits`
-  (acceptEdits), `bypass` (bypassPermissions), `dontask` (dontAsk), any other
-  mode lowercased, faint; nothing for `default` (invariant 3: a mode kel was
-  not told is not drawn). The name truncates to make room, as it does for the
-  inline hover buttons.
-- **`wt` follows the mode** (*2026-11-07*, F11): a faint `wt` marks an agent
-  whose pane stands in a linked git worktree (or whose record says
-  `isolation: worktree`). Tags are added in order, mode then `wt`, each only
-  while the whole name and every tag so far fit; the last to arrive is the
-  first dropped, and the name is never cut for a tag.
-- **A window's panes nest under its agent** (*2026-11-07*, F10): a server,
-  shell or program pane in an agent's window is one row under that agent's
-  card, `└ ▪ python3 :18765`, with the kind glyph, ports and hover buttons it
-  had in `Shells` (a port is never cut) but not the repo, which the card
-  already names. Its id is the pane's, so the drawer, `x`, `z`, `f`, `g`, `o`
-  act as before. `Shells` keeps the panes of windows with no agent and counts
-  what it lists. Two agents in one window: the first, in the order `agents`
-  lists them, owns the panes. An agent folded into the quiet trailer owns none:
-  its panes are in `Shells`, so a running server is never hidden. A dead
-  agent's window keeps its panes under it.
-- **The selection is a raised block**, opencode's way: a lighter fill with a
-  blank row above and below, the accent bar down its whole height, and the
-  entry's detail inside it — context and cost, what it is doing, subagents;
-  for a space, its ports and agent count. A waiting agent's reason shows
-  whether or not it is selected.
+  pointer whenever a state changed; the dots, the footer's count, the banner
+  and `` prefix ` `` carry urgency instead.
+- **Every entry is one line, in every state, selected or not** (*2026-11-18*,
+  the hybrid; issue #59). Nothing appears under a row when its state changes,
+  when it is selected or when the pointer is on it: a block that opened under
+  the selection, a reason line, a hover strip and the drawer each pushed the
+  rows below while the author aimed at them. Replaces the summary line under
+  every agent, task progress on it, the mode and `wt` tags after the name, a
+  window's panes nested under its agent, the raised selection block, state
+  chips and the `Needs you` section; their facts are in the inspector, and
+  nothing left the fleet document.
+- **The right slot**, one column clear of the edge, carries in priority order:
+  the waiting reason in a dimmed amber, the error text in red, `dead` in red,
+  `quota` in violet, an unseen card (`▸ decision` in amber, `▸ result` dim),
+  then the age, dim. A dim `▪` before it says the agent's window runs a
+  server. An agent with no state reads dim `unknown`, and its dot stays `?`.
+  A `working` agent not heard from for half an hour reads `quiet 14m`, grey
+  italic.
+- **Repo groups fold by hand.** The heading is `▾`/`▸` and the repo's name,
+  dim (bold when it holds the agent of the window the sidebar sits in), a
+  blank row between groups. The fold is saved as `grp:<repo>`, open by
+  default. A folded heading shows one dot per agent, right-aligned, in the
+  glyphs and colours below; short of room the dots pack, then keep the most
+  urgent, so an agent that needs you is never out of sight. After the repos
+  come `background` (sessions with no agent of their name; folded, with dots)
+  and `shells` (the panes of windows with no agent; folded with a count while
+  there are agents, open when there are none). An entry folded away hands the
+  selection to its heading.
+- **The inspector** is a fixed block of five rows on the raised surface,
+  pinned above a blank row and the footer, so the list above it never moves.
+  It shows the selected entry. An agent: name, state word in its colour and
+  age; what it is doing (working, else its running subagent's label), its
+  reason (waiting), error, or last message (done, idle), or an unseen card,
+  with the task count dim on the right; model · context · cost, with the
+  permission mode (`plan`, `edits`, `bypass`, `dontask`; nothing for
+  `default`) and `wt` faint on the right; the other panes of its window, its
+  running subagents and its background children, each pane and child a click
+  that selects it; its keys (`↵ go  ␣ peek  ⋯`, and `R relaunch` when dead).
+  A pane: command and ports, its window, cwd, git position, an unseen card or
+  whose window it shares. A repo heading: agent count, branch and position,
+  path, ports. Nothing selected, it is blank and keeps its height. A state
+  with nothing known has no line, never a placeholder (invariant 3); the
+  session's title never stands in for a last message.
+- **The entry menu** replaces the drawer: right-click on a row, `→`, or the
+  inspector's `⋯` opens it, and it draws over the inspector region with its
+  foot on the inspector's last row, never between rows. It holds the entry's
+  verbs, each with its key — the pane verbs (own window, move beside…, swap
+  with…) included.
+- **What needs you is a count, not a section:** `●N need you` in amber at the
+  left of the footer, counting `waiting`, `error` and unseen `done`. A click
+  on it is `` ` ``. A waiting agent is otherwise its amber row with its
+  reason in the right slot, and the banner.
+- **One accent for the selected entry**: a lighter fill and the accent bar on
+  its one line.
 - **The selection is the target, and it follows jumps.** The highlighted
   entry is the one held in `sidebar.json`: a sidebar that finds none, or one
   that no longer exists, adopts the agent it sits beside and saves it, so a
   new agent never starts in `~` under a highlight on a repo. A jump (`kel
-  jump`, the banner's ↵ go, a Needs you row, `kel new`) writes `a:<pane id>`
+  jump`, the banner's ↵ go, the footer's count, `kel new`) writes `a:<pane id>`
   and wakes the shown sidebar; plain window switching does not.
-- **A chip names a state that needs a word**: `needs you`, `done` (unseen),
-  `dead`, `quota`, `blocked`, on a dark fill of the state's colour, with half-block ends (`▐needs you▌`) so it reads rounded. Calm
-  states are a dot and an age.
 - **The first-column glyph is the state** (*revised 2026-11-07*): one line
   per state, and the only glyph table.
   - grey `○` idle: started, never prompted; folds after 24 h.
@@ -413,18 +411,19 @@ in any terminal:
   - A `working` agent with no running subagent and no hook for 30 minutes
     draws `◌` and `quiet`.
 - **The rail** (*F9, 2026-11-07*): a sidebar of four columns, drawn at six or
-  fewer. From the top: the Needs you count in amber (`●2`), absent at 0; one
+  fewer. From the top: the need-you count in amber (`●2`), absent at 0; one
   dot per agent in the list's order, with the glyphs and colours above; a dim
   `▪` if any pane runs a server; and `≡` on the last row. A click on a dot jumps
   as its row does; a click on the count jumps to the first agent that needs
   you; a click on `≡` sets the window to full and keeps it there. No names, no
-  hover, no drawer, no selection mark. The bar and the banner still carry
+  hover, no menu, no selection mark. The bar and the banner still carry
   what needs you.
-- **One accent for the selected entry**, and it is not inverse video.
-- **Dots, not words, for state.** A chip appears only beside the dot, never
-  as the only signal.
+- The accent is never inverse video.
+- **Dots, not words, for state.** A word in the right slot appears only beside
+  the dot, never as the only signal.
 - **Whitespace, not box-drawing.** No borders inside the sidebar; sections are
-  separated by a blank line and a dim label (`Shells`, `Repos`, `Agents`; lowercase until 2026-11-04). Repo groups under `Agents` are a blank row apart, each headed by its name and agent count.
+  separated by a blank line and a dim heading (*2026-11-18*: repo groups,
+  `background`, `shells`; the `Shells` / `Repos` / `Agents` labels went).
 - **Chrome, not a box** — the sidebar's background and border come from tmux
   per-pane styles (§5a), so it reads as part of the window, the way herdr's
   does.
@@ -508,9 +507,9 @@ the agent's environment) and R3 (kel rendering documentation).
   sidebar, as the sidebar's own go-to does, and closes; `esc` or `q` closes;
   no other key is read. It only reads — nothing is sent to the target, so
   invariant 4 is untouched. A gone pane or a dead agent is said in the footer
-  and opens no popup. `space` on an agent or pane row and the drawer's `Peek`
-  (first after `Go to it`) open it; `space` on Repos or a quiet trailer still
-  folds. It is `kel _panel peek <dir> <name> <pane>`, a popup like the others,
+  and opens no popup. `space` on an agent or pane row, the inspector's `␣
+  peek` and the entry menu's `Peek` (first after `Go to it`) open it; `space`
+  on a heading or a quiet trailer still folds. It is `kel _panel peek <dir> <name> <pane>`, a popup like the others,
   not a second surface (invariant 6).
 - **Diffs: `d` reviews a worktree** against its land base — committed and
   uncommitted, what the agent changed — `nvim -c "DiffviewOpen <base>"` when
@@ -564,13 +563,13 @@ facts moved.
 | fact | its one home | the draft also had it in |
 |---|---|---|
 | model, context bar, cost, `fast` / `xhigh` | **Claude's row** — you are typing to that session | — |
-| repo / worktree, branch, `↑N`, dirty, land | **sidebar**, per space | Claude's row; the bar's location |
-| agent state, per-agent context % and cost | **sidebar**, per agent | — |
-| listening ports | **sidebar**, on the space whose server holds them | the bar's machine segment |
+| repo / worktree, branch, `↑N`, dirty | **sidebar's inspector**, for a repo heading or a pane *(2026-11-18; land moves to the board)* | Claude's row; the bar's location |
+| agent state, per-agent context % and cost | **sidebar**: the dot and right slot per agent, context and cost in the inspector | — |
+| listening ports | **sidebar's inspector**, on the pane or repo heading; `▪` on the agent's row | the bar's machine segment |
 | pane count | **sidebar** — it *is* the list | the bar |
 | quota: 5 h with reset, weekly | **tmux's bar**, left — per account, belongs to no pane *(2026-10-21; the sidebar's last line before)* | Claude's row; the sidebar |
 | total cost of live sessions | **tmux's bar** — an aggregate has no row | — |
-| waiting count, oldest wait | **the sidebar's footer** while it lacks the keyboard — the alarm, which names `prefix` `` ` `` and still jumps on a click (the bar's, while the sidebar is off) | (the sidebar shows each dot) |
+| waiting count | **the sidebar's footer**, `●N need you`, a click that jumps (*2026-11-18*); the banner names who (the bar's, while the sidebar is off) | (the sidebar shows each dot) |
 | keys, the restore hint | **the sidebar's footer** | startup text |
 | the time | **tmux's bar**, right, alone *(2026-10-21)* — the author did not want it bottom-left in an agent's row, where it went (2026-10-19) while the bar was off. tmux cannot float text over a pane; the bar's right edge is the nearest thing to a corner | Claude's row |
 | zoomed | **tmux's bar**, beside the clock: `⤢ zoomed · click to restore`, while the window is zoomed — the sidebar is hidden then, so the bar is the one place a click can undo it | — |
@@ -622,7 +621,7 @@ Opus 5.5 · ████░░ 36% ctx · $10.65
 
 The bar reads hook state, which includes what the visible sidebar wrote from Claude Code's view (§9): it applies no rule of its own and never runs `claude agents`.
 
-*Redesigned 2026-11-04, from the mockups:* `5h ━━━━━━━━ 58% (1h20m)   7d 41% · $24.10` on the left, a thin meter with labels in place of `claude ███░░` and `wk`; on the right `▐needs you▌ <agent> 6m +N`, one click target that jumps there, chip, name, age and count, then the clock. The waiting alarm lives here only, so the sidebar's foot stays `Settings · Help`; `nothing waiting` went with it. The bar wears the sidebar's surface. What follows is the M4 design it grew from.
+*Redesigned 2026-11-04, from the mockups:* `5h ━━━━━━━━ 58% (1h20m)   7d 41% · $24.10` on the left, a thin meter with labels in place of `claude ███░░` and `wk`; on the right `▐needs you▌ <agent> 6m +N`, one click target that jumps there, chip, name, age and count, then the clock. The waiting alarm lived here only until 2026-11-18, when the sidebar's foot took the count (`●N need you`, §5d); `nothing waiting` went with it. The bar wears the sidebar's surface. What follows is the M4 design it grew from.
 
 ```
 claude ███░░ 58% (1h20m) · wk 41%  │  1 waiting 6m · $24.10
@@ -1098,8 +1097,8 @@ your terminal). Strip everything below `0x20` except newline in `note`, and
 **Keyed by pane, not agent.** Only Claude Code is tracked as an agent today
 (`backlog.md` #9), so a Gemini or Codex pane reads as `program` or `shell`.
 Cards attach to `$TMUX_PANE`, and the fleet document carries them on `panes[]`,
-so any agent's card shows. The sidebar puts it under the agent if the pane has
-one, otherwise under the pane's row.
+so any agent's card shows. The sidebar shows it on the agent if the pane has
+one, otherwise on the pane's row.
 
 **On disk.** `<pane-id>.cards`: JSON lines, newest last, the last 20 kept,
 rewritten atomically. `<pane-id>.cards-seen`: the epoch you last opened them.
@@ -1113,19 +1112,11 @@ none, otherwise `{count, unseen, latest: {kind, title, at}}`. Reading it costs
 one small file per pane with a card, and it reads only the last line, so it
 stays inside invariant 5.
 
-**The sidebar.** An unseen card adds one dim line under its entry, in frames
-the author approves first (§5e):
-
-```
-agents
-▌● kelsier
-   working 1m · 30% · $2.00
-   ▸ result: Auth fix ready
-```
-
-This is a deliberate exception to "one line per entry" (§5d), and only while a
-card is unseen. Worth trying the alternative on real frames: `· 1 card` at the
-end of the second line. A `decision` makes the line yellow.
+**The sidebar** (*revised 2026-11-18*, the hybrid). An unseen card puts
+`▸ decision` (amber) or `▸ result` (dim) in its entry's right slot, after
+waiting, dead and quota and before the age, and its kind and title in the
+inspector. The extra line under the entry it drew until then broke "one line
+per entry" (§5d), so it went.
 
 **The popup.** `i` on the selected entry opens the pane's cards, newest first,
 through `kel _panel cards`, composed like `p` composes the plan (`panel_plan`).

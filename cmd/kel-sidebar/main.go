@@ -13,27 +13,6 @@ import (
 	"strings"
 )
 
-// triageRank orders states by urgency: a space shows its most urgent agent's.
-func triageRank(state *string) int {
-	if state == nil {
-		return 5
-	}
-	switch *state {
-	case "waiting", "error":
-		return 0
-	case "working":
-		return 1
-	case "throttled":
-		return 2
-	case "done":
-		return 3
-	case "dead":
-		return 6
-	default: // idle
-		return 5
-	}
-}
-
 func f(p *float64) float64 {
 	if p == nil {
 		return 0
@@ -69,17 +48,15 @@ var (
 	faint    = rgb{85, 85, 94}.fg()
 	lifted   = rgb{29, 29, 34}
 	raised   = lifted.bg()
-	drawerBg = lifted.mix(baseFg, 0.06).bg()
 	lit      = lifted.mix(accentRGB, 0.35)
-	yellowBg = rgb{46, 34, 16}
-	redBg    = rgb{49, 21, 25}
-	greenBg  = rgb{18, 41, 27}
-	purpleBg = rgb{36, 27, 54}
+	amberDim = waitingRGB.mix(baseBg, 0.30).fg()
 )
 
 type rgb struct{ r, g, b uint8 }
 
 var accentRGB = rgb{106, 167, 248}
+
+var waitingRGB = rgb{245, 167, 66}
 
 func (c rgb) fg() string  { return fmt.Sprintf("\x1b[38;2;%d;%d;%dm", c.r, c.g, c.b) }
 func (c rgb) bg() string  { return fmt.Sprintf("\x1b[48;2;%d;%d;%dm", c.r, c.g, c.b) }
@@ -118,11 +95,8 @@ func applyPalette(term, text rgb) {
 	dim = text.mix(surface, 0.50).fg()
 	faint = text.mix(surface, 0.64).fg()
 	lifted, raised = lift, lift.bg()
-	drawerBg = lift.mix(text, 0.06).bg()
 	lit = lift.mix(accentRGB, 0.35)
-	chip := func(c rgb) rgb { return c.mix(surface, 0.80) }
-	yellowBg, redBg = chip(rgb{245, 167, 66}), chip(rgb{242, 114, 127})
-	greenBg, purpleBg = chip(rgb{95, 211, 141}), chip(rgb{180, 140, 242})
+	amberDim = waitingRGB.mix(surface, 0.30).fg()
 }
 
 // humanizeSecs matches bin/kel's helper: 45s, 6m, 1h05m.

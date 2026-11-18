@@ -25,9 +25,9 @@ package main
 // the sidebar never re-implements a refusal.
 
 import (
-	"image/color"
 	"encoding/json"
 	"fmt"
+	"image/color"
 	"io"
 	"os"
 	"os/exec"
@@ -90,21 +90,20 @@ type sbModel struct {
 	claudeSent    map[string]string
 	loading       bool
 
-	mode   sbMode
-	input  string // the name being typed
-	cands  string // tab's choices when a typed directory is ambiguous
-	hist   int    // how far back ;'s history is, 0 = what is being typed
-	target string // the entry a pending kill or rename acts on
+	mode     sbMode
+	input    string // the name being typed
+	cands    string // tab's choices when a typed directory is ambiguous
+	hist     int    // how far back ;'s history is, 0 = what is being typed
+	target   string // the entry a pending kill or rename acts on
 	pickVerb string
-	msg    string // the last command's result, shown until the next key or toastFor
-	msgBad bool
-	msgAt  time.Time
-	help   bool
+	msg      string // the last command's result, shown until the next key or toastFor
+	msgBad   bool
+	msgAt    time.Time
+	help     bool
 
 	pending tea.Cmd // a command activate() started, returned by the caller
 
-	menu   *sbMenu   // open over the rows: kel's, from the header
-	drawer *sbDrawer // an entry's actions, open beneath its block
+	menu *sbMenu // open over the rows: kel's, from the header, or an entry's
 
 	settings bool // the settings screen, in place of the lists
 	setSel   int  // its row the keyboard is on
@@ -279,7 +278,7 @@ var probeVisible = func(pane string) (visible, focused bool) {
 	return parseVisible(string(out))
 }
 
-func (m *sbModel) clearHover() { m.ui.hover, m.ui.hoverX, m.ui.hoverID = 0, 0, "" }
+func (m *sbModel) clearHover() { m.ui.hover, m.ui.hoverX = 0, 0 }
 
 func (m sbModel) lastRefs() []lineRef {
 	if m.frame != nil {
@@ -582,7 +581,6 @@ func tickAfter() tea.Cmd {
 func (m sbModel) view() sbView {
 	v := buildView(m.doc, m.ui)
 	v.menu = m.menu
-	v.drawer = m.drawer
 	ask := func(title, colour, hint string) {
 		v.promptTitle, v.promptColour, v.hint2 = title, colour, hint
 	}
@@ -640,14 +638,7 @@ func (m sbModel) view() sbView {
 	case modeQuit:
 		ask("quit kel?", yellow, "y yes · n no")
 	case modeSweep:
-		q := "sweep everything landed?"
-		if m.target != "" {
-			q = "sweep " + filepath.Base(m.target) + "?"
-			if sp, ok := m.selSpace(spaceID(m.target)); ok {
-				q = "sweep " + sp.label + "?"
-			}
-		}
-		ask(q, yellow, "y yes · n no")
+		ask("sweep everything landed?", yellow, "y yes · n no")
 	default:
 		if m.msg != "" {
 			v.footer, v.footerColour = m.msg, ""
@@ -671,7 +662,11 @@ func (m *sbModel) cancel() {
 
 func (m *sbModel) move(d int) {
 	v := m.view()
-	i := v.indexOf(v.sel) + d
+	cur := v.sel
+	if o := v.inner[cur]; o != "" {
+		cur = o // a pane with no row walks from its agent's
+	}
+	i := v.indexOf(cur) + d
 	if i < 0 || i >= len(v.entryIDs) {
 		return
 	}
@@ -712,34 +707,18 @@ func (m sbModel) entryName(id string) string {
 	return id
 }
 
-// activate is enter, and a click: jump to an agent or pane; open or close a
+// activate is enter, and a click: jump to an agent or pane; open or shut a
 // fold.
 func (m *sbModel) activate(id string) {
 	v := m.view()
+	if key, open, ok := v.foldOf(id); ok {
+		m.toggle(key, open)
+		return
+	}
 	switch {
-	case id == reposID:
-		m.toggle(reposKey, m.ui.expanded[reposKey])
-	case strings.HasPrefix(id, "x:"):
-		repo := strings.TrimPrefix(id, "x:")
-		m.toggle(quietKey(repo), v.quiet[repo].open)
-	case strings.HasPrefix(id, "w:"):
-		for _, s := range v.spaces {
-			if wtID(s.key) == id {
-				m.toggle(wtKey(s.key), s.wtOpen)
-				m.ui.sel = id
-				m.saveShared()
-			}
-		}
 	case strings.HasPrefix(id, "a:"):
 		if a, ok := m.agentOf(id); ok {
 			jump(a.wid, a.pane)
-		}
-	case strings.HasPrefix(id, "q:"):
-		aid := agentID(strings.TrimPrefix(id, "q:"))
-		if a, ok := m.agentOf(aid); ok {
-			jump(a.wid, a.pane)
-			m.ui.sel = aid
-			m.saveShared()
 		}
 	case strings.HasPrefix(id, "b:"):
 		// a background agent has no pane to jump to: open it, `claude
@@ -806,18 +785,10 @@ func (m sbModel) selSpace(id string) (sbSpace, bool) {
 	switch {
 	case strings.HasPrefix(id, "s:"):
 		key = strings.TrimPrefix(id, "s:")
-	case strings.HasPrefix(id, "w:"):
-		key = strings.TrimPrefix(id, "w:")
-	case id == reposID:
-		return sbSpace{}, false
+	case strings.HasPrefix(id, "g:"):
+		return v.groupSpace(strings.TrimPrefix(id, "g:"))
 	case strings.HasPrefix(id, "x:"):
-		repo := strings.TrimPrefix(id, "x:")
-		for _, s := range v.spaces {
-			if s.parent == "" && s.label == repo {
-				key = s.key
-				break
-			}
-		}
+		return v.groupSpace(strings.TrimPrefix(id, "x:"))
 	case m.doc.Panes != nil:
 		wid := ""
 		if a, ok := m.agentOf(id); ok {
@@ -974,31 +945,30 @@ func (m sbModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		nm = s
 	}
-	if !ok || s.drawer == nil {
+	if !ok || s.menu == nil || s.menu.entry == "" {
 		return nm, cmd
 	}
-	switch msg.(type) {
-	case sbLoaded:
+	// an entry's menu goes with its entry: gone, or its verbs changed
+	if _, ok := msg.(sbLoaded); ok {
 		v := buildView(s.doc, s.ui)
-		if v.sel != s.drawer.id || v.indexOf(v.sel) < 0 || !slices.Equal(entryMenu(v), s.drawer.items) {
-			s.drawer = nil
-		}
-	case tea.KeyPressMsg, tea.MouseClickMsg, tea.MouseWheelMsg:
-		if s.ui.sel != s.drawer.id {
-			s.drawer = nil
+		if v.sel != s.menu.entry || !slices.Equal(entryMenu(v), s.menu.items) {
+			s.menu = nil
 		}
 	}
 	return s, cmd
 }
 
-func (m *sbModel) openDrawer() {
+// openMenu opens the selected entry's menu over the inspector: what the
+// inspector's ⋯, a right-click and → do.
+func (m *sbModel) openMenu() {
 	if m.mode != modeNormal {
 		return
 	}
 	v := m.view()
+	what, name, _ := selActions(v)
 	if items := entryMenu(v); len(items) > 0 {
 		m.ui.sel = v.sel
-		m.drawer = &sbDrawer{id: v.sel, items: items}
+		m.menu = &sbMenu{title: what + " " + name, items: items, entry: v.sel}
 	}
 }
 
@@ -1102,21 +1072,11 @@ func (m sbModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.MouseMotionMsg:
 		refs := m.lastRefs()
-		m.ui.hover, m.ui.hoverX, m.ui.hoverID = msg.Y+1, msg.X, ""
-		if msg.Y >= 0 && msg.Y < len(refs) && len(rowButtons(refs[msg.Y].kind)) > 0 {
-			m.ui.hoverID = refs[msg.Y].id
-		}
+		m.ui.hover, m.ui.hoverX = msg.Y+1, msg.X
 		if m.menu != nil && msg.Y >= 0 && msg.Y < len(refs) && strings.HasPrefix(refs[msg.Y].id, "mi:") {
 			for i, it := range m.menu.items {
 				if "mi:"+it.key == refs[msg.Y].id {
 					m.menu.sel = i
-				}
-			}
-		}
-		if m.drawer != nil && msg.Y >= 0 && msg.Y < len(refs) {
-			for i, it := range m.drawer.items {
-				if "dr:"+it.key == refs[msg.Y].id {
-					m.drawer.sel = i
 				}
 			}
 		}
@@ -1146,19 +1106,6 @@ func (m sbModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.ui.sel = hit.id
 			return m.pick(false)
 		}
-		if m.drawer != nil {
-			if hit.kind == "drawer" {
-				if k := strings.TrimPrefix(hit.id, "dr:"); k != hit.id && msg.Button == tea.MouseLeft {
-					m.drawer = nil
-					return m.press(k)
-				}
-				return m, nil
-			}
-			m.drawer = nil
-			if hit.pad && hit.id == m.ui.sel && msg.Button == tea.MouseLeft {
-				return m, nil
-			}
-		}
 		if m.menu != nil {
 			// an item is its key, pressed; anywhere else closes the menu
 			m.menu = nil
@@ -1169,10 +1116,10 @@ func (m sbModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if msg.Button == tea.MouseRight {
 			switch hit.kind {
-			case "agent", "space", "pane", "bg":
+			case "agent", "group", "pane", "bg":
 				m.ui.sel = hit.id
 				m.saveShared()
-				m.openDrawer()
+				m.openMenu()
 			}
 			return m, nil
 		}
@@ -1182,17 +1129,24 @@ func (m sbModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if hit.id == railFullID {
 			return m, runKel("", nil, "_sidebar", "size", m.ui.myWindow, "full")
 		}
-		for _, b := range hit.hits {
-			if msg.X >= b.x0 && msg.X < b.x1 {
-				// a row's button: on that row, whatever was selected
-				m.ui.sel = hit.id
-				m.saveShared()
-				if b.key == "menu" {
-					m.openDrawer()
-					return m, nil
-				}
-				return m.press(b.key)
-			}
+		// a button: the inspector's keys and its panes, the footer's
+		switch k := hit.hitAt(msg.X); {
+		case k == "":
+		case k == "menu":
+			m.openMenu()
+			return m, nil
+		case strings.HasPrefix(k, "sel:"):
+			m.ui.sel = strings.TrimPrefix(k, "sel:")
+			m.saveShared()
+			return m, nil
+		case k == "open:help":
+			m.help = true
+			return m, nil
+		case k == "open:settings":
+			m.settings, m.setSel = true, 1
+			return m, nil
+		default:
+			return m.press(k)
 		}
 		if hit.kind == "menu" {
 			switch hit.at(msg.X) {
@@ -1200,10 +1154,6 @@ func (m sbModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.menu = &sbMenu{title: "New", items: newMenu(), y: msg.Y + 1}
 			case "menu:kel":
 				m.menu = &sbMenu{title: "kel", items: kelMenu(m.view()), y: msg.Y + 1}
-			case "open:help":
-				m.help = true
-			case "open:settings":
-				m.settings, m.setSel = true, 1
 			}
 			return m, nil
 		}
@@ -1221,10 +1171,6 @@ func (m sbModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else if m.mode == modeFilter {
 			m.mode, m.input = modeNormal, ""
 		}
-		if msg.Y >= 0 && msg.Y < len(refs) && refs[msg.Y].kind == "action" {
-			// an action is its key, pressed: the waiting alarm's `
-			return m.press(strings.TrimPrefix(refs[msg.Y].at(msg.X), "act:"))
-		}
 		if msg.Y >= 0 && msg.Y < len(refs) && refs[msg.Y].id != "" {
 			m.ui.sel = refs[msg.Y].id
 			m.saveShared()
@@ -1235,6 +1181,10 @@ func (m sbModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case tea.MouseWheelMsg:
+		if m.menu != nil {
+			m.menu = nil
+			return m, nil
+		}
 		switch msg.Button {
 		case tea.MouseWheelDown:
 			m.move(1)
@@ -1292,30 +1242,6 @@ func (m sbModel) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if m.settings {
 		return m.settingsKey(k)
 	}
-	if m.drawer != nil {
-		d := m.drawer
-		switch k {
-		case "up", "k":
-			d.sel = (d.sel + len(d.items) - 1) % len(d.items)
-			return m, nil
-		case "down", "j":
-			d.sel = (d.sel + 1) % len(d.items)
-			return m, nil
-		case "esc", "left":
-			m.drawer = nil
-			return m, nil
-		case "enter":
-			m.drawer = nil
-			return m.press(d.items[d.sel].key)
-		}
-		for _, it := range d.items {
-			if it.key == k {
-				m.drawer = nil
-				return m.press(k)
-			}
-		}
-		return m, nil
-	}
 	if m.menu != nil {
 		// the arrows walk it, enter chooses, esc or any other key closes it
 		switch k {
@@ -1330,8 +1256,19 @@ func (m sbModel) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.menu = nil
 			return m.press(it.key)
 		}
+		if m.menu.entry != "" && k != "esc" && k != "left" {
+			// an entry's menu takes the keys it lists and ignores the rest,
+			// as the drawer it replaced did
+			for _, it := range m.menu.items {
+				if it.key == k {
+					m.menu = nil
+					return m.press(k)
+				}
+			}
+			return m, nil
+		}
 		m.menu = nil
-		if k == "esc" {
+		if k == "esc" || k == "left" {
 			return m, nil
 		}
 	}
@@ -1352,9 +1289,6 @@ func (m sbModel) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			// kel sweep decides, fresh: it removes only what landed, and git
 			// itself refuses a worktree with changes in it (invariant 1)
 			m.msg = "sweeping…"
-			if m.target != "" {
-				return m, runKel("", nil, "sweep", m.target)
-			}
 			return m, runKel("", nil, "sweep")
 		}
 		return m, nil
@@ -1528,40 +1462,6 @@ func (m sbModel) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.move(-1)
 	case "enter":
 		v := m.view()
-		if strings.HasPrefix(v.sel, "s:") {
-			for _, s := range v.spaces {
-				if spaceID(s.key) == v.sel {
-					var targetWid, targetPane string
-					for _, a := range v.agents {
-						if a.wid != "" && ((a.agent.Cwd != nil && *a.agent.Cwd == s.key) || a.repo == s.key) {
-							targetWid = a.wid
-							targetPane = a.pane
-							break
-						}
-					}
-					if targetWid == "" && m.doc.Panes != nil {
-						for _, p := range *m.doc.Panes {
-							k, _ := spaceKey(p)
-							if k == s.key {
-								targetWid = p.WindowID
-								targetPane = p.PaneID
-								if p.Active {
-									break
-								}
-							}
-						}
-					}
-					if targetWid == "" && len(s.panes) > 0 {
-						targetWid = s.panes[0].WindowID
-						targetPane = s.panes[0].PaneID
-					}
-					if targetWid != "" {
-						jump(targetWid, targetPane)
-						return m, nil
-					}
-				}
-			}
-		}
 		m.activate(v.sel)
 		c := m.pending
 		m.pending = nil
@@ -1571,36 +1471,24 @@ func (m sbModel) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		if k == "space" && m.peekable(v.sel) {
 			return m.peek()
 		}
-		if k == "right" && !strings.HasPrefix(v.sel, "s:") {
-			m.openDrawer()
-			return m, nil
-		}
 		if k == "h" && strings.HasPrefix(v.sel, "a:") {
 			return m.panel("history")
 		}
-		key, open := "", false
-		switch {
-		case v.sel == reposID:
-			key, open = reposKey, v.reposOpen
-		case strings.HasPrefix(v.sel, "x:"):
-			repo := strings.TrimPrefix(v.sel, "x:")
-			key, open = quietKey(repo), v.quiet[repo].open
-		}
-		if key != "" {
-			if k == "h" || k == "left" { // h closes, l opens, space flips
+		if key, open, ok := v.foldOf(v.sel); ok {
+			if k == "h" || k == "left" { // h shuts, l opens, space flips
 				open = true
 			} else if k == "l" || k == "right" {
 				open = false
 			}
 			m.toggle(key, open)
+			return m, nil
+		}
+		if k == "right" {
+			m.openMenu()
 		}
 	case "/":
 		m.mode, m.input = modeFilter, m.ui.filter
 	case "n", "w":
-		if m.view().sel == reposID {
-			m.msg, m.msgBad = "select something first", true
-			return m, nil
-		}
 		m.mode = modeNew
 		if k == "w" {
 			m.mode = modeNewWorktree
@@ -1685,10 +1573,6 @@ func (m sbModel) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, runKel(dir, nil, "_panel", "usage", dir)
 	case "t":
-		if m.view().sel == reposID {
-			m.msg, m.msgBad = "select something first", true
-			return m, nil
-		}
 		dir, _ := m.spaceFor(m.view().sel)
 		return m, runKel(dir, nil, "shell", dir)
 	case "|", "-":
@@ -1696,11 +1580,7 @@ func (m sbModel) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "q", "Q", "shift+q":
 		m.mode = modeQuit
 	case "s":
-		// on a worktree: that one; anywhere else: everything that landed
-		m.mode, m.target = modeSweep, ""
-		if sp, ok := m.selSpace(m.view().sel); ok && strings.HasPrefix(m.view().sel, "s:") && sp.parent != "" {
-			m.target = sp.key
-		}
+		m.mode = modeSweep
 	case "b":
 		if m.ui.restore {
 			m.msg = "restoring…"
@@ -1717,7 +1597,7 @@ func (m sbModel) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			if a.agent.State == nil || *a.agent.State != "dead" {
-				m.msg, m.msgBad = a.agent.Name + " is not dead", true
+				m.msg, m.msgBad = a.agent.Name+" is not dead", true
 				return m, nil
 			}
 			name := a.agent.Name
@@ -1764,8 +1644,8 @@ func (m sbModel) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 var sbHelp = [][2]string{
 	{"#", "move"},
 	{"j k", "up, down"},
-	{"→ ←", "open, close its drawer"},
-	{"enter", "jump · fold a section"},
+	{"→ ←", "open, fold · → its menu"},
+	{"enter", "jump · fold a group"},
 	{"/", "filter by name"},
 	{"esc", "back to your pane"},
 	{"#", "an agent"},
@@ -1797,7 +1677,7 @@ var sbHelp = [][2]string{
 	{"t", "shell here"},
 	{"o", "open in browser"},
 	{"c", "claude config"},
-	{"s", "sweep if landed"},
+	{"s", "sweep what landed"},
 	{"#", "kel"},
 	{"n", "new agent (tab: dir)"},
 	{"n x -- …", "with claude flags"},
@@ -2286,8 +2166,8 @@ func (m sbModel) settingsClick(msg tea.MouseClickMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	r := refs[msg.Y]
-	if r.kind == "menu" {
-		switch r.at(msg.X) {
+	if r.kind == "foot" {
+		switch r.hitAt(msg.X) {
 		case "open:settings":
 			m.settings = false
 		case "open:help":

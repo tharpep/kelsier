@@ -32,34 +32,6 @@ func shellIDs(v sbView) []string {
 	return ids
 }
 
-func TestPaneNestsUnderItsAgent(t *testing.T) {
-	v := buildView(nestDoc(), uiState{})
-	if got := shellIDs(v); len(got) != 1 || got[0] != "%9" {
-		t.Errorf("Shells holds %v, want only %%9 (no agent in its window)", got)
-	}
-	if n := len(v.under[v.agents[0].key]); n != 2 {
-		t.Errorf("%d panes under the agent, want 2", n)
-	}
-	out, _ := renderView(v, 32, 0, 0)
-	rows := strings.Split(plain(out), "\n")
-	at := func(sub string) int {
-		for i, r := range rows {
-			if strings.Contains(r, sub) {
-				return i
-			}
-		}
-		t.Fatalf("no row with %q:\n%s", sub, plain(out))
-		return -1
-	}
-	card, srv, sh := at("feat-login"), at("└ ▪ python3 :18765"), at("└ $ bash")
-	if !(card < srv && srv < sh) {
-		t.Errorf("rows out of order: card %d server %d shell %d", card, srv, sh)
-	}
-	if !strings.Contains(plain(out), "Shells                      1") {
-		t.Errorf("Shells header does not count what is listed there:\n%s", plain(out))
-	}
-}
-
 func TestPaneInAgentlessWindowStaysInShells(t *testing.T) {
 	v := buildView(nestDoc(), uiState{})
 	if got := shellIDs(v); len(got) != 1 || got[0] != "%9" {
@@ -99,11 +71,47 @@ func TestQuietFoldedAgentReturnsPanesToShells(t *testing.T) {
 	}
 }
 
-func TestNestedPaneIsSelectableWithDrawer(t *testing.T) {
+func inspectorText(v sbView) string {
+	var rows []string
+	for _, l := range v.inspector(32, 0) {
+		rows = append(rows, strings.TrimRight(plain(l.s), " "))
+	}
+	return strings.Join(rows, "\n")
+}
+
+// A window's other panes are in its agent's inspector, each a click, and the
+// row says only that a server runs there: ▪ before the age.
+func TestPaneNestsUnderItsAgent(t *testing.T) {
+	v := buildView(nestDoc(), uiState{sel: agentID("%1")})
+	if got := shellIDs(v); len(got) != 1 || got[0] != "%9" {
+		t.Errorf("shells holds %v, want only %%9 (no agent in its window)", got)
+	}
+	if n := len(v.under[v.agents[0].key]); n != 2 {
+		t.Errorf("%d panes under the agent, want 2", n)
+	}
+	out, _ := renderView(v, 32, 0, 0)
+	if strings.Contains(plain(out), "└") {
+		t.Errorf("a nested row is drawn:\n%s", plain(out))
+	}
+	for _, r := range strings.Split(plain(out), "\n") {
+		if strings.Contains(r, "● feat-login") && !strings.Contains(r, "▪") {
+			t.Errorf("the agent's row has no server mark: %q", r)
+		}
+	}
+	if got := inspectorText(v); !strings.Contains(got, " ▪ python3 :18765 · $ bash") {
+		t.Errorf("the inspector does not list the window's panes:\n%s", got)
+	}
+	if !strings.Contains(plain(out), "▸ shells                     1") {
+		t.Errorf("the shells heading does not count what it holds:\n%s", plain(out))
+	}
+}
+
+// A nested pane is selected from the inspector, and has its menu.
+func TestNestedPaneIsSelectableWithItsMenu(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	v := buildView(nestDoc(), uiState{sel: "%2"})
-	if v.indexOf("%2") < 0 || v.indexOf("%3") < 0 {
-		t.Fatalf("nested panes are not selectable: %v", v.entryIDs)
+	if v.sel != "%2" || v.inner["%2"] != agentID("%1") {
+		t.Fatalf("a nested pane is not selectable: sel %q inner %v", v.sel, v.inner)
 	}
 	what, _, acts := selActions(v)
 	if what != "pane" || len(acts) == 0 {
@@ -114,32 +122,33 @@ func TestNestedPaneIsSelectableWithDrawer(t *testing.T) {
 		t.Error("paneOf does not find a nested pane")
 	}
 	m = press(m, "right")
-	if m.view().drawer == nil || m.view().drawer.id != "%2" {
-		t.Errorf("the drawer did not open on a nested pane: %+v", m.view().drawer)
+	if m.menu == nil || m.menu.entry != "%2" {
+		t.Errorf("the menu did not open on a nested pane: %+v", m.menu)
 	}
 }
 
+// Mode and wt are in the inspector, faint on the facts row; never on the row.
 func TestWtTagOnWorktreeAgentOnly(t *testing.T) {
 	d := nestDoc()
-	row := func() string {
-		out, _ := renderView(buildView(d, uiState{}), 32, 0, 0)
-		for _, r := range strings.Split(plain(out), "\n") {
-			if strings.Contains(r, "feat-login") {
-				return r
-			}
-		}
-		return ""
+	facts := func() string {
+		return strings.Split(inspectorText(buildView(d, uiState{sel: agentID("%1")})), "\n")[2]
 	}
-	if r := row(); strings.Contains(r, "wt") {
+	if r := facts(); strings.HasSuffix(r, "wt") {
 		t.Errorf("in-place agent tagged: %q", r)
 	}
 	(*d.Panes)[0].Git = &fleet.Git{Root: "/r/webapp-feat", Worktree: true}
-	if r := row(); !strings.Contains(r, "feat-login wt") {
+	if r := facts(); !strings.HasSuffix(r, " wt") {
 		t.Errorf("worktree agent not tagged: %q", r)
 	}
 	plan := "plan"
 	d.Agents[0].Mode = &plan
-	if r := row(); !strings.Contains(r, "feat-login plan wt") {
+	if r := facts(); !strings.HasSuffix(r, " plan wt") {
 		t.Errorf("mode and wt do not share the row: %q", r)
+	}
+	out, _ := renderView(buildView(d, uiState{}), 32, 0, 0)
+	for _, r := range strings.Split(plain(out), "\n") {
+		if strings.Contains(r, "● feat-login") && (strings.Contains(r, "plan") || strings.Contains(r, " wt")) {
+			t.Errorf("a tag on the row: %q", r)
+		}
 	}
 }

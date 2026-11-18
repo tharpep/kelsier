@@ -96,39 +96,3 @@ func TestToastExpires(t *testing.T) {
 		t.Errorf("a finished command is not stamped: %q %v", s.msg, s.msgAt)
 	}
 }
-
-// A hovered server row trades its name for the buttons, never its port.
-func TestServerPortSurvivesHover(t *testing.T) {
-	t.Setenv("XDG_STATE_HOME", t.TempDir())
-	m := sbModel{doc: loadFixture(t, "fifteen-three-repos"), width: 32, height: 0, visible: true}
-	_, refs := renderView(m.view(), 32, 0, 0)
-	y := nameRow(refs, "%7")
-	m.ui.hover, m.ui.hoverX, m.ui.hoverID = y+1, 3, "%7"
-	lines, _ := hoverFrame(m)
-	if !strings.Contains(lines[y], ":8000") {
-		t.Errorf("hovered server row: %q", lines[y])
-	}
-}
-
-// With the branch equal to the agent's name, the drawer does not say it twice.
-func TestDrawerSkipsBranchEqualToName(t *testing.T) {
-	t.Setenv("XDG_STATE_HOME", t.TempDir())
-	m := drawerModel(t, "a:@7")
-	v := m.view()
-	var name, branch string
-	for i := range v.agents {
-		if agentID(v.agents[i].key) == "a:@7" && v.agents[i].git != nil && v.agents[i].git.Branch != nil {
-			branch = *v.agents[i].git.Branch
-			v.agents[i].agent.Name = branch
-			name = branch
-		}
-	}
-	if name == "" {
-		t.Skip("fixture agent has no branch")
-	}
-	v.drawer = &sbDrawer{id: "a:@7", items: []sbAct{{"enter", "Go to it"}}}
-	out, _ := renderView(v, 32, 0, 0)
-	if n := strings.Count(plain(out), branch); n != 1 {
-		t.Errorf("%q appears %d times:\n%s", branch, n, plain(out))
-	}
-}

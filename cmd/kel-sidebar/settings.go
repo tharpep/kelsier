@@ -211,9 +211,9 @@ func renderSettings(c map[string]string, w, h, sel, hover, hoverX int) (string, 
 		body = append(body, line{s, ref})
 	}
 	// Settings stays lit while its screen is open: where you are
-	foot := footerLine(w, "  ", "open:settings")
-	if h > 0 && hover == h && foot.ref.at(hoverX) == "open:help" {
-		foot = footerLine(w, "  ", "open:help")
+	foot := footerLine(w, " ", 0, "open:settings")
+	if h > 0 && hover == h && foot.ref.hitAt(hoverX) == "open:help" {
+		foot = footerLine(w, " ", 0, "open:help")
 	}
 	if h > 0 {
 		for len(body) < h-1 {

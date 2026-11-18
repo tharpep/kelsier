@@ -12,11 +12,11 @@ func isRail(w int) bool { return w >= 1 && w <= railMaxWidth }
 
 // renderRail is the sidebar at four columns (spec.md §5b): what needs you, a
 // dot per agent in the list's order, a mark when a server runs, and ≡ at the
-// foot to bring the full sidebar back. No hover, no drawer.
+// foot to bring the full sidebar back. No hover, no menu.
 func renderRail(v sbView, w, h int, now int64) (string, []lineRef) {
 	var body []line
 	if n := len(v.needs); n > 0 {
-		body = append(body, line{" " + yellow + bold + "●" + strconv.Itoa(min(n, 99)) + reset, lineRef{id: needID(v.needs[0].key), kind: "rail"}})
+		body = append(body, line{" " + yellow + bold + "●" + strconv.Itoa(min(n, 99)) + reset, lineRef{id: agentID(v.needs[0].key), kind: "rail"}})
 	}
 	for _, a := range v.agents {
 		dot, colour := stateLook(a.agent.State, a.agent.Unseen, a.agent.StateSince, now)

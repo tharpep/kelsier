@@ -796,14 +796,14 @@ cur="$(tmux list-windows -t '=keltest' -F '#{window_active} #{window_id}' | awk 
 ok "  ...and is next once none does"            '[ "$cur" = "$CW" ]'
 # the shared selection follows a jump, keeps the folds, and a plain window
 # switch leaves it alone
-printf '{"selected":"a:%%gone","expanded":{"sec:repos":true}}' > "$STATE/sidebar.json"
+printf '{"selected":"a:%%gone","expanded":{"sec:shells":true}}' > "$STATE/sidebar.json"
 tmux select-window -t "$DW"
 ok "plain select-window leaves the shared selection alone" '[ "$(jq -r .selected "$STATE/sidebar.json")" = "a:%gone" ]'
 printf 'error %s\n' "$(( $(date +%s) - 60 ))" > "$STATE/$CW.state"
 TMUX="$TMUX_TMPDIR/tmux-$(id -u)/default,$(tmux display-message -p '#{pid}'),0" "$KEL" jump
 JP="$(tmux display -p -t "$CW" '#{pane_id}')"
 ok "kel jump selects the agent it lands on" '[ "$(jq -r .selected "$STATE/sidebar.json")" = "a:$JP" ]'
-ok "  ...and keeps the folds" '[ "$(jq -r ".expanded[\"sec:repos\"]" "$STATE/sidebar.json")" = true ]'
+ok "  ...and keeps the folds" '[ "$(jq -r ".expanded[\"sec:shells\"]" "$STATE/sidebar.json")" = true ]'
 rm -f "$STATE/$CW.state" "$STATE/sidebar.json"
 release_client
 rm -f "$STATE/$CW.state"
@@ -1274,13 +1274,13 @@ alt() { tmux display -p -t "$1" '#{alternate_on}'; }
 f0=$fail
 hold_client 40
 tmux select-window -t "$SBW"; "$KEL" _sidebar wake
-wait_until '[ "$(alt "$SB1")" = 1 ] && [ "$(alt "$SB2")" = 0 ] && [ "$(alt "$SB3")" = 0 ] && tmux capture-pane -p -t "$SB3" | grep -q Shells && tmux capture-pane -p -t "$SB3" | grep -q kel' 150
+wait_until '[ "$(alt "$SB1")" = 1 ] && [ "$(alt "$SB2")" = 0 ] && [ "$(alt "$SB3")" = 0 ] && tmux capture-pane -p -t "$SB3" | grep -q "≡" && tmux capture-pane -p -t "$SB3" | grep -q kel' 150
 ok "the shown sidebar is on the alternate screen, hidden ones are not" \
    '[ "$(alt "$SB1")" = 1 ] && [ "$(alt "$SB2")" = 0 ] && [ "$(alt "$SB3")" = 0 ]'
 ok "  ...and a paused pane still shows the last frame" \
-   'tmux capture-pane -p -t "$SB2" | grep -q "kel" && tmux capture-pane -p -t "$SB2" | grep -q "Shells"'
+   'tmux capture-pane -p -t "$SB2" | grep -q "kel" && tmux capture-pane -p -t "$SB2" | grep -q "≡"'
 ok "  ...and one created hidden, never shown, does too" \
-   'tmux capture-pane -p -t "$SB3" | grep -q "kel" && tmux capture-pane -p -t "$SB3" | grep -q "Shells"'
+   'tmux capture-pane -p -t "$SB3" | grep -q "kel" && tmux capture-pane -p -t "$SB3" | grep -q "≡"'
 if [ -r /proc/self/stat ]; then
   ticks() { local t=0 p; for p in "$@"; do t=$((t + $(awk '{print $14 + $15}' "/proc/$(tmux display -p -t "$p" '#{pane_pid}')/stat"))); done; echo "$t"; }
   c0="$(ticks "$SB2" "$SB3")"; sleep 10; c1="$(ticks "$SB2" "$SB3")"
@@ -1288,8 +1288,8 @@ if [ -r /proc/self/stat ]; then
   ok "  ...and two hidden sidebars use under 8 clock ticks in 10 s" '[ $((c1 - c0)) -lt 8 ]'
 fi
 tmux select-window -t "$OTW"; "$KEL" _sidebar wake
-wait_until '[ "$(alt "$SB2")" = 1 ] && tmux capture-pane -p -t "$SB2" | grep -q Shells' 30
-ok "a hidden sidebar that is shown draws again" '[ "$(alt "$SB2")" = 1 ] && tmux capture-pane -p -t "$SB2" | grep -q Shells'
+wait_until '[ "$(alt "$SB2")" = 1 ] && tmux capture-pane -p -t "$SB2" | grep -q "≡"' 30
+ok "a hidden sidebar that is shown draws again" '[ "$(alt "$SB2")" = 1 ] && tmux capture-pane -p -t "$SB2" | grep -q "≡"'
 tmux send-keys -t "$SB2" '?'
 wait_until 'tmux capture-pane -p -t "$SB2" | grep -q "click a bold key"' 30
 ok "  ...and answers keys" 'tmux capture-pane -p -t "$SB2" | grep -q "click a bold key"'
@@ -1375,9 +1375,9 @@ MW="$(window_of api-gw main1)"
 hold_client 40
 tmux select-window -t "$MW"; "$KEL" _sidebar wake
 SP="$(sbpane "$MW")"
-wait_until 'sbtext "$SP" | grep -q "wt" && sbtext "$SP" | grep -qx "  Agents"' 150
-ok "the sidebar draws shells, repos folded, then agents" 'sbtext "$SP" | grep -q "^  Shells" && sbtext "$SP" | grep -q "Repos ▸" && sbtext "$SP" | grep -qx "  Agents"'
-ok "  ...no space row while Repos is folded"     '[ "$(sbtext "$SP" | grep -c "api-gw")" -lt 2 ]'
+wait_until 'sbtext "$SP" | grep -q "[○●◌?✕] wt " && sbtext "$SP" | grep -q "^ ▾ api-gw"' 150
+ok "the sidebar draws its agents under their repo's heading, one line each" 'sbtext "$SP" | grep -q "^ ▾ api-gw" && sbtext "$SP" | grep -q "[○●◌?✕] wt " && sbtext "$SP" | grep -q "[○●◌?✕] main1 "'
+ok "  ...with no Repos, Agents or Needs you section" '! sbtext "$SP" | grep -q "Repos\|Agents\|Needs you"'
 ok "  ...and selects with a bar, not inverse video" '! tmux capture-pane -e -p -t "$SP" | grep -q "\[7m" && sbtext "$SP" | grep -q "▌"'
 ok "  ...in truecolor, never a palette index"      'tmux capture-pane -e -p -t "$SP" | grep -q "48;2;" && ! tmux capture-pane -e -p -t "$SP" | grep -q "[34]8;5;"'
 
@@ -1389,24 +1389,21 @@ tmux send-keys -t "$SP" Enter
 wait_until '[ "$(active_win)" = "$WTW" ]'
 ok "enter jumps to the agent's window"          '[ "$(active_win)" = "$WTW" ]'
 
-# enter on the Repos header opens it, shared through sidebar.json
-step_to "$SP" k r:repos
+# enter on a repo's heading folds the group, shared through sidebar.json,
+# and the heading keeps a dot per agent; enter again opens it
+step_to "$SP" k g:api-gw
 tmux send-keys -t "$SP" Enter
-wait_until '[ "$(jq -r ".expanded[\"sec:repos\"]" "$STATE/sidebar.json" 2>/dev/null)" = true ] && [ "$(sbtext "$SP" | grep -c "api-gw")" -ge 2 ]' 50
-ok "enter on the Repos header opens it, with the worktree as a space of its own" '[ "$(jq -r ".expanded[\"sec:repos\"]" "$STATE/sidebar.json")" = true ] && [ "$(sbtext "$SP" | grep -c "api-gw")" -ge 2 ]'
-
-# enter on a space header row jumps to that space's window: j down to the
-# repo's own row, the first space under Repos
-step_to "$SP" j 's:*/api-gw'
+wait_until '[ "$(jq -r ".expanded[\"grp:api-gw\"]" "$STATE/sidebar.json" 2>/dev/null)" = false ] && sbtext "$SP" | grep -q "▸ api-gw"' 50
+ok "enter on a repo's heading folds it, a dot per agent left on the heading" '[ "$(jq -r ".expanded[\"grp:api-gw\"]" "$STATE/sidebar.json")" = false ] && ! sbtext "$SP" | grep -q "[○●◌?✕] main1 " && sbtext "$SP" | grep "▸ api-gw" | grep -q "[○●◌?✕] [○●◌?✕]"'
 tmux send-keys -t "$SP" Enter
-wait_until '[ "$(active_win)" = "$MW" ]' 50
-ok "enter on a space header row jumps to that space's window" '[ "$(active_win)" = "$MW" ]'
+wait_until 'sbtext "$SP" | grep -q "[○●◌?✕] main1 "' 50
+ok "  ...and enter opens it again"               '[ "$(jq -r ".expanded[\"grp:api-gw\"]" "$STATE/sidebar.json")" = true ]'
 
 # invariant 1, through the sidebar: x, y on dirty work is refused by kel kill
 tmux select-window -t "$WTW"
 "$KEL" _sidebar wake
 SW="$(sbpane "$WTW")"
-wait_until 'sbtext "$SW" | grep -q Agents'
+wait_until 'sbtext "$SW" | grep -q "▾ api-gw"'
 wait_until '[ "$(active_win)" = "$WTW" ]' 50
 # down to wt, one key at a time, each one landing before the next
 for _ in 1 2 3 4 5 6 7 8; do
@@ -1426,11 +1423,11 @@ ok "  ...naming the file at risk, in the sidebar" 'sbtext "$SW" | grep -q "scrat
 # n: a new agent in the selected entry's space, named in the footer
 f0=$fail
 tmux send-keys -t "$SW" n
-wait_until 'sbtext "$SW" | grep -q "^  new agent in "'
+wait_until 'sbtext "$SW" | grep -q "^ new agent in "'
 tmux send-keys -t "$SW" -l fresh
 tmux send-keys -t "$SW" Enter
-wait_until 'sbtext "$SW" | grep -q "^  new agent where?"'
-ok "n asks where, after the name"         'sbtext "$SW" | grep -q "enter window · | right" && sbtext "$SW" | grep -q -- "- down · esc"'
+wait_until 'sbtext "$SW" | grep -q "^ new agent where?"'
+ok "n asks where, after the name"         'sbtext "$SW" | grep -q "enter window · | right" && sbtext "$SW" | grep -q -- "- down" && sbtext "$SW" | grep -q "esc"'
 tmux send-keys -t "$SW" Enter
 # kel new stamps the window's group before it writes the record, so wait for
 # both — waiting on the window alone raced the record on CI's macOS runner,
@@ -1440,24 +1437,24 @@ ok "n names and starts an agent, in that space's repo" '[ -n "$(window_of api-gw
 sbdiag "$SW" "$f0"
 wait_until '[ "$(active_win)" = "$(window_of api-gw fresh)" ]' 50
 tmux select-window -t "$WTW"; "$KEL" _sidebar wake
-wait_until 'sbtext "$SW" | grep -q Agents'
+wait_until 'sbtext "$SW" | grep -q "▾ api-gw"'
 f0=$fail
 tmux send-keys -t "$SW" n
-wait_until 'sbtext "$SW" | grep -q "^  new agent in "'
+wait_until 'sbtext "$SW" | grep -q "^ new agent in "'
 tmux send-keys -t "$SW" Enter
-wait_until 'sbtext "$SW" | grep -q "^  new agent where?"'
+wait_until 'sbtext "$SW" | grep -q "^ new agent where?"'
 tmux send-keys -t "$SW" Enter
 wait_until '[ -n "$(window_of api-gw api-gw-1)" ] && [ -f "$SESSIONS/api-gw/api-gw-1.json" ]' 80
 ok "  ...and n, enter needs no name"      '[ -n "$(window_of api-gw api-gw-1)" ] && [ -f "$SESSIONS/api-gw/api-gw-1.json" ]'
 SPW="$(window_of api-gw api-gw-1)"
 tmux select-window -t "$SPW"; "$KEL" _sidebar wake
 SW2="$(sbpane "$SPW")"
-wait_until 'sbtext "$SW2" | grep -q Agents'
+wait_until 'sbtext "$SW2" | grep -q "▾ api-gw"'
 tmux select-pane -t "$(userpane "$SPW")"; tmux select-pane -t "$SW2"
 tmux send-keys -t "$SW2" n
-wait_until 'sbtext "$SW2" | grep -q "^  new agent in "'
+wait_until 'sbtext "$SW2" | grep -q "^ new agent in "'
 tmux send-keys -t "$SW2" Enter
-wait_until 'sbtext "$SW2" | grep -q "^  new agent where?"'
+wait_until 'sbtext "$SW2" | grep -q "^ new agent where?"'
 tmux send-keys -t "$SW2" '|'
 wait_until '[ -f "$SESSIONS/api-gw/api-gw-2.json" ]' 80
 ok "  ...and n, enter, | splits the pane you were in" '[ "$(jq -r .window_id "$SESSIONS/api-gw/api-gw-2.json")" = "$SPW" ] && [ "$(tmux list-panes -t "$SPW" -F "#{@kel-agent}" | grep -cx "api-gw/api-gw-[12]")" = 2 ]'
@@ -1568,14 +1565,14 @@ sbdiag "$S5" "$f0"
 # d: committed and uncommitted work against the land base
 echo more >> "$WT5/README.md"
 tmux send-keys -t "$S5" d
-wait_until 'sbtext "$S5" | grep -q "^  › main"'
-ok "d asks against what, offering the base it lands on" 'sbtext "$S5" | grep -q "^  diff wt5 against" && sbtext "$S5" | grep -q "^  › main"'
+wait_until 'sbtext "$S5" | grep -q "^ › main"'
+ok "d asks against what, offering the base it lands on" 'sbtext "$S5" | grep -q "^ diff wt5 against" && sbtext "$S5" | grep -q "^ › main"'
 tmux send-keys -t "$S5" Enter
 wait_until 'grep -q "diff ·" "$KEL_POPUP_TRACE"'
 ok "d diffs the worktree against its base"      'grep -q "^$WT5	diff · api-gw/wt5 · main · prefix q closes	" "$KEL_POPUP_TRACE"'
 # ;: a kel command typed in the sidebar, answered in its footer
 tmux send-keys -t "$S5" '\;'   # escaped: a lone ; is tmux's command separator
-wait_until 'sbtext "$S5" | grep -q "^  kel command"'
+wait_until 'sbtext "$S5" | grep -q "^ kel command"'
 tmux send-keys -t "$S5" -l "url $WORK/repos"; tmux send-keys -t "$S5" Enter
 wait_until 'sbtext "$S5" | grep -q "no server listening"' 50
 ok "; runs a kel command and answers in the footer" 'sbtext "$S5" | grep -q "no server listening"'
@@ -2163,9 +2160,9 @@ tmux select-window -t "$(window_of api-gw b)"; hook "$P" UserPromptSubmit; hook 
 ok "✕ dismisses it"                        '[ ! -s "$STATE/banner" ]'
 tmux select-window -t "$(window_of api-gw b)"
 printf '%s\twaiting\ta\ttext\n' "$P" > "$STATE/banner"
-printf '{"selected":"a:%%gone","expanded":{"sec:repos":true}}' > "$STATE/sidebar.json"
+printf '{"selected":"a:%%gone","expanded":{"sec:shells":true}}' > "$STATE/sidebar.json"
 "$KEL" _click bgo '' ''
-ok "a click on the banner selects the agent it lands on, folds kept" '[ "$(jq -r .selected "$STATE/sidebar.json")" = "a:$P" ] && [ "$(jq -r ".expanded[\"sec:repos\"]" "$STATE/sidebar.json")" = true ]'
+ok "a click on the banner selects the agent it lands on, folds kept" '[ "$(jq -r .selected "$STATE/sidebar.json")" = "a:$P" ] && [ "$(jq -r ".expanded[\"sec:shells\"]" "$STATE/sidebar.json")" = true ]'
 : > "$STATE/banner"
 ok "kel.conf clears it when a window is visited" 'grep -q "session-window-changed.*kel _banner seen" "$HERE/../tmux/kel.conf"'
 # #23: a line outlives what it announced when no hook says so — the pane

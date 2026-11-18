@@ -37,6 +37,7 @@ func TestOwnWindowForAPlainPane(t *testing.T) {
 		t.Errorf("m on a pane sharing its window ran %q", *rec)
 	}
 	m, rec = peekModel(t, "%14")
+	m.ui.expanded = map[string]bool{shellsKey: true}
 	press(m, "m")
 	if *rec != "" {
 		t.Errorf("m on a pane alone in its window ran %q", *rec)
@@ -84,7 +85,7 @@ func TestSwapStaysInItsWindow(t *testing.T) {
 }
 
 func TestAgentsOfferNoMove(t *testing.T) {
-	m := drawerModel(t, "a:@1")
+	m := atModel(t, "a:@1")
 	for _, a := range entryMenu(m.view()) {
 		if a.key == "M" {
 			t.Errorf("an agent offers %v (backlog #42)", a)
@@ -109,7 +110,7 @@ func TestPaneFramesGolden(t *testing.T) {
 	refused := pickTo(press(at("%2"), "M"), "a:@1", "enter")
 	for name, m := range map[string]sbModel{
 		"new-menu":     menu,
-		"pane-drawer":  press(at("%2"), "right"),
+		"pane-menu":    press(at("%2"), "right"),
 		"pick-move":    pick,
 		"pick-refused": refused,
 	} {

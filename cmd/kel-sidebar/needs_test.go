@@ -6,7 +6,6 @@ import (
 	"strings"
 	"testing"
 
-	tea "charm.land/bubbletea/v2"
 	"github.com/tharpep/kelsier/internal/fleet"
 )
 
@@ -34,28 +33,43 @@ func needNames(v sbView) string {
 	return strings.Join(n, " ")
 }
 
-func TestNeedsYouListsWhatWantsALook(t *testing.T) {
+// What needs you is counted in the footer, in the waiting colour, and a
+// click on the count is ` (the next one); the agents stay in their groups,
+// once each, with no section of their own.
+func TestNeedsYouIsTheFootersCount(t *testing.T) {
 	v := buildView(loadFixture(t, "fifteen-three-repos"), uiState{})
-	// done and unseen, then the two waiting, the longest-waiting first
 	if got := needNames(v); got != "docs fix-auth api-auth" {
 		t.Errorf("needs you: %q", got)
 	}
-	if v.entryIDs[0] != "q:@3" {
-		t.Errorf("the pointers come first in the cursor's order: %q", v.entryIDs[:3])
+	out, refs := renderView(v, 32, 30, 1792018800)
+	rows := strings.Split(plain(out), "\n")
+	if foot := rows[len(rows)-1]; !strings.HasPrefix(foot, " ●3 need you") {
+		t.Errorf("footer %q", foot)
 	}
-	out, _ := renderView(v, 32, 0, 1792018800)
-	if !strings.Contains(plain(out), "  Needs you                   3\n") {
-		t.Errorf("header with its count:\n%s", plain(out))
+	if !strings.Contains(out, yellow+bold+"●3 need you") {
+		t.Error("the count is not in the waiting colour")
+	}
+	if k := refs[len(refs)-1].hitAt(3); k != "`" {
+		t.Errorf("a click on the count presses %q", k)
 	}
 	for _, name := range []string{"docs", "fix-auth", "api-auth"} {
-		if strings.Count(plain(out), name) < 2 {
-			t.Errorf("%s must show in Needs you and in its repo group", name)
+		n := 0
+		for _, r := range rows {
+			if strings.HasPrefix(strings.TrimLeft(r, " ▌"), "● "+name+" ") {
+				n++
+			}
+		}
+		if n != 1 {
+			t.Errorf("%s has %d rows, want its one in its group", name, n)
 		}
 	}
+	if strings.Contains(plain(out), "Needs you") {
+		t.Error("a Needs you section is drawn")
+	}
 	for _, f := range []string{"empty", "quota", "one-agent", "done-seen"} {
-		out, _ := renderView(buildView(loadFixture(t, f), uiState{}), 32, 0, 0)
-		if strings.Contains(out, "Needs you") {
-			t.Errorf("%s: nothing needs you, so no section", f)
+		out, _ := renderView(buildView(loadFixture(t, f), uiState{}), 32, 30, 0)
+		if strings.Contains(out, "need you") {
+			t.Errorf("%s: nothing needs you, so no count", f)
 		}
 	}
 	doc := loadFixture(t, "error-agent")
@@ -85,89 +99,6 @@ func TestNeedsYouOldestFirst(t *testing.T) {
 	}
 }
 
-func TestNeedsYouPointerJumpsAndSelectsTheAgent(t *testing.T) {
-	jumps := recordJumps(t)
-	m := needsModel(t, "fifteen-three-repos")
-	y := rowOf(t, m, "q:@2")
-	nm, _ := m.Update(tea.MouseClickMsg{X: 8, Y: y, Button: tea.MouseLeft})
-	m = nm.(sbModel)
-	if len(*jumps) != 1 || (*jumps)[0] != "@2|%3" {
-		t.Errorf("a click on the pointer jumps as the agent's own row does: %v", *jumps)
-	}
-	if m.ui.sel != "a:@2" {
-		t.Errorf("selects the agent's row, not the pointer: %q", m.ui.sel)
-	}
-	if sbLoadShared().Selected != "a:@2" {
-		t.Error("the selection is shared")
-	}
-
-	// j walks onto a pointer like any entry; enter on it does the same
-	m = needsModel(t, "fifteen-three-repos")
-	m.ui.sel = "q:@3"
-	nm, _ = m.Update(tea.KeyPressMsg{Code: 'j', Text: "j"})
-	m = nm.(sbModel)
-	if m.view().sel != "q:@2" {
-		t.Errorf("j passes through the pointers: %q", m.view().sel)
-	}
-	*jumps = nil
-	nm, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
-	m = nm.(sbModel)
-	if len(*jumps) != 1 || m.ui.sel != "a:@2" {
-		t.Errorf("enter on a pointer: jumps %v, sel %q", *jumps, m.ui.sel)
-	}
-}
-
-func hasSummary(a fleet.Agent) bool {
-	if a.State == nil {
-		return false
-	}
-	switch *a.State {
-	case "working":
-		return a.Doing != nil && *a.Doing != ""
-	case "waiting", "error":
-		return a.Note != nil && *a.Note != ""
-	case "done", "idle":
-		return a.LastMessage != nil && *a.LastMessage != ""
-	}
-	return false
-}
-
-// Every agent has one summary line when something is known and none when
-// nothing is, in every fixture, selected or not.
-func TestOneSummaryLinePerAgent(t *testing.T) {
-	files, _ := filepath.Glob(filepath.Join(fixtures, "*.json"))
-	for _, f := range files {
-		name := strings.TrimSuffix(filepath.Base(f), ".json")
-		doc := loadFixture(t, name)
-		base := buildView(doc, uiState{})
-		for _, sel := range append([]string{""}, agentIDs(base)...) {
-			ui := uiState{sel: sel}
-			if sel == "" && len(base.spaces) > 0 {
-				ui.sel = spaceID(base.spaces[0].key)
-			}
-			v := buildView(doc, ui)
-			_, refs := renderView(v, 32, 0, 1792018800)
-			for _, a := range v.agents {
-				id := agentID(a.key)
-				n := 0
-				for _, r := range refs {
-					if r.id == id && r.sum {
-						n++
-					}
-				}
-				switch {
-				case !hasSummary(a.agent) && n != 0:
-					t.Errorf("%s %s (sel %q): %d summary lines for an agent with nothing known", name, a.agent.Name, ui.sel, n)
-				case hasSummary(a.agent) && id != ui.sel && n != 1:
-					t.Errorf("%s %s: %d summary lines, want exactly one", name, a.agent.Name, n)
-				case hasSummary(a.agent) && id == ui.sel && (n < 1 || n > 2):
-					t.Errorf("%s %s selected: %d summary lines, want one wrapped to at most two", name, a.agent.Name, n)
-				}
-			}
-		}
-	}
-}
-
 func agentIDs(v sbView) []string {
 	var ids []string
 	for _, a := range v.agents {
@@ -180,7 +111,7 @@ func TestAgentWithNoStateReadsUnknown(t *testing.T) {
 	out, _ := renderView(buildView(loadFixture(t, "unknowns"), uiState{}), 32, 0, 0)
 	for _, l := range strings.Split(plain(out), "\n") {
 		if strings.Contains(l, "nostate") {
-			if !strings.HasPrefix(l, "  ? nostate") || !strings.HasSuffix(strings.TrimRight(l, " "), "unknown") {
+			if !strings.HasPrefix(l, " ? nostate") || !strings.HasSuffix(strings.TrimRight(l, " "), "unknown") {
 				t.Errorf("an agent with no state should read unknown: %q", l)
 			}
 			return
@@ -189,33 +120,34 @@ func TestAgentWithNoStateReadsUnknown(t *testing.T) {
 	t.Error("no nostate row")
 }
 
-func TestSelectedBlockCarriesLastMessageAndModel(t *testing.T) {
+// The inspector carries the last message, on one line, and the model,
+// context and cost; the session's title never stands in.
+func TestInspectorCarriesLastMessageAndModel(t *testing.T) {
 	doc := loadFixture(t, "one-agent")
 	done := "done"
 	doc.Agents[0].State = &done
 	doc.Agents[0].Doing = nil
 	doc.Agents[0].LastMessage = sp("PR 59 is merged, so passes now skip the card greeting and go straight on")
-	out, _ := renderView(buildView(doc, uiState{}), 32, 0, 1792018800)
-	rows := strings.Split(plain(out), "\n")
-	var at int
-	for i, l := range rows {
-		if strings.Contains(l, "PR 59 is merged, so passes") {
-			at = i
+	text := func() string {
+		var rows []string
+		for _, l := range buildView(doc, uiState{}).inspector(32, 1792018800) {
+			rows = append(rows, plain(l.s))
 		}
+		return strings.Join(rows, "\n")
 	}
-	if at == 0 || !strings.Contains(rows[at+1], "now skip the card") {
-		t.Fatalf("the last message wraps in the block:\n%s", plain(out))
+	got := text()
+	if !strings.Contains(got, " PR 59 is merged, so pass") {
+		t.Errorf("the last message, cut to its row:\n%s", got)
 	}
-	if strings.Contains(plain(out), "Okay, so I put out PR 16") {
-		t.Errorf("the title is not on the card:\n%s", plain(out))
+	if strings.Contains(got, "Okay, so I put out PR 16") {
+		t.Errorf("the title is in the inspector:\n%s", got)
 	}
-	if !strings.Contains(plain(out), "Opus 5.5 · 41% · $1.20") {
-		t.Errorf("model, context and cost stay on the facts line:\n%s", plain(out))
+	if !strings.Contains(got, " Opus 5.5 · 41% · $1.20") {
+		t.Errorf("model, context and cost:\n%s", got)
 	}
 	doc.Agents[0].Context.Model = nil
-	out, _ = renderView(buildView(doc, uiState{}), 32, 0, 1792018800)
-	if !strings.Contains(plain(out), "   41% · $1.20") {
-		t.Errorf("an unknown model leaves the line as it was:\n%s", plain(out))
+	if got := text(); !strings.Contains(got, "\n 41% · $1.20") {
+		t.Errorf("an unknown model leaves the line as it was:\n%s", got)
 	}
 }
 
@@ -262,96 +194,6 @@ func TestShortNoteAndModel(t *testing.T) {
 	m := "Opus 5.5 (1M context)"
 	if shortModel(&m) != "Opus 5.5" || shortModel(nil) != "" {
 		t.Errorf("shortModel: %q", shortModel(&m))
-	}
-}
-
-func TestNeedsYouStaysPinnedWhileScrolled(t *testing.T) {
-	doc := loadFixture(t, "fifteen-three-repos")
-	out, _ := renderView(buildView(doc, uiState{focused: true, sel: "a:@8"}), 32, 30, 1792018800)
-	rows := strings.Split(plain(out), "\n")
-	if len(rows) != 30 {
-		t.Fatalf("%d rows", len(rows))
-	}
-	for i, want := range []string{"  kel ", "", "  Needs you ", "  ● docs ", "  ● fix-auth ", "  ● api-auth ", ""} {
-		if !strings.HasPrefix(rows[i], want) {
-			t.Errorf("row %d: %q, want %q first:\n%s", i, rows[i], want, strings.Join(rows[:8], "\n"))
-		}
-	}
-	if !strings.Contains(plain(out), "spike") {
-		t.Error("the selection is scrolled off")
-	}
-}
-
-func TestNeedsYouFoldsPastFour(t *testing.T) {
-	jumps := recordJumps(t)
-	m := sixNeeding(t)
-	m.ui.sel = "a:@8"
-	out, refs := renderView(m.view(), m.width, m.height, 1792018800)
-	rows := strings.Split(plain(out), "\n")
-	if got := needNames(m.view()); got != "docs fix-auth api-auth gateway kelsier dashboard" {
-		t.Fatalf("needs: %q", got)
-	}
-	if !strings.HasPrefix(rows[5], "  ● api-auth") || !strings.HasPrefix(rows[6], "  +3 more") || rows[7] != "" {
-		t.Errorf("three rows then +3 more:\n%s", strings.Join(rows[:9], "\n"))
-	}
-	if !strings.Contains(out, yellow+"+3 more") {
-		t.Error("+N more is in the waiting colour")
-	}
-	nm, _ := m.Update(tea.MouseClickMsg{X: 4, Y: 6, Button: tea.MouseLeft})
-	m = nm.(sbModel)
-	if refs[6].id != "q:@4" || len(*jumps) != 1 || (*jumps)[0] != "@4|%6" || m.ui.sel != "a:@4" {
-		t.Errorf("a click on +3 more jumps to the oldest one not shown (gateway): id %q jumps %v sel %q", refs[6].id, *jumps, m.ui.sel)
-	}
-}
-
-func sixNeeding(t *testing.T) sbModel {
-	m := needsModel(t, "fifteen-three-repos")
-	m.height = 30
-	for i := range m.doc.Agents {
-		a := &m.doc.Agents[i]
-		since, ok := map[string]float64{"docs": 100, "fix-auth": 200, "api-auth": 300, "gateway": 400, "kelsier": 500, "dashboard": 600}[a.Name]
-		if !ok {
-			continue
-		}
-		a.State, a.StateSince, a.Note, a.Unseen = sp("waiting"), &since, sp("Claude needs your permission to use Edit"), false
-	}
-	return m
-}
-
-func TestCursorIsAlwaysOnAVisibleRowPastTheFold(t *testing.T) {
-	jumps := recordJumps(t)
-	m := sixNeeding(t)
-	m.ui.sel = "q:@3"
-	for step := 0; step < 6; step++ {
-		sel := m.view().sel
-		if want := m.view().entryIDs[step]; sel != want {
-			t.Fatalf("step %d: sel %q, want %q", step, sel, want)
-		}
-		out, refs := renderView(m.view(), m.width, m.height, 1792018800)
-		shown := false
-		for i, r := range refs {
-			if r.id == sel && strings.Contains(strings.Split(out, "\n")[i], raised) {
-				shown = true
-			}
-		}
-		if !shown {
-			t.Errorf("step %d: %q has no raised row:\n%s", step, sel, plain(out))
-		}
-		nm, _ := m.Update(tea.KeyPressMsg{Code: 'j', Text: "j"})
-		m = nm.(sbModel)
-	}
-	m.ui.sel = "q:@6"
-	nm, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
-	m = nm.(sbModel)
-	if len(*jumps) != 1 || m.ui.sel != "a:@6" {
-		t.Errorf("enter on the selected hidden row: jumps %v sel %q", *jumps, m.ui.sel)
-	}
-}
-
-func TestPointerCursorFallsBackToItsAgent(t *testing.T) {
-	doc := loadFixture(t, "fifteen-three-repos")
-	if got := buildView(doc, uiState{sel: "q:@5"}).sel; got != "a:@5" {
-		t.Errorf("q: of an agent that left Needs you: %q", got)
 	}
 }
 
@@ -458,7 +300,7 @@ func TestQuietText(t *testing.T) {
 func TestDensityFrames(t *testing.T) {
 	t.Setenv("HOME", "/home/me")
 	doc := loadFixture(t, "density")
-	open := uiState{now: 1792018800, expanded: map[string]bool{reposKey: true, quietKey("web-dashboard"): true}}
+	open := uiState{now: 1792018800, expanded: map[string]bool{shellsKey: true, bgKey: true, quietKey("web-dashboard"): true}}
 	out, _ := renderView(buildView(doc, open), 32, 0, 1792018800)
 	got := plain(out) + "\n"
 	gold := filepath.Join(fixtures, "density-open.32.golden")
@@ -494,25 +336,6 @@ func TestQuietTrailerToggles(t *testing.T) {
 	}
 }
 
-func TestFoldRowsResolveTheirSpace(t *testing.T) {
-	m := needsModel(t, "density")
-	m.ui.expanded = map[string]bool{reposKey: true}
-	if sp, ok := m.selSpace(quietID("web-dashboard")); !ok || sp.label != "web-dashboard" || sp.parent != "" {
-		t.Errorf("a quiet trailer resolves to %+v, %v; want the repo's main space", sp, ok)
-	}
-	if _, ok := m.selSpace(reposID); ok {
-		t.Error("the Repos header resolves to a space")
-	}
-	m.ui.sel = reposID
-	for _, k := range []string{"n", "w", "t", "f", "g", "d"} {
-		nm, cmd := m.Update(tea.KeyPressMsg{Code: rune(k[0]), Text: k})
-		got := nm.(sbModel)
-		if cmd != nil || got.mode != modeNormal || !got.msgBad {
-			t.Errorf("%s on Repos: mode %v msgBad %v cmd %v", k, got.mode, got.msgBad, cmd != nil)
-		}
-	}
-}
-
 func TestFilteredShellKeepsItsMenu(t *testing.T) {
 	doc := loadFixture(t, "servers")
 	for i := range *doc.Panes {
@@ -530,26 +353,4 @@ func TestFilteredShellKeepsItsMenu(t *testing.T) {
 	if acts := entryMenu(v); len(acts) == 0 {
 		t.Errorf("menu: %v", acts)
 	}
-}
-
-func TestPinnedReposHeaderFolds(t *testing.T) {
-	doc := loadFixture(t, "fifteen-three-repos")
-	ui := uiState{focused: true, sel: spaceID("/home/me/code/web-dashboard"), expanded: map[string]bool{reposKey: true}}
-	out, refs := renderView(buildView(doc, ui), 32, 16, 0)
-	rows := strings.Split(out, "\n")
-	for i, r := range refs {
-		if r.id != reposID {
-			continue
-		}
-		if strings.Contains(plain(rows[i]), "▌") || !strings.HasPrefix(plain(rows[i]), "  Repos ▾") {
-			t.Errorf("pinned Repos row %q carries the cursor or lost its label", plain(rows[i]))
-		}
-		m := sbModel{doc: doc, width: 32, height: 16, visible: true, ui: ui}
-		m.activate(reposID)
-		if m.ui.expanded[reposKey] {
-			t.Error("a click on the pinned row did not fold Repos")
-		}
-		return
-	}
-	t.Fatal("no row carries the Repos id while scrolled inside it")
 }

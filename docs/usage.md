@@ -101,7 +101,7 @@ Keys below use `Ctrl-b`, tmux's default prefix; if you changed yours, kel's own 
 | `Ctrl-b ,` | rename this window (routes through `kel rename`) |
 | `Ctrl-b \|` / `-` | split, keeping the current directory |
 | `Ctrl-b [` | scroll mode for a shell pane (`q` to leave) |
-| right-click | on the sidebar, its drawer for the row, with the keyboard staying in the sidebar. Elsewhere, tmux's menu for the pane, tab or session — it stays open until you click an item or outside it (tmux 3.2+; below that it is tmux's press-drag-release menu) |
+| right-click | on the sidebar, the row's menu, with the keyboard staying in the sidebar. Elsewhere, tmux's menu for the pane, tab or session — it stays open until you click an item or outside it (tmux 3.2+; below that it is tmux's press-drag-release menu) |
 | mouse wheel | scroll an agent's conversation (one page per notch). In a pane on the normal screen it scrolls tmux's history: up shows `[5/1999]` and you are reading back; down to the bottom and you are live again — no `esc`. Over the status bar the wheel does nothing (tmux's default would switch windows) |
 | drag, double-click (word), triple-click (line), or `Ctrl-b [` then enter | copy to the system clipboard, through `pbcopy` / `wl-copy` / `xclip` / `clip.exe` (`KEL_COPY_CMD` overrides). Hold **shift** instead in a pane whose app grabs the mouse — Claude Code sometimes does, and tmux never sees the drag |
 | middle-click | paste the system clipboard into that pane, bracketed, through `pbpaste` / `wl-paste` / `xclip -o` / `powershell.exe Get-Clipboard` (`KEL_PASTE_CMD` overrides). An empty clipboard, or no tool, is said in the message line. A program that takes the mouse itself still gets the click |
@@ -112,57 +112,51 @@ pane.
 
 ## The sidebar
 
-Every kel window has a 32-column pane on its left — the same in every window —
-in two sections, and above them **`Needs you`** while anything does: a row for
-each agent that is waiting, errored, or finished and not yet looked at, the
-longest-waiting first (`● fix-auth  allow Bash?  6m`). A row is a pointer: click
-it or press `enter` and you are at that agent, and its own row below is
-selected. Nothing needs you, no section. Needs you stays pinned while the list
-scrolls; more than four needing you fold into `+N more`.
+Every kel window has a 32-column pane on its left — the same in every window.
+**Every entry is one line, in every state**, so nothing moves while you aim:
 
-- **`Shells`** — every pane that is not an agent (servers, shells, programs)
-  in a window with no agent, one row each with the repo or directory it stands
-  in on the right. A pane in an agent's window is not here: it nests under that
-  agent's card in `agents`.
-- **`Repos`** — where things are, folded to `Repos ▸  4 · 2 merged` until you
-  open it with `enter` or a click: one entry per repo checkout or worktree,
-  with its branch, `↑` unpushed / `↓` behind, `●` uncommitted files and the
-  ports its servers listen on, and a dim `·` where no agent works. **Every worktree of a
-  repo nests under it** — kel's, Claude Code's own (`.claude/worktrees`) and
-  ones made by hand, open in a window or not — one line each: `└ ● fix-auth
-  ↑1 · review`, grey when no window stands there, `merged` in green when it
-  has landed, `no commits` or `detached` in grey when there is nothing to land
-  yet (never swept). Only repos with a kel window appear; a background Claude
-  session adds none. `s` sweeps a landed one (`s` elsewhere: everything landed),
-  asking first. A checkout two or more agents work in says so (`2 agents`)
-  — said, never refused. A repo with **more than three** worktrees folds
-  them behind one row, `└ +10 worktrees  30 unpushed` (the commits on no
-  remote, so the pile is not mistaken for clutter). Worktrees with an agent,
-  or the one you are in, stay listed. `enter` or a click on that row opens the
-  list (`− worktrees` closes it); the choice is saved with the other folds.
-- **`agents`** — every agent, grouped under the repo it works in, in a fixed
-  order: repos by name, agents in the order their windows were made, a blank
-  row between cards. An agent with no state or idle for a day or more folds
-  into a `+ 3 idle 1d+ · 1 unknown` row ending its group, which `enter` opens.
-  A state change moves a dot or a chip, never a row. A dot per state (the table is spec §5d) and how
-  long, right-aligned; an agent with no state (opencode, or a restored session before
-  its first hook) reads dim `unknown` there and keeps a grey `?`. An agent
-  not in the default permission mode carries it, faint, after its name:
-  `plan`, `edits`, `bypass`, `dontask`; one working in a linked git worktree
-  carries a faint `wt` after that. The panes of its window nest under the
-  card, one row each, `└ ▪ python3 :18765` or `└ $ bash`, with their drawer
-  and keys; a window with two agents nests them under the first, and an
-  agent folded into the `idle 1d+` row hands its panes back to `Shells`. A state that needs a word gets a chip: `needs
-  you`, `done`, `error`, `dead`, `quota`. **Every agent has one line under it,
-  chosen by its state:** working, what it is doing (`editing sbview.go`, its last
-  tool call, from the tail of Claude Code's own transcript); waiting, what it
-  waits for (`allow Bash?`); an API error, which (`Rate limit reached`); finished or idle, its
-  **last message**, the first line of its last reply, markdown stripped, from the tail of the same
-  transcript (none for an agent with no Claude transcript or no reply yet). Nothing known, no
-  line. The selected agent opens to that line in full, the model's name, context
-  % and cost (`Opus 5.5 · 36% · $10.65`), and its subagents. An agent whose
-  session keeps a task list shows its progress, dim, at the right of that line
-  (`3/7`: done of all; on the context line when selected).
+```
+ ▸ api-gw                 ○ ◌ ●
+ ▾ kelsier
+▌● kelsier                   2m
+ ● fix-auth         allow Bash?
+ ● docs                     15m
+```
+
+- **Agents, grouped under the repo they work in**, in a fixed order: repos by
+  name, agents in the order their windows were made, a blank row between
+  groups. A state change moves a dot or the right of a row, never a row. A dot
+  per state (the table is spec §5d), and on the right, by priority: what a
+  waiting agent waits for (`allow Bash?`), an API error (`Rate limit
+  reached`), `dead`, `quota`, an unseen card (`▸ decision`, `▸ result`), else
+  how long it has been in its state. A dim `▪` before that means a server
+  runs in the agent's window. An agent with no state (opencode, or a restored
+  session before its first hook) reads dim `unknown` and keeps a grey `?`.
+  An agent with no state or idle for a day or more folds into a
+  `+ 3 idle 1d+ · 1 unknown` row ending its group, which `enter` opens.
+- **A repo's heading folds the group** (`enter`, a click, `h` / `l`): `▸
+  api-gw` then shows a dot per agent on its right, so one that needs you
+  never hides. The fold is saved and shared.
+- **`background`** — Claude Code background sessions with no agent of their
+  name, folded with a dot each. One named like an agent belongs to that agent.
+- **`shells`** — every pane that is not an agent, in a window with no agent,
+  folded with its count while there are agents. A pane in an agent's window
+  is in that agent's inspector instead.
+
+**The inspector**, five rows above the footer, is the selected entry's detail.
+For an agent: its state and age; what it is doing (`editing sbview.go`, its
+last tool call), what it waits for, the error, or its **last message** (the
+first line of its last reply) — or an unseen card — with its task progress
+(`3/7`) on the right; the model, context and cost (`Opus 5.5 · 36% · $10.65`)
+with its permission mode (`plan`, `edits`, `bypass`, `dontask`) and `wt` when
+it works in a linked worktree; the other panes of its window, its running
+subagents and background children; and its keys, `↵ go  ␣ peek  ⋯`. A pane or
+child there is a click that selects it. For a repo heading: its agents,
+branch, path and ports. Nothing known, no line.
+
+The foot is `●3 need you` in amber while any agent waits, errored, or
+finished and you have not looked — a click is `` Ctrl-b ` `` — then `≡`
+(settings) and `?` (help) on the right.
 
 **Mouse first.** The top line is `kel` with two buttons:
 
@@ -173,24 +167,20 @@ scrolls; more than four needing you fold into `+N more`.
 `+ New` opens a menu of what makes something: a new agent, an agent in a
 worktree, split right, split down, a shell window in the selected space. `⋯` opens kel's own: next that needs you,
 usage, pull requests, a kel command, restore (while a previous workspace
-waits), all keys, quit. **Right-click any space, agent or pane** (or press `→`
-on an agent, pane or background agent) to open its drawer beneath it, pushing the rows below
-down: everything it can do. An agent's has go to it, peek,
-diff, files, edit last file, plan, history, cards, zoom, own window and swap
-with… (when it shares its window), rename, kill, and relaunch when it is dead, under its git position when known. Every
-item shows its key on the right, so the keys are there when you want them,
-learned by using the mouse. **The entry under the pointer shows its buttons on its own row**, in place of
-its age, branch or chip, and its name shortens to make room: `Diff · Files · ⋯`
-on an agent, `Files · Git · ⋯` on a space or pane. Nothing is inserted, so no
-row moves. The selected entry carries the same buttons permanently, in the
-foot of its raised block, pointer or not. A click acts on that entry, and `⋯`
-opens its drawer, for a trackpad with no right button. A drawer closes on `←`, esc, a click outside it, or when the
-selection moves; `↑` `↓` and enter walk it, and a letter runs its item. The header menus close on esc or a click outside them; the
-arrows and enter walk those too. `|` and `-` split the pane you were in, right
-or below, at its directory, and put you in the new shell.
+waits), all keys, quit. **Right-click any agent, pane or repo heading** (or
+press `→`, or click the inspector's `⋯`) to open its menu over the inspector:
+everything it can do. An agent's has go to it, peek, diff, files, edit last
+file, plan, history, cards, zoom, own window and swap with… (when it shares
+its window), rename, kill, and relaunch when it is dead; a pane's adds move
+beside…. Every item shows its key on the right, so the keys are there when
+you want them, learned by using the mouse. A menu draws over what is there,
+so no row moves. It closes on `←`, esc, a click outside it or the wheel; `↑`
+`↓` and enter walk it, and a letter it lists runs its item. The header menus
+close on esc or a click outside them; the arrows and enter walk those too.
+`|` and `-` split the pane you were in, right or below, at its directory, and
+put you in the new shell.
 
-The foot reads `≡ Settings` and `? Help`; anything clickable lights up under
-the pointer. **Settings** replaces the lists with kel's options as switches,
+Anything clickable lights up under the pointer. **Settings** (`≡`) replaces the lists with kel's options as switches,
 steppers and choices: which states notify you and how (bell, desktop,
 banner), the sidebar's width and background (from the terminal, or fixed),
 the context warning, PR lookups and how often. Each click writes your
@@ -205,7 +195,7 @@ esc returns. Help lists every key and has the same `‹ Back` row.
 a click. Moving between panes (`Ctrl-b o`, `Ctrl-b ←`, vim-tmux-navigator's
 Ctrl-h) passes over it, so typing meant for an agent never lands there.
 
-**The sidebar follows the window's width.** From `sidebar_rail_below` columns (120) it is the full sidebar; from `sidebar_hide_below` (80) up to that, a **rail** four columns wide; narrower, none. The window's width decides, so shrinking the terminal changes every window at once. The rail shows what needs you (`●2`), a dot per agent in the list's order, `▪` when a server runs, and `≡` at the foot. Click a dot to jump to that agent, the count to jump to the first that needs you, `≡` to bring the full sidebar back. There is no hover or drawer in it. `Ctrl-b b` cycles full, rail, hidden for the window you are in, and that choice stays for the window (until the server restarts) whatever its width. Hiding a window's sidebar does not touch `kel sidebar off`, which stays global, and kel still never resizes your own panes: tmux hands the sidebar's columns to them.
+**The sidebar follows the window's width.** From `sidebar_rail_below` columns (120) it is the full sidebar; from `sidebar_hide_below` (80) up to that, a **rail** four columns wide; narrower, none. The window's width decides, so shrinking the terminal changes every window at once. The rail shows what needs you (`●2`), a dot per agent in the list's order, `▪` when a server runs, and `≡` at the foot. Click a dot to jump to that agent, the count to jump to the first that needs you, `≡` to bring the full sidebar back. There is no hover or menu in it. `Ctrl-b b` cycles full, rail, hidden for the window you are in, and that choice stays for the window (until the server restarts) whatever its width. Hiding a window's sidebar does not touch `kel sidebar off`, which stays global, and kel still never resizes your own panes: tmux hands the sidebar's columns to them.
 
 **The sidebar stays where it is.** tmux's layout keys (`Ctrl-b M-1..5`,
 `Ctrl-b Ctrl-o`, `Ctrl-b {` / `}`) rearrange your panes as usual and the
@@ -238,19 +228,20 @@ the key. kel writes every one of these the same way, using your real prefix.
 command never needs a shell: type `new docs -w`, `restore`, `url`… A
 one-line answer comes back as a message, a longer one in a popup.
 
-Each entry is one line. The selection stands on a lighter block with a blue
-`▌` down its side and its detail inside; where you are is the name in bold. A
+Each entry is one line. The selection is that line on a lighter fill with a
+blue `▌` at its left; where you are is the name in bold. A
 doubtful `working` reads `quiet 2h` in grey italic.
 
-The selection is shared by every window's sidebar, and it is what `n`, `w`, `t` and `+ New` act on. A new sidebar starts on the agent you are in, so what is highlighted is where a new agent will start. It follows a jump: `` prefix ` ``, a click on the banner, a Needs you row, and the window `kel new` makes. Moving with `j` `k` or the pointer never switches windows, and neither does `prefix n` / `p` / a window number.
+The selection is shared by every window's sidebar, and it is what `n`, `w`, `t` and `+ New` act on. A new sidebar starts on the agent you are in, so what is highlighted is where a new agent will start. It follows a jump: `` prefix ` ``, a click on the banner or the footer's count, and the window `kel new` makes. Moving with `j` `k` or the pointer never switches windows, and neither does `prefix n` / `p` / a window number.
 
 | key | |
 |---|---|
 | `Ctrl-b Space` | put the keyboard in the sidebar (replaces tmux's `next-layout` on that key) |
 | `j` / `k` | move |
-| `enter` | jump to an agent or pane · open or fold Repos or a quiet trailer |
-| `space` / `l` / `h` | fold, open, close Repos or a quiet trailer |
-| `space` on an agent or pane | peek: a read-only popup of its screen as it is now, in colour, titled `peek · name · ↵ go · esc closes`. `enter` jumps there and selects it; `esc` or `q` closes; no other key does anything and nothing is sent to the pane. A pane that is gone, or an agent that is dead, says so in the footer and opens no popup. The drawer's `Peek` is the same |
+| `enter` | jump to an agent or pane · fold or open a heading or a quiet trailer |
+| `space` / `l` / `h` | flip, open, fold a heading or a quiet trailer |
+| `→` / right-click / `⋯` | the selected entry's menu (`→` on a heading opens it instead) |
+| `space` on an agent or pane | peek: a read-only popup of its screen as it is now, in colour, titled `peek · name · ↵ go · esc closes`. `enter` jumps there and selects it; `esc` or `q` closes; no other key does anything and nothing is sent to the pane. A pane that is gone, or an agent that is dead, says so in the footer and opens no popup. The inspector's `␣ peek` and the menu's `Peek` are the same |
 | `/` | filter by name, live · `esc` clears |
 | `n` / `w` | new agent / new worktree agent in the selected entry's space — `enter` at once, or type a name first |
 | `r` | rename the selected agent |
@@ -262,7 +253,7 @@ The selection is shared by every window's sidebar, and it is what `n`, `w`, `t` 
 | `e` on a space | nvim at that directory, kept between opens — your buffers are still there next time |
 | `t` | a plain shell window in the selected space — no agent |
 | `q` | quit kel, after `y`: saves the workspace, then closes it all; refuses while a worktree holds unsaved work |
-| `h` | the selected agent's last twenty state changes in a popup, newest first with ages (`2m ago  done  Stop`). On Repos or a quiet trailer, `h` still closes it |
+| `h` | the selected agent's last twenty state changes in a popup, newest first with ages (`2m ago  done  Stop`). On a heading or a quiet trailer, `h` folds it |
 | `p` | the selected agent's plan (from plan mode), then its task list — `✓` done, `▸` in progress, `·` pending, and what blocks what. Most sessions on newer models keep no task list; it says so. Rendered with glow when installed |
 | `i` | the selected entry's cards (reports from agents) in a popup, newest first — result, update, decision. Rendered with glow when installed |
 | `c` | the Claude Code configuration that applies to the selected space, in yazi, a tab per place: the repo's `CLAUDE.md`, its `.claude/`, the global `~/.claude` and the project's memory. To read and open — kel writes none of it |
@@ -270,10 +261,10 @@ The selection is shared by every window's sidebar, and it is what `n`, `w`, `t` 
 | `u` | Claude Code usage from ccusage — the current 5-hour block and two weeks by day; quit it (`q`) and type any other report (`monthly`, `session`, `daily --since 20261001`). ccusage reads Claude Code's own transcripts, so kel stores no history |
 | `n name -- flags` | after ` -- `, flags for Claude itself: `fix -- --model sonnet` (`kel new fix -- --model sonnet` from a shell) |
 | `;` | a kel command; quotes keep words together, `↑` / `↓` walk the last twenty |
-| `s` | sweep the selected worktree once it has landed (anywhere else: everything landed), after `y` |
+| `s` | sweep everything that has landed, after `y` (one worktree: `kel sweep <path>`) |
 | `?` | every key |
 | `esc` | back to the pane you were in |
-| click · wheel | select and jump, fold Repos or a quiet trailer · move |
+| click · wheel | select and jump, fold a heading or a quiet trailer · move |
 
 **`Ctrl-b q` closes any popup**, whatever is running in it — even vim that
 yazi opened for you. It says so in every popup's title. Quitting the tool
