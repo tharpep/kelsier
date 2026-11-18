@@ -27,6 +27,7 @@ type Quota struct {
 type Window struct {
 	Pct      *float64 `json:"pct"`       // null: not reported, or stale
 	ResetsAt *float64 `json:"resets_at"` // null: not reported
+	Spent    *float64 `json:"spent,omitempty"`
 }
 
 const (
@@ -93,15 +94,18 @@ func refreshQuotaCmd(sd string, now int64) {
 	script := fmt.Sprintf(`fail() { printf '%%s fail\n' "$(date +%%s)" > "%s"; exit 0; }
 out=$(%s 2>/dev/null) || fail
 set -- $out
-pct=$1; reset=${2:-0}
+pct=$1; reset=${2:-0}; spent=${3:--1}
 case "$pct" in
   ''|*[!0-9.]*) fail ;;
 esac
 case "$reset" in
   ''|*[!0-9]*) reset=0 ;;
 esac
+case "$spent" in
+  ''|*[!0-9.]*) spent=-1 ;;
+esac
 tmp=$(mktemp "%s/.qcmd.XXXXXX" 2>/dev/null) || fail
-printf '%%s %%s %%d\n' "$pct" "$reset" %d > "$tmp" && mv -f "$tmp" "%s"
+printf '%%s %%s %%d %%s\n' "$pct" "$reset" %d "$spent" > "$tmp" && mv -f "$tmp" "%s"
 `, atFile, cmdStr, sd, now, target)
 
 	cmd := exec.Command("sh", "-c", script)
@@ -112,7 +116,7 @@ printf '%%s %%s %%d\n' "$pct" "$reset" %d > "$tmp" && mv -f "$tmp" "%s"
 
 // loadQuota reads `<pct5> <at5> <pct7> <at7> <spend> <atspend> <epoch>`; -1
 // is "not reported", 0 for a reset is "not given". If spend is not reported in
-// quota, quota-cmd (from KEL_QUOTA_CMD) is
+// quota, quota-cmd (`<pct> <reset> <epoch> [<spent>]`, from KEL_QUOTA_CMD) is
 // checked as a fallback.
 func loadQuota(sd string, now int64) *Quota {
 	var q *Quota
@@ -177,6 +181,11 @@ func loadQuota(sd string, now int64) *Quota {
 						if reset > 0 {
 							r := reset
 							w.ResetsAt = &r
+						}
+						if len(fields) >= 4 {
+							if sp, err := strconv.ParseFloat(fields[3], 64); err == nil && sp >= 0 {
+								w.Spent = &sp
+							}
 						}
 						if q == nil {
 							q = &Quota{At: float64(at)}

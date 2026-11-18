@@ -648,7 +648,14 @@ claude ███░░ 58% (1h20m) · wk 41%  │  1 waiting 6m · $24.10  │  
    do not belong on a path that redraws constantly.
 4. **spend** — the spend limit, after the weekly window, drawn as a meter like 5h (#34), **only from 50%**
    (`quota_from` since #28: a `quota_cmd` budget may be watched from 0):
-   account-wide like the others, and almost always irrelevant.
+   account-wide like the others, and almost always irrelevant. A `quota_cmd`
+   (`<pct> <reset | 0> [<usd spent>]`, #3) may report dollars as a third field
+   (#57): the chip then reads `spend ━━━━━━━━ 22% $559.24`, and while it shows
+   them the live-session total leaves the bar, since two dollar figures side
+   by side read as one that disagrees. Hidden below `quota_from`, or with no
+   dollars, the total stays. Absent, `-1` or unparseable is not reported,
+   never `$0`. A failed run backs off `min(30 s, quota_ttl)` (#58), not a
+   whole ttl.
 
 Cut from the first draft, each because the sidebar holds it: per-state counts
 (`4 agents · 2 done`), pane count, the port list, and location while the

@@ -353,8 +353,8 @@ is a click that jumps.
 |---|---|
 | `5h ━━━━━━━━ 58% (1h20m)` | the 5-hour quota as a thin meter (green, amber from 70%, red from 90%) and when it resets; an empty meter and `?` once it has reset since it was last seen, never the old figure |
 | `7d 41%` | the weekly quota (`7d ?` when stale) |
-| `spend ━━━━━━━━ 61%` | the spend limit as the same thin meter, with its reset when known, from 50% (`quota_from` in config; `0` shows it always) |
-| `$24.10` | the cost of the agents open right now |
+| `spend ━━━━━━━━ 61%` | the spend limit as the same thin meter, with its reset when known, from 50% (`quota_from` in config; `0` shows it always). A `quota_cmd` that prints dollars spent as a third field (`<pct> <resets_at | 0> [<usd>]`) adds `$559.24` after the percentage; a failed run is retried after 30 s, not a whole `quota_ttl` |
+| `$24.10` | the cost of the agents open right now. Hidden while the spend chip shows dollars, so two figures never read as one that disagrees |
 | `▐needs you▌ docs 6m +1` | the agent that has waited on you longest, how long, and how many more; a click on any of it jumps there. Absent when none waits |
 | `kelsier · fix-auth ↑2 ●3` | only while the sidebar is off: where the pane you are in stands |
 

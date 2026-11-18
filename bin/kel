@@ -3279,11 +3279,14 @@ cmd_status_line() {
     def heat: if . >= 90 then "#[fg=#f2727f,bold]" elif . >= 70 then "#[fg=#f5a742]" else "#[fg=#5fd38d]" end;
     def tag: "#[fg=#7f7f8a]" + . + "#[default] ";
     def dot: "#[fg=#55555e] · #[default]";
+    def money: (. * 100 | round / 100 | tostring
+                | if test("\\.") then (if test("\\.[0-9]$") then . + "0" else . end) else . + ".00" end);
     # a thin meter, eight cells of a line: the author found blocks heavy
     def meter: ((. + 6) / 12.5 | floor | if . > 8 then 8 else . end) as $f
       | heat + ([range(0; $f)] | map("━") | join("")) + "#[fg=#3a3a44]" + ([range($f; 8)] | map("━") | join("")) + "#[default]";
     now as $now
     | (.quota // null) as $q
+    | ( ($q // {}) | .spend // null | . != null and .pct != null and .pct >= $from and (.spent // null) != null ) as $dollars
     | ( if $q == null then null else
           [ ( $q.five_hour // null | if . == null then empty
               elif .pct == null then ("5h" | tag) + "#[fg=#3a3a44]━━━━━━━━#[default] ?"
@@ -3297,6 +3300,7 @@ cmd_status_line() {
             ( $q.spend // null | if . == null or .pct == null or .pct < $from then empty
               else (.pct | floor) as $p
                 | ("spend" | tag) + ($p | meter) + " \($p)%"
+                  + (if (.spent // null) != null then " #[fg=#a1a1aa]$" + (.spent | money) + "#[default]" else "" end)
                   + (if (.resets_at // 0) > $now then "#[fg=#7f7f8a] (\(.resets_at - $now | dur))#[default]" else "" end)
               end ) ]
           | if length == 0 then null else join("   ") end
@@ -3305,8 +3309,7 @@ cmd_status_line() {
     | [ $live[] | select(.state == "waiting") ] as $wait
     | ( [ $live[] | .context.cost_usd // empty ] | add // 0 ) as $cost
     | ( if ($live | length) == 0 then "#[fg=#7f7f8a]no agents#[default]"
-        elif $cost > 0 then "#[fg=#a1a1aa]$" + ($cost * 100 | round / 100 | tostring
-                             | if test("\\.") then (if test("\\.[0-9]$") then . + "0" else . end) else . + ".00" end) + "#[default]"
+        elif $cost > 0 and ($dollars | not) then "#[fg=#a1a1aa]$" + ($cost | money) + "#[default]"
         else null end ) as $fleet
     | ( .here // null | if . == null then null else
           .group + ( .git // null | if . == null then ""

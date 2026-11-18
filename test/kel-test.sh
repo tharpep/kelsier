@@ -2497,6 +2497,21 @@ wait_until '[ -f "$STATE/quota-cmd" ]' 30
 ok "  ...and is retried once the backoff passes, not the ttl" '[ "$("$KEL" _fleet | jq -r .quota.spend.pct)" = 42 ]'
 export KEL_QUOTA_TTL=60; unset KEL_QUOTA_RETRY
 
+# #57: quota_cmd's optional third field is the dollars spent
+export KEL_QUOTA_CMD="echo 22.4 0 559.24"
+rm -f "$STATE/quota" "$STATE/quota-cmd" "$STATE/quota-cmd.at"
+"$KEL" _fleet >/dev/null 2>&1
+wait_until '[ -f "$STATE/quota-cmd" ]' 30
+ok "quota_cmd's third field reaches the fleet document as spend.spent" '[ "$("$KEL" _fleet | jq -r .quota.spend.spent)" = 559.24 ]'
+ok "  ...and the bar shows it beside the spend meter" '[[ "$(KEL_QUOTA_FROM=0 bar)" == *"spend ━━━━━━━━ 22% \$559.24"* ]]'
+ok "  ...in place of the live sessions total" '[ "$(KEL_QUOTA_FROM=0 bar | grep -o "[\$]" | grep -c .)" = 1 ]'
+ok "  ...but not while the chip is hidden below quota_from" '[[ "$(bar)" != *559.24* ]]'
+export KEL_QUOTA_CMD="echo 22.4 0"
+rm -f "$STATE/quota-cmd" "$STATE/quota-cmd.at"
+"$KEL" _fleet >/dev/null 2>&1
+wait_until '[ -f "$STATE/quota-cmd" ]' 30
+ok "  ...and a command with two fields leaves spent null" '[ "$("$KEL" _fleet | jq -r .quota.spend.spent)" = null ]'
+
 # pr = off suppresses quota_cmd
 MARKER="$WORK/quota-ran"
 export KEL_QUOTA_CMD="touch $MARKER && echo 42 0"

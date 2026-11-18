@@ -149,6 +149,30 @@ func TestQuotaCmd(t *testing.T) {
 	}
 }
 
+func TestQuotaCmdSpent(t *testing.T) {
+	sd := t.TempDir()
+	now := time.Now().Unix()
+	write := func(s string) { os.WriteFile(filepath.Join(sd, "quota-cmd"), []byte(s), 0o600) }
+
+	write(fmt.Sprintf("22.4 0 %d 559.24\n", now))
+	q := loadQuota(sd, now)
+	if q == nil || q.Spend == nil || q.Spend.Spent == nil || *q.Spend.Spent != 559.24 {
+		t.Fatalf("a fourth field is the dollars spent: got %+v", q)
+	}
+
+	write(fmt.Sprintf("22.4 0 %d -1\n", now))
+	q = loadQuota(sd, now)
+	if q == nil || q.Spend == nil || q.Spend.Pct == nil || q.Spend.Spent != nil {
+		t.Fatalf("-1 is not reported, never $0: got %+v", q)
+	}
+
+	write(fmt.Sprintf("22.4 0 %d\n", now))
+	q = loadQuota(sd, now)
+	if q == nil || q.Spend == nil || q.Spend.Pct == nil || q.Spend.Spent != nil {
+		t.Fatalf("a three-field file still parses without dollars: got %+v", q)
+	}
+}
+
 func TestQuotaCmdRetry(t *testing.T) {
 	t.Setenv("KEL_QUOTA_TTL", "300")
 	t.Setenv("KEL_PR", "")
