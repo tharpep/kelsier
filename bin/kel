@@ -17,6 +17,9 @@
 #                              (one agent — `kel restore` rebuilds the workspace)
 #   kel sidebar on|off         the sidebar pane in every window (default on)
 #   kel shell [dir]            a plain shell window, no agent (sidebar: t)
+#   kel layout [name] [win]    arrange a window's own panes: below, editor, side,
+#                              main, grid, columns (no name: the ones that fit);
+#                              kel layout undo puts the last one back (sidebar: L)
 #   kel board                  every agent as a tile, in a popup over the window
 #                              (sidebar: B, or prefix B; esc closes)
 #   kel quit [-f]              save the workspace, then close all of it; refuses
@@ -534,6 +537,215 @@ swap_panes() { # pane other
   say "swapped with $(pane_name "$b")"
 }
 
+# Named layouts, picked by hand (invariant 4: kel never picks one itself).
+# Each is one tmux layout string over the whole window whose first cell is the
+# sidebar at the width fit wants, so fit finds nothing to change and has
+# nothing to answer (#33); select-layout of a preset would stretch the sidebar
+# and start fit's re-make.  One line per layout: name, fewest and most panes
+# it fits, its words.  The sidebar's menu keeps the same names and counts,
+# pinned by TestLayoutsMatchKel.
+layout_table() {
+  cat <<'EOF'
+below 2 9 agent + shell below
+editor 2 9 agent + editor right 40%
+side 2 2 two side by side
+main 3 9 main left + stack right
+grid 4 4 grid, two by two
+columns 3 9 even columns
+EOF
+}
+
+layout_cut() { # h|v x y w h share... -> "x y w h" a part: a percent of the room past the borders, or = for an even part; the last takes the rest
+  local d=$1 x=$2 y=$3 w=$4 h=$5 n room at=0 i=0 sz p
+  shift 5
+  n=$#
+  if [ "$d" = h ]; then room=$((w - n + 1)); else room=$((h - n + 1)); fi
+  for p in "$@"; do
+    i=$((i + 1))
+    if [ "$i" -eq "$n" ]; then sz=$((room - at))
+    elif [ "$p" = = ]; then sz=$((room / n))
+    else sz=$((room * p / 100)); fi
+    if [ "$d" = h ]; then echo "$((x + at + i - 1)) $y $sz $h"; else echo "$x $((y + at + i - 1)) $w $sz"; fi
+    at=$((at + sz))
+  done
+}
+
+layout_leaf() { printf '%sx%s,%s,%s,%s' "$3" "$4" "$1" "$2" "${5#%}"; } # x y w h pane
+
+layout_wrap() { # h|v x y w h cells
+  if [ "$1" = h ]; then printf '%sx%s,%s,%s{%s}' "$4" "$5" "$2" "$3" "$6"
+  else printf '%sx%s,%s,%s[%s]' "$4" "$5" "$2" "$3" "$6"; fi
+}
+
+layout_even() { # h|v x y w h pane... -> the rect shared evenly among the panes
+  local d=$1 x=$2 y=$3 w=$4 h=$5 shares='' cells='' p cx cy cw ch
+  shift 5
+  [ $# -eq 1 ] && { layout_leaf "$x" "$y" "$w" "$h" "$1"; return; }
+  for p in "$@"; do shares="$shares ="; done
+  while read -r cx cy cw ch; do
+    cells="$cells,$(layout_leaf "$cx" "$cy" "$cw" "$ch" "$1")"
+    shift
+  done <<EOF
+$(layout_cut "$d" "$x" "$y" "$w" "$h" $shares)
+EOF
+  layout_wrap "$d" "$x" "$y" "$w" "$h" "${cells#,}"
+}
+
+layout_main() { # h|v pct x y w h main rest... -> main takes pct along d, the rest share what is left across it
+  local d=$1 pct=$2 x=$3 y=$4 w=$5 h=$6 main=$7 a b across=v
+  shift 7
+  [ $# -gt 0 ] || { layout_leaf "$x" "$y" "$w" "$h" "$main"; return; }
+  [ "$d" = v ] && across=h
+  { read -r a; read -r b; } <<EOF
+$(layout_cut "$d" "$x" "$y" "$w" "$h" "$pct" 0)
+EOF
+  # shellcheck disable=SC2086
+  layout_wrap "$d" "$x" "$y" "$w" "$h" "$(layout_leaf $a "$main"),$(layout_even "$across" $b "$@")"
+}
+
+layout_cell() { # name x y w h pane... -> the user panes' cell; the editor, if any, is the last pane
+  local name=$1 x=$2 y=$3 w=$4 h=$5 a b last left=''
+  shift 5
+  case "$name" in
+    below)   layout_main v 65 "$x" "$y" "$w" "$h" "$@" ;;
+    side|columns) layout_even h "$x" "$y" "$w" "$h" "$@" ;;
+    main)    layout_main h 60 "$x" "$y" "$w" "$h" "$@" ;;
+    grid)    { read -r a; read -r b; } <<EOF
+$(layout_cut v "$x" "$y" "$w" "$h" = =)
+EOF
+             # shellcheck disable=SC2086
+             layout_wrap v "$x" "$y" "$w" "$h" "$(layout_even h $a "$1" "$2"),$(layout_even h $b "$3" "$4")" ;;
+    editor)  while [ $# -gt 1 ]; do left="$left $1"; shift; done
+             last=$1
+             { read -r a; read -r b; } <<EOF
+$(layout_cut h "$x" "$y" "$w" "$h" 60 0)
+EOF
+             # shellcheck disable=SC2086
+             layout_wrap h "$x" "$y" "$w" "$h" "$(layout_main v 65 $a $left),$(layout_leaf $b "$last")" ;;
+  esac
+}
+
+layout_sum() { # layout -> tmux's checksum of it
+  local s="$1" c=0 i ch
+  for ((i = 0; i < ${#s}; i++)); do
+    printf -v ch '%d' "'${s:i:1}"
+    c=$(( (((c >> 1) + ((c & 1) << 15)) + ch) & 65535 ))
+  done
+  printf '%04x' "$c"
+}
+
+# tmux deals a layout's cells to the window's panes in list order, so the
+# panes are swapped into the cells' order first, in the same command list:
+# the layout hook sees only the end state, never the sidebar swapped away.
+layout_set() { # wid layout pane... (in the cells' order)
+  local wid=$1 lay=$2 want i=0 j c
+  shift 2
+  local -a cur cmd
+  cmd=()
+  cur=( $(tmux list-panes -t "$wid" -F '#{pane_id}' 2>/dev/null) )
+  for want in "$@"; do
+    if [ "${cur[$i]:-}" != "$want" ]; then
+      cmd+=(swap-pane -d -s "$want" -t "${cur[$i]}" ';')
+      for ((j = i + 1; j < ${#cur[@]}; j++)); do
+        [ "${cur[$j]}" = "$want" ] && { c="${cur[$i]}"; cur[$i]="$want"; cur[$j]="$c"; break; }
+      done
+    fi
+    i=$((i + 1))
+  done
+  cmd+=(select-layout -t "$wid" "$lay")
+  tmux "${cmd[@]}" 2>/dev/null
+}
+
+layout_window() { # [target] -> its window id
+  local t="${1:-${TMUX_PANE:-}}"
+  [ -n "$t" ] || die "which window?  kel layout <name> <window-id>"
+  tmux display-message -p -t "$t" '#{window_id}' 2>/dev/null || die "no window $t"
+}
+
+cmd_layout() { # [name|undo] [window]
+  local name="${1:-}" wid rows p s a c sb='' agents='' others='' editors='' n ww wh sw=0 x=0 cell root ids lo hi words f
+  case "$name" in
+    ''|-l|--list)
+      n=0
+      if [ -n "${2:-${TMUX_PANE:-}}" ]; then
+        wid="$(layout_window "${2:-}")" || exit 1
+        n="$(user_panes "$wid" | grep -c .)"
+      fi
+      layout_table | while read -r p lo hi words; do
+        [ "$n" = 0 ] || { [ "$n" -ge "$lo" ] && [ "$n" -le "$hi" ]; } || continue
+        if [ "$lo" = "$hi" ]; then printf '%-8s %s  (%s panes)\n' "$p" "$words" "$lo"
+        else printf '%-8s %s  (%s+ panes)\n' "$p" "$words" "$lo"; fi
+      done
+      return 0 ;;
+    undo) wid="$(layout_window "${2:-}")" || exit 1; layout_undo "$wid"; return ;;
+  esac
+  read -r lo hi words <<EOF
+$(layout_table | awk -v n="$name" '$1 == n { $1 = ""; print substr($0, 2) }')
+EOF
+  [ -n "${lo:-}" ] || die "no layout '$name'  (kel layout lists them)"
+  wid="$(layout_window "${2:-}")" || exit 1
+  rows="$(tmux list-panes -t "$wid" -F '#{pane_id}|#{@kel-sidebar}|#{@kel-agent}|#{pane_current_command}' 2>/dev/null)"
+  while IFS='|' read -r p s a c; do
+    [ -n "$p" ] || continue
+    if [ "$s" = 1 ]; then sb="$p"
+    elif [ -n "$a" ]; then agents="$agents $p"
+    else
+      case "$c" in
+        claude|agy|codex|aider|opencode) agents="$agents $p" ;;
+        nvim|vim|vi|hx|helix|emacs|nano|micro|kak) editors="$editors $p" ;;
+        *) others="$others $p" ;;
+      esac
+    fi
+  done <<EOF
+$rows
+EOF
+  set -- $agents $others $editors
+  n=$#
+  [ "$n" -ge "$lo" ] && [ "$n" -le "$hi" ] || die "$name fits $lo$([ "$hi" = "$lo" ] || echo +) panes; this window has $n"
+  read -r ww wh <<EOF
+$(tmux display-message -p -t "$wid" '#{window_width} #{window_height}')
+EOF
+  [ -n "$sb" ] && { sw="$(size_width "$(sidebar_size "$wid")")"; x=$((sw + 1)); }
+  cell="$(layout_cell "$name" "$x" 0 $((ww - x)) "$wh" "$@")"
+  if [ -z "$sb" ]; then root="$cell"
+  elif [[ $cell =~ ^[0-9]+x[0-9]+,[0-9]+,[0-9]+\{(.*)\}$ ]]; then
+    root="$(layout_wrap h 0 0 "$ww" "$wh" "$(layout_leaf 0 0 "$sw" "$wh" "$sb"),${BASH_REMATCH[1]}")"
+  else
+    root="$(layout_wrap h 0 0 "$ww" "$wh" "$(layout_leaf 0 0 "$sw" "$wh" "$sb"),$cell")"
+  fi
+  ids="$(printf '%s\n' "$root" | grep -oE '[0-9]+x[0-9]+,[0-9]+,[0-9]+,[0-9]+' | sed 's/.*,/%/')"
+  printf '%s\n' "$root" | grep -oE '[0-9]+x[0-9]+,[0-9]+,[0-9]+,[0-9]+' \
+    | awk -F'[x,]' '$1 < 2 || $2 < 3 { bad = 1 } END { exit bad }' || die "the window is too small for $name"
+  f="$STATE_DIR/$wid.layout"
+  {
+    tmux display-message -p -t "$wid" '#{window_layout}'
+    tmux list-panes -t "$wid" -F '#{pane_id}' | tr '\n' ' '
+    echo
+  } > "$f.tmp" && mv -f "$f.tmp" "$f"
+  # shellcheck disable=SC2086
+  layout_set "$wid" "$(layout_sum "$root"),$root" $ids || { rm -f "$f"; die "tmux would not take $name"; }
+  snapshot
+  say "laid out: $name · L u undoes"
+}
+
+layout_undo() { # wid
+  local wid=$1 f lay ids
+  f="$STATE_DIR/$wid.layout"
+  [ -f "$f" ] || die "no layout to undo here"
+  lay="$(sed -n 1p "$f")"; ids="$(sed -n 2p "$f")"
+  # shellcheck disable=SC2086
+  if [ "$(printf '%s\n' $ids | sort)" != "$(tmux list-panes -t "$wid" -F '#{pane_id}' | sort)" ]; then
+    rm -f "$f"
+    die "its panes changed since; nothing to undo"
+  fi
+  # shellcheck disable=SC2086
+  layout_set "$wid" "$lay" $ids || die "tmux would not take the old layout"
+  rm -f "$f"
+  sidebar_fit
+  snapshot
+  say "layout undone"
+}
+
 window_state() { # wid -> the most urgent state among its agents
   local p best='' r br=9 st
   for p in $(tmux list-panes -t "$1" -F '#{@kel-sidebar}|#{pane_id}' 2>/dev/null | awk -F'|' '$1 == "" {print $2}') "$1"; do
@@ -1040,7 +1252,7 @@ prune_state() {
   local live f wid panes pane
   live="$(tmux list-windows -a -F '#{window_id}' 2>/dev/null; tmux list-panes -a -F '#{pane_id}' 2>/dev/null)"
   [ -n "$live" ] || return 0
-  for f in "$STATE_DIR"/*.state "$STATE_DIR"/*.ctx "$STATE_DIR"/*.seen "$STATE_DIR"/*.edit "$STATE_DIR"/*.plan "$STATE_DIR"/*.view "$STATE_DIR"/*.subs "$STATE_DIR"/*.cards "$STATE_DIR"/*.cards-seen "$STATE_DIR"/*.mode "$STATE_DIR"/%*.log "$STATE_DIR"/*.transcript_path "$STATE_DIR"/*.artifact_dir "$STATE_DIR"/*.refit "$STATE_DIR"/*.refit-due; do
+  for f in "$STATE_DIR"/*.state "$STATE_DIR"/*.ctx "$STATE_DIR"/*.seen "$STATE_DIR"/*.edit "$STATE_DIR"/*.plan "$STATE_DIR"/*.view "$STATE_DIR"/*.subs "$STATE_DIR"/*.cards "$STATE_DIR"/*.cards-seen "$STATE_DIR"/*.mode "$STATE_DIR"/%*.log "$STATE_DIR"/*.transcript_path "$STATE_DIR"/*.artifact_dir "$STATE_DIR"/*.refit "$STATE_DIR"/*.refit-due "$STATE_DIR"/*.layout; do
     [ -e "$f" ] || continue
     wid="${f##*/}"; wid="${wid%.*}"
     if ! printf '%s\n' "$live" | grep -qxF "$wid"; then
@@ -4722,6 +4934,7 @@ main() {
     url)          cmd_url "$@" ;;
     shot)         cmd_shot "$@" ;;
     shell)        cmd_shell "$@" ;;
+    layout)       cmd_layout "$@" ;;
     board)        cmd_board "$@" ;;
     _seen)        mark_seen "${1:-}" ;;
     quit)         cmd_quit "$@" ;;

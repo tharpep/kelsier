@@ -18,7 +18,7 @@ _kel() {
     cword=$COMP_CWORD
   }
 
-  local subcmds="new kill ls rename sidebar url shot shell board quit restore relaunch reload sweep prune doctor config update card sync help"
+  local subcmds="new kill ls rename sidebar url shot shell layout board quit restore relaunch reload sweep prune doctor config update card sync help"
 
   if [ "$cword" -eq 1 ]; then
     COMPREPLY=( $(compgen -W "$subcmds" -- "$cur") )
@@ -67,6 +67,9 @@ _kel() {
       ;;
     sidebar)
       COMPREPLY=( $(compgen -W "on off" -- "$cur") )
+      ;;
+    layout)
+      [ "$cword" -eq 2 ] && COMPREPLY=( $(compgen -W "below editor side main grid columns undo" -- "$cur") )
       ;;
   esac
 }

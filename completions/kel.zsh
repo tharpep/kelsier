@@ -22,6 +22,7 @@ _kel() {
     'url:the dev-server URLs of a worktree'
     'shot:the pane as an SVG, with freeze'
     'shell:a plain shell window, no agent'
+    'layout:arrange the panes of a window (undo puts them back)'
     'board:every agent as a tile, in a popup'
     'quit:save the workspace, then close it all'
     'restore:bring back a previous workspace (--list to choose)'
@@ -71,6 +72,7 @@ _kel() {
       ;;
     restore) compadd -- --list --no-resume ;;
     sidebar) compadd -- on off ;;
+    layout)  (( CURRENT == 3 )) && compadd -- below editor side main grid columns undo ;;
     relaunch)
       _alternative 'flags:flag:(-f)' \
         "agents:agent:($(_kel_names '.agents[] | .name, "\(.group)/\(.name)"'))"

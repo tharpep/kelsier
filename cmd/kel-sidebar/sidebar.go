@@ -106,7 +106,8 @@ type sbModel struct {
 
 	pending tea.Cmd // a command activate() started, returned by the caller
 
-	menu *sbMenu // open over the rows: kel's, from the header, or an entry's
+	menu    *sbMenu       // open over the rows: kel's, from the header, or an entry's
+	layouts *sbLayoutMenu // the layout menu, open over the inspector
 
 	settings bool // the settings screen, in place of the lists
 	setSel   int  // its row the keyboard is on
@@ -599,7 +600,7 @@ func pulseAfter() tea.Cmd {
 
 func (m sbModel) view() sbView {
 	v := buildView(m.doc, m.ui)
-	v.menu = m.menu
+	v.menu, v.layouts = m.menu, m.layouts
 	if m.board {
 		// the list's folds are not the board's: a tile in a shut group or a
 		// quiet trailer stays selected. One the filter hides gives way to
@@ -1027,6 +1028,10 @@ func (m sbModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		nm = s
 	}
+	if _, loaded := msg.(sbLoaded); ok && loaded && s.layouts != nil && len(layoutsFor(s.view().windowPanes(s.layouts.win))) == 0 {
+		s.layouts = nil
+		nm = s
+	}
 	if !ok || s.menu == nil || s.menu.entry == "" {
 		return nm, cmd
 	}
@@ -1170,6 +1175,13 @@ func (m sbModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.MouseMotionMsg:
 		refs := m.lastRefs()
 		m.ui.hover, m.ui.hoverX = msg.Y+1, msg.X
+		if m.layouts != nil && msg.Y >= 0 && msg.Y < len(refs) && strings.HasPrefix(refs[msg.Y].id, "lo:") {
+			for i, l := range layoutsFor(m.view().windowPanes(m.layouts.win)) {
+				if "lo:"+l.name == refs[msg.Y].id {
+					m.layouts.sel = i
+				}
+			}
+		}
 		if m.menu != nil && msg.Y >= 0 && msg.Y < len(refs) && strings.HasPrefix(refs[msg.Y].id, "mi:") {
 			for i, it := range m.menu.items {
 				if "mi:"+it.key == refs[msg.Y].id {
@@ -1199,6 +1211,13 @@ func (m sbModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return lineRef{}
 		}()
+		if m.layouts != nil {
+			if msg.Button != tea.MouseLeft {
+				m.layouts = nil
+				return m, nil
+			}
+			return m.layoutClick(hit, msg.X)
+		}
 		if m.mode == modePick && msg.Button == tea.MouseLeft && (hit.kind == "agent" || hit.kind == "pane") {
 			m.ui.sel = hit.id
 			return m.pick(false)
@@ -1282,8 +1301,8 @@ func (m sbModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case tea.MouseWheelMsg:
-		if m.menu != nil {
-			m.menu = nil
+		if m.menu != nil || m.layouts != nil {
+			m.menu, m.layouts = nil, nil
 			return m, nil
 		}
 		if m.board {
@@ -1357,6 +1376,9 @@ func (m sbModel) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	m.ui.focused = true
 	if m.settings {
 		return m.settingsKey(k)
+	}
+	if m.layouts != nil {
+		return m.layoutKey(k)
 	}
 	if m.menu != nil {
 		// the arrows walk it, enter chooses, esc or any other key closes it
@@ -1624,6 +1646,8 @@ func (m sbModel) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 	case "z":
 		return m, zoomCmd(m.ui.myWindow, m.zoomTarget())
+	case "L", "shift+l":
+		m.openLayouts()
 	case "m":
 		v := m.view()
 		if a, ok := m.agentOf(v.sel); ok && v.windowPanes(a.wid) > 1 {
@@ -1819,6 +1843,7 @@ var sbHelp = [][2]string{
 	{"w", "new worktree agent"},
 	{"|", "split right"},
 	{"-", "split down"},
+	{"L", "layout a window…"},
 	{"`", "next waiting agent"},
 	{"B", "the board"},
 	{"u", "usage (ccusage)"},

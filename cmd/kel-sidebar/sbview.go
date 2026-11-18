@@ -161,6 +161,7 @@ type sbView struct {
 	hoverX               int
 	restore              bool
 	menu                 *sbMenu // open over the rows, or nil
+	layouts              *sbLayoutMenu
 	quota                *fleet.Quota
 }
 
@@ -1211,9 +1212,20 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 		}
 		copy(out[y:], box)
 	}
+	if v.layouts != nil {
+		box := v.layoutLines(w, h)
+		y := max(0, inspEnd-len(box))
+		if h > 0 && y+len(box) > h {
+			y = max(0, h-len(box))
+		}
+		for len(out) < y+len(box) {
+			out = append(out, gap)
+		}
+		copy(out[y:], box)
+	}
 	// hover: the entry under the pointer gets a dim bar where the selection's
 	// would be, so what a click would hit is visible before the click
-	if v.hover > 0 && v.hover <= len(out) && v.menu == nil {
+	if v.hover > 0 && v.hover <= len(out) && v.menu == nil && v.layouts == nil {
 		hl := out[v.hover-1]
 		if id := hl.ref.id; id != "" && id != v.sel && v.inner[v.sel] != id && listKind(hl.ref.kind) {
 			s := hl.s
@@ -1596,7 +1608,7 @@ func selActions(v sbView) (string, string, []sbAct) {
 			if agentID(a.key) == v.sel {
 				acts := []sbAct{{"d", "diff"}, {"f", "files"}, {"e", "edit file"}, {"p", "plan"}, {"h", "history"}, {"i", "cards"}, {"z", "zoom"}}
 				if v.windowPanes(a.wid) > 1 {
-					acts = append(acts, sbAct{"m", "own window"}, sbAct{"M", "move beside…"}, sbAct{"S", "swap with…"})
+					acts = append(acts, sbAct{"m", "own window"}, sbAct{"M", "move beside…"}, sbAct{"S", "swap with…"}, sbAct{"L", "layout ▸"})
 				}
 				acts = append(acts, sbAct{"r", "rename"}, sbAct{"x", "kill"})
 				if a.agent.State != nil && *a.agent.State == "dead" {
@@ -1639,7 +1651,7 @@ func selActions(v sbView) (string, string, []sbAct) {
 			}
 			acts = append(acts, sbAct{"M", "move beside…"})
 			if v.windowPanes(p.WindowID) > 1 {
-				acts = append(acts, sbAct{"S", "swap with…"})
+				acts = append(acts, sbAct{"S", "swap with…"}, sbAct{"L", "layout ▸"})
 			}
 			acts = append(acts, sbAct{"f", "files"}, sbAct{"g", "git"}, sbAct{"e", "nvim"}, sbAct{"i", "cards"}, sbAct{"x", "close"}, sbAct{"z", "zoom"})
 			return "pane", paneLabel(p), acts
@@ -1702,7 +1714,7 @@ func newMenu() []sbAct {
 
 // kelMenu holds kel's own: what the key grid's kel half was.
 func kelMenu(v sbView) []sbAct {
-	acts := []sbAct{{"`", "Next that needs you"}, {"u", "Usage"}, {"v", "Pull requests"}, {";", "Run a kel command"}}
+	acts := []sbAct{{"`", "Next that needs you"}, {"L", "Layout ▸"}, {"u", "Usage"}, {"v", "Pull requests"}, {";", "Run a kel command"}}
 	if v.restore {
 		acts = append(acts, sbAct{"b", "Restore last workspace"})
 	}

@@ -57,6 +57,10 @@ kel rename <newname>   rename THIS window and keep its record in sync
 kel sidebar on|off     the sidebar pane in every window (on by default; off is
                        remembered until you turn it back on)
 kel shell [dir]        a plain shell window there — no agent, no record
+kel layout [name] [win]  arrange a window's own panes, right of the sidebar:
+                       below, editor, side, main, grid, columns. No name lists
+                       the ones that fit; `kel layout undo` puts the last back
+                       (the sidebar's L)
 kel board              every agent as a tile, in a popup over the window
                        (the sidebar's B, Ctrl-b B; esc closes)
 kel quit [-f]          save the workspace, then close it all; refuses while a
@@ -175,12 +179,12 @@ you — the board's header and the rail count the same — a click is
 
 `+ New` opens a menu of what makes something: a new agent, an agent in a
 worktree, split right, split down, a shell window in the selected space. `⋯` opens kel's own: next that needs you,
-usage, pull requests, a kel command, restore (while a previous workspace
+layout ▸, usage, pull requests, a kel command, restore (while a previous workspace
 waits), all keys, quit. **Right-click any agent, pane or repo heading** (or
 press `→`, or click the inspector's `⋯`) to open its menu over the inspector:
 everything it can do. An agent's has go to it, peek, diff, files, edit last
-file, plan, history, cards, zoom, own window, move beside… and swap with…
-(when it shares its window), rename, kill, and relaunch when it is dead. Every item shows its key on the right, so the keys are there when
+file, plan, history, cards, zoom, own window, move beside…, swap with… and
+layout ▸ (when it shares its window), rename, kill, and relaunch when it is dead. Every item shows its key on the right, so the keys are there when
 you want them, learned by using the mouse. A menu draws over what is there,
 so no row moves. It closes on `←`, esc, a click outside it or the wheel; `↑`
 `↓` and enter walk it, and a letter it lists runs its item. The header menus
@@ -405,6 +409,17 @@ a window (`kel new --split`). A pane selected in the sidebar has:
 | `S` swap with… | the same picker, inside its own window; agents have it too |
 | `x` close | asks first, a shell at its prompt too |
 | `z` zoom | |
+
+**Layouts.** `L` (or `Layout ▸` in `⋯` or an entry's menu) opens a menu
+over the inspector for the selected agent's or pane's window, else the
+sidebar's own: a small picture of each named layout that fits its number of
+panes, its words and its key. `1`–`9` or `enter` apply one, `u` puts the
+layout before the last one back, esc closes. Agents go first, an editor
+(nvim, vim, hx…) last: *agent + shell* (the first pane over the rest, 65%),
+*agent + editor* (the editor right, 40%), *side by side* (two panes),
+*main + stack* (the first pane left, 60%, three or more), *grid* (four),
+*even columns* (three or more). Only your panes move; the sidebar keeps its
+place and width. `kel layout <name>` does the same from a shell.
 
 kel moves a pane only when you choose one of these. While a window is zoomed the bar says
 `⤢ zoomed · click to restore`. Dragging a divider turns it blue and heavy

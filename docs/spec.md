@@ -154,6 +154,18 @@ border drag already resizes, and never into another window, where the resize
 of a running Claude was the objection (§5b, backlog #42). No move targets the
 sidebar or lands left of it; `fit` re-docks it after.
 
+**Named layouts, picked by hand** (*2026-11-18*, round 7). zellij's swap
+layouts pick a variant by pane count on their own; kel offers the same kind
+of variants only when asked (`L`, `kel layout <name>`), so invariant 4 holds.
+A layout is applied as one tmux layout string over the whole window whose
+first cell is the sidebar at the width `fit` wants: `fit` finds the sidebar
+docked and has nothing to answer, so the two cannot loop (#33). A preset
+`select-layout` would stretch the sidebar and start a re-make. tmux deals a
+layout's cells to panes in pane-list order, so the panes are swapped into the
+cells' order in the same command list, and no hook sees the sidebar swapped
+away. The window's previous layout string is kept (`<window-id>.layout`) for
+one undo.
+
 - **Sidebar** — a Go TUI (Bubble Tea v2), grown from `kel top`. *Since
   2026-11-18 (the hybrid, §5d):* one list of agents grouped under their repo,
   each one line, an inspector for the selected entry above the footer, and the

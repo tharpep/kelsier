@@ -1229,6 +1229,34 @@ ok "  ...nothing moves beside the sidebar"        '[[ "$JOUT" == *"sidebar stays
 JOUT="$("$KEL" _join "$RS" "$RS" right 2>&1)"
 ok "  ...nor beside itself"                       '[[ "$JOUT" == *"another pane"* ]]'
 
+# named layouts: one layout string with the sidebar's cell at fit's width, so
+# fit has nothing to re-make (#33) and the old layout comes back with undo
+RSB="$(sidebar_of "$RW")"
+rm -f "$STATE/$RW.refit"
+ok "kel layout lists what fits the window"        '[ "$("$KEL" layout "" "$RW" | cut -d" " -f1 | tr "\n" " ")" = "below editor side " ]'
+"$KEL" layout side "$RW" >/dev/null 2>&1
+SIDE="$(tmux display -p -t "$RW" '#{window_layout}')"
+ok "kel layout side puts the panes side by side"  '[ "$(tmux display -p -t "$RA" "#{pane_top}")" = "$(tmux display -p -t "$RS" "#{pane_top}")" ] && [ "$(tmux display -p -t "$RA" "#{pane_left}")" -lt "$(tmux display -p -t "$RS" "#{pane_left}")" ]'
+ok "  ...saving the old layout for undo"          '[ "$(grep -c . "$STATE/$RW.layout")" = 2 ]'
+"$KEL" layout below "$RW" >/dev/null 2>&1
+ok "kel layout below puts the shell under the agent" '[ "$(tmux display -p -t "$RA" "#{pane_top}")" -lt "$(tmux display -p -t "$RS" "#{pane_top}")" ] && [ "$(tmux display -p -t "$RA" "#{pane_left}")" = "$(tmux display -p -t "$RS" "#{pane_left}")" ]'
+ok "  ...the sidebar the same pane, docked at its width" '[ "$(sidebar_of "$RW")" = "$RSB" ] && docked $RW'
+"$KEL" layout undo "$RW" >/dev/null 2>&1
+ok "kel layout undo puts the last layout back"    '[ "$(tmux display -p -t "$RW" "#{window_layout}")" = "$SIDE" ] && [ ! -f "$STATE/$RW.layout" ]'
+JOUT="$("$KEL" layout undo "$RW" 2>&1)"
+ok "  ...once"                                    '[[ "$JOUT" == *"no layout to undo"* ]]'
+JOUT="$("$KEL" layout grid "$RW" 2>&1)"
+ok "kel layout refuses one that does not fit"     '[[ "$JOUT" == *"grid fits 4 panes"* ]] && [ "$(tmux display -p -t "$RW" "#{window_layout}")" = "$SIDE" ]'
+# tmux deals a layout's cells in pane-list order: a sidebar that is not first
+# in the list is swapped there in the same command, never seen elsewhere
+tmux set-hook -gu window-layout-changed
+tmux swap-pane -d -s "$RSB" -t "$(tmux list-panes -t "$RW" -F '#{pane_id}' | tail -1)"
+ok "  ...(the sidebar is last in the list now)"   '[ "$(tmux list-panes -t "$RW" -F "#{pane_id}" | tail -1)" = "$RSB" ]'
+"$KEL" layout below "$RW" >/dev/null 2>&1
+ok "  ...and lays out panes whatever their list order" '[ "$(sidebar_of "$RW")" = "$RSB" ] && docked $RW && [ "$(tmux display -p -t "$RA" "#{pane_top}")" -lt "$(tmux display -p -t "$RS" "#{pane_top}")" ]'
+tmux source-file "$WORK/hooks.conf"
+ok "fit never had to re-make the sidebar for any of it" '[ ! -f "$STATE/$RW.refit" ]'
+
 # F9: the window's width picks full, rail or none (spec §5b)
 NW="$(tmux new-window -d -P -F '#{window_id}' -t '=keltest:' -c "$WORK/repos/api-gw" 'sleep 9999')"
 "$KEL" _sidebar ensure "$NW"
