@@ -160,8 +160,10 @@ func (v sbView) inspectAgent(a sbAgent, w int, now int64) []irow {
 
 	type seg struct{ s, key string }
 	var segs []seg
-	for _, sh := range v.under[a.key] {
-		segs = append(segs, seg{paneGlyph(sh.pane.Kind) + " " + paneLabel(sh.pane), "sel:" + sh.pane.PaneID})
+	// numbered, because two `$ bash` looked the same, and the number is the
+	// key that selects it (paneKey)
+	for i, sh := range v.under[a.key] {
+		segs = append(segs, seg{fmt.Sprintf("%s%d%s ", bold, i+1, reset) + paneGlyph(sh.pane.Kind) + " " + paneLabel(sh.pane), "sel:" + sh.pane.PaneID})
 	}
 	if n := runningCount(a.agent); n > 0 {
 		t := fmt.Sprintf("%d subagents", n)
@@ -182,6 +184,15 @@ func (v sbView) inspectAgent(a sbAgent, w int, now int64) []irow {
 			sep = dim + " · " + reset
 		}
 		n := visWidth(sep + sg.s)
+		if i == 0 && n > w-2 {
+			// the first is cut rather than dropped, leaving room to say how
+			// many follow: a server's ports are why the row is there
+			room := w - 2
+			if len(segs) > 1 {
+				room -= len(fmt.Sprintf(" +%d", len(segs)-1))
+			}
+			sg.s, n = truncateStyled(sg.s, room), room
+		}
 		if x+n > w-2 {
 			if rest := fmt.Sprintf(" +%d", len(segs)-i); x+len(rest) <= w-2 {
 				four.left += dim + rest + reset

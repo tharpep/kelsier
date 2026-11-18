@@ -373,7 +373,8 @@ in any terminal:
   permission mode (`plan`, `edits`, `bypass`, `dontask`; nothing for
   `default`) and `wt` faint on the right; the other panes of its window, its
   running subagents and its background children, each pane and child a click
-  that selects it; its keys (`↵ go  ␣ peek  ⋯`, and `R relaunch` when dead).
+  that selects it, the panes numbered so `1`–`9` select them by key and two
+  `$ bash` read apart (*2026-11-18*); its keys (`↵ go  ␣ peek  ⋯`, and `R relaunch` when dead).
   A pane: command and ports, its window, cwd, git position, an unseen card or
   whose window it shares. A repo heading: agent count, branch and position,
   path, ports. Nothing selected, it is blank and keeps its height. A state

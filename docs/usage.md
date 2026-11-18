@@ -105,7 +105,7 @@ Keys below use `Ctrl-b`, tmux's default prefix; if you changed yours, kel's own 
 | `Ctrl-b ,` | rename this window (routes through `kel rename`) |
 | `Ctrl-b \|` / `-` | split, keeping the current directory |
 | `Ctrl-b [` | scroll mode for a shell pane (`q` to leave) |
-| right-click | on the sidebar, the row's menu, with the keyboard staying in the sidebar. Elsewhere, tmux's menu for the pane, tab or session — it stays open until you click an item or outside it (tmux 3.2+; below that it is tmux's press-drag-release menu) |
+| right-click | on the sidebar, the row's menu, with the keyboard staying in the sidebar. Elsewhere, tmux's menu for the pane, tab or session (its splits open in the pane's directory) — it stays open until you click an item or outside it (tmux 3.2+; below that it is tmux's press-drag-release menu) |
 | mouse wheel | scroll an agent's conversation (one page per notch). In a pane on the normal screen it scrolls tmux's history: up shows `[5/1999]` and you are reading back; down to the bottom and you are live again — no `esc`. Over the status bar the wheel does nothing (tmux's default would switch windows) |
 | drag, double-click (word), triple-click (line), or `Ctrl-b [` then enter | copy to the system clipboard, through `pbcopy` / `wl-copy` / `xclip` / `clip.exe` (`KEL_COPY_CMD` overrides). Hold **shift** instead in a pane whose app grabs the mouse — Claude Code sometimes does, and tmux never sees the drag |
 | middle-click | paste the system clipboard into that pane, bracketed, through `pbpaste` / `wl-paste` / `xclip -o` / `powershell.exe Get-Clipboard` (`KEL_PASTE_CMD` overrides). An empty clipboard, or no tool, is said in the message line. A program that takes the mouse itself still gets the click |
@@ -153,9 +153,12 @@ last tool call), what it waits for, the error, or its **last message** (the
 first line of its last reply) — or an unseen card — with its task progress
 (`3/7`) on the right; the model, context and cost (`Opus 5.5 · 36% · $10.65`)
 with its permission mode (`plan`, `edits`, `bypass`, `dontask`) and `wt` when
-it works in a linked worktree; the other panes of its window, its running
-subagents and background children; and its keys, `↵ go  ␣ peek  ⋯`. A pane or
-child there is a click that selects it. For a repo heading: its agents,
+it works in a linked worktree; the other panes of its window, numbered
+(`1 $ bash · 2 ▸ nvim`), its running subagents and background children; and
+its keys, `↵ go  ␣ peek  ⋯`. A pane or child there is a click that selects
+it, and `1`–`9` select those panes by key, from the agent or from one of
+them. `x` on an agent asks `kill docs (pane only)?` when its window holds
+anything else of yours, and `kill docs + window?` when it is the last. For a repo heading: its agents,
 branch, path and ports. Nothing known, no line.
 
 The foot is `●3 need you` in amber while any agent waits, errored, or
@@ -401,7 +404,7 @@ a window (`kel new --split`). A pane selected in the sidebar has:
 | `m` own window | takes the pane out into a window of its own, when its window holds another pane |
 | `M` move beside… | the list becomes a picker: click or walk to an agent or pane in another window, `enter` puts it to the right, `-` below. The window it left closes if nothing but the sidebar remains. Not for agents: a resize leaves stale lines in Claude Code's scrollback (backlog #42) |
 | `S` swap with… | the same picker, inside its own window; agents have it too |
-| `x` close | a shell at once, anything else asks |
+| `x` close | asks first, a shell at its prompt too |
 | `z` zoom | |
 
 kel moves a pane only when you choose one of these. While a window is zoomed the bar says

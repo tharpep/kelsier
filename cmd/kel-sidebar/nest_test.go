@@ -98,7 +98,7 @@ func TestPaneNestsUnderItsAgent(t *testing.T) {
 			t.Errorf("the agent's row has no server mark: %q", r)
 		}
 	}
-	if got := inspectorText(v); !strings.Contains(got, " ▪ python3 :18765 · $ bash") {
+	if got := inspectorText(v); !strings.Contains(got, "1 ▪ python3 :18765 · 2 $ bash") {
 		t.Errorf("the inspector does not list the window's panes:\n%s", got)
 	}
 	if !strings.Contains(plain(out), "▸ shells                     1") {
@@ -150,5 +150,46 @@ func TestWtTagOnWorktreeAgentOnly(t *testing.T) {
 		if strings.Contains(r, "● feat-login") && (strings.Contains(r, "plan") || strings.Contains(r, " wt")) {
 			t.Errorf("a tag on the row: %q", r)
 		}
+	}
+}
+
+// A digit selects that pane of the agent's inspector, from the agent or from
+// a sibling pane; a number past the list, or with nothing nested, does nothing.
+func TestDigitSelectsAnInspectorPane(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	m := sbModel{doc: nestDoc(), width: 32, height: 40, visible: true, ui: uiState{sel: agentID("%1")}}
+	if got := inspectorText(m.view()); !strings.Contains(got, "1 ▪ python3 :18765 · 2 $ bash") {
+		t.Errorf("the inspector's panes are not numbered:\n%s", got)
+	}
+	if m = press(m, "2"); m.view().sel != "%3" {
+		t.Errorf("2 from the agent selected %q, want %%3", m.view().sel)
+	}
+	if m = press(m, "1"); m.view().sel != "%2" {
+		t.Errorf("1 from a nested pane selected %q, want %%2", m.view().sel)
+	}
+	if m = press(m, "7"); m.view().sel != "%2" {
+		t.Errorf("7 with two panes moved the selection to %q", m.view().sel)
+	}
+}
+
+// x asks on every pane, a shell at its prompt included, and the kill question
+// says whether the window goes with the agent.
+func TestXAsksAndSaysWhatCloses(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	m := sbModel{doc: nestDoc(), width: 32, height: 40, visible: true, ui: uiState{sel: "%3"}}
+	if m = press(m, "x"); m.mode != modeClose || !strings.Contains(plain(m.render()), "close bash?") {
+		t.Errorf("x on a shell did not ask:\n%s", plain(m.render()))
+	}
+	m = press(m, "n")
+	m.ui.sel = agentID("%1")
+	if m = press(m, "x"); !strings.Contains(plain(m.render()), "kill feat-login (pane only)?") {
+		t.Errorf("an agent beside other panes does not say only its pane goes:\n%s", plain(m.render()))
+	}
+	m = press(m, "n")
+	d := nestDoc()
+	*d.Panes = (*d.Panes)[:1]
+	m = sbModel{doc: d, width: 32, height: 40, visible: true, ui: uiState{sel: agentID("%1")}}
+	if m = press(m, "x"); !strings.Contains(plain(m.render()), "kill feat-login + window?") {
+		t.Errorf("an agent alone does not say its window goes:\n%s", plain(m.render()))
 	}
 }

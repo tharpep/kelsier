@@ -718,6 +718,26 @@ func (m *sbModel) move(d int) {
 	m.saveShared()
 }
 
+// paneKey selects the n-th pane the selected agent's inspector lists, from
+// the agent or from one of those panes: they have no row of their own, so a
+// click was the only way to them.
+func (m *sbModel) paneKey(n int) {
+	v := m.view()
+	owner := v.sel
+	if o := v.inner[owner]; o != "" {
+		owner = o
+	}
+	for _, a := range v.agents {
+		if agentID(a.key) == owner {
+			if shs := v.under[a.key]; n <= len(shs) {
+				m.ui.sel = shs[n-1].pane.PaneID
+				m.saveShared()
+			}
+			return
+		}
+	}
+}
+
 func (m *sbModel) toggle(key string, open bool) {
 	if m.ui.expanded == nil {
 		m.ui.expanded = map[string]bool{}
@@ -1564,6 +1584,8 @@ func (m sbModel) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.move(1)
 	case "k", "up":
 		m.move(-1)
+	case "1", "2", "3", "4", "5", "6", "7", "8", "9":
+		m.paneKey(int(k[0] - '0'))
 	case "enter":
 		v := m.view()
 		m.activate(v.sel)
@@ -1624,10 +1646,9 @@ func (m sbModel) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.mode, m.target, m.pickVerb, m.msg, m.msgBad = modePick, v.sel, verb, "", false
 	case "r", "x":
 		v := m.view()
+		// a shell asks too: one at its prompt may still hold a background
+		// job or the scrollback you wanted, and every x asking is one rule
 		if p, ok := m.paneOf(v.sel); ok && k == "x" {
-			if p.Kind == "shell" {
-				return m, closePaneCmd(p.PaneID)
-			}
 			m.mode, m.target = modeClose, p.PaneID
 			return m, nil
 		}
@@ -1768,6 +1789,7 @@ var sbHelp = [][2]string{
 	{"z", "zoom"},
 	{"m", "own window"},
 	{"S", "swap places with…"},
+	{"1-9", "its window's panes"},
 	{"#", "a pane"},
 	{"space", "peek at its screen"},
 	{"m", "own window"},
