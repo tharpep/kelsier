@@ -2381,12 +2381,17 @@ panel_claude() { # dir title
 # over the window, the way kel's other popups open. It reads the sidebar's own
 # selection, so what you pick on it is selected in the sidebar after. Not a
 # zoom of the sidebar pane: resizing that pane is what #33's fit loop fed on.
+# KEL_PR is handed over by name: the popup's session takes the server's
+# environment, not this process's, and the board's CI and PR refresh are
+# calls to github.com that `pr = off` must stop (found in a live rig: the
+# board ran without it).
 cmd_board() {
   need tmux
   [ -x "$KEL_SIDEBAR_BIN" ] || die "kel-sidebar is not built — run ./install.sh (needs Go)"
   KEL_POPUP_W="${KEL_POPUP_W:-95%}" KEL_POPUP_H="${KEL_POPUP_H:-90%}" \
     popup "${PWD:-$HOME}" "board · ↵ go · v face · esc closes" \
-      env "KEL_BIN=$SELF" "KEL_SIDEBAR_BG=${KEL_SIDEBAR_BG:-}" "$KEL_SIDEBAR_BIN" --board
+      env "KEL_BIN=$SELF" "KEL_SIDEBAR_BG=${KEL_SIDEBAR_BG:-}" "KEL_PR=${KEL_PR:-}" "KEL_PR_TTL=${KEL_PR_TTL:-}" \
+        "$KEL_SIDEBAR_BIN" --board
 }
 
 # a: an agent's window marked seen without visiting it — the epoch the shown

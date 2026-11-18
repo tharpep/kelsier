@@ -289,6 +289,7 @@ rm -f "$GHR/wip.txt"
 # `gh pr checks`. Through kel _fleet, the path the board's load runs
 mkdir -p "$STATE/pr-cache"
 printf '[{"number":7,"sha":"%s","merged":false,"state":"open"}]\n' "$(git -C "$GHR" rev-parse HEAD)" > "$STATE/pr-cache/example__ghrepo.sha.json"
+date +%s > "$STATE/pr-cache/example__ghrepo.sha.json.at"   # fresh: no refresh races the checks below
 GHPR() { PATH="$WORK/nogh2:$PATH" "$@" "$KEL" _fleet --board | jq -c '.agents[]|select(.name=="gh1")|.pr'; }
 rm -f "$WORK/gh.calls" "$STATE/pr-cache/"*.ci.json
 pr="$(GHPR env)"
@@ -298,6 +299,23 @@ ok "  ...and a failing gh leaves CI null"           '[ "$(printf "%s" "$pr" | jq
 rm -f "$WORK/gh.calls" "$STATE/pr-cache/"*.ci.json
 pr="$(GHPR env KEL_PR=off)"
 ok "  ...and pr = off asks nothing"                 '[ ! -f "$WORK/gh.calls" ] && [ "$(printf "%s" "$pr" | jq -r ".ci")" = null ]'
+# past its TTL the cache is refreshed by a detached kel-fleet, never inline:
+# the board's load answers from the stale cache at once
+echo 1 > "$STATE/pr-cache/example__ghrepo.sha.json.at"
+pr="$(GHPR env KEL_PR=off)"
+ok "a stale pr-cache under pr = off starts no refresh" '[ ! -f "$WORK/gh.calls" ] && [ ! -e "$STATE/pr-cache/example__ghrepo.sha.json.refreshing" ]'
+# CI already answered for this head, so the only gh call left is the refresh
+printf '{"7":{"sha":"%s","ci":null,"at":%s}}' "$(git -C "$GHR" rev-parse HEAD)" "$(date +%s)" > "$STATE/pr-cache/example__ghrepo.ci.json"
+rm -f "$WORK/gh.calls"
+pr="$(GHPR env)"
+ok "  ...with pr on, the board reads the stale cache"  '[ "$(printf "%s" "$pr" | jq -r ".number")" = 7 ]'
+ok "  ...while a detached kel-fleet asks gh"          'wait_until "[ -f \"$WORK/gh.calls\" ]" 50'
+ok "  ...and lets the next stale read try again"      'wait_until "[ ! -e \"$STATE/pr-cache/example__ghrepo.sha.json.refreshing\" ]" 50'
+mkdir -p "$WORK/cfg-pr/kel"; printf 'pr = off\n' > "$WORK/cfg-pr/kel/config.toml"
+export KEL_POPUP_TRACE="$WORK/pr-popups"; : > "$KEL_POPUP_TRACE"
+( unset KEL_PR; XDG_CONFIG_HOME="$WORK/cfg-pr" "$KEL" board ) >/dev/null 2>&1
+ok "config's pr = off reaches the board's popup"      'grep -q " KEL_PR=off " "$KEL_POPUP_TRACE"'
+unset KEL_POPUP_TRACE
 
 section "legacy flat records migrate"
 reset

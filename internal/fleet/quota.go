@@ -58,7 +58,7 @@ func quotaRetry(ttl int64) int64 {
 	return min(retry, ttl)
 }
 
-func quotaPROff() bool {
+func prOff() bool {
 	switch os.Getenv("KEL_PR") {
 	case "0", "off", "no", "false":
 		return true
@@ -69,7 +69,7 @@ func quotaPROff() bool {
 // refreshQuotaCmd runs quota_cmd detached if the cache is stale and KEL_PR is not off.
 func refreshQuotaCmd(sd string, now int64) {
 	cmdStr := quotaCmd()
-	if cmdStr == "" || quotaPROff() {
+	if cmdStr == "" || prOff() {
 		return
 	}
 	ttl := quotaTTL()

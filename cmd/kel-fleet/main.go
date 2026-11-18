@@ -16,12 +16,12 @@ import (
 	"github.com/tharpep/kelsier/internal/fleet"
 )
 
-func detachedRefresh(string) {
+func detached(args ...string) {
 	exe, err := os.Executable()
 	if err != nil {
 		return
 	}
-	cmd := exec.Command(exe, "--refresh-claude-agents")
+	cmd := exec.Command(exe, args...)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	if cmd.Start() == nil {
 		go cmd.Wait()
@@ -29,7 +29,12 @@ func detachedRefresh(string) {
 }
 
 func main() {
-	fleet.StartClaudeRefresh = detachedRefresh
+	fleet.StartClaudeRefresh = func(string) { detached("--refresh-claude-agents") }
+	fleet.StartPRRefresh = func(dir string) { detached("--refresh-pr", dir) }
+	if len(os.Args) == 3 && os.Args[1] == "--refresh-pr" {
+		fleet.RefreshPR(os.Args[2])
+		return
+	}
 	var opt fleet.Options
 	for _, a := range os.Args[1:] {
 		switch a {

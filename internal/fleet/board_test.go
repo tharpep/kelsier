@@ -4,8 +4,10 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestParseHistory(t *testing.T) {
@@ -164,5 +166,48 @@ func TestDiffAgainstTheMergeBase(t *testing.T) {
 	}
 	if d := diffOf(t.TempDir()); d != nil {
 		t.Errorf("no repo read %+v, want null", *d)
+	}
+}
+
+// A pr-cache past its TTL starts one refresh off the board's path, and none
+// under pr = off, while one is running, while the cache is fresh, or for a
+// checkout with uncommitted work.
+func TestBoardRefreshesAStalePRCacheLater(t *testing.T) {
+	dir := ghRepo(t)
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	t.Setenv("KEL_PR", "")
+	var started []string
+	old := StartPRRefresh
+	StartPRRefresh = func(d string) { started = append(started, d) }
+	t.Cleanup(func() { StartPRRefresh = old })
+	f := prCacheFile(dir)
+
+	t.Setenv("KEL_PR", "off")
+	prOf(dir)
+	if len(started) != 0 {
+		t.Fatal("pr = off started a refresh")
+	}
+	t.Setenv("KEL_PR", "")
+	prOf(dir)
+	prOf(dir)
+	if len(started) != 1 || started[0] != dir {
+		t.Fatalf("a stale cache started %v, want one refresh of %s", started, dir)
+	}
+	if _, err := os.Stat(f + ".refreshing"); err != nil {
+		t.Errorf("no .refreshing marker: %v", err)
+	}
+	_ = os.Remove(f + ".refreshing")
+	WriteAtomic(f+".at", []byte(strconv.FormatInt(time.Now().Unix(), 10)+"\n"))
+	prOf(dir)
+	if len(started) != 1 {
+		t.Error("a fresh cache started a refresh")
+	}
+	_ = os.Remove(f + ".at")
+	if err := os.WriteFile(filepath.Join(dir, "wip.txt"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	prOf(dir)
+	if len(started) != 1 {
+		t.Error("uncommitted work started a refresh: it must never be why kel calls gh")
 	}
 }

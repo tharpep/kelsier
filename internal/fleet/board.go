@@ -174,13 +174,15 @@ func diffOf(root string) *Diff {
 	return d
 }
 
-// prOf is the PR whose head is this checkout's HEAD, from pr-cache, which
-// only the --pr path refreshes: the board never adds a call for the list.
+// prOf is the PR whose head is this checkout's HEAD, from pr-cache. A cache
+// past its TTL starts a refresh off the load's path (refreshPRLater) and is
+// read as it stands meanwhile: the board never waits on the network.
 func prOf(root string) *PR {
 	f := prCacheFile(root)
 	if f == "" {
 		return nil
 	}
+	refreshPRLater(root, f)
 	head, ok := git(root, "rev-parse", "HEAD")
 	if !ok || head == "" {
 		return nil
@@ -201,6 +203,55 @@ func prOf(root string) *PR {
 		p.CI = ciOf(root, p.Number, head)
 	}
 	return p
+}
+
+// StartPRRefresh runs RefreshPR away from the caller: a goroutine in the
+// long-lived board, a detached `kel-fleet --refresh-pr` from the CLI, which
+// exits before a goroutine would finish (cmd/kel-fleet).
+var StartPRRefresh = func(dir string) { go RefreshPR(dir) }
+
+// prRefreshing is how long a started refresh holds off another: one gh call
+// per repo however many agents and boards read it, and a gh that failed is
+// asked again after it, not on every reload.
+const prRefreshing = 60
+
+// RefreshPR refetches dir's pr-cache when it is stale, as the --pr path
+// does, and lets the next stale read start another.
+func RefreshPR(dir string) {
+	prRefresh(dir)
+	if f := prCacheFile(dir); f != "" {
+		_ = os.Remove(f + ".refreshing")
+	}
+}
+
+// refreshPRLater starts a refresh of a pr-cache past its TTL. Never under
+// pr = off, never twice at once (the .refreshing epoch), and never for a
+// checkout with uncommitted files: work nobody has committed must not be
+// the reason kel talks to github.com, as landMap keeps it.
+func refreshPRLater(root, f string) {
+	if prOff() {
+		return
+	}
+	now := time.Now().Unix()
+	if epochIn(f+".at") > now-prTTL() || epochIn(f+".refreshing") > now-prRefreshing {
+		return
+	}
+	if local(root).dirty != 0 {
+		return
+	}
+	_ = os.MkdirAll(prCacheDir(), 0o755)
+	WriteAtomic(f+".refreshing", []byte(strconv.FormatInt(now, 10)+"\n"))
+	StartPRRefresh(root)
+}
+
+// epochIn is the epoch a one-line file holds; 0 when it is absent or junk.
+func epochIn(path string) int64 {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return 0
+	}
+	n, _ := strconv.ParseInt(strings.TrimSpace(string(b)), 10, 64)
+	return n
 }
 
 // matchPR is the PR headed by sha. A cache written before kel kept the
