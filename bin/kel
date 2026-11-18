@@ -659,6 +659,26 @@ sidebar_refit() { # wid -> 0 and stamps <wid>.refit, unless it was stamped under
   return 0
 }
 
+# A capped re-make used to be dropped, and nothing re-fits a window until its
+# layout changes again: prefix M-5 then M-2 inside 30 s left the sidebar a
+# full-width strip across the top for good.  So the cap defers instead: one
+# detached `fit` per window, once the 30 s are up.  <wid>.refit-due holds the
+# epoch it fires at, so a sleeper that died (a reboot) cannot block the next
+# one for long.  Not `join-pane -f` to move it back: that postdates the 3.0
+# floor, and a move fires window-layout-changed like a re-make, so it could
+# loop the same way (#33).  Pinned by "a capped re-make is deferred, not dropped".
+sidebar_refit_later() { # wid
+  local due="$STATE_DIR/$1.refit-due" now last at
+  now="$(date +%s)"
+  at="$(cat "$due" 2>/dev/null)"
+  case "$at" in ''|*[!0-9]*) ;; *) [ "$now" -le $((at + 5)) ] && return 0 ;; esac
+  last="$(cat "$STATE_DIR/$1.refit" 2>/dev/null)"
+  case "$last" in ''|*[!0-9]*) last=0 ;; esac
+  at=$((last + 31)); [ "$at" -gt "$now" ] || at=$((now + 1))
+  printf '%s\n' "$at" > "$due"
+  ( ( sleep $((at - now)); [ -e "$due" ] && rm -f "$due" && "$SELF" _sidebar fit ) </dev/null >/dev/null 2>&1 & )
+}
+
 sidebar_fit() {
   local flag id w wid zoomed l t b ph wh ww pick pos size want
   sidebar_width_opts
@@ -674,7 +694,12 @@ sidebar_fit() {
       fi
       case "$pos" in
         hidden) tmux kill-pane -t "$id" 2>/dev/null ;;
-        moved)  sidebar_refit "$wid" || { printf 'fit: %s re-made under 30s ago, left alone\n' "$wid" >> "$STATE_DIR/sidebar-fail.log"; continue; }
+        moved)  if ! sidebar_refit "$wid"; then
+                  printf 'fit: %s re-made under 30s ago, re-fit deferred\n' "$wid" >> "$STATE_DIR/sidebar-fail.log"
+                  sidebar_refit_later "$wid"
+                  continue
+                fi
+                rm -f "$STATE_DIR/$wid.refit-due"
                 tmux kill-pane -t "$id" 2>/dev/null; sidebar_ensure "$wid" ;;
         docked) [ "$w" != "$want" ] \
                   && tmux resize-pane -t "$id" -x "$want" 2>/dev/null ;;
@@ -978,7 +1003,7 @@ prune_state() {
   local live f wid panes pane
   live="$(tmux list-windows -a -F '#{window_id}' 2>/dev/null; tmux list-panes -a -F '#{pane_id}' 2>/dev/null)"
   [ -n "$live" ] || return 0
-  for f in "$STATE_DIR"/*.state "$STATE_DIR"/*.ctx "$STATE_DIR"/*.seen "$STATE_DIR"/*.edit "$STATE_DIR"/*.plan "$STATE_DIR"/*.view "$STATE_DIR"/*.subs "$STATE_DIR"/*.cards "$STATE_DIR"/*.cards-seen "$STATE_DIR"/*.mode "$STATE_DIR"/%*.log "$STATE_DIR"/*.transcript_path "$STATE_DIR"/*.artifact_dir "$STATE_DIR"/*.refit; do
+  for f in "$STATE_DIR"/*.state "$STATE_DIR"/*.ctx "$STATE_DIR"/*.seen "$STATE_DIR"/*.edit "$STATE_DIR"/*.plan "$STATE_DIR"/*.view "$STATE_DIR"/*.subs "$STATE_DIR"/*.cards "$STATE_DIR"/*.cards-seen "$STATE_DIR"/*.mode "$STATE_DIR"/%*.log "$STATE_DIR"/*.transcript_path "$STATE_DIR"/*.artifact_dir "$STATE_DIR"/*.refit "$STATE_DIR"/*.refit-due; do
     [ -e "$f" ] || continue
     wid="${f##*/}"; wid="${wid%.*}"
     if ! printf '%s\n' "$live" | grep -qxF "$wid"; then

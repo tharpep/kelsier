@@ -110,6 +110,7 @@ change; migrate old records in `migrate_meta`.
 | `gh-dash.yml` | the config `v` writes for gh dash each time — every open space's repos; not the user's own |
 | `sidebar-fail.log` | a dying sidebar's own stderr (`kel-sidebar 2>>`), appended. Temporary: backlog #41 is fixed, and it goes once daily use stays quiet |
 | `<window-id>.refit` | one epoch: when `fit` last re-made that window's sidebar. `fit` re-makes at most one per window per 30 s and logs the skip to `sidebar-fail.log` (#33) |
+| `<window-id>.refit-due` | one epoch: when the `fit` a capped re-make deferred will run. Present while a detached `kel _sidebar fit` sleeps out the cap; a re-make removes it, and one past its epoch reads stale |
 | `server` | `<pid> <start_time>`: the tmux server the pane- and window-keyed files were last reaped for. On a new server `kel-fleet` (on every read, or `--reap-stale` when bash sees a new pid in `$TMUX`) removes every `%*` / `@*` file, `.stash/` and `.waiting/` entry and `banner` last written before that server started, then rewrites it (backlog #44). Absent reads as a new server |
 | `ports.json` | `{at, panes:{<pane pid>: [ports]}}` — the listening-port scan behind `_fleet --panes`, reused for 10 s |
 

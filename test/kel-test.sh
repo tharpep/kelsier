@@ -1170,6 +1170,14 @@ tmux swap-pane -s "$LA" -t "$SB1"; "$KEL" _sidebar fit
 ok "a second re-make inside thirty seconds is skipped" '[ "$(sidebar_of "$LW")" = "$SB1" ]'
 ok "  ...and logged once, naming the window" '[ "$(cat "$STATE/sidebar-fail.log" | grep -c .)" = $((FL0 + 1)) ] && tail -1 "$STATE/sidebar-fail.log" | grep -qF "$LW"'
 rm -f "$STATE/$LW.refit"; "$KEL" _sidebar fit
+ok "  ...a re-make clears the deferral it made redundant" '[ ! -f "$STATE/$LW.refit-due" ]'
+# prefix M-5 then M-2 inside 30 s left a full-width strip for good: the cap
+# defers its re-make to when the 30 s are up, three seconds away here
+SB2="$(sidebar_of "$LW")"
+printf '%s\n' "$(( $(date +%s) - 28 ))" > "$STATE/$LW.refit"
+tmux swap-pane -s "$LA" -t "$SB2"; "$KEL" _sidebar fit
+ok "a capped re-make is deferred, not dropped"   '[ -f "$STATE/$LW.refit-due" ] && tail -1 "$STATE/sidebar-fail.log" | grep -q "re-fit deferred"'
+ok "  ...and re-docks once the cap is up"        'wait_until "leftdocked $LW && [ \"\$(sidebar_of $LW)\" != $SB2 ]" 80 && [ ! -f "$STATE/$LW.refit-due" ]'
 tmux set-option -wu -t "$LW" window-size; tmux set-option -wu -t "$LW" pane-border-status; tmux resize-window -A -t "$LW"
 grep -E '^set-hook -g (window-layout-changed|pane-focus-in) ' "$HERE/../tmux/kel.conf" \
   | sed "s#\$HOME/.local/bin/kel#$KEL#g" > "$WORK/hooks.conf"
