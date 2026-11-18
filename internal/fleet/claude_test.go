@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -120,6 +121,13 @@ type scene struct {
 func (sc scene) run(t *testing.T) Agent {
 	t.Helper()
 	sd := t.TempDir()
+	var refreshes sync.WaitGroup
+	prev := StartClaudeRefresh
+	StartClaudeRefresh = func(sd string) {
+		refreshes.Add(1)
+		go func() { defer refreshes.Done(); RefreshClaudeAgents(sd) }()
+	}
+	t.Cleanup(func() { refreshes.Wait(); StartClaudeRefresh = prev })
 	pid := os.Getpid()
 	for _, s := range sc.sessions {
 		if s["pid"] == "self" {
