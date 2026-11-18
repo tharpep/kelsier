@@ -1167,7 +1167,9 @@ rewritten atomically. `<pane-id>.cards-seen`: the epoch you last opened them.
 Both join the pane-keyed files in `rm_agent_state` and the two sweeps that
 clear stale state. Pane ids are reused after a server restart (rollout M7), so
 a file must only be read for a pane that passes the same check `.state` does:
-a stale pane adopting old cards is the bug `caa11fa` fixed for state.
+a stale pane adopting old cards is the bug `caa11fa` fixed for state. Since
+backlog #44 a new server also reaps every pane-keyed file written before it
+started, cards included (the `server` state file).
 
 **The fleet document** gains, on each pane, `cards`: `null` when there are
 none, otherwise `{count, unseen, latest: {kind, title, at}}`. Reading it costs

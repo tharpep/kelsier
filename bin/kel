@@ -949,6 +949,28 @@ dead_sessions() {
   done < <(all_metas)
 }
 
+# Pane and window ids restart with a new tmux server, so a reused id would
+# read the files the last server's agent left (backlog #44).  The check is a
+# compare against the server pid in $TMUX, a builtin read and no fork; only a
+# new pid runs kel-fleet --reap-stale, which drops by mtime whatever predates
+# the server and records it in `server`.  `cheap` skips the tmux lookup when
+# $TMUX is unset, for the hot paths (invariant 5); kel-fleet reaps on its own
+# reads besides, so nothing they show was missed.
+server_check() { # [cheap]
+  local cur='' was=''
+  case "${TMUX:-}" in *,*,*) cur="${TMUX#*,}"; cur="${cur%%,*}" ;; esac
+  case "$cur" in *[!0-9]*) cur='' ;; esac
+  if [ -z "$cur" ]; then
+    [ "${1:-}" = cheap ] && return 0
+    cur="$(tmux display-message -p '#{pid}' 2>/dev/null)" || return 0
+    [ -n "$cur" ] || return 0
+  fi
+  read -r was _ 2>/dev/null < "$STATE_DIR/server"
+  [ "$was" = "$cur" ] && return 0
+  [ -x "$KEL_FLEET_BIN" ] && "$KEL_FLEET_BIN" --reap-stale >/dev/null 2>&1
+  return 0
+}
+
 prune_state() {
   local live f wid panes pane
   live="$(tmux list-windows -a -F '#{window_id}' 2>/dev/null; tmux list-panes -a -F '#{pane_id}' 2>/dev/null)"
@@ -4134,10 +4156,11 @@ cmd_hook_agy() {
 
   local pane
   pane="$(resolve_pane "$sid")"
-  if [ "$event" = "SessionStart" ] && [ -n "$pane" ] && [ -n "$sid" ]; then
+  [ -z "$pane" ] && exit 0
+  server_check
+  if [ "$event" = "SessionStart" ] && [ -n "$sid" ]; then
     printf '%s' "$pane" > "$STASH_DIR/$sid"
   fi
-  [ -z "$pane" ] && exit 0
 
   local wid
   wid="$(tmux display-message -p -t "$pane" '#{window_id}' 2>/dev/null || true)"
@@ -4339,6 +4362,7 @@ cmd_hook() {
   { read -r psess; read -r wid; } < <(tmux display-message -p -t "$pane" '#{session_name}
 #{window_id}' 2>/dev/null)
   [ "${psess:-}" = "$KEL_PREFIX" ] && [ -n "${wid:-}" ] || exit 0
+  server_check
   if [ "$event" = "SessionStart" ] && [ -n "$sid" ]; then
     printf '%s' "$pane" > "$STASH_DIR/$sid"
   fi
@@ -4594,6 +4618,10 @@ usage() { awk 'NR>1 && /^#/ {sub(/^# ?/,""); print; next} NR>1 {exit}' "$0"; }
 
 main() {
   local cmd="${1:-}"; [ $# -gt 0 ] && shift
+  case "$cmd" in
+    hook|statusline|status-line|_fleet|substatus|jump) server_check cheap ;;
+    *) server_check ;;
+  esac
   case "$cmd" in
     hook)         cmd_hook "$@" ;;                 # hot path — skip migrate
     new)          migrate_meta; cmd_new "$@" ;;

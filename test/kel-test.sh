@@ -2084,6 +2084,35 @@ hook "$P" Notification permission_prompt "allow?"
 ok "  ...and so does any tool while an agent waits" '[ "$(traced "$P" Read)" -gt 100 ]'
 ok "  ...which ends the wait"                       '[ "$(state_of a)" = working ]'
 
+section "a restarted server's reused pane id starts clean (#44)"
+reset
+NEW api-gw a
+P="$(pane_of api-gw a)"
+hookm "$P" plan
+hook "$P" Notification permission_prompt "allow?"
+printf '%s' "{\"session_id\":\"s\",\"cwd\":\"$WORK\",\"hook_event_name\":\"PostToolUse\",\"tool_name\":\"Edit\",\"tool_input\":{\"file_path\":\"$WORK/x\"}}" \
+  | TMUX_PANE="$P" "$KEL" hook PostToolUse
+hook "$P" Notification permission_prompt "allow?"
+ok "an agent's mode, state, history and edit are on disk" \
+  '[ -e "$STATE/$P.mode" ] && [ -e "$STATE/$P.state" ] && [ -e "$STATE/$P.log" ] && [ -e "$STATE/$P.edit" ]'
+# a second boundary: a file the old server wrote in the second the new one
+# started is the one case the mtime test cannot tell apart
+tmux kill-server 2>/dev/null; sleep 1.1
+NEW api-gw b
+ok "  ...the new server hands its pane the same id"  '[ "$(pane_of api-gw b)" = "$P" ]'
+fb="$("$KEL" _fleet)"
+ok "  ...which shows none of the old agent's mode"   '[ "$(printf "%s" "$fb" | jq -r ".agents[] | select(.name==\"b\") | .mode")" = null ]'
+ok "  ...nor its state"                              '[ "$(printf "%s" "$fb" | jq -r ".agents[] | select(.name==\"b\") | .state")" != waiting ]'
+ok "  ...and the old files are gone"                 '[ ! -e "$STATE/$P.mode" ] && [ ! -e "$STATE/$P.log" ] && [ ! -e "$STATE/$P.edit" ]'
+ok "  ...the server they were reaped for recorded"   '[ "$(cat "$STATE/server")" = "$(tmux display-message -p "#{pid} #{start_time}")" ]'
+hookm "$P" acceptEdits
+ok "  ...and the new agent's own mode is kept"       '[ "$("$KEL" _fleet | jq -r ".agents[] | select(.name==\"b\") | .mode")" = acceptEdits ]'
+# the bash side: a pid that is not the recorded one reaps before kel reads
+printf 'plan\n' > "$STATE/$P.mode"; touch -t 202001010000 "$STATE/$P.mode"
+printf '1 1\n' > "$STATE/server"
+"$KEL" _seen "$(window_of api-gw b)" >/dev/null 2>&1
+ok "  ...and bash reaps on a new pid before it reads" '[ ! -e "$STATE/$P.mode" ] && [ "$(cut -d" " -f1 "$STATE/server")" = "$(tmux display-message -p "#{pid}")" ]'
+
 section "dead agents are detected at read time"
 reset
 NEW api-gw a

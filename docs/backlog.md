@@ -200,7 +200,12 @@ step 4.6).
 The six entries below come from the 2026-11-07 hands-on review. They were left
 unbuilt when W1–W7 landed (`e4438b2..9006762`).
 
-### 44. Per-pane files outlive the tmux server  ·  `[defect]`
+### 44. Per-pane files outlive the tmux server  ·  **fixed 2026-11-18**
+
+*Fixed by a reap per server* (`rollout.md`): the `server` state file names the
+tmux server the files belong to, and a new one removes every pane- or
+window-keyed file written before it started. What follows is the defect as
+filed.
 
 After a server restart a reused pane id inherits the old agent's `.mode` and
 `.state`. Records are guarded by `@kel-agent`, and W2's session field guards

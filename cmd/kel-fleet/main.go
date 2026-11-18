@@ -4,6 +4,7 @@
 // v0.10 there is no bash fallback — see internal/fleet.
 //
 //	kel-fleet [--dirty] [--land] [--pr] [--panes] [--here] [--worktrees] [--board]
+//	kel-fleet --reap-stale    drop the files an earlier tmux server left (backlog #44)
 package main
 
 import (
@@ -52,6 +53,9 @@ func main() {
 			opt.Worktrees = true
 		case "--board":
 			opt.Board = true
+		case "--reap-stale":
+			fleet.ReapStale(fleet.StateDir(), fleet.ServerID())
+			return
 		case "--refresh-claude-agents":
 			fleet.RefreshClaudeAgents(fleet.StateDir())
 			return

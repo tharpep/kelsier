@@ -258,7 +258,7 @@ func Load(o Options) Doc {
 		defer wg.Done()
 		// path last: it is the one field that could hold anything
 		panesRaw = tmuxOut("list-panes", "-a", "-F",
-			"#{window_id}\t#{pane_current_command}\t#{pane_id}\t#{pane_index}\t#{pane_active}\t#{pane_pid}\t#{@kel-sidebar}\t#{@kel-agent}\t#{@kel-state}\t#{pane_current_path}")
+			"#{window_id}\t#{pane_current_command}\t#{pane_id}\t#{pane_index}\t#{pane_active}\t#{pane_pid}\t#{@kel-sidebar}\t#{@kel-agent}\t#{@kel-state}\t"+serverFormat+"\t#{pane_current_path}")
 	}()
 	go func() {
 		defer wg.Done()
@@ -274,11 +274,14 @@ func Load(o Options) Doc {
 	paneMap := map[string][]string{}
 	firstPath := map[string]string{} // window id -> its first pane's cwd
 	paneRows := map[string][]paneRow{}
+	server := ""
 	for _, l := range lines(panesRaw) {
-		p := strings.SplitN(l, "\t", 10)
-		if len(p) != 10 {
+		p := strings.SplitN(l, "\t", 11)
+		if len(p) != 11 {
 			continue
 		}
+		server = p[9]
+		p = append(p[:9], p[10])
 		// The sidebar pane (v0.10 M2) is kel's, not the user's: it runs
 		// kel-sidebar, a non-shell, so counting it would read a crashed agent as
 		// alive (invariant 3) and list the sidebar inside itself.
@@ -292,6 +295,8 @@ func Load(o Options) Doc {
 		paneRows[p[0]] = append(paneRows[p[0]], paneRow{
 			wid: p[0], cmd: p[1], id: p[2], idx: p[3], active: p[4], pid: p[5], stamp: p[7], kstate: p[8], path: p[9]})
 	}
+
+	ReapStale(sd, server)
 
 	type stateEntry struct {
 		state string
