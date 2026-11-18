@@ -2649,7 +2649,7 @@ popup() {
   [ -n "${TMUX_PANE:-}" ] && opt+=( -t "$TMUX_PANE" )
   # the inner client is this same server's; $TMUX unset, or tmux refuses to
   # nest. `env -u` is in both GNU and BSD env
-  tmux display-popup "${opt[@]}" "env -u TMUX tmux -S $(printf '%q' "$sock") attach -t $(printf '%q' "=$name")"
+  tmux display-popup "${opt[@]}" "env -u TMUX tmux -S $(printf '%q' "$sock") attach -t '=$name'"
 }
 
 # diff: what the agent changed — committed and uncommitted — against the base

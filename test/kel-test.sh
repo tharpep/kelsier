@@ -1697,6 +1697,17 @@ ok "  ...nor snapshots"                           '! grep -q _kelpop_ "$STATE/sn
 ( unset KEL_POPUP_TRACE; KEL_POPUP_NODRAW=1 TMUX="$TMUX_TMPDIR/tmux-$(id -u)/default,1,0" "$KEL" _panel files "$WT5" api-gw/wt5 ) >/dev/null 2>&1
 ok "files and git keep theirs between opens"     '[ "$(tmux list-sessions -F "#{session_name}" | grep -c "^_kelpop_")" = 1 ]'
 tmux kill-session -t "=$POP" 2>/dev/null
+if command -v zsh >/dev/null 2>&1; then
+  mkdir -p "$WORK/popshim" "$WORK/argvshim"
+  printf '#!/bin/sh\n[ "$1" = display-popup ] && { for a; do l="$a"; done; printf "%%s\\n" "$l" > "%s/popcmd"; exit 0; }\nexec "%s/shim/tmux" "$@"\n' "$WORK" "$WORK" > "$WORK/popshim/tmux"
+  printf '#!/bin/sh\nprintf "%%s\\n" "$@" > "%s/popargv"\n' "$WORK" > "$WORK/argvshim/tmux"
+  chmod +x "$WORK/popshim/tmux" "$WORK/argvshim/tmux"
+  ( unset KEL_POPUP_TRACE KEL_POPUP_NODRAW; PATH="$WORK/popshim:$PATH" TMUX="$TMUX_TMPDIR/tmux-$(id -u)/default,1,0" "$KEL" _panel files "$WT5" api-gw/wt5 ) >/dev/null 2>&1
+  PCMD="$(cat "$WORK/popcmd" 2>/dev/null)"
+  ( PATH="$WORK/argvshim:$PATH" zsh -f -c "$PCMD" ) >/dev/null 2>&1
+  ok "a popup's attach target survives zsh's =word expansion" 'grep -qx "=_kelpop_[0-9]*" "$WORK/popargv"'
+  tmux kill-session -t "=$(tmux list-sessions -F '#{session_name}' | grep '^_kelpop_' | head -1)" 2>/dev/null
+fi
 XD="$WORK/x#(touch p)"; mkdir -p "$XD"
 export KEL_TEST_TMUX_LOG="$WORK/popdir.log"; : > "$KEL_TEST_TMUX_LOG"
 ( unset KEL_POPUP_TRACE; KEL_POPUP_NODRAW=1 TMUX="$TMUX_TMPDIR/tmux-$(id -u)/default,1,0" "$KEL" _panel files "$XD" api-gw/x ) >/dev/null 2>&1
