@@ -56,6 +56,7 @@
 #   kel _copy                  stdin to the system clipboard (copy-mode pipes here)
 #   kel _paste <pane>          the system clipboard into a pane (middle-click)
 #   kel _seen <window-id>      mark an agent's window seen, as showing it would (board: a)
+#   kel _drop <src> <dst> <x> <y> <w> <h>  an Alt-drag let go over dst (kel.conf)
 set -uo pipefail
 
 # The hook that fires after every tool call, cut short. Bash parses a script
@@ -515,6 +516,37 @@ join_beside() { # pane target right|down|left|up
   snapshot
   case "$side" in down) side=below ;; up) side=above ;; *) side="$side of" ;; esac
   say "moved $side $(pane_name "$dst")"
+}
+
+# An Alt-drag let go over a pane (tmux/kel.conf).  Where the pointer is in it
+# picks the move: the middle third both ways swaps the two, anywhere else
+# moves the dragged pane to the nearest edge, so a corner takes the nearer
+# one.  x and y are tmux's mouse_x / mouse_y, relative to that pane; without
+# them (a tmux that has no such formats) nothing moves.  Nothing on the pane
+# itself or the sidebar either.  The bar says what happened.
+cmd_drop() { # src dst x y w h [client]
+  local src="${1:-}" dst="${2:-}" x="${3:-}" y="${4:-}" w="${5:-}" h="${6:-}" c="${7:-}" out side l r t b v
+  for v in "$x" "$y" "$w" "$h"; do
+    case "$v" in ''|*[!0-9]*) return 0 ;; esac
+  done
+  [ "$w" -gt 0 ] && [ "$h" -gt 0 ] && [ -n "$src" ] && [ -n "$dst" ] && [ "$src" != "$dst" ] || return 0
+  [ -z "$(tmux display-message -p -t "$src" '#{@kel-sidebar}' 2>/dev/null)" ] \
+    && [ -z "$(tmux display-message -p -t "$dst" '#{@kel-sidebar}' 2>/dev/null)" ] || return 0
+  if [ $((x * 3 / w)) = 1 ] && [ $((y * 3 / h)) = 1 ]; then
+    out="$(swap_panes "$src" "$dst" 2>&1)"
+  else
+    l=$((x * h)); r=$(((w - 1 - x) * h)); t=$((y * w)); b=$(((h - 1 - y) * w))
+    side=right; [ "$l" -lt "$r" ] && { side=left; r=$l; }
+    [ "$t" -lt "$r" ] && { side=up; r=$t; }
+    [ "$b" -lt "$r" ] && side=down
+    out="$(join_beside "$src" "$dst" "$side" 2>&1)"
+  fi
+  tmux select-pane -t "$src" 2>/dev/null
+  out="$(printf '%s\n' "$out" | sed "s/$(printf '\033')\[[0-9;]*m//g; s/^kel //" | tail -1)"
+  [ -n "$out" ] || return 0
+  if [ -n "$c" ]; then tmux display-message -c "$c" "→ $(fmt_text "$out")" 2>/dev/null
+  else tmux display-message "→ $(fmt_text "$out")" 2>/dev/null; fi
+  return 0
 }
 
 pane_name() { # pane -> the agent's name, else the program it runs
@@ -4952,6 +4984,7 @@ main() {
     _own)         own_window "${1:-}" ;;
     _join)        join_beside "${1:-}" "${2:-}" "${3:-right}" ;;
     _swap)        swap_panes "${1:-}" "${2:-}" ;;
+    _drop)        cmd_drop "$@" ;;
     _sidebar)     case "${1:-}" in
                     ensure) sidebar_ensure "${2:-}" ;;
                     wake)   sidebar_wake "${2:-}" ;;

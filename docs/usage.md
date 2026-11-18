@@ -423,7 +423,16 @@ place and width. `kel layout <name>` does the same from a shell.
 
 kel moves a pane only when you choose one of these. While a window is zoomed the bar says
 `⤢ zoomed · click to restore`. Dragging a divider turns it blue and heavy
-until you let go. Once a window has more than one pane, each pane's title
+until you let go.
+
+**Alt-drag a pane** onto another in its window to put it there. Hold Alt,
+press on the pane you want to move, and drag; the pane under the pointer
+takes an amber border. Let go over the outer third of a pane to put yours on
+that edge (left, right, above, below; a corner takes the nearer edge), or over
+its middle to swap the two. The bar then says what moved, `→ moved right of
+nvim`. Letting go on the pane itself or on the sidebar moves nothing, and so
+does letting go of Alt before the mouse. Agents follow the same rule as
+`M`: inside their own window. A plain drag still selects text. Once a window has more than one pane, each pane's title
 names it — an agent pane by its name and state, `● 3 · guest waiting`, in
 the sidebar's colours.
 

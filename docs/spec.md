@@ -166,6 +166,17 @@ cells' order in the same command list, and no hook sees the sidebar swapped
 away. The window's previous layout string is kept (`<window-id>.layout`) for
 one undo.
 
+**Alt-drag to snap** (*2026-11-18*, round 7). tmux reports a drag's release
+with the pane under the pointer and `mouse_x` / `mouse_y` inside it, so
+`kel.conf` binds `M-MouseDown1Pane` (remember the pane), `M-MouseDrag1Pane`
+(select the pane under the pointer, so the active border shows the target in
+amber) and `M-MouseDragEnd1Pane` (`kel _drop`). The outer thirds move the
+pane to that edge (`join-pane -h`/`-v`, `-b` for left and above), the middle
+swaps, a corner takes the nearer edge. No motion runs a shell (invariant 5),
+and tmux cannot draw a ghost pane, so the border is the only preview. Alt
+leaves the plain drag to text selection. A tmux without the `mouse_x`
+formats hands `_drop` nothing to place by, and it moves nothing.
+
 - **Sidebar** — a Go TUI (Bubble Tea v2), grown from `kel top`. *Since
   2026-11-18 (the hybrid, §5d):* one list of agents grouped under their repo,
   each one line, an inspector for the selected entry above the footer, and the

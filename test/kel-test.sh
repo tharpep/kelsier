@@ -1257,6 +1257,29 @@ ok "  ...and lays out panes whatever their list order" '[ "$(sidebar_of "$RW")" 
 tmux source-file "$WORK/hooks.conf"
 ok "fit never had to re-make the sidebar for any of it" '[ ! -f "$STATE/$RW.refit" ]'
 
+# Alt-drag: a control client cannot drag, so _drop gets what kel.conf's
+# release binding would hand it -- the pane under the pointer and where in it
+grep -E '^bind -n M-Mouse' "$HERE/../tmux/kel.conf" | sed "s#\$HOME/.local/bin/kel#$KEL#g" > "$WORK/drag.conf"
+ok "kel.conf's Alt-drag bindings load"            'tmux source-file "$WORK/drag.conf" && [ "$(tmux list-keys -T root | grep -cE "M-Mouse(Down1|Drag1|DragEnd1|Up1)Pane ")" = 4 ]'
+ok "  ...and the release is silenced"             'grep "M-MouseDragEnd1Pane" "$WORK/drag.conf" | grep -q ">/dev/null 2>&1\""'
+dims() { tmux display -p -t "$1" '#{pane_width} #{pane_height}'; }
+read -r DW DH <<< "$(dims "$RA")"
+"$KEL" _drop "$RS" "$RA" $((DW - 2)) $((DH / 2)) "$DW" "$DH" >/dev/null 2>&1
+ok "a drop on a pane's right third moves it right of that pane" '[ "$(tmux display -p -t "$RS" "#{pane_left}")" -gt "$(tmux display -p -t "$RA" "#{pane_left}")" ] && [ "$(tmux display -p -t "$RS" "#{pane_top}")" = "$(tmux display -p -t "$RA" "#{pane_top}")" ]'
+read -r DW DH <<< "$(dims "$RA")"
+"$KEL" _drop "$RS" "$RA" $((DW / 2)) $((DH / 2)) "$DW" "$DH" >/dev/null 2>&1
+ok "  ...on its middle swaps the two"             '[ "$(tmux display -p -t "$RS" "#{pane_left}")" -lt "$(tmux display -p -t "$RA" "#{pane_left}")" ]'
+read -r DW DH <<< "$(dims "$RA")"
+"$KEL" _drop "$RS" "$RA" $((DW / 4)) $((DH - 1)) "$DW" "$DH" >/dev/null 2>&1
+ok "  ...on a corner takes the nearer edge"       '[ "$(tmux display -p -t "$RS" "#{pane_top}")" -gt "$(tmux display -p -t "$RA" "#{pane_top}")" ] && [ "$(tmux display -p -t "$RS" "#{pane_left}")" = "$(tmux display -p -t "$RA" "#{pane_left}")" ]'
+L0="$(tmux display -p -t "$RW" '#{window_layout}')"
+"$KEL" _drop "$RS" "$RSB" 2 2 32 20 >/dev/null 2>&1
+"$KEL" _drop "$RS" "$RS" 2 2 "$DW" "$DH" >/dev/null 2>&1
+"$KEL" _drop "$RS" "$RA" '' '' "$DW" "$DH" >/dev/null 2>&1
+ok "  ...and nothing on the sidebar, itself, or with no pointer" '[ "$(tmux display -p -t "$RW" "#{window_layout}")" = "$L0" ]'
+ok "  ...the sidebar docked through all of it"    "wait_until 'docked $RW' && [ \"\$(sidebar_of $RW)\" = $RSB ]"
+"$KEL" kill -f api-gw/rearr >/dev/null 2>&1; tmux kill-window -t "$RW" 2>/dev/null
+
 # F9: the window's width picks full, rail or none (spec §5b)
 NW="$(tmux new-window -d -P -F '#{window_id}' -t '=keltest:' -c "$WORK/repos/api-gw" 'sleep 9999')"
 "$KEL" _sidebar ensure "$NW"
