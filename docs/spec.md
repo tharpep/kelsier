@@ -385,7 +385,12 @@ in any terminal:
   verbs, each with its key — the pane verbs (own window, move beside…, swap
   with…) included.
 - **What needs you is a count, not a section:** `●N need you` in amber at the
-  left of the footer, counting `waiting`, `error` and unseen `done`. A click
+  left of the footer, counting `waiting`, `error` and unseen `done`, and a
+  background session listed on its own that Claude Code calls `blocked`
+  (*2026-11-18*: the board counted it and the footer did not). The footer,
+  the rail and the board's header read one rule (`needCount`), and a Go test
+  holds the three to one number for every fixture. One folded under an
+  agent's name has no tile on the board, so none counts it. A click
   on it is `` ` ``. A waiting agent is otherwise its amber row with its
   reason in the right slot, and the banner.
 - **One accent for the selected entry**: a lighter fill and the accent bar on

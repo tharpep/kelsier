@@ -33,7 +33,8 @@ func needNames(v sbView) string {
 	return strings.Join(n, " ")
 }
 
-// What needs you is counted in the footer, in the waiting colour, and a
+// What needs you is counted in the footer, in the waiting colour — three
+// agents and the blocked background session — and a
 // click on the count is ` (the next one); the agents stay in their groups,
 // once each, with no section of their own.
 func TestNeedsYouIsTheFootersCount(t *testing.T) {
@@ -43,10 +44,10 @@ func TestNeedsYouIsTheFootersCount(t *testing.T) {
 	}
 	out, refs := renderView(v, 32, 30, 1792018800)
 	rows := strings.Split(plain(out), "\n")
-	if foot := rows[len(rows)-1]; !strings.HasPrefix(foot, " ●3 need you") {
+	if foot := rows[len(rows)-1]; !strings.HasPrefix(foot, " ●4 need you") {
 		t.Errorf("footer %q", foot)
 	}
-	if !strings.Contains(out, yellow+bold+"●3 need you") {
+	if !strings.Contains(out, yellow+bold+"●4 need you") {
 		t.Error("the count is not in the waiting colour")
 	}
 	if k := refs[len(refs)-1].hitAt(3); k != "`" {

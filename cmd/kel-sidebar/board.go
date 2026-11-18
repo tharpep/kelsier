@@ -885,7 +885,7 @@ func tileCount(t boardTile) string {
 	}
 	if t.bg != nil {
 		switch {
-		case t.bg.State == "blocked":
+		case bgNeedsYou(*t.bg):
 			return "need you"
 		case t.bg.Status == "busy":
 			return "working"
@@ -898,9 +898,10 @@ func tileCount(t boardTile) string {
 	if a.State == nil || *a.State == "" {
 		return "unknown"
 	}
-	switch s := *a.State; {
-	case s == "waiting" || s == "error" || (s == "done" && a.Unseen):
+	if agentNeedsYou(a) {
 		return "need you"
+	}
+	switch s := *a.State; {
 	case s == "dead":
 		return "stopped"
 	case s == "working" || s == "throttled" || s == "done" || s == "idle":
@@ -916,6 +917,7 @@ func boardHeader(v sbView, ts []boardTile, w int, now int64) string {
 	for _, t := range ts {
 		n[tileCount(t)]++
 	}
+	n["need you"] = v.needCount()
 	counts := func(words bool) string {
 		var parts []string
 		for _, c := range countOrder {

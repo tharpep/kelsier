@@ -15,8 +15,8 @@ func isRail(w int) bool { return w >= 1 && w <= railMaxWidth }
 // foot to bring the full sidebar back. No hover, no menu.
 func renderRail(v sbView, w, h int, now int64) (string, []lineRef) {
 	var body []line
-	if n := len(v.needs); n > 0 {
-		body = append(body, line{" " + yellow + bold + "●" + strconv.Itoa(min(n, 99)) + reset, lineRef{id: agentID(v.needs[0].key), kind: "rail"}})
+	if n := v.needCount(); n > 0 {
+		body = append(body, line{" " + yellow + bold + "●" + strconv.Itoa(min(n, 99)) + reset, lineRef{id: v.needTarget(), kind: "rail"}})
 	}
 	for _, a := range v.agents {
 		dot, colour := stateLook(a.agent.State, a.agent.Unseen, a.agent.StateSince, now)

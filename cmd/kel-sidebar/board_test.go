@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -193,5 +194,53 @@ func TestBoardUnknownStaysUnknown(t *testing.T) {
 	strip := stateStrip(fleet.Agent{State: sp("working"), StateSince: fp(1000 - 600)}, 60, 1000)
 	if !strings.HasPrefix(strip, strings.Repeat(" ", 40)) || !strings.Contains(strip, "▆") {
 		t.Errorf("an hour with ten known minutes drew %q", plain(strip))
+	}
+}
+
+// The board's header, the sidebar's foot and the rail say one need-you
+// number for every fixture, and it is needCount's: a blocked background
+// session counts in all three.
+func TestNeedYouCountsAgree(t *testing.T) {
+	t.Setenv("HOME", "/home/me")
+	files, _ := filepath.Glob("testdata/*/*.json")
+	foot := regexp.MustCompile(`●(\d+) need you`)
+	head := regexp.MustCompile(`● (\d+) need you`)
+	rail := regexp.MustCompile(`^ ●(\d+)$`)
+	sawBg := false
+	for _, f := range files {
+		doc, now, err := readFixture(f)
+		if err != nil {
+			continue
+		}
+		v := buildView(doc, uiState{now: now})
+		want := itoa(v.needCount())
+		if want == "0" {
+			want = ""
+		}
+		for _, b := range v.bgLoose {
+			sawBg = sawBg || bgNeedsYou(b)
+		}
+		num := func(re *regexp.Regexp, s string) string {
+			if m := re.FindStringSubmatch(s); m != nil {
+				return m[1]
+			}
+			return ""
+		}
+		side, _ := renderView(v, 32, 0, now)
+		board, _ := renderBoard(v, 150, 0, now, boardOpts{loc: time.UTC})
+		rl, _ := renderView(v, 4, 0, now)
+		got := []string{
+			num(foot, plain(side)),
+			num(head, strings.SplitN(plain(board), "\n", 2)[0]),
+			num(rail, strings.SplitN(plain(rl), "\n", 2)[0]),
+		}
+		for i, g := range got {
+			if g != want {
+				t.Errorf("%s: %s says %q, needCount %q", f, []string{"sidebar", "board", "rail"}[i], g, want)
+			}
+		}
+	}
+	if !sawBg {
+		t.Error("no fixture has a blocked background session of its own")
 	}
 }

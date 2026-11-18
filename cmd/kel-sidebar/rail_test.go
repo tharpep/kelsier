@@ -18,7 +18,7 @@ func TestRailShowsCountDotsServerAndMenu(t *testing.T) {
 	v := buildView(loadFixture(t, "fifteen-three-repos"), uiState{})
 	out, refs := renderView(v, 4, 0, 1792018800)
 	lines := strings.Split(plain(out), "\n")
-	if lines[0] != " ●3" {
+	if lines[0] != " ●4" {
 		t.Errorf("the count comes first: %q", lines[0])
 	}
 	if want := 1 + len(v.agents) + 1 + 1; len(lines) != want {

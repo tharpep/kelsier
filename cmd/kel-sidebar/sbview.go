@@ -699,10 +699,47 @@ func (v *sbView) applyFilter(q string) {
 	v.agents = as
 }
 
+// agentNeedsYou and bgNeedsYou are the one rule for what needs you: the
+// sidebar's foot, the rail and the board's header all count needCount.
+func agentNeedsYou(a fleet.Agent) bool {
+	st := a.State
+	return st != nil && (*st == "waiting" || *st == "error" || (*st == "done" && a.Unseen))
+}
+
+// a blocked background session is waiting on you, as an agent is
+func bgNeedsYou(b fleet.Background) bool { return b.State == "blocked" }
+
+// needCount is every agent that needs you and every background session
+// listed on its own that does; one under an agent's name is not a tile on
+// the board, so neither surface counts it.
+func (v sbView) needCount() int {
+	n := len(v.needs)
+	for _, b := range v.bgLoose {
+		if bgNeedsYou(b) {
+			n++
+		}
+	}
+	return n
+}
+
+// needTarget is what a click on the rail's count selects: the agent that
+// has needed you longest, else the first blocked background session.
+func (v sbView) needTarget() string {
+	if len(v.needs) > 0 {
+		return agentID(v.needs[0].key)
+	}
+	for _, b := range v.bgLoose {
+		if bgNeedsYou(b) {
+			return bgID(b.ID)
+		}
+	}
+	return ""
+}
+
 func needsYou(agents []sbAgent) []sbAgent {
 	var out []sbAgent
 	for _, a := range agents {
-		if st := a.agent.State; st != nil && (*st == "waiting" || *st == "error" || (*st == "done" && a.agent.Unseen)) {
+		if agentNeedsYou(a.agent) {
 			out = append(out, a)
 		}
 	}
@@ -1119,7 +1156,7 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 	}
 	foot := len(tail) == 0
 	if foot {
-		tail = []line{footerLine(w, in, len(v.needs), "")}
+		tail = []line{footerLine(w, in, v.needCount(), "")}
 	}
 
 	insp := v.inspector(w, now)
@@ -1152,7 +1189,7 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 	out = append(out, tail...)
 	if foot && h > 0 {
 		y := len(out) - 1
-		out[y] = footerLine(w, in, len(v.needs), v.hoverKey(out[y].ref, y))
+		out[y] = footerLine(w, in, v.needCount(), v.hoverKey(out[y].ref, y))
 	}
 	if h > 0 && len(out) > h {
 		out = out[:h]

@@ -158,7 +158,9 @@ child there is a click that selects it. For a repo heading: its agents,
 branch, path and ports. Nothing known, no line.
 
 The foot is `●3 need you` in amber while any agent waits, errored, or
-finished and you have not looked — a click is `` Ctrl-b ` `` — then `≡`
+finished and you have not looked, or a background session is blocked on
+you — the board's header and the rail count the same — a click is
+`` Ctrl-b ` `` — then `≡`
 (settings) and `?` (help) on the right.
 
 **Mouse first.** The top line is `kel` with two buttons:
