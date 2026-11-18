@@ -773,7 +773,8 @@ all_metas() {
     for f in "$d"*.json; do
       [ -e "$f" ] || continue
       nm="$(basename "$f" .json)"
-      printf '%s\t%s\t%s\n' "$g" "$nm" "$f"
+      # a reader that found its record stops reading: that is not an error
+      printf '%s\t%s\t%s\n' "$g" "$nm" "$f" 2>/dev/null || return 0
     done
   done
 }

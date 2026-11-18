@@ -924,7 +924,9 @@ ok "  ...never --continue, which takes the directory's newest" '! grep -q -- --c
 reset
 FKC="$WORK/claude-fork"; rm -rf "$FKC"
 FKCWD="$(cd "$WORK/repos/api-gw" && pwd -P)"
-FKP="$FKC/projects/$(printf '%s' "$FKCWD" | tr '/.' '--')"; mkdir -p "$FKP"
+# every character but a letter or digit becomes '-', as Claude Code names the
+# directory: macOS's $TMPDIR holds underscores on some runners
+FKP="$FKC/projects/$(printf '%s' "$FKCWD" | tr -c 'A-Za-z0-9' '-')"; mkdir -p "$FKP"
 fk_tx() { # id title mtime
   printf '{"type":"custom-title","customTitle":"%s","sessionId":"%s"}\n{"type":"user","note":"\\"customTitle\\":\\"zzz\\""}\n' "$2" "$1" > "$FKP/$1.jsonl"
   touch -t "$3" "$FKP/$1.jsonl"
@@ -1279,7 +1281,11 @@ release_client
 ok "  ...and with no client attached, wake signals no one" '[ ! -s "$KEL_WAKE_TRACE" ]'
 unset KEL_WAKE_TRACE
 
-sbtext() { tmux capture-pane -p -t "$1" 2>/dev/null; }
+# tmux 3.4+ keeps a tab the renderer wrote to skip blank cells, and
+# capture-pane prints it: a live row reads "? wt\t\tunknown", so a pattern
+# with a space after the name matched only the paused frame, which is
+# written with spaces, and failed whenever the live frame drew first
+sbtext() { tmux capture-pane -p -t "$1" 2>/dev/null | tr '\t' ' '; }
 # when an assertion fails, show what the server held: these have failed only
 # on CI's macOS runner, where nothing can be looked at after
 sbdiag() { # pane  fail-count-before  [more panes]
@@ -1294,6 +1300,7 @@ sbdiag() { # pane  fail-count-before  [more panes]
   done
   printf '       sidebar-fail.log: %s\n' "$(tail -n 5 "$STATE/sidebar-fail.log" 2>&1 | tr '\n' '|')"
   printf '       trace: %s\n' "$(tail -n 8 "$KEL_SIDEBAR_TRACE" 2>&1 | tr '\n' '|')"
+  printf '       sidebar.json: %s\n' "$(cat "$STATE/sidebar.json" 2>&1)"
 }
 # a hidden sidebar runs no Program: it is off the alternate screen, burns no
 # CPU, and comes back drawing and answering keys when its window is shown
@@ -1406,8 +1413,10 @@ MW="$(window_of api-gw main1)"
 hold_client 40
 tmux select-window -t "$MW"; "$KEL" _sidebar wake
 SP="$(sbpane "$MW")"
+f0=$fail
 wait_until 'sbtext "$SP" | grep -q "[○●◌?✕] wt " && sbtext "$SP" | grep -q "[○●◌?✕] main1 " && sbtext "$SP" | grep -q "^ ▾ api-gw"' 150
 ok "the sidebar draws its agents under their repo's heading, one line each" 'sbtext "$SP" | grep -q "^ ▾ api-gw" && sbtext "$SP" | grep -q "[○●◌?✕] wt " && sbtext "$SP" | grep -q "[○●◌?✕] main1 "'
+sbdiag "$SP" "$f0"
 ok "  ...with no Repos, Agents or Needs you section" '! sbtext "$SP" | grep -q "Repos\|Agents\|Needs you"'
 ok "  ...and selects with a bar, not inverse video" '! tmux capture-pane -e -p -t "$SP" | grep -q "\[7m" && sbtext "$SP" | grep -q "▌"'
 ok "  ...in truecolor, never a palette index"      'tmux capture-pane -e -p -t "$SP" | grep -q "48;2;" && ! tmux capture-pane -e -p -t "$SP" | grep -q "[34]8;5;"'
