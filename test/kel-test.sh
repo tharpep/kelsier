@@ -1388,7 +1388,7 @@ MW="$(window_of api-gw main1)"
 hold_client 40
 tmux select-window -t "$MW"; "$KEL" _sidebar wake
 SP="$(sbpane "$MW")"
-wait_until 'sbtext "$SP" | grep -q "[○●◌?✕] wt " && sbtext "$SP" | grep -q "^ ▾ api-gw"' 150
+wait_until 'sbtext "$SP" | grep -q "[○●◌?✕] wt " && sbtext "$SP" | grep -q "[○●◌?✕] main1 " && sbtext "$SP" | grep -q "^ ▾ api-gw"' 150
 ok "the sidebar draws its agents under their repo's heading, one line each" 'sbtext "$SP" | grep -q "^ ▾ api-gw" && sbtext "$SP" | grep -q "[○●◌?✕] wt " && sbtext "$SP" | grep -q "[○●◌?✕] main1 "'
 ok "  ...with no Repos, Agents or Needs you section" '! sbtext "$SP" | grep -q "Repos\|Agents\|Needs you"'
 ok "  ...and selects with a bar, not inverse video" '! tmux capture-pane -e -p -t "$SP" | grep -q "\[7m" && sbtext "$SP" | grep -q "▌"'
