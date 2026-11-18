@@ -17,6 +17,8 @@
 #                              (one agent — `kel restore` rebuilds the workspace)
 #   kel sidebar on|off         the sidebar pane in every window (default on)
 #   kel shell [dir]            a plain shell window, no agent (sidebar: t)
+#   kel board                  every agent as a tile, in a popup over the window
+#                              (sidebar: B, or prefix B; esc closes)
 #   kel quit [-f]              save the workspace, then close all of it; refuses
 #                              while a worktree holds unsaved work (sidebar: Q)
 #   kel url [dir|agent]        the dev-server URLs of a worktree, one per line
@@ -50,6 +52,7 @@
 #   kel _click <range> ...     a click on a status line: close a popup, jump
 #   kel _copy                  stdin to the system clipboard (copy-mode pipes here)
 #   kel _paste <pane>          the system clipboard into a pane (middle-click)
+#   kel _seen <window-id>      mark an agent's window seen, as showing it would (board: a)
 set -uo pipefail
 
 # The hook that fires after every tool call, cut short. Bash parses a script
@@ -2374,6 +2377,28 @@ panel_claude() { # dir title
   KEL_POPUP_KEEP=1 popup "$root" "claude config · $2 · tabs: 1-${#tabs[@]} · prefix q closes" yazi "${tabs[@]}"
 }
 
+# kel board — the board (spec.md §5d): kel-sidebar at full width, in a popup
+# over the window, the way kel's other popups open. It reads the sidebar's own
+# selection, so what you pick on it is selected in the sidebar after. Not a
+# zoom of the sidebar pane: resizing that pane is what #33's fit loop fed on.
+cmd_board() {
+  need tmux
+  [ -x "$KEL_SIDEBAR_BIN" ] || die "kel-sidebar is not built — run ./install.sh (needs Go)"
+  KEL_POPUP_W="${KEL_POPUP_W:-95%}" KEL_POPUP_H="${KEL_POPUP_H:-90%}" \
+    popup "${PWD:-$HOME}" "board · ↵ go · v face · esc closes" \
+      env "KEL_BIN=$SELF" "KEL_SIDEBAR_BG=${KEL_SIDEBAR_BG:-}" "$KEL_SIDEBAR_BIN" --board
+}
+
+# a: an agent's window marked seen without visiting it — the epoch the shown
+# sidebar writes for its own window, so a `done` stops reading unseen
+mark_seen() { # window-id
+  case "${1:-}" in @[0-9]*) ;; *) die "usage: kel _seen <window-id>" ;; esac
+  local t; t="$(mktemp "$STATE_DIR/.seen.XXXXXX" 2>/dev/null)" || die "could not write to $STATE_DIR"
+  printf '%s\n' "$(date +%s)" > "$t" && mv -f "$t" "$STATE_DIR/$1.seen"
+  sidebar_wake all
+  say "marked seen"
+}
+
 # kel shot [agent] — the pane as an image, with freeze. SVG: freeze's PNG
 # path crashed (a Go stack overflow) on the author's WSL2, from both a Go
 # build and the release, and its .webp came out as SVG under another name —
@@ -4241,8 +4266,8 @@ hook_history() { # pane epoch event state note
   printf '%s %s %s %s\n' "$2" "$3" "$4" "${note:0:40}" >> "$f"
   IFS= read -r -d '' h < "$f" || true
   nl="${h//[!$'\n']/}"
-  if [ "${#nl}" -gt 40 ]; then
-    write_private "$f.$$" "$(tail -n 20 "$f")"$'\n' && mv -f "$f.$$" "$f"
+  if [ "${#nl}" -gt 400 ]; then
+    write_private "$f.$$" "$(tail -n 200 "$f")"$'\n' && mv -f "$f.$$" "$f"
   fi
 }
 
@@ -4575,6 +4600,8 @@ main() {
     url)          cmd_url "$@" ;;
     shot)         cmd_shot "$@" ;;
     shell)        cmd_shell "$@" ;;
+    board)        cmd_board "$@" ;;
+    _seen)        mark_seen "${1:-}" ;;
     quit)         cmd_quit "$@" ;;
     _prompt)      cmd_prompt "$@" ;;
     _notify)      notify "${1:-kel}" "${2:-test notification}" ;;

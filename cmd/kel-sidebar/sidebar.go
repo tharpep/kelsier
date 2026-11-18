@@ -110,6 +110,8 @@ type sbModel struct {
 
 	termBg, termFg *rgb // the terminal's colours, once it has answered
 	fixedBg        bool // KEL_SIDEBAR_BG names the background: nothing to ask
+
+	board bool // drawn as the board, in kel board's popup (board.go)
 }
 
 // ---------------------------------------------------------------- state dir
@@ -217,6 +219,7 @@ func paintFrame(s string, w, h int) string {
 type sbShared struct {
 	Selected string          `json:"selected"`
 	Expanded map[string]bool `json:"expanded,omitempty"`
+	Face     string          `json:"face,omitempty"` // the board's, by name; absent is card
 }
 
 func sbLoadShared() sbShared {
@@ -228,7 +231,11 @@ func sbLoadShared() sbShared {
 }
 
 func (m *sbModel) saveShared() {
-	b, _ := json.Marshal(sbShared{Selected: m.ui.sel, Expanded: m.ui.expanded})
+	sh := sbShared{Selected: m.ui.sel, Expanded: m.ui.expanded}
+	if m.ui.face != faceCard {
+		sh.Face = faceNames[m.ui.face]
+	}
+	b, _ := json.Marshal(sh)
 	fleet.WriteAtomic(sbStateFile(), b)
 }
 
@@ -557,7 +564,8 @@ func (m *sbModel) loadCmd() tea.Cmd {
 	}
 	m.loading = true
 	trace(m.myPane)
-	return func() tea.Msg { return sbLoaded{fleet.Load(fleet.Options{Panes: true})} }
+	board := m.board
+	return func() tea.Msg { return sbLoaded{fleet.Load(fleet.Options{Panes: true, Board: board})} }
 }
 
 // trace logs each load for the suite's sleep/wake checks (KEL_SIDEBAR_TRACE)
@@ -581,6 +589,15 @@ func tickAfter() tea.Cmd {
 func (m sbModel) view() sbView {
 	v := buildView(m.doc, m.ui)
 	v.menu = m.menu
+	if m.board {
+		// the list's folds are not the board's: a tile in a shut group or a
+		// quiet trailer stays selected
+		for _, t := range boardTiles(v) {
+			if t.id == m.ui.sel {
+				v.sel = t.id
+			}
+		}
+	}
 	ask := func(title, colour, hint string) {
 		v.promptTitle, v.promptColour, v.hint2 = title, colour, hint
 	}
@@ -923,6 +940,9 @@ func (m sbModel) browse() (sbModel, tea.Cmd) {
 // ---------------------------------------------------------------- update
 
 func (m sbModel) Init() tea.Cmd {
+	if m.board {
+		return tickAfter()
+	}
 	if !m.visible {
 		return nil
 	}
@@ -1038,7 +1058,7 @@ func (m sbModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.doc = msg.doc
 		m.ui = m.withShared()
 		m.adoptSel()
-		if m.visible {
+		if m.visible && !m.board {
 			for i := range m.doc.Agents {
 				a := &m.doc.Agents[i]
 				if a.WindowID != nil && *a.WindowID == m.ui.myWindow && a.Unseen {
@@ -1095,7 +1115,7 @@ func (m sbModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		}
-		_, refs := renderView(m.view(), m.width, m.height, time.Now().Unix())
+		refs := m.clickRefs()
 		hit := func() lineRef {
 			if msg.Y >= 0 && msg.Y < len(refs) {
 				return refs[msg.Y]
@@ -1136,7 +1156,11 @@ func (m sbModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.openMenu()
 			return m, nil
 		case strings.HasPrefix(k, "sel:"):
-			m.ui.sel = strings.TrimPrefix(k, "sel:")
+			id := strings.TrimPrefix(k, "sel:")
+			if m.board && id == m.view().sel {
+				return m.press("enter") // a click on the selected tile, or a double-click
+			}
+			m.ui.sel = id
 			m.saveShared()
 			return m, nil
 		case k == "open:help":
@@ -1185,6 +1209,12 @@ func (m sbModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.menu = nil
 			return m, nil
 		}
+		if m.board {
+			if msg.Button == tea.MouseWheelDown {
+				return m.press("j")
+			}
+			return m.press("k")
+		}
 		switch msg.Button {
 		case tea.MouseWheelDown:
 			m.move(1)
@@ -1209,13 +1239,14 @@ func (m sbModel) withShared() uiState {
 		ui.sel = sh.Selected
 	}
 	ui.expanded = sh.Expanded
+	ui.face, _ = parseFace(sh.Face)
 	ui.now = time.Now().Unix()
 	return ui
 }
 
 // pinned by TestFreshSidebarAdoptsTheCurrentAgentAsItsSelection
 func (m *sbModel) adoptSel() {
-	if !m.visible || m.ui.filter != "" {
+	if !m.visible || m.ui.filter != "" || m.board {
 		return
 	}
 	if v := buildView(m.doc, m.ui); v.sel != "" && v.sel != m.ui.sel {
@@ -1451,6 +1482,11 @@ func (m sbModel) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
+	if m.board {
+		if nm, c, ok := m.boardKey(k); ok {
+			return nm, c
+		}
+	}
 	if m.help {
 		m.help = false
 		return m, nil
@@ -1613,6 +1649,8 @@ func (m sbModel) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 	case "`":
 		return m, runKel("", nil, "jump")
+	case "B", "shift+b":
+		return m, runKel("", nil, "board")
 	case ";", ":":
 		// typed here, like a name — tmux's own prompt opened at the foot of
 		// the window, where the author did not see it had (2026-10-16). `;`
@@ -1685,6 +1723,7 @@ var sbHelp = [][2]string{
 	{"|", "split right"},
 	{"-", "split down"},
 	{"`", "next waiting agent"},
+	{"B", "the board"},
 	{"u", "usage (ccusage)"},
 	{"v", "PRs, every space"},
 	{";", "kel command (↑)"},
@@ -1692,6 +1731,7 @@ var sbHelp = [][2]string{
 	{"P", ""},
 	{"  space", "the sidebar"},
 	{"  `", "next waiting agent"},
+	{"  B", "the board"},
 	{"  k", "kel command"},
 	{"  q", "close a popup"},
 }
@@ -1701,7 +1741,68 @@ func (m sbModel) render() string {
 	return out
 }
 
+// clickRefs is what a click on each line of the frame now drawn hits.
+func (m sbModel) clickRefs() []lineRef {
+	if m.board {
+		_, refs := renderBoard(m.view(), m.width, m.height, time.Now().Unix(), m.boardOpts())
+		return refs
+	}
+	_, refs := renderView(m.view(), m.width, m.height, time.Now().Unix())
+	return refs
+}
+
+func (m sbModel) boardOpts() boardOpts { return boardOpts{face: m.ui.face, loc: time.Local} }
+
+// boardKey is a key the board answers itself; ok false hands it to the
+// sidebar's own handling, for the keys the two share (space, d, x, /).
+// Every other key does nothing on the board.
+func (m sbModel) boardKey(k string) (tea.Model, tea.Cmd, bool) {
+	switch k {
+	case "left", "h", "right", "l", "up", "k", "down", "j":
+		cols, _ := boardCols(m.width)
+		if id := boardStep(m.view(), cols, k); id != "" {
+			m.ui.sel = id
+			m.saveShared()
+		}
+		return m, nil, true
+	case "enter":
+		v := m.view()
+		if a, ok := m.agentOf(v.sel); ok {
+			// to the agent, where you answer it (invariant 4); the popup
+			// closes as the board exits
+			jump(a.wid, a.pane)
+			return m, tea.Quit, true
+		}
+		m.activate(v.sel)
+		c := m.pending
+		m.pending = nil
+		return m, c, true
+	case "v":
+		m.ui.face = (m.ui.face + 1) % face(len(faceNames))
+		m.saveShared()
+		return m, nil, true
+	case "a":
+		if a, ok := m.agentOf(m.view().sel); ok {
+			return m, runKel("", nil, "_seen", a.wid), true
+		}
+		m.msg, m.msgBad = "select an agent first", true
+		return m, nil, true
+	case "esc", "q":
+		if k == "esc" && m.ui.filter != "" {
+			m.ui.filter = ""
+			return m, nil, true
+		}
+		return m, tea.Quit, true
+	case "space", "d", "x", "/":
+		return m, nil, false
+	}
+	return m, nil, true
+}
+
 func (m sbModel) draw() (string, []lineRef) {
+	if m.board {
+		return renderBoard(m.view(), m.width, m.height, time.Now().Unix(), m.boardOpts())
+	}
 	if isRail(m.width) {
 		return renderView(m.view(), m.width, m.height, time.Now().Unix())
 	}
@@ -1761,8 +1862,14 @@ func (m sbModel) View() tea.View {
 	return v
 }
 
-func runSidebar(once bool) {
-	m := sbModel{myPane: os.Getenv("TMUX_PANE"), fixedBg: loadPalette(), frame: new([]lineRef)}
+// runSidebar runs the sidebar, or with board the board in kel board's
+// popup: no pane of a kel window of its own, so it takes no wake, writes no
+// palette and marks no window seen by being shown.
+func runSidebar(once, board bool) {
+	m := sbModel{fixedBg: loadPalette(), frame: new([]lineRef), board: board}
+	if !board {
+		m.myPane = os.Getenv("TMUX_PANE")
+	}
 	if m.myPane != "" {
 		// the pane wears no style of its own: tmux would give that as the
 		// terminal's background. kel up to v0.10 set one on every sidebar
@@ -1781,7 +1888,7 @@ func runSidebar(once bool) {
 	// draw once whatever: an empty column helps no one. The first load is the
 	// one synchronous one — there is nothing on screen yet to keep responsive
 	trace(m.myPane)
-	m.doc = fleet.Load(fleet.Options{Panes: true})
+	m.doc = fleet.Load(fleet.Options{Panes: true, Board: board})
 	m.ui = m.withShared()
 	m.adoptSel()
 	if m.visible {
@@ -2089,13 +2196,15 @@ func helpKey(row string) string {
 		return ""
 	case row == "  k":
 		return ";"
+	case row == "  B":
+		return "B"
 	case row == "  `":
 		return "`"
 	case strings.HasPrefix(row, " "), row == "#":
 		return ""
 	default:
 		switch f[0] {
-		case "/", "n", "w", "r", "x", "t", ";", "`", "s", "q", "f", "g", "d", "e", "o", "p", "c", "v", "u", "|", "-", "z", "m", "M", "S", "R", "i", "h":
+		case "/", "n", "w", "r", "x", "t", ";", "`", "s", "q", "f", "g", "d", "e", "o", "p", "c", "v", "u", "|", "-", "z", "m", "M", "S", "R", "i", "h", "B":
 			return f[0]
 		}
 	}

@@ -166,7 +166,7 @@ func renderBoard(v sbView, w, h int, now int64, o boardOpts) (string, []lineRef)
 		}
 	}
 
-	foot := []line{{}, boardFooter(w, o.face, above, below)}
+	foot := []line{{}, boardFooter(v, w, o.face, above, below)}
 	if h > 0 {
 		area := max(0, h-len(head)-len(foot))
 		body = body[:min(len(body), area)]
@@ -211,6 +211,51 @@ func (b boardBlock) lines(v sbView, w, tw int, now int64, o boardOpts) []line {
 		out = append(out, line{s.String(), lineRef{kind: "board", hits: hits}})
 	}
 	return out
+}
+
+// boardStep is the tile a move lands on: h and l walk the wall in reading
+// order, j and k go to the same column a row down or up (the row's last
+// tile when it is shorter). With no tile selected any move takes the first;
+// at an edge it stays, "".
+func boardStep(v sbView, cols int, k string) string {
+	blocks := boardBlocks(boardTiles(v), cols)
+	if len(blocks) == 0 {
+		return ""
+	}
+	var flat []string
+	bi, ti, at := -1, -1, -1
+	for i, b := range blocks {
+		for j, t := range b.tiles {
+			if t.id == v.sel {
+				bi, ti, at = i, j, len(flat)
+			}
+			flat = append(flat, t.id)
+		}
+	}
+	if at < 0 {
+		return flat[0]
+	}
+	switch k {
+	case "left", "h":
+		if at > 0 {
+			return flat[at-1]
+		}
+	case "right", "l":
+		if at+1 < len(flat) {
+			return flat[at+1]
+		}
+	case "up", "k":
+		if bi > 0 {
+			b := blocks[bi-1].tiles
+			return b[min(ti, len(b)-1)].id
+		}
+	case "down", "j":
+		if bi+1 < len(blocks) {
+			b := blocks[bi+1].tiles
+			return b[min(ti, len(b)-1)].id
+		}
+	}
+	return ""
 }
 
 // ---------------------------------------------------------------- a tile
@@ -761,9 +806,8 @@ func tileCount(t boardTile) string {
 	return "unknown"
 }
 
-// boardHeader: kel board, the agents counted by state, the 5h quota, today's
-// spend, esc. Short of room the counts lose their words, then the right
-// side loses esc, then the spend.
+// boardHeader: kel board, the agents counted by state, the 5h quota, esc.
+// Short of room the counts lose their words, then the right side loses esc.
 func boardHeader(v sbView, ts []boardTile, w int, now int64) string {
 	n := map[string]int{}
 	for _, t := range ts {
@@ -792,11 +836,7 @@ func boardHeader(v sbView, ts []boardTile, w int, now int64) string {
 		p := *q.FiveHour.Pct
 		quota = dim + "5h" + reset + " " + bar(p, 16) + " " + dim + fmt.Sprintf("%.0f%%", p) + reset
 	}
-	spend := dim + "today ?" + reset
-	if v.spend != nil {
-		spend = dim + "today" + reset + " " + money(*v.spend)
-	}
-	right := []string{quota, spend, dim + "esc" + reset}
+	right := []string{quota, dim + "esc" + reset}
 	title := " " + bold + "kel board" + reset
 	for _, words := range []bool{true, false} {
 		for k := len(right); k >= 1; k-- {
@@ -814,8 +854,30 @@ func boardHeader(v sbView, ts []boardTile, w int, now int64) string {
 }
 
 // boardFooter: the keys, and on the right which face is showing, with how
-// many tiles are scrolled out of sight.
-func boardFooter(w int, f face, above, below int) line {
+// many tiles are scrolled out of sight. A prompt (a kill's question, the
+// filter, d's base) or the last command's word takes the line instead.
+func boardFooter(v sbView, w int, f face, above, below int) line {
+	if v.promptTitle != "" {
+		c := v.promptColour
+		if c == "" {
+			c = accent
+		}
+		s := " " + c + bold + v.promptTitle + reset
+		if v.input != "" {
+			s += "  " + v.input
+		}
+		if v.hint2 != "" {
+			s += "   " + dim + v.hint2 + reset
+		}
+		return line{truncateStyled(s, w-1), lineRef{kind: "foot"}}
+	}
+	if v.footer != "" {
+		c := v.footerColour
+		if c == "" {
+			c = mid
+		}
+		return line{" " + c + truncate(v.footer, w-2) + reset, lineRef{kind: "foot"}}
+	}
 	keys := chips([]sbAct{{"enter", "go"}, {"space", "peek"}, {"v", "face"}, {"a", "seen"}, {"d", "diff"}, {"x", "kill"}, {"/", "filter"}})
 	var fs []string
 	for i, n := range faceNames {

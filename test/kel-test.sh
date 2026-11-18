@@ -285,6 +285,19 @@ code="$(GHLAND env)"
 ok "  ...and dirty work never reaches gh" '[ ! -f "$WORK/gh.calls" ]'
 ok "  ...still answering dirty"         '[ "$code" = dirty ]'
 rm -f "$GHR/wip.txt"
+# the board's PR and CI (v0.11): the PR from pr-cache by head commit, CI from
+# `gh pr checks`. Through kel _fleet, the path the board's load runs
+mkdir -p "$STATE/pr-cache"
+printf '[{"number":7,"sha":"%s","merged":false,"state":"open"}]\n' "$(git -C "$GHR" rev-parse HEAD)" > "$STATE/pr-cache/example__ghrepo.sha.json"
+GHPR() { PATH="$WORK/nogh2:$PATH" "$@" "$KEL" _fleet --board | jq -c '.agents[]|select(.name=="gh1")|.pr'; }
+rm -f "$WORK/gh.calls" "$STATE/pr-cache/"*.ci.json
+pr="$(GHPR env)"
+ok "the board reads an agent's PR from pr-cache"    '[ "$(printf "%s" "$pr" | jq -r ".number, .state" | tr "\n" " ")" = "7 open " ]'
+ok "  ...asks gh for its checks"                    '[ -f "$WORK/gh.calls" ]'
+ok "  ...and a failing gh leaves CI null"           '[ "$(printf "%s" "$pr" | jq -r ".ci")" = null ]'
+rm -f "$WORK/gh.calls" "$STATE/pr-cache/"*.ci.json
+pr="$(GHPR env KEL_PR=off)"
+ok "  ...and pr = off asks nothing"                 '[ ! -f "$WORK/gh.calls" ] && [ "$(printf "%s" "$pr" | jq -r ".ci")" = null ]'
 
 section "legacy flat records migrate"
 reset
@@ -2669,9 +2682,12 @@ export KEL_POPUP_TRACE="$WORK/hist-popups"; : > "$KEL_POPUP_TRACE"
 ok "_panel history opens a popup titled for the agent" 'grep -q "history · api-gw/hist · prefix q closes" "$KEL_POPUP_TRACE"'
 ok "  ...newest first, with ages"                     '[ "$(sed -n 1p "$STATE/$HP.view" | tr -s " " | cut -d" " -f3,4)" = "done Stop" ] && sed -n 3p "$STATE/$HP.view" | grep -q "^[0-9]*s ago *working *UserPromptSubmit"'
 ok "  ...and a pane with no history is refused"       '! "$KEL" _panel history "$WORK/repos/api-gw" t %9999 >/dev/null 2>&1'
+# an hour of history for the board (v0.11): kept to 400 lines, cut to the
+# last 200. Filled by hand to 398, so a few hooks cross the line
+for i in $(seq 395); do printf '%s Stop done\n' "$i"; done >> "$STATE/$HP.log"
 HMAX=0
-for i in $(seq 45); do hook "$HP" UserPromptSubmit; hook "$HP" Stop; n="$(grep -c . "$STATE/$HP.log")"; [ "$n" -gt "$HMAX" ] && HMAX="$n"; done
-ok "the log is never longer than 40 lines, and trimmed to 20 when it passes 40" '[ "$HMAX" = 40 ] && [ "$(grep -c . "$STATE/$HP.log")" -ge 20 ] && [ "$(tail -n 1 "$STATE/$HP.log" | cut -d" " -f3)" = done ]'
+for i in 1 2 3; do hook "$HP" UserPromptSubmit; hook "$HP" Stop; n="$(grep -c . "$STATE/$HP.log")"; [ "$n" -gt "$HMAX" ] && HMAX="$n"; done
+ok "the log keeps more than 40 lines, at most 400, trimmed to 200 past it" '[ "$HMAX" = 400 ] && [ "$(grep -c . "$STATE/$HP.log")" -ge 200 ] && [ "$(grep -c . "$STATE/$HP.log")" -lt 210 ] && [ "$(tail -n 1 "$STATE/$HP.log" | cut -d" " -f3)" = done ]'
 ok "  ...and still 0600"                              '[ "$(perl -e "printf q(%o), (stat shift)[2] & 07777" "$STATE/$HP.log")" = 600 ]'
 jq -nc --arg c "$WORK" '{session_id:"s",cwd:$c,hook_event_name:"Notification",notification_type:"permission_prompt",message:"a\u001b[31mred\rcr"}' | TMUX_PANE="$HP" "$KEL" hook Notification
 ok "control characters in a note become spaces in the log" '[ "$(tail -n 1 "$STATE/$HP.log" | cut -d" " -f4-)" = "a [31mred cr" ]'
@@ -2686,6 +2702,26 @@ ok "a .log for a gone pane is pruned, the sidebar's own log kept" '[ ! -e "$STAT
 K api-gw kill hist >/dev/null 2>&1
 ok "kel kill removes the history"                     '[ ! -e "$STATE/$HP.log" ]'
 unset KEL_POPUP_TRACE
+
+section "the board: every agent as a tile (v0.11)"
+reset
+NEW api-gw brd
+BP="$(pane_of api-gw brd)"; BW="$(window_of api-gw brd)"
+export KEL_POPUP_TRACE="$WORK/board-popups"; : > "$KEL_POPUP_TRACE"
+TMUX_PANE="$BP" "$KEL" board >/dev/null 2>&1
+ok "kel board opens the board in a popup"             'grep -q "	board · ↵ go · v face · esc closes	env KEL_BIN=.* --board$" "$KEL_POPUP_TRACE"'
+ok "  ...prefix B runs it, showing its errors"        'grep -q "^bind-key B run-shell -b .*local/bin/kel board 2>&1\"$" "$HERE/../tmux/kel.conf"'
+unset KEL_POPUP_TRACE
+echo 1 > "$STATE/$BW.seen"
+hook "$BP" Stop
+BSEEN() { "$KEL" _fleet | jq -r '.agents[]|select(.name=="brd")|.unseen'; }
+ok "a finished agent reads unseen"                    '[ "$(BSEEN)" = true ]'
+"$KEL" _seen "$BW" >/dev/null
+ok "kel _seen (the board's a) writes the window's .seen" '[ "$(cat "$STATE/$BW.seen")" -gt 1 ]'
+ok "  ...and the agent reads seen, never visited"     '[ "$(BSEEN)" = false ]'
+ok "  ...a bad window id is refused"                  '! "$KEL" _seen "../x" >/dev/null 2>&1'
+hook "$BP" UserPromptSubmit
+ok "the board's fleet carries the state history"      '[ "$("$KEL" _fleet --board | jq -r ".agents[]|select(.name==\"brd\")|.history[-1].state")" = working ]'
 
 section "the sidebar writes Claude Code's view down (W2b)"
 export KEL_SIDEBAR=on KEL_NOTIFY_CMD="$WORK/stub" KEL_SIDEBAR_TRACE="$WORK/sidebar-w2b.trace"

@@ -56,6 +56,8 @@ kel rename <newname>   rename THIS window and keep its record in sync
 kel sidebar on|off     the sidebar pane in every window (on by default; off is
                        remembered until you turn it back on)
 kel shell [dir]        a plain shell window there — no agent, no record
+kel board              every agent as a tile, in a popup over the window
+                       (the sidebar's B, Ctrl-b B; esc closes)
 kel quit [-f]          save the workspace, then close it all; refuses while a
                        worktree holds unsaved work (-f overrides). `kel`, then
                        `kel restore`, brings it back
@@ -98,6 +100,7 @@ Keys below use `Ctrl-b`, tmux's default prefix; if you changed yours, kel's own 
 | `` Ctrl-b ` `` | jump to the next agent that **needs you** — any group: waiting or stopped on an API error first, then finished ones you have not looked at; press again to work through them |
 | `Ctrl-b 1..9` / `n` / `p` / `w` | move between windows — every agent is in one session (native tmux) |
 | `Ctrl-b b` | cycle this window's sidebar: full, rail, hidden. The choice sticks for the window until you change it again |
+| `Ctrl-b B` | the board: every agent as a tile, in a popup (below) |
 | `Ctrl-b ,` | rename this window (routes through `kel rename`) |
 | `Ctrl-b \|` / `-` | split, keeping the current directory |
 | `Ctrl-b [` | scroll mode for a shell pane (`q` to leave) |
@@ -262,6 +265,7 @@ The selection is shared by every window's sidebar, and it is what `n`, `w`, `t` 
 | `n name -- flags` | after ` -- `, flags for Claude itself: `fix -- --model sonnet` (`kel new fix -- --model sonnet` from a shell) |
 | `;` | a kel command; quotes keep words together, `↑` / `↓` walk the last twenty |
 | `s` | sweep everything that has landed, after `y` (one worktree: `kel sweep <path>`) |
+| `B` | the board, in a popup over the window |
 | `?` | every key |
 | `esc` | back to the pane you were in |
 | click · wheel | select and jump, fold a heading or a quiet trailer · move |
@@ -305,6 +309,48 @@ everywhere (and new windows get none) until `kel sidebar on`; `sidebar =
 `sidebar_bg` the background its colours are built from: by default it asks
 the terminal, and a terminal that does not answer (WezTerm on WSL) needs
 `sidebar_bg = "#1e1e2e"`, your theme's background.
+
+## The board
+
+`B` in the sidebar, `Ctrl-b B`, or `kel board` opens every agent as a tile,
+in a popup over the window. It is the sidebar drawn at full width: the same
+agents, grouped the same way, and the same selection, so what you pick on
+the board is selected in the sidebar after.
+
+```
+ kel board     ● 4 need you   ● 2 working   ○ 1 idle            5h ━━━━━━━━ 43%    esc
+ kelsier
+ ╭─ ● fix-auth ─────────────────────────── 6m ─╮   ╭─ ● docs ────────────────────────────── 15m ─╮
+ │ allow Bash?                                 │   │ Tests pass. I left the flaky one skipped    │
+ │ npm test -- --watch=false                   │   │ and said why in the PR.                     │
+ │                                             │   │                                             │
+ │ ▁▁▁▁▁▁▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆ │   │ ▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆ │
+ │ ━━━━━━━━━━ 58%  $3.10                       │   │ ━━━━━━━━━━ 22%  $0.84               ■■■■■■■ │
+ ╰─ Opus 5.5 ──────────────────────── +88 −12 ─╯   ╰─ Opus 5.5 ──────────────── #61 ✓  +302 −95 ─╯
+```
+
+A tile's border is its state's colour. Its top edge has its age; its bottom
+edge has its model, its PR with CI (`✓` pass, `✕` fail, `◌` running, `?` gh
+could not say) and its diff against the branch it lands on. Tiles never
+move: not when a state changes, not on another face, not when you select one.
+`v` turns every tile to its next face: the **card** (what it says or does,
+its subagent or server, an hour of state, context, cost, tasks), the
+**screen** (the pane's last five lines, read-only), the **timeline** (that
+hour with clock times, the last two changes, how many waits today). The face
+is remembered for the next board.
+
+| key | |
+|---|---|
+| `h` `j` `k` `l` / arrows | move between tiles: `h` `l` in reading order, `j` `k` down and up a column |
+| `enter` | go to the agent and close the board; you answer it in its own pane |
+| `space` | peek at its screen |
+| `v` | every tile to the next face |
+| `a` | mark it seen without going there |
+| `d` | its diff, against a base you are asked for |
+| `x` | kill it, after `y`, with the sidebar's refusal of unsaved work |
+| `/` | filter by name · `esc` clears |
+| `esc` / `q` | close the board |
+| click | select a tile; click the selected one again (or double-click) to go there |
 
 ## Groups
 
@@ -420,7 +466,7 @@ Everything lives in `${XDG_STATE_HOME:-~/.local/state}/kel/`, mode `0700`:
   pane, with whatever tmux said, newest 100 kept. Why that happens is not
   known yet; a window switch heals it. **Temporary**: when a log explains a
   real failure, that is fixed and this goes with it
-- `<window-id>.seen`, `sidebar.json`, `sidebar-cache.json` — the sidebar's
+- `<window-id>.seen`, `sidebar.json` (and the board's face), `sidebar-cache.json` — the sidebar's
 - `<pane-id>.edit` — the file the agent last edited, and the line, from a
   `PostToolUse` hook on Edit / Write; `<pane-id>.plan` — the plan file a
   plan-mode Write named; `<pane-id>.view` — what `p` last showed
@@ -431,10 +477,13 @@ Everything lives in `${XDG_STATE_HOME:-~/.local/state}/kel/`, mode `0700`:
 
 Field layouts are in `CLAUDE.md` under *The on-disk contract*.
 
-**One network call**, `gh api repos/<slug>/pulls`, and only from `kel sweep`
-(the `--pr` path). Never for a repo whose `origin` is not on `github.com`,
-never for one whose work is still uncommitted or unpushed, and never with `pr =
-"off"`. Nothing else leaves the machine; kel does not wrap Claude Code.
+**Two network calls**, both through `gh`. `gh api repos/<slug>/pulls`, only
+from `kel sweep` (the `--pr` path): never for a repo whose `origin` is not on
+`github.com`, and never for one whose work is still uncommitted or unpushed.
+And, only while the board is open, `gh pr checks <n>` for each open PR an
+agent's commit heads, cached for five minutes (`pr-cache/<slug>.ci.json`).
+`pr = "off"` stops both. Nothing else leaves the machine; kel does not wrap
+Claude Code.
 
 ## Claude Code's own row
 

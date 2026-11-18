@@ -3,6 +3,7 @@
 //
 //	kel-sidebar                      the live pane
 //	kel-sidebar --once               render one frame to stdout and exit
+//	kel-sidebar --board              the board, as kel board's popup runs it
 //	kel-sidebar --fixture FILE|DIR   render saved fleet documents, for
 //	    [--width N] [--height N]     the golden frames (spec.md §5e)
 //	    [--board [--face F]]         the same, drawn as the board
@@ -201,5 +202,5 @@ func main() {
 		runFixtures(fixture, widths, max(height, 0))
 		return
 	}
-	runSidebar(once)
+	runSidebar(once, board)
 }

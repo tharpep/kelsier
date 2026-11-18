@@ -418,6 +418,26 @@ in any terminal:
   you; a click on `≡` sets the window to full and keeps it there. No names, no
   hover, no menu, no selection mark. The bar and the banner still carry
   what needs you.
+- **The board** (*2026-11-18*, issue #60): the sidebar binary at full width,
+  in a popup over the window (`B` in the sidebar, `prefix B`, `kel board`;
+  `esc` closes). Same fleet document, same selection in `sidebar.json`, so
+  the rail, the list and the board are one surface at three widths. One
+  rounded tile per agent, its border in its state's colour (grey for idle),
+  under its repo in the list's order, then `background`. A tile is at least
+  40 columns: three across at 150, two at 100, one below 85. The header has
+  `kel board`, the agents counted by state and the 5h quota. Every face
+  fills the same five rows, and `v` turns every tile to the next one. The
+  card face shows the message or question, then the running subagent or the
+  window's server, the hour's state strip, and context, cost and tasks. The
+  screen face shows the pane's last five lines, as plain text. The timeline
+  face shows the strip, the last two transitions with clock times, and the
+  waits counted since midnight, or since the log's first line when it starts
+  later. The top edge has glyph, name and age; the bottom edge has the model,
+  the PR with its CI (`#61 ✓`) and the diff against the merge base. A tile's
+  place depends only on the fleet and the width, never on its face, state or
+  selection. The wall scrolls by whole rows to keep the selection in view.
+  Unknown is `?` or absent, and an hour the log does not cover is blank,
+  not idle. The selected tile's inside is the raised surface.
 - The accent is never inverse video.
 - **Dots, not words, for state.** A word in the right slot appears only beside
   the dot, never as the only signal.
@@ -535,7 +555,10 @@ the agent's environment) and R3 (kel rendering documentation).
 ## 6. Keys
 
 The sidebar's keys are decided in §5c. Today's bindings are listed in
-`usage.md` — one list, so the two cannot drift.
+`usage.md` — one list, so the two cannot drift. The board (§5d) takes the
+sidebar's keys where they mean the same (`space`, `d`, `x`, `/`), adds its
+own (`h` `j` `k` `l` on the grid, `v` faces, `a` seen), and ignores the rest:
+`q` and `esc` close it, never quit kel.
 
 Two rules hold across both. **Switching is one keystroke** — never
 open-menu, find-row, press-enter. And **`` prefix ` `` is the key the tool
@@ -754,7 +777,7 @@ with the payload on stdin:
 | `PostToolUse`, every tool | `working`, only from `waiting` (*2026-10-21*) — see below. On `Edit` / `Write` / `MultiEdit` also: |
 | | *built (M5).* no change — records the last file the agent touched and its first changed line (`tool_response.structuredPatch[0].newStart`), for `e` (§5f). *Built (M6):* a write under `~/.claude/plans/` is the session's plan, recorded as `<pane-id>.plan` instead |
 
-Each transition the hook writes is also appended to `<pane-id>.log` as `<epoch> <event> <state> <note, first 40 characters>` (*2026-11-06*), kept to the last 20 lines (trimmed to 20 when it passes 40, so never more than 40) and removed with the agent's other state and at `SessionStart`, `SessionEnd` and relaunch. Control characters in the note become spaces. The Antigravity hook logs too. `h` in the sidebar, or its entry menu, shows it in a popup, newest first (`kel _panel history <dir> <title> <pane>`). The append is one `printf >>` and a line count in the shell's own memory, no fork: about 2.4 ms measured on WSL2, plus a trim fork-chain every twentieth transition, against a hook that already makes several tmux calls (invariant 5). `PostToolUse`'s fast path writes nothing, so it logs nothing.
+Each transition the hook writes is also appended to `<pane-id>.log` as `<epoch> <event> <state> <note, first 40 characters>` (*2026-11-06*), kept to the last 200 lines (trimmed to 200 when it passes 400, so never more than 400; 20 and 40 until v0.11, which wanted an hour for the board's strip) and removed with the agent's other state and at `SessionStart`, `SessionEnd` and relaunch. Control characters in the note become spaces. The Antigravity hook logs too. `h` in the sidebar, or its entry menu, shows it in a popup, newest first (`kel _panel history <dir> <title> <pane>`). The append is one `printf >>` and a line count in the shell's own memory, no fork: about 2.4 ms measured on WSL2, plus a trim fork-chain every two hundredth transition, against a hook that already makes several tmux calls (invariant 5). `PostToolUse`'s fast path writes nothing, so it logs nothing.
 
 Every payload carries `permission_mode`. A hook that sees one writes it to `<pane-id>.mode` unless it is `default`, which removes the file, and the fleet document reports it as the agent's `mode` (*2026-11-06*). The `PostToolUse` fast path leaves before reading it, so a mode changed mid-turn shows from the next prompt, stop or wait.
 
@@ -948,6 +971,14 @@ on the `--panes` path only; a message further back has none. It lives in the
 fleet document, so the sidebar's `sidebar-cache.json` (0600) holds it too.
 Absent for an agent with no Claude transcript (Antigravity, opencode). The
 first-prompt `title` it replaced is gone.
+
+`--board` *(v0.11)* adds the board's facts, for it alone: `diff` (`git diff
+--shortstat` against the merge base with the branch it lands on, reused for
+10 s), `pr` (number and state from `pr-cache` by head commit, and `ci` from
+`gh pr checks`, cached per PR and head commit, null when gh fails or `pr =
+"off"`), `history` (`<pane-id>.log`, null with no log) and `screen` (the
+pane's last five lines, `capture-pane -p -J`). It implies `--panes`. The
+board does not write `sidebar-cache.json`, so no screen is kept on disk.
 
 `--dirty` is opt-in because `git status` per worktree is the expensive part
 and the bar never shows it.
@@ -1221,6 +1252,11 @@ GitHub release are the fix. Versioning policy is in `rollout.md`.
    the bash reader kept this promise);
 3. `pr = "off"` disables it outright (likewise only honoured by bash until
    v0.10).
+
+**The board's CI** is the one other: while the board is open, `gh pr checks
+<n>` for each open PR an agent's HEAD heads, at most once per PR and head
+commit per `pr-cache` TTL (30 s after a failure). The PR is already on
+GitHub, so it says nothing about local work, and `pr = "off"` stops it too.
 
 The rest go online only when you ask: `v` opens gh dash (GitHub, for every
 open space's repo), `u` runs ccusage, `kel doctor` runs `gh auth status`,

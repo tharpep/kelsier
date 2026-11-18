@@ -83,8 +83,8 @@ type Agent struct {
 	// Subagents: the agent panel's rows, from `kel substatus` (claude.go).
 	// Empty when none are showing; recorded within subsFresh or not at all
 	Subagents []Subagent `json:"subagents,omitempty"`
-	// The board's facts (board.go). Absent means kel could not tell, never
-	// zero or none (invariant 3); nothing fills them yet but the fixtures
+	// The board's facts (board.go), only with Options.Board. Absent means
+	// kel could not tell, never zero or none (invariant 3)
 	Diff    *Diff         `json:"diff,omitempty"`
 	PR      *PR           `json:"pr,omitempty"`
 	History *[]Transition `json:"history,omitempty"`
@@ -113,9 +113,6 @@ type Doc struct {
 	// Repos: every repo a pane stands in, with all its worktrees and their
 	// land state (worktrees.go). Only with Options.Panes or Worktrees
 	Repos *[]Repo `json:"repos,omitempty"`
-	// SpendToday is the dollars every session spent since local midnight,
-	// for the board's header; absent until kel keeps a daily ledger
-	SpendToday *float64 `json:"spend_today,omitempty"`
 }
 
 // record is the on-disk agent record, sessions/<group>/<name>.json.
@@ -235,6 +232,9 @@ type Options struct {
 	// Worktrees: the repos' worktrees asked fresh, not from the sidebar's
 	// cache — for `kel sweep`, which acts on the answer. Implies Panes
 	Worktrees bool
+	// Board: each agent's diff, PR and CI, state history and screen, for
+	// the board (board.go). Implies Panes
+	Board bool
 }
 
 // Load assembles the fleet document.
@@ -627,7 +627,7 @@ func Load(o Options) Doc {
 		}
 	}
 
-	if o.Panes || o.Worktrees {
+	if o.Panes || o.Worktrees || o.Board {
 		ps := buildPanes(paneRows, paneWins, curPane, agentPanes)
 		doc.Panes = &ps
 		withClaude(&doc, sd, ps)
@@ -639,6 +639,9 @@ func Load(o Options) Doc {
 		withDoing(&doc, paths)
 		withLastMessage(&doc, paths)
 		withRepos(&doc, sd, o.Worktrees)
+		if o.Board {
+			withBoard(&doc, sd)
+		}
 	} else {
 		withAgy(&doc)
 		withCards(&doc, sd, stalePanes)

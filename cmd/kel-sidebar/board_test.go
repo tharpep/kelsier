@@ -180,7 +180,7 @@ func TestBoardUnknownStaysUnknown(t *testing.T) {
 		t.Fatal(err)
 	}
 	p := plain(got)
-	for _, want := range []string{"5h ?", "today ?", "ctx ?  $?", "#12 ?", "─ ? nostate ─", "─ ? ─╮"} {
+	for _, want := range []string{"5h ?", "ctx ?  $?", "#12 ?", "─ ? nostate ─", "─ ? ─╮"} {
 		if !strings.Contains(p, want) {
 			t.Errorf("missing %q:\n%s", want, p)
 		}

@@ -22,6 +22,7 @@ _kel() {
     'url:the dev-server URLs of a worktree'
     'shot:the pane as an SVG, with freeze'
     'shell:a plain shell window, no agent'
+    'board:every agent as a tile, in a popup'
     'quit:save the workspace, then close it all'
     'restore:bring back a previous workspace (--list to choose)'
     'relaunch:relaunch ONE crashed agent in its existing window'

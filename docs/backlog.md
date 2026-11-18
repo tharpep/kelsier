@@ -245,7 +245,7 @@ prompt could be skipped when the base is unambiguous, with a modifier to ask.
 
 **Gate:** the prompt is answered with the default more often than not.
 
-### 48. An agent's PR on its row  ·  `[fits]`
+### 48. An agent's PR on its row  ·  `[fits]`  ·  *on the board's tiles since v0.11*
 
 `pr-cache` already maps a commit to its PR. The agent row could show the
 number and state. Weighed for the card line (F8) and not chosen. #43's
@@ -276,6 +276,16 @@ agent. Pane geometry left `_fleet --panes` with it.
 
 **Gate:** in a window of three or more panes, you lose track of which pane is
 where, or pick the wrong one in Swap with… or Move beside….
+
+### 51. Today's spend on the board  ·  `[fits]`
+
+The approved board header carried `today $41.20`. kel knows each session's
+cost (`.ctx`) but keeps no ledger: a session that ended this morning is gone
+from the fleet. The figure needs a small append-only cost log, kept by
+`kel statusline`, summed since local midnight. Left off rather than shown as
+a permanent `today ?`.
+
+**Gate:** you want the day's spend at a glance, and `u` (ccusage) is too far.
 
 ---
 

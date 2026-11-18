@@ -96,6 +96,7 @@ func repoSlug(dir string) string {
 // "behind its base" — the squash puts one commit on base the branch lacks
 // (2026-10-20). A commit made after the merge is new work, and stops matching.
 type prEntry struct {
+	Number int    `json:"number,omitempty"`
 	SHA    string `json:"sha"`
 	Merged bool   `json:"merged"`
 	State  string `json:"state"`
@@ -154,7 +155,7 @@ func prRefresh(dir string) {
 	// it prints one PR per line and they are collected here.
 	out, err := exec.Command("gh", "api", "--paginate",
 		"repos/"+repoSlug(dir)+"/pulls?state=all&per_page=100",
-		"--jq", `.[] | {sha: .head.sha, merged: (.merged_at != null), state: .state}`,
+		"--jq", `.[] | {number: .number, sha: .head.sha, merged: (.merged_at != null), state: .state}`,
 	).Output()
 	if err != nil {
 		return
