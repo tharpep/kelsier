@@ -1404,8 +1404,9 @@ cmd_ls() {
 # --------------------------------------------------------------------------
 # pinned by "restore resumes the newest transcript titled with the agent's name"
 newest_titled_session() { # cwd name recorded-id
-  local dir f id
-  dir="$CLAUDE_HOME/projects/$(printf '%s' "$1" | tr -c 'A-Za-z0-9' '-')"
+  local dir f id real
+  real="$(cd "$1" 2>/dev/null && pwd -P)"
+  dir="$CLAUDE_HOME/projects/$(printf '%s' "${real:-$1}" | tr -c 'A-Za-z0-9' '-')"
   if [ -d "$dir" ]; then
     while IFS= read -r f; do
       id="${f##*/}"; id="${id%.jsonl}"
