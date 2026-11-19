@@ -487,8 +487,9 @@ done**: `p` shows the agent's plan and Claude Code's own task list, read from
 unreadable). Automations stay gated (`backlog.md` #38); `v0.10.0` is the
 author's call. *2026-11-18, the hybrid:* every sidebar entry is one line,
 detail in an inspector above the footer, the entry menu over it, the footer's
-`●N need you`; Needs you, Repos and the drawer are gone, and the tile-wall
-board is next (`rollout.md`). After M6, a batch from daily use: `kel quit` / `kel shell`,
+`●N need you`; Needs you, Repos and the drawer are gone. The tile-wall board
+(`kel board`, `prefix B`) shipped in v0.11; panes you can rearrange, named
+layouts, Alt-drag snap, view tabs, extrakto and glow in v0.12. After M6, a batch from daily use: `kel quit` / `kel shell`,
 the sidebar's actions group, `prefix k` for kel commands, `idle_prompt`
 ending a stuck `working`, spaces named by their repo. The
 sidebar's look is held by golden frames (`cmd/kel-sidebar/testdata/sidebar`);
