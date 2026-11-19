@@ -177,6 +177,20 @@ you — the board's header and the rail count the same — a click is
   kel               ▐+ New▌ ▐⋯▌
 ```
 
+Under it, **the view tabs**: `Agents  Board  PRs  Trees` (`Agt  Brd  PR  Tree`
+in a sidebar narrower than 28 columns). Click one, or press `tab` /
+`shift-tab` in the sidebar to walk them. **Agents** is the list described
+here. **Board** opens the board, as `B` does. **PRs** opens gh dash, as `v`
+does. **Trees** swaps the list for every repo's linked worktrees: each under
+its repo, a dot (green merged, amber unsaved work, red missing) and what
+landing it needs (`●3 dirty`, `↑4` unpushed, `review`, `no PR`, `?` when kel
+cannot tell). The inspector shows the selected worktree's path, land state
+and who works in it; `↵` goes to that agent or pane, `g` opens lazygit
+there, `t` a shell, and `s` sweeps it after `y` through `kel sweep <path>`,
+which keeps a worktree with work in it or anything standing in it and says
+why in the footer. Agents and Trees each keep their own cursor, and every
+window's sidebar shows the same tab. Nothing else moves when you change tab.
+
 `+ New` opens a menu of what makes something: a new agent, an agent in a
 worktree, split right, split down, a shell window in the selected space. `⋯` opens kel's own: next that needs you,
 layout ▸, usage, pull requests, a kel command, restore (while a previous workspace
@@ -249,6 +263,7 @@ The selection is shared by every window's sidebar, and it is what `n`, `w`, `t` 
 | key | |
 |---|---|
 | `Ctrl-b Space` | put the keyboard in the sidebar (replaces tmux's `next-layout` on that key) |
+| `tab` / `shift-tab` | the next / previous view tab: Agents, Board, PRs, Trees |
 | `j` / `k` | move |
 | `enter` | jump to an agent or pane · fold or open a heading or a quiet trailer |
 | `space` / `l` / `h` | flip, open, fold a heading or a quiet trailer |
@@ -326,10 +341,11 @@ the terminal, and a terminal that does not answer (WezTerm on WSL) needs
 `B` in the sidebar, `Ctrl-b B`, or `kel board` opens every agent as a tile,
 in a popup over the window. It is the sidebar drawn at full width: the same
 agents, grouped the same way, and the same selection, so what you pick on
-the board is selected in the sidebar after.
+the board is selected in the sidebar after. Its header leads with the same
+view tabs, Board chosen; a click on one chooses it.
 
 ```
- kel board     ● 4 need you   ● 2 working   ○ 1 idle            5h ━━━━━━━━ 43%    esc
+ Agents  Board  PRs  Trees     ● 4 need you   ● 2 working   ○ 1 idle     5h ━━━━━━━━ 43%    esc
  kelsier
  ╭─ ● fix-auth ─────────────────────────── 6m ─╮   ╭─ ● docs ────────────────────────────── 15m ─╮
  │ allow Bash?                                 │   │ Tests pass. I left the flaky one skipped    │
@@ -382,6 +398,7 @@ with worktrees apart: `↑1`, `↓2 · 3 worktrees`, `↓3 worktrees`.
 | `d` | its diff, against a base you are asked for |
 | `x` | kill it, after `y`, with the sidebar's refusal of unsaved work |
 | `/` | filter by name; the last line says the filter while it holds · `esc` clears |
+| `tab` / `shift-tab` | the next / previous view tab. PRs opens gh dash over the board; Agents or Trees closes the board on that view of the sidebar |
 | `esc` / `q` | close the board |
 | click | select a tile; click the selected one again (or double-click) to go there |
 

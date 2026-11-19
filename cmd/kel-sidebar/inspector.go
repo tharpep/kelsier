@@ -74,6 +74,10 @@ func (v sbView) inspectRows(w int, now int64) []irow {
 				return v.inspectAgent(a, w, now)
 			}
 		}
+	case strings.HasPrefix(id, "w:"):
+		if t, ok := v.treeOf(id); ok {
+			return v.inspectTree(t)
+		}
 	case strings.HasPrefix(id, "g:"):
 		return v.inspectGroup(strings.TrimPrefix(id, "g:"))
 	case strings.HasPrefix(id, "x:"):

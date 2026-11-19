@@ -463,7 +463,8 @@ in any terminal:
   working tile the board stops ticking until a load brings one. It costs
   about 0.7% of a core while it runs (measured in the rig). A tile is at least
   40 columns: three across at 150, two at 100, one below 85. The header has
-  `kel board`, the agents counted by state and the 5h quota. Every face
+  the view tabs with Board chosen, the agents counted by state and the 5h
+  quota. Every face
   fills the same five rows, and `v` turns every tile to the next one. The
   card face shows the message or question, then the running subagent or the
   window's server, the hour's state strip, and context, cost and tasks. The
@@ -490,6 +491,28 @@ in any terminal:
   heading). A click on a board heading folds nothing, and a filter that
   hides the selected tile moves the selection to the first tile shown, and
   says itself on the last line.
+- **The view tabs** (*2026-11-18*, round 7): one row, `Agents · Board · PRs
+  · Trees`, under `kel` in the sidebar and leading the board's header. They
+  are views of the one surface (invariant 6), not tabs of tmux windows,
+  which tmux's bar lists already, and not a second agent list. Agents is the
+  list. Board opens the board, as `B` does. PRs opens gh dash, as `v` does
+  (§5f). Trees swaps the list for every repo's linked worktrees, the board's
+  worktree rows drawn as a list: a dim `▾ <repo>` heading, then a row per
+  worktree with its land state's dot (green merged, amber unsaved, red
+  missing) and what landing needs on the right (`●3 dirty`, `↑4`, `review`,
+  `?` when unknown). Its inspector has the branch and repo, the path, the
+  land state in words, and who works in it; its keys are `↵` go (to the agent
+  or pane standing there), `g` lazygit, `t` a shell, and `s`, which asks and
+  then runs `kel sweep <path>` with its checks. The chosen tab is drawn on
+  the selection's surface in the accent, and a click chooses one; `tab` and
+  `shift-tab` walk the four round while the sidebar or the board has the
+  keys. The strip takes the row the blank under `kel` had, so choosing a tab
+  swaps the list's content and moves nothing else. The choice, and the
+  cursor of whichever list is not showing, are shared in `sidebar.json`;
+  Agents and Trees each keep their own cursor. On the board, Agents and Trees
+  are the sidebar's lists, so choosing one there hands it over and closes the
+  board. Below 28 columns the labels shorten to `Agt Brd PR Tree`; the rail
+  has no strip.
 - The accent is never inverse video.
 - **Dots, not words, for state.** A word in the right slot appears only beside
   the dot, never as the only signal.
@@ -610,7 +633,8 @@ The sidebar's keys are decided in §5c. Today's bindings are listed in
 `usage.md` — one list, so the two cannot drift. The board (§5d) takes the
 sidebar's keys where they mean the same (`space`, `d`, `x`, `/`), adds its
 own (`h` `j` `k` `l` on the grid, `v` faces, `a` seen), and ignores the rest:
-`q` and `esc` close it, never quit kel.
+`q` and `esc` close it, never quit kel. `tab` and `shift-tab` walk the view
+tabs (§5d) in both.
 
 Two rules hold across both. **Switching is one keystroke** — never
 open-menu, find-row, press-enter. And **`` prefix ` `` is the key the tool

@@ -225,7 +225,9 @@ func paintFrame(s string, w, h int) string {
 type sbShared struct {
 	Selected string          `json:"selected"`
 	Expanded map[string]bool `json:"expanded,omitempty"`
-	Face     string          `json:"face,omitempty"` // the board's, by name; absent is card
+	Face     string          `json:"face,omitempty"`   // the board's, by name; absent is card
+	View     string          `json:"view,omitempty"`   // the tab chosen; absent is agents
+	Parked   string          `json:"parked,omitempty"` // the cursor of the list not on screen
 }
 
 func sbLoadShared() sbShared {
@@ -237,7 +239,13 @@ func sbLoadShared() sbShared {
 }
 
 func (m *sbModel) saveShared() {
-	sh := sbShared{Selected: m.ui.sel, Expanded: m.ui.expanded}
+	sh := sbShared{Selected: m.ui.sel, Expanded: m.ui.expanded, View: m.ui.tab, Parked: m.ui.parked}
+	if m.board {
+		sh.View = m.ui.fileView
+	}
+	if sh.View == "agents" {
+		sh.View = ""
+	}
 	if m.ui.face != faceCard {
 		sh.Face = faceNames[m.ui.face]
 	}
@@ -800,6 +808,8 @@ func (m *sbModel) activate(id string) {
 		if a, ok := m.agentOf(id); ok {
 			jump(a.wid, a.pane)
 		}
+	case strings.HasPrefix(id, "w:"):
+		m.goTree(id)
 	case strings.HasPrefix(id, "b:"):
 		// a background agent has no pane to jump to: open it, `claude
 		// attach`, in a popup — prefix q closes it, and it keeps running
@@ -1232,7 +1242,7 @@ func (m sbModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if msg.Button == tea.MouseRight {
 			switch hit.kind {
-			case "agent", "group", "pane", "bg":
+			case "agent", "group", "pane", "bg", "tree":
 				m.ui.sel = hit.id
 				m.saveShared()
 				m.openMenu()
@@ -1259,6 +1269,8 @@ func (m sbModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.ui.sel = id
 			m.saveShared()
 			return m, nil
+		case strings.HasPrefix(k, "tab:"):
+			return m.setTab(strings.TrimPrefix(k, "tab:"))
 		case k == "open:help":
 			m.help = true
 			return m, nil
@@ -1336,13 +1348,17 @@ func (m sbModel) withShared() uiState {
 	}
 	ui.expanded = sh.Expanded
 	ui.face, _ = parseFace(sh.Face)
+	ui.parked, ui.fileView = sh.Parked, sh.View
+	if !m.board {
+		ui.tab = sh.View
+	}
 	ui.now = time.Now().Unix()
 	return ui
 }
 
 // pinned by TestFreshSidebarAdoptsTheCurrentAgentAsItsSelection
 func (m *sbModel) adoptSel() {
-	if !m.visible || m.ui.filter != "" || m.board {
+	if !m.visible || m.ui.filter != "" || m.board || tabOf(m.ui.tab) == "trees" {
 		return
 	}
 	v := buildView(m.doc, m.ui)
@@ -1366,6 +1382,8 @@ func (m sbModel) press(k string) (tea.Model, tea.Cmd) {
 		return m.key(tea.KeyPressMsg{Code: tea.KeyEnter})
 	case "space":
 		return m.key(tea.KeyPressMsg{Code: tea.KeySpace, Text: " "})
+	case "tab":
+		return m.key(tea.KeyPressMsg{Code: tea.KeyTab})
 	}
 	return m.key(tea.KeyPressMsg{Code: rune(k[0]), Text: k})
 }
@@ -1604,7 +1622,18 @@ func (m sbModel) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.help = false
 		return m, nil
 	}
+	if strings.HasPrefix(m.view().sel, "w:") {
+		if nm, c, ok := m.treeKey(k); ok {
+			return nm, c
+		}
+	}
 	switch k {
+	case "tab", "shift+tab":
+		d := 1
+		if k == "shift+tab" {
+			d = -1
+		}
+		return m.setTab(tabStep(m.ui.tab, d))
 	case "j", "down":
 		m.move(1)
 	case "k", "up":
@@ -1713,12 +1742,7 @@ func (m sbModel) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "c":
 		return m.panel("claude")
 	case "v", "G", "shift+g":
-		// every open space's PRs, the selected one's repo first
-		dir := os.Getenv("HOME")
-		if sp, ok := m.selSpace(m.view().sel); ok {
-			dir = sp.dir()
-		}
-		return m, runKel(dir, nil, "_panel", "dash", dir)
+		return m, m.dash()
 	case "u":
 		// the account's usage, not the selection's: from wherever is selected,
 		// or home when nothing is
@@ -1838,6 +1862,7 @@ var sbHelp = [][2]string{
 	{"c", "claude config"},
 	{"s", "sweep what landed"},
 	{"#", "kel"},
+	{"tab", "next view · ⇧tab back"},
 	{"n", "new agent (tab: dir)"},
 	{"n x -- …", "with claude flags"},
 	{"w", "new worktree agent"},
@@ -1897,6 +1922,13 @@ func (m sbModel) boardKey(k string) (tea.Model, tea.Cmd, bool) {
 		return m, nil, true
 	}
 	switch k {
+	case "tab", "shift+tab":
+		d := 1
+		if k == "shift+tab" {
+			d = -1
+		}
+		nm, c := m.setTab(tabStep(m.ui.tab, d))
+		return nm, c, true
 	case "left", "h", "right", "l", "up", "k", "down", "j":
 		cols, _ := boardCols(m.width)
 		if id := boardStep(m.view(), cols, k); id != "" {
@@ -2008,6 +2040,8 @@ func runSidebar(once, board bool) {
 	m := sbModel{fixedBg: loadPalette(), frame: new([]lineRef), board: board}
 	if !board {
 		m.myPane = os.Getenv("TMUX_PANE")
+	} else {
+		m.ui.tab = "board"
 	}
 	if m.myPane != "" {
 		// the pane wears no style of its own: tmux would give that as the

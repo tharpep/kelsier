@@ -32,6 +32,9 @@ type uiState struct {
 	prefix   string // the tmux prefix in words ("Ctrl-b"), for hints
 	restore  bool   // a previous workspace waits to be restored
 	face     face   // the board's, shared through sidebar.json
+	tab      string // the view tab chosen (tabs.go), shared through sidebar.json
+	parked   string // the selection of the list not on screen: agents' while Trees shows
+	fileView string // the tab sidebar.json holds: the board's strip is its own
 }
 
 type sbSpace struct {
@@ -163,6 +166,8 @@ type sbView struct {
 	menu                 *sbMenu // open over the rows, or nil
 	layouts              *sbLayoutMenu
 	quota                *fleet.Quota
+	tab                  string   // the view tab shown: agents, board, prs or trees
+	trees                []sbTree // the Trees view's rows, when it shows
 }
 
 // lineRef says which entry a screen line belongs to — what a click hits.
@@ -490,6 +495,10 @@ func buildView(doc fleet.Doc, ui uiState) sbView {
 	}
 	v.nestPanes()
 	v.entries(ui)
+	if v.tab = tabOf(ui.tab); v.tab == "trees" {
+		v.trees, v.sel = treeRows(v.repos, ui.filter), ui.sel
+		v.treeEntries()
+	}
 	return v
 }
 
@@ -1117,6 +1126,9 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 	const in = " "
 	gap := line{"", lineRef{}}
 	body := v.listLines(w, now)
+	if v.tab == "trees" {
+		body = v.treeLines(w)
+	}
 
 	// the top: kel, and its two menus. Mouse first (2026-11-04): what the key
 	// grid at the foot listed is in these menus and in each entry's own,
@@ -1127,7 +1139,9 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 		ref := lineRef{kind: "menu", id: "menu:new", id2: "menu:kel", from: from, split: from + visWidth(button("+ New")) + 1}
 		on := v.hoverOn(ref, 0)
 		right := buttonLit("+ New", on == "menu:new") + " " + buttonLit("⋯", on == "menu:kel")
-		head = []line{{spread(in+bold+"kel"+reset, right, w), ref}, gap}
+		strip := tabStrip(v.tab, "", w)
+		strip = tabStrip(v.tab, v.hoverKey(strip.ref, 1), w)
+		head = []line{{spread(in+bold+"kel"+reset, right, w), ref}, strip}
 	}
 
 	// the tail: a prompt — what it asks, what you type, how to answer — or
@@ -1241,7 +1255,7 @@ func renderView(v sbView, w, h int, now int64) (string, []lineRef) {
 // listKind: a line of the list, which a hover lights.
 func listKind(k string) bool {
 	switch k {
-	case "agent", "pane", "bg", "group", "fold":
+	case "agent", "pane", "bg", "group", "fold", "tree":
 		return true
 	}
 	return false
@@ -1616,6 +1630,10 @@ func selActions(v sbView) (string, string, []sbAct) {
 				}
 				return "agent", a.agent.Name, acts
 			}
+		}
+	case strings.HasPrefix(v.sel, "w:"):
+		if t, ok := v.treeOf(v.sel); ok {
+			return "worktree", wtLabel(t.wt), []sbAct{{"enter", "go"}, {"g", "lazygit"}, {"t", "shell"}, {"s", "sweep"}}
 		}
 	case strings.HasPrefix(v.sel, "b:"):
 		for _, list := range append([][]fleet.Background{v.bgLoose}, mapValues(v.bgUnder)...) {

@@ -176,11 +176,14 @@ func renderBoard(v sbView, w, h int, now int64, o boardOpts) (string, []lineRef)
 	if o.loc == nil {
 		o.loc = time.Local
 	}
+	if v.tab != "prs" {
+		v.tab = "board"
+	}
 	ts := boardTiles(v)
 	cols, tw := boardCols(w)
 	blocks := boardBlocks(ts, cols)
 
-	head := []line{{boardHeader(v, ts, w, now), lineRef{kind: "head"}}, {}}
+	head := []line{boardHeader(v, ts, w, now), {}}
 	var body []line
 	var above, below unseen
 	switch {
@@ -971,9 +974,13 @@ func tileCount(t boardTile) string {
 	return "unknown"
 }
 
-// boardHeader: kel board, the agents counted by state, the 5h quota, esc.
-// Short of room the counts lose their words, then the right side loses esc.
-func boardHeader(v sbView, ts []boardTile, w int, now int64) string {
+// boardHeader: the view tabs, the agents counted by state, the 5h quota,
+// esc. Short of room the counts lose their words, then the right side loses
+// esc. Each tab is a click.
+func boardHeader(v sbView, ts []boardTile, w int, now int64) line {
+	strip := tabStrip(v.tab, "", w)
+	strip = tabStrip(v.tab, v.hoverKey(strip.ref, 0), w)
+	ref := lineRef{kind: "head", hits: strip.ref.hits}
 	n := map[string]int{}
 	for _, t := range ts {
 		n[tileCount(t)]++
@@ -1003,7 +1010,7 @@ func boardHeader(v sbView, ts []boardTile, w int, now int64) string {
 		quota = dim + "5h" + reset + " " + bar(p, 16) + " " + dim + fmt.Sprintf("%.0f%%", p) + reset
 	}
 	right := []string{quota, dim + "esc" + reset}
-	title := " " + bold + "kel board" + reset
+	title := strip.s
 	for _, words := range []bool{true, false} {
 		for k := len(right); k >= 1; k-- {
 			left := title
@@ -1012,11 +1019,11 @@ func boardHeader(v sbView, ts []boardTile, w int, now int64) string {
 			}
 			r := strings.Join(right[:k], "    ")
 			if visWidth(left)+2+visWidth(r) <= w-1 {
-				return spread(left, r, w)
+				return line{spread(left, r, w), ref}
 			}
 		}
 	}
-	return truncateStyled(title+"  "+counts(false), w)
+	return line{truncateStyled(title+"  "+counts(false), w), ref}
 }
 
 // boardFooter: the keys, and on the right which face is showing, with what
@@ -1044,9 +1051,9 @@ func boardFooter(v sbView, w int, f face, above, below unseen) line {
 		}
 		return line{" " + c + truncate(v.footer, w-2) + reset, lineRef{kind: "foot"}}
 	}
-	acts := []sbAct{{"enter", "go"}, {"space", "peek"}, {"v", "face"}, {"a", "seen"}, {"d", "diff"}, {"x", "kill"}, {"/", "filter"}}
+	acts := []sbAct{{"enter", "go"}, {"space", "peek"}, {"v", "face"}, {"tab", "view"}, {"a", "seen"}, {"d", "diff"}, {"x", "kill"}, {"/", "filter"}}
 	if strings.HasPrefix(v.sel, "w:") {
-		acts = []sbAct{{"s", "sweep"}, {"v", "face"}, {"/", "filter"}}
+		acts = []sbAct{{"s", "sweep"}, {"v", "face"}, {"tab", "view"}, {"/", "filter"}}
 	}
 	keys := chips(acts)
 	var fs []string
