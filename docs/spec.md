@@ -620,6 +620,20 @@ the agent's environment) and R3 (kel rendering documentation).
   footer (`opened :3000 · also :3001 :9229`) — the extras are often a
   debugger. *(Decided in M5 planning.)* A browser *inside* the terminal (`carbonyl`) is rejected
   (backlog R7).
+- **Grab: `prefix Tab` picks what an agent printed** (*2026-11-18*, round 7).
+  extrakto finds the paths, URLs and quoted strings in the pane's last 2000
+  lines; fzf picks one in a popup, newest first. kel routes the pick: a path
+  to `e`'s editor at the line the pane named it at (`handlers.go:88`), a
+  directory to nvim there, a URL to `o`'s browser, anything else to the
+  clipboard, and `Ctrl-y` copies any of them through kel's copy chain. kel
+  runs extrakto's extractor (`extrakto.py`) itself rather than its tmux
+  plugin: the plugin's insert key pastes into the pane and its edit key types
+  `$EDITOR -- <text>` there, both against invariant 4, and its open runs the
+  picked text, which an agent printed, through a shell unquoted. So kel has
+  no insert action at all. The pick travels in a tmux buffer, and the open
+  runs from the server, so the editor's popup outlives the grab's. extrakto
+  is a clone in kel's data dir, not a TPM plugin; without it, python3 or
+  fzf, `prefix Tab` says so in the message line, and `kel doctor` lists it.
 - **`kel url [worktree]`** prints that worktree's server URL, so an agent's
   own browser tooling (a Playwright skill, say) can ask kel where the dev
   server is instead of guessing `:3000`. Read-only — the agent asks, kel never

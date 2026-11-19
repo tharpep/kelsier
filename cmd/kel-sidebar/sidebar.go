@@ -1879,6 +1879,7 @@ var sbHelp = [][2]string{
 	{"  space", "the sidebar"},
 	{"  `", "next waiting agent"},
 	{"  B", "the board"},
+	{"  Tab", "grab a path or URL"},
 	{"  k", "kel command"},
 	{"  q", "close a popup"},
 }

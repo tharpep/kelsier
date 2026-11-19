@@ -57,6 +57,7 @@
 #   kel _paste <pane>          the system clipboard into a pane (middle-click)
 #   kel _seen <window-id>      mark an agent's window seen, as showing it would (board: a)
 #   kel _drop <src> <dst> <x> <y> <w> <h>  an Alt-drag let go over dst (kel.conf)
+#   kel _grab <pane>           prefix Tab: paths, URLs and quotes from a pane, to open or copy
 set -uo pipefail
 
 # The hook that fires after every tool call, cut short. Bash parses a script
@@ -2427,6 +2428,14 @@ cmd_doctor() {
     if command -v "$t" >/dev/null 2>&1; then printf '  \033[1;32m✓\033[0m %s\n' "$t (optional)" >&2
     else printf '  \033[2m·\033[0m %s\n' "$t not installed (optional — install/30-extras.sh)" >&2; fi
   done
+  local h_grab="install/20-user-tools.sh"
+  [ "$(uname -s)" = Darwin ] && h_grab="install/macos-tools.sh"
+  # prefix Tab's grab: extrakto's extractor, run by python3, picked with fzf
+  local miss=''
+  [ -f "$(extrakto_dir)/extrakto.py" ] || miss="extrakto"
+  for t in python3 fzf; do command -v "$t" >/dev/null 2>&1 || miss="${miss:+$miss, }$t"; done
+  if [ -z "$miss" ]; then printf '  \033[1;32m✓\033[0m %s\n' "extrakto (optional, for prefix Tab)" >&2
+  else printf '  \033[2m·\033[0m %s\n' "extrakto not ready: no $miss (optional, for prefix Tab — $h_grab)" >&2; fi
   local popn popc
   popn="$(tmux list-sessions -F '#{session_name}' 2>/dev/null | grep -c '^_kelpop_')"
   popc="$(tmux list-sessions -F '#{session_name}' 2>/dev/null | grep '^_kelpop_' \
@@ -3064,7 +3073,14 @@ panel_edit() { # dir title wid
   f="$(state_file "$3" edit)"
   [ -n "$wid" ] && [ -f "$f" ] || die "nothing edited yet in this window"
   { read -r path; read -r line; } < "$f"
-  case "${line:-}" in ''|*[!0-9]*) line=1 ;; esac
+  edit_at "$dir" "$title" "$path" "$line"
+}
+
+# edit_at: PATH at LINE in the nvim open in DIR's worktree, else a popup — e's
+# path, and the grab's
+edit_at() { # dir title path line
+  local dir="$1" title="$2" path="$3" line="${4:-}"
+  case "$line" in ''|*[!0-9]*) line=1 ;; esac
   [ -f "$path" ] || die "$path is gone"
   need_tool nvim
   local root pane sock
@@ -3197,6 +3213,96 @@ cmd_peek_view() { # file pane
             [ -z "$rest" ] && return 0 ;;
     esac
   done
+}
+
+# prefix Tab — grab what an agent printed (spec.md §5f). extrakto's extractor
+# finds the paths, URLs and quoted strings in the pane; fzf picks one in a
+# popup; kel routes it: a path to e's editor (your nvim, else a popup), a URL
+# to o's browser, anything else, or ^y, to the clipboard through kel's copy
+# chain. Not extrakto's tmux plugin: its insert key pastes into the pane, its
+# edit key types `$EDITOR -- <text>` there (invariant 4: kel never types into
+# a pane), and its open runs the picked text through a shell unquoted, text an
+# agent printed. kel has no insert action at all.
+extrakto_dir() { printf '%s' "${KEL_EXTRAKTO_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/kel/extrakto}"; }
+
+cmd_grab() { # pane
+  local pane="${1:-${TMUX_PANE:-}}" ex dir name cap t
+  ex="$(extrakto_dir)/extrakto.py"
+  # missing is a hint in the message line, not run-shell's error page, which
+  # would take the pane's keys until q
+  local miss=''
+  [ -f "$ex" ] || miss="extrakto"
+  for t in python3 fzf; do command -v "$t" >/dev/null 2>&1 || miss="${miss:+$miss, }$t"; done
+  if [ -n "$miss" ]; then
+    local hint="prefix Tab needs $miss — install/20-user-tools.sh (macOS: install/macos-tools.sh); kel doctor checks"
+    if [ -z "${TMUX:-}" ]; then warn "$hint"
+    elif tmux_at_least 3 2; then tmux display-message -d 5000 "$hint"
+    else tmux display-message "$hint"; fi
+    return 0
+  fi
+  case "$pane" in %[0-9]*) ;; *) die "usage: kel _grab <pane>" ;; esac
+  [ -n "$(tmux display-message -p -t "$pane" '#{@kel-sidebar}' 2>/dev/null)" ] && die "grab from a pane of yours, not the sidebar"
+  dir="$(tmux display-message -p -t "$pane" '#{pane_current_path}' 2>/dev/null)"
+  [ -d "$dir" ] || dir="$HOME"
+  name="$(pane_name "$pane")"
+  cap="$STATE_DIR/$pane.view"
+  write_private "$cap" "$(tmux capture-pane -p -J -S -2000 -t "$pane" 2>/dev/null)"
+  KEL_POPUP_W="${KEL_POPUP_W:-70%}" KEL_POPUP_H="${KEL_POPUP_H:-60%}" \
+    popup "$dir" "grab · from ${name//%/%%} · ↵ open · ^y copy · esc closes" "$SELF" _grab_pick "$pane"
+}
+
+# inside the popup: the list, newest first, kind then text. The choice goes
+# to the tmux buffer kel-grab and the open runs from the server, so an editor
+# popup outlives this one and no picked text passes through a shell
+cmd_grab_pick() { # pane
+  local pane="$1" cap out key sel
+  cap="$STATE_DIR/$pane.view"
+  [ -f "$cap" ] || die "nothing grabbed"
+  out="$(python3 "$(extrakto_dir)/extrakto.py" --all --name -r < "$cap" \
+    | awk '{ i = index($0, ": "); if (!i) next; k = substr($0, 1, i - 1); t = substr($0, i + 2)
+             if (k == "path") sub(/\.+$/, "", t)
+             if (t != "" && !seen[k, t]++) printf "%-5s\t%s\n", k, t }' \
+    | fzf --expect=enter,ctrl-y --no-info --tiebreak=index --reverse --tabstop=6 \
+          --header='↵ open · ^y copy · esc closes' --prompt='> ')" || return 0
+  key="${out%%$'\n'*}"
+  sel="${out#*$'\n'}"
+  [ -n "$sel" ] && [ "$sel" != "$out" ] || return 0
+  tmux set-buffer -b kel-grab -- "$key"$'\n'"$sel"
+  tmux run-shell -b -t "$pane" "'$SELF' _grab_open '$pane' >/dev/null 2>&1"
+}
+
+# run from the server: a refusal (no such file, no nvim) is said in tmux's
+# message line, since nothing here has a pane of its own to print in
+cmd_grab_open() { # pane
+  local pane="$1" out err esc=$'\033'
+  out="$(tmux show-buffer -b kel-grab 2>/dev/null)" || die "nothing picked"
+  tmux delete-buffer -b kel-grab 2>/dev/null
+  export TMUX_PANE="$pane"
+  err="$( (grab_route "$pane" "${out%%$'\n'*}" "${out#*$'\n'}") 2>&1 >/dev/null)" && return 0
+  err="$(printf '%s\n' "$err" | sed "s/${esc}\[[0-9;]*m//g" | tail -n 1)"
+  tmux display-message -t "$pane" "$(fmt_text "${err:-the grab could not open that}")" 2>/dev/null
+  return 1
+}
+
+grab_route() { # pane key selection
+  local pane="$1" key="$2" sel="$3" cap kind text dir path line
+  cap="$STATE_DIR/$pane.view"
+  kind="${sel%%$'\t'*}"; kind="${kind%% *}"
+  text="${sel#*$'\t'}"
+  if [ "$key" = ctrl-y ] || { [ "$kind" != path ] && [ "$kind" != url ]; }; then
+    printf '%s' "$text" | copy_stdin
+    tmux display-message -t "$pane" "copied $(fmt_text "${text:0:60}")" 2>/dev/null
+    return 0
+  fi
+  if [ "$kind" = url ]; then open_url "$text"; return; fi
+  dir="$(tmux display-message -p -t "$pane" '#{pane_current_path}' 2>/dev/null)"
+  path="$text"
+  case "$path" in "~/"*) path="$HOME/${path#\~/}" ;; /*) ;; *) path="$dir/$path" ;; esac
+  # the line the pane named it at, path:88, which extrakto's path drops
+  line="$(awk -v t="$text:" '{ i = index($0, t); if (i) { r = substr($0, i + length(t)); if (match(r, /^[0-9]+/)) { print substr(r, 1, RLENGTH); exit } } }' "$cap")"
+  if [ -d "$path" ]; then need_tool nvim; KEL_POPUP_KEEP=1 popup "$path" "nvim · ${path##*/} · prefix q closes" nvim .; return; fi
+  [ -f "$path" ] || die "no such file: $text"
+  edit_at "$dir" "$(pane_name "$pane")" "$path" "$line"
 }
 
 panel_cards() { # dir title pane_or_wid
@@ -4976,6 +5082,9 @@ main() {
     substatus)    cmd_substatus "$@" ;;
     _panel)       cmd_panel "$@" ;;
     _peek_view)   cmd_peek_view "$@" ;;
+    _grab)        cmd_grab "$@" ;;
+    _grab_pick)   cmd_grab_pick "$@" ;;
+    _grab_open)   cmd_grab_open "$@" ;;
     _claude_state) cmd_claude_state "$@" ;;
     _banner)      case "${1:-}" in
                     seen)  banner_seen ;;

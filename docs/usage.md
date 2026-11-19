@@ -106,6 +106,7 @@ Keys below use `Ctrl-b`, tmux's default prefix; if you changed yours, kel's own 
 | `Ctrl-b 1..9` / `n` / `p` / `w` | move between windows — every agent is in one session (native tmux) |
 | `Ctrl-b b` | cycle this window's sidebar: full, rail, hidden. The choice sticks for the window until you change it again |
 | `Ctrl-b B` | the board: every agent as a tile, in a popup (below) |
+| `Ctrl-b Tab` | grab from the pane you are in: its paths, URLs and quoted strings, newest first, in an fzf popup (`path  internal/auth/handlers.go`). `enter` opens a path in your editor as `e` does, at the line the pane named it at (`handlers.go:88`), in the nvim you have open in that worktree, else a popup; a directory opens nvim there; a URL opens in your browser as `o` does; a quoted string is copied. `Ctrl-y` copies whatever is picked, through the same chain as a drag. Nothing is typed into the pane. Needs extrakto, python3 and fzf (`install/20-user-tools.sh`, or `macos-tools.sh`); without them the message line says so |
 | `Ctrl-b ,` | rename this window (routes through `kel rename`) |
 | `Ctrl-b \|` / `-` | split, keeping the current directory |
 | `Ctrl-b [` | scroll mode for a shell pane (`q` to leave) |

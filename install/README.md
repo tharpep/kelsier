@@ -12,8 +12,9 @@ brought up by hand.
 | Script | Platform | Runs as | Installs |
 |---|---|---|---|
 | `10-system-tools.sh` | Debian/Ubuntu | root | neovim (tarball), lazygit, yazi, git-delta, gh, win32yank, tealdeer |
-| `20-user-tools.sh` | Debian/Ubuntu | your user | zoxide, fzf, fnm + Node LTS, the `~/.bashrc` env block |
-| `macos-tools.sh` | macOS | your user | all of the above via Homebrew, minus win32yank |
+| `20-user-tools.sh` | Debian/Ubuntu | your user | zoxide, fzf, extrakto (cloned into `~/.local/share/kel/extrakto`, for `prefix Tab`), fnm + Node LTS, Go, the `~/.bashrc` env block |
+| `30-extras.sh` | Debian/Ubuntu | your user | the optional tools kel opens: glow, freeze, vhs (ttyd, ffmpeg), ccusage, gh-dash |
+| `macos-tools.sh` | macOS | your user | all of the above via Homebrew (extrakto by the same clone), minus win32yank |
 
 The apt packages (`tmux git build-essential curl wget unzip tar ripgrep fd-find
 bat btop jq` + yazi's preview stack) install separately — `docs/setup.md` §3a.

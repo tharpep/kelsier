@@ -107,6 +107,7 @@ Notes:
 | `yazi` | GitHub release binary (`yazi` + `ya`) | not packaged |
 | `zoxide` | official install script | in 24.04 universe, but upstream ships fixes faster |
 | `fzf` | `git clone ~/.fzf && ./install` | apt's 0.44 lacks 0.50+ features incl. `--tmux`, plus the shell keybindings |
+| `extrakto` | `git clone` → `~/.local/share/kel/extrakto` | not packaged; kel runs its extractor (`extrakto.py`, python3) for `prefix Tab` itself, so there is no TPM and nothing in `~/.tmux.conf` |
 | `gh` | GitHub's apt repo (keyring + source list) | not in default Ubuntu |
 | `git-delta` | GitHub release `.deb` | 24.04's is older; **binary is `delta`, not `git-delta`** — git config must say `delta` |
 | `win32yank` | GitHub release | clipboard paste fallback (see 4), no apt package |

@@ -1736,6 +1736,44 @@ ok "an Edit records the file and its first changed line" '[ "$(sed -n 1p "$STATE
 ok "  ...and leaves the agent's state alone"    '[ ! -f "$STATE/$K5.state" ]'
 "$KEL" _panel edit "$WT5" api-gw/wt5 "$W5" >/dev/null 2>&1
 ok "e with no nvim open there: a popup at the line" 'grep -q "^$WT5	nvim · api-gw/wt5 · prefix q closes	nvim +12 $WT5/README.md$" "$KEL_POPUP_TRACE"'
+
+# prefix Tab, the grab: extrakto's extractor and fzf are stubs here (CI has
+# neither); what is kel's — the hint, the popup, the list, the routing — runs
+EXD="$WORK/extrakto"; mkdir -p "$EXD"
+printf '#!/usr/bin/env python3\nprint("path: README.md.")\nprint("url: https://x.test/a")\nprint("path: README.md.")\nprint("quote: \\"go test\\"")\n' > "$EXD/extrakto.py"
+gout="$(KEL_EXTRAKTO_DIR="$WORK/no-extrakto" "$KEL" _grab "$K5" 2>&1)"; grc=$?
+ok "prefix Tab without extrakto: a hint, not a failure" '[ "$grc" = 0 ] && [[ "$gout" == *"needs extrakto"* ]] && ! grep -q "grab ·" "$KEL_POPUP_TRACE"'
+gout="$(KEL_EXTRAKTO_DIR="$WORK/no-extrakto" "$KEL" doctor 2>&1 || true)"
+ok "  ...and kel doctor says it is missing" '[[ "$gout" == *"extrakto not ready: no extrakto"* ]]'
+printf '#!/bin/sh\ncat > %s/fzf.in\nexit 130\n' "$WORK" > "$WORK/shim/fzf"; chmod +x "$WORK/shim/fzf"
+export KEL_EXTRAKTO_DIR="$EXD"
+"$KEL" _grab "$K5" >/dev/null 2>&1
+ok "prefix Tab opens the grab over the pane"    'grep -q "^$WT5	grab · from wt5 · ↵ open · ^y copy · esc closes	.*kel _grab_pick $K5$" "$KEL_POPUP_TRACE"'
+ok "  ...from a capture of that pane, kept private" '[ -f "$STATE/$K5.view" ] && [ "$(ls -l "$STATE/$K5.view" | cut -c1-10)" = "-rw-------" ]'
+ok "  ...never from the sidebar"                '[[ "$("$KEL" _grab "$S5" 2>&1)" == *"not the sidebar"* ]]'
+"$KEL" _grab_pick "$K5" >/dev/null 2>&1
+ok "  ...the list: kind, then text, each once, the stray full stop gone" '[ "$(cat "$WORK/fzf.in")" = "$(printf "path \tREADME.md\nurl  \thttps://x.test/a\nquote\t\"go test\"")" ]'
+ok "  ...and esc in fzf picks nothing"          '! tmux show-buffer -b kel-grab >/dev/null 2>&1'
+printf 'see README.md:7 for it\n' > "$STATE/$K5.view"
+tmux set-buffer -b kel-grab -- "$(printf 'enter\npath \tREADME.md')"
+"$KEL" _grab_open "$K5" >/dev/null 2>&1
+ok "enter on a path: e's editor, at the line the pane named" 'grep -q "^$WT5	nvim · wt5 · prefix q closes	nvim +7 $WT5/README.md$" "$KEL_POPUP_TRACE"'
+ok "  ...and the pick is used once"             '! tmux show-buffer -b kel-grab >/dev/null 2>&1'
+: > "$WORK/browsed"
+tmux set-buffer -b kel-grab -- "$(printf 'enter\nurl  \thttps://x.test/a')"
+"$KEL" _grab_open "$K5" >/dev/null 2>&1
+ok "enter on a URL: the browser, as o opens one" 'wait_until "[ \"\$(cat \"$WORK/browsed\")\" = https://x.test/a ]" 20'
+tmux set-buffer -b kel-grab -- "$(printf 'ctrl-y\npath \tREADME.md')"
+KEL_COPY_CMD="cat > '$WORK/grabbed'" "$KEL" _grab_open "$K5" >/dev/null 2>&1
+ok "^y copies through kel's copy chain"         '[ "$(cat "$WORK/grabbed")" = README.md ]'
+tmux set-buffer -b kel-grab -- "$(printf 'enter\nquote\t"go test"')"
+KEL_COPY_CMD="cat > '$WORK/grabbed'" "$KEL" _grab_open "$K5" >/dev/null 2>&1
+ok "  ...as enter does on a quote: there is nothing to open" '[ "$(cat "$WORK/grabbed")" = "\"go test\"" ]'
+tmux set-buffer -b kel-grab -- "$(printf 'enter\npath \tno/such.go')"
+ok "a path that is not there is refused, nothing opened" '! "$KEL" _grab_open "$K5" >/dev/null 2>&1 && ! grep -q "such.go" "$KEL_POPUP_TRACE"'
+ok "kel has no insert action: nothing pastes or types into a pane" '! awk "/^cmd_grab\(\)/,/^panel_cards/" "$HERE/../bin/kel" | grep -qE "paste-buffer|send-keys"'
+unset KEL_EXTRAKTO_DIR
+rm -f "$WORK/shim/fzf"
 # a pane whose process is called nvim (a renamed sleep), and a socket where
 # nvim 0.9+ would listen: e must reach it over the socket and select the pane
 mkdir -p "$WORK/nvimbin"

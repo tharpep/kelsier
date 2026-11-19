@@ -19,6 +19,18 @@ fi
 "$HOME/.fzf/install" --key-bindings --completion --no-update-rc
 "$HOME/.fzf/bin/fzf" --version
 
+say "extrakto (prefix Tab in kel: paths, URLs and quotes from a pane; needs python3 and fzf)"
+# kel runs its extractor itself, so a clone into kel's own data dir is all it
+# takes: no TPM, nothing in ~/.tmux.conf
+EXTRAKTO="${XDG_DATA_HOME:-$HOME/.local/share}/kel/extrakto"
+if [ ! -d "$EXTRAKTO/.git" ]; then
+  mkdir -p "$(dirname "$EXTRAKTO")"
+  git clone --depth 1 https://github.com/laktak/extrakto.git "$EXTRAKTO"
+else
+  git -C "$EXTRAKTO" pull --ff-only
+fi
+python3 "$EXTRAKTO/extrakto.py" --help >/dev/null && echo "  extrakto ready: $EXTRAKTO"
+
 say "fnm"
 curl -fsSL https://fnm.vercel.app/install | bash -s -- --skip-shell
 export PATH="$HOME/.local/share/fnm:$PATH"

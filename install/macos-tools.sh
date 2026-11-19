@@ -36,6 +36,19 @@ else
   brew install go
 fi
 
+say "extrakto (prefix Tab in kel: paths, URLs and quotes from a pane; needs python3 and fzf)"
+# kel runs its extractor itself: a clone into kel's own data dir, no TPM.
+# python3 is the Command Line Tools' own, else Homebrew's
+command -v python3 >/dev/null 2>&1 || brew install python
+EXTRAKTO="${XDG_DATA_HOME:-$HOME/.local/share}/kel/extrakto"
+if [ ! -d "$EXTRAKTO/.git" ]; then
+  mkdir -p "$(dirname "$EXTRAKTO")"
+  git clone --depth 1 https://github.com/laktak/extrakto.git "$EXTRAKTO"
+else
+  git -C "$EXTRAKTO" pull --ff-only
+fi
+python3 "$EXTRAKTO/extrakto.py" --help >/dev/null && echo "  extrakto ready: $EXTRAKTO"
+
 say "shell rc block"
 # macOS defaults to zsh, so this is ~/.zshrc rather than the ~/.bashrc block
 # 20-user-tools.sh writes. Deliberately NO `fd=fdfind` / `bat=batcat` aliases:
