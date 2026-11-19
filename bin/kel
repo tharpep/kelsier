@@ -2424,12 +2424,14 @@ cmd_doctor() {
     else printf '  \033[2m·\033[0m %s\n' "$t not installed (optional — $pm $t)" >&2; fi
   done
   # phase 3's: install/30-extras.sh (or Homebrew on the Mac) installs them all
+  local h_extras="install/30-extras.sh" h_grab="install/20-user-tools.sh" why
+  [ "$(uname -s)" = Darwin ] && h_extras="install/macos-tools.sh" h_grab="install/macos-tools.sh"
   for t in glow ccusage freeze; do
-    if command -v "$t" >/dev/null 2>&1; then printf '  \033[1;32m✓\033[0m %s\n' "$t (optional)" >&2
-    else printf '  \033[2m·\033[0m %s\n' "$t not installed (optional — install/30-extras.sh)" >&2; fi
+    why=''
+    [ "$t" = glow ] && why=", renders p and i; plain without it"
+    if command -v "$t" >/dev/null 2>&1; then printf '  \033[1;32m✓\033[0m %s\n' "$t (optional$why)" >&2
+    else printf '  \033[2m·\033[0m %s\n' "$t not installed (optional$why — $h_extras)" >&2; fi
   done
-  local h_grab="install/20-user-tools.sh"
-  [ "$(uname -s)" = Darwin ] && h_grab="install/macos-tools.sh"
   # prefix Tab's grab: extrakto's extractor, run by python3, picked with fzf
   local miss=''
   [ -f "$(extrakto_dir)/extrakto.py" ] || miss="extrakto"
@@ -3149,10 +3151,18 @@ panel_plan() { # dir title wid
     printf '\n---\n\n'
     plan_tasks "$sid" "$tdir"
   } > "$view.$$" && mv -f "$view.$$" "$view"
-  if command -v glow >/dev/null 2>&1; then popup "$dir" "plan · $title · prefix q closes" glow -p "$view"
-  elif command -v bat >/dev/null 2>&1; then popup "$dir" "plan · $title · prefix q closes" bat --paging=always -l md "$view"
-  elif command -v batcat >/dev/null 2>&1; then popup "$dir" "plan · $title · prefix q closes" batcat --paging=always -l md "$view"
-  else popup "$dir" "plan · $title · prefix q closes" less -R "$view"; fi
+  md_popup "$dir" "plan · $title · prefix q closes" "$view"
+}
+
+# md_popup: markdown in a popup — rendered by glow when it is installed, else
+# the plain view: bat's highlighting, else less. glow reads it on stdin:
+# given the file, it judges by the extension, and <pane>.view has none, so it
+# showed the markdown raw (seen in test/live-rig.sh, 2026-11-18)
+md_popup() { # dir title file
+  if command -v glow >/dev/null 2>&1; then popup "$1" "$2" sh -c 'glow -p - < "$1"' sh "$3"
+  elif command -v bat >/dev/null 2>&1; then popup "$1" "$2" bat --paging=always -l md "$3"
+  elif command -v batcat >/dev/null 2>&1; then popup "$1" "$2" batcat --paging=always -l md "$3"
+  else popup "$1" "$2" less -R "$3"; fi
 }
 
 panel_history() { # dir title pane
@@ -3340,9 +3350,7 @@ panel_cards() { # dir title pane_or_wid
       "---\n"
     ' "$cf" 2>/dev/null | sed '$d'
   } > "$view.$$" && mv -f "$view.$$" "$view"
-  if command -v glow >/dev/null 2>&1; then popup "$dir" "cards · $title · prefix q closes" glow -p "$view"
-  elif command -v bat >/dev/null 2>&1; then popup "$dir" "cards · $title · prefix q closes" bat --paging=always -l md "$view"
-  else popup "$dir" "cards · $title · prefix q closes" less -R "$view"; fi
+  md_popup "$dir" "cards · $title · prefix q closes" "$view"
 }
 
 # the task list as markdown: ✓ done, ▸ in progress, · pending, and what blocks

@@ -1803,6 +1803,19 @@ ok "  ...and not the last edit"                  '[ "$(sed -n 1p "$STATE/$K5.edi
 : > "$KEL_POPUP_TRACE"
 "$KEL" _panel plan "$WT5" api-gw/wt5 "$W5" >/dev/null 2>&1
 ok "p opens the plan in a popup"                 'grep -q "^$WT5	plan · api-gw/wt5 · prefix q closes	" "$KEL_POPUP_TRACE"'
+# glow renders it when installed; without glow, the plain view (bat, else less)
+mkdir -p "$WORK/glowbin"; printf '#!/bin/sh\nexit 0\n' > "$WORK/glowbin/glow"; chmod +x "$WORK/glowbin/glow"
+NOGLOW="$(printf '%s' "$PATH" | tr ':' '\n' | while IFS= read -r d; do [ -n "$d" ] && [ ! -x "$d/glow" ] && printf '%s:' "$d"; done)"; NOGLOW="${NOGLOW%:}"
+: > "$KEL_POPUP_TRACE"
+PATH="$WORK/glowbin:$PATH" "$KEL" _panel plan "$WT5" api-gw/wt5 "$W5" >/dev/null 2>&1
+ok "  ...rendered through glow when it is there" 'grep -q "^$WT5	plan · api-gw/wt5 · prefix q closes	sh -c glow -p - < \"\$1\" sh .*\.view$" "$KEL_POPUP_TRACE"'
+: > "$KEL_POPUP_TRACE"
+PATH="$NOGLOW" "$KEL" _panel plan "$WT5" api-gw/wt5 "$W5" >/dev/null 2>&1
+ok "  ...and plain without it"                   'grep -qE "^$WT5	plan · api-gw/wt5 · prefix q closes	(bat|batcat|less) " "$KEL_POPUP_TRACE" && ! grep -q glow "$KEL_POPUP_TRACE"'
+gout="$(PATH="$NOGLOW" "$KEL" doctor 2>&1 || true)"
+ok "  ...which kel doctor reports"               '[[ "$gout" == *"glow not installed (optional, renders p and i; plain without it"* ]]'
+gout="$(PATH="$WORK/glowbin:$PATH" "$KEL" doctor 2>&1 || true)"
+ok "  ...as it reports glow there"               '[[ "$gout" == *"glow (optional, renders p and i"* ]]'
 ok "  ...the plan's own text"                    'grep -q "Fix the parser" "$STATE/$K5.view"'
 ok "  ...and says when the session keeps no tasks" 'grep -q "no task list" "$STATE/$K5.view"'
 # tasks: Claude Code's own list, as it stands on disk for the agent's session
@@ -2892,6 +2905,12 @@ ok "_panel cards records seen epoch" '[ -f "$STATE/$CP.cards-seen" ]'
 ok "_panel cards composes markdown view" \
    'grep -q "## update · cleantitle" "$STATE/$CP.view" && grep -q "## result · unit tests pass" "$STATE/$CP.view"'
 ok "_panel cards opens popup" '[ -f "$WORK/card-popups" ] && grep -q "cards · api-gw/ccard" "$WORK/card-popups"'
+: > "$WORK/card-popups"
+PATH="$WORK/glowbin:$PATH" KEL_POPUP_TRACE="$WORK/card-popups" "$KEL" _panel cards "$WORK/repos/api-gw" "api-gw/ccard" "$CP" >/dev/null 2>&1
+ok "  ...rendered through glow when it is there" 'grep -q "cards · api-gw/ccard · prefix q closes	sh -c glow -p - " "$WORK/card-popups"'
+: > "$WORK/card-popups"
+PATH="$NOGLOW" KEL_POPUP_TRACE="$WORK/card-popups" "$KEL" _panel cards "$WORK/repos/api-gw" "api-gw/ccard" "$CP" >/dev/null 2>&1
+ok "  ...and plain without it"                   'grep -q "cards · api-gw/ccard" "$WORK/card-popups" && ! grep -q glow "$WORK/card-popups"'
 
 FJSON_SEEN="$("$KEL" _fleet --panes)"
 ok "after opening cards, fleet reports unseen: false" \

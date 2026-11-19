@@ -282,8 +282,8 @@ The selection is shared by every window's sidebar, and it is what `n`, `w`, `t` 
 | `t` | a plain shell window in the selected space — no agent |
 | `q` | quit kel, after `y`: saves the workspace, then closes it all; refuses while a worktree holds unsaved work |
 | `h` | the selected agent's last twenty state changes in a popup, newest first with ages (`2m ago  done  Stop`). On a heading or a quiet trailer, `h` folds it |
-| `p` | the selected agent's plan (from plan mode), then its task list — `✓` done, `▸` in progress, `·` pending, and what blocks what. Most sessions on newer models keep no task list; it says so. Rendered with glow when installed |
-| `i` | the selected entry's cards (reports from agents) in a popup, newest first — result, update, decision. Rendered with glow when installed |
+| `p` | the selected agent's plan (from plan mode), then its task list — `✓` done, `▸` in progress, `·` pending, and what blocks what. Most sessions on newer models keep no task list; it says so. Rendered with glow when installed, plain (bat, else less) without it |
+| `i` | the selected entry's cards (reports from agents) in a popup, newest first — result, update, decision. Rendered with glow when installed, plain without it |
 | `c` | the Claude Code configuration that applies to the selected space, in yazi, a tab per place: the repo's `CLAUDE.md`, its `.claude/`, the global `~/.claude` and the project's memory. To read and open — kel writes none of it |
 | `v` | gh dash across **every repo a space is open in**: tabs for the selected space's repo, yours everywhere, review requests, all open; issues too. `/` edits a search, `t` drops the repo filter, `?` lists gh dash's keys |
 | `u` | Claude Code usage from ccusage — the current 5-hour block and two weeks by day; quit it (`q`) and type any other report (`monthly`, `session`, `daily --since 20261001`). ccusage reads Claude Code's own transcripts, so kel stores no history |

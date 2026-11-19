@@ -575,7 +575,11 @@ make sure a frame the author approved stays approved.
 What the desktop ADEs (Orca, Superset, Conductor, T3 Code) build in, kel gets
 by deciding where existing tools open — invariant 7.
 
-*Phase 3 (2026-10-16) adds four more, the same way:* markdown is glow (`p`);
+*Phase 3 (2026-10-16) adds four more, the same way:* markdown is glow (`p`,
+and `i` for cards; *2026-11-18:* fed on stdin, because glow judges a file by
+its extension and the composed view has none, so it showed raw markdown;
+without glow the popup is plain, bat else less, and `kel doctor` says glow is
+missing);
 usage is ccusage (`u`), which reads Claude Code's own transcripts, so kel stores
 no history; PRs and issues are gh dash (`G`), kept like lazygit; and the Claude
 configuration that applies to a space — the repo's `CLAUDE.md` and `.claude/`,
