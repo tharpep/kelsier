@@ -6,8 +6,9 @@ you, in the terminal. `tmux` does the multiplexing; `kel` does the bookkeeping.
 Go for everything that reads or renders; bash for the hooks, the installer, and
 the mutating commands until they move.
 
-**kel is mid-pivot (v0.10)** to an Orca-shaped sidebar — see *Where things
-stand* at the bottom. `v0.9.0` is the tag for the old design.
+**kel is at `v0.12.0`**: the Orca-shaped sidebar in every window and the board
+it opens. See *Where things stand* at the bottom. `v0.9.0` is the tag for the
+old design.
 
 Read `docs/spec.md` for the design and `docs/rollout.md` for the build order and
 current status. **`rollout.md` is the source of truth for what to work on next.**
@@ -467,41 +468,25 @@ under its own work dir.
 
 ## Where things stand
 
-**v0.10, the pivot, is in progress.** Steps 1–3 are done: `v0.9.0` tagged as
-the marker for the old design; the docs rewritten to the new one; the old
-surfaces deleted (board, menus, `kel cheat`, `go` / `move` / `adopt`, the bash
-fleet reader). Go is now required.
+**The v0.10 pivot is done.** Three tags since the old design (`rollout.md`,
+"Tags so far"): `v0.10.0` is the sidebar as daily-driven, `v0.11.0` the
+hybrid sidebar and the tile-wall board, `v0.12.0` pane rearranging, named
+layouts, Alt-drag snap, the view tabs, extrakto and glow. The bash fleet
+reader, the old board, the menus and `kel cheat` are gone, and Go is
+required. What comes next, and what v1.0 means, is `rollout.md`.
 
-**Step 4, the sidebar, is being built milestone by milestone** — the plan is
-`rollout.md` § v0.10 (M0–M6), each milestone planned with the author before
-code. **M0–M3 are done**: one session, `kel` never prompts (`kel restore` by choice),
-`_fleet --panes` knows every pane, and every window carries the sidebar —
-`spaces` / `agents`, keys, mouse, `done` until seen. `v0.10.0` is tagged
-when the author has daily-driven it. **M4 is done** too: the bar is the
-workspace footer and Claude's row is the session only, inside kel. **M5 is
-done**: `f` `g` `d` `e` `o` open yazi, lazygit, the diff, the agent's last
-file and the browser — kel owns none of them, and `KEL_POPUP_TRACE` lets the
-suite check what a popup would open without a terminal client. **M6 is
-done**: `p` shows the agent's plan and Claude Code's own task list, read from
-`~/.claude/tasks/<session>/` (undocumented — a file that will not parse reads
-unreadable). Automations stay gated (`backlog.md` #38); `v0.10.0` is the
-author's call. *2026-11-18, the hybrid:* every sidebar entry is one line,
-detail in an inspector above the footer, the entry menu over it, the footer's
-`●N need you`; Needs you, Repos and the drawer are gone. The tile-wall board
-(`kel board`, `prefix B`) shipped in v0.11; panes you can rearrange, named
-layouts, Alt-drag snap, view tabs, extrakto and glow in v0.12. After M6, a batch from daily use: `kel quit` / `kel shell`,
-the sidebar's actions group, `prefix k` for kel commands, `idle_prompt`
-ending a stuck `working`, spaces named by their repo. The
-sidebar's look is held by golden frames (`cmd/kel-sidebar/testdata/sidebar`);
-change one only after showing the author the frame. The layout
-is decided — a sidebar pane in every window, measured against `swap-pane` in
-`spec.md` §5b. A design pass after M2 settled the rest (`rollout.md`, "After
-M2"): `spaces` / `agents` sections, the visual language and how it is held
-(§5d, §5e), one home per fact in the bottom rows (§7), and the editor / diff /
-browser embeds (§5f).
+The sidebar is mouse first (invariant 6): a gesture a key does in the
+sidebar or the board is also a click. A mouse gesture is verified in
+`test/live-rig.sh` with SGR mouse sequences sent to its real client, and
+pinned by a Go test that sends a `tea.MouseClickMsg` against a rendered
+frame.
+
+The sidebar's look is held by golden frames
+(`cmd/kel-sidebar/testdata/sidebar`); change one only after showing the
+author the frame.
 
 Bubble Tea is **v2** (`charm.land/bubbletea/v2`, `View() tea.View`,
 `tea.KeyPressMsg`); almost every tutorial online is v1 and will not compile.
 
-Versioning is in `rollout.md`: `0.x` carries no promise, `0.10` follows `0.9`,
-and `v0.10.0` is tagged when the sidebar is usable.
+Versioning is in `rollout.md`: `0.x` carries no promise, and a minor bump
+marks a step worth daily-driving.

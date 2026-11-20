@@ -61,7 +61,7 @@ statusline adapter. What did not: every interactive surface.
 
 ---
 
-## v0.10 — the pivot  ·  *in progress*
+## v0.10 — the pivot  ·  **done** (`v0.10.0`, then `v0.11.0` and `v0.12.0`)
 
 **Theme:** one surface. An Orca-shaped workspace in the terminal: a persistent
 sidebar in every window listing every pane, your own splits left untouched, IDE views (files,
@@ -91,7 +91,7 @@ TUI pass over the old board, which no longer exists.
 fix: `kel-fleet` ignored `pr = off`, and it called `gh` for repos that local git
 had already answered.
 
-### Step 4 — the build plan  ·  *M0–M6 done*
+### Step 4 — the build plan  ·  **done** (M0–M8)
 
 Agreed 2026-10-14. Each milestone ends with something to try, and the suite
 stays green throughout. The decisions behind it are `spec.md` §5c and §7.
@@ -514,7 +514,7 @@ the `TodoWrite` design was stale, and the plan turned out to need no new hook.
 
 **v0.11: the tile-wall board** · *built 2026-11-18, above* (approved 2026-11-18, same artifact). The hybrid sidebar is done; the board was the next milestone. It is the sidebar binary drawn at full width in a popup (`B`, `prefix B`; `esc` closes) over the same fleet document and selection, so one surface at three widths: rail, list, board (invariant 6). One bordered tile per agent in its state's colour, grouped by repo, in window order, never moving; `v` cycles every tile between three faces — a card (question or last message, state strip, context and task bars), the pane's last lines, and a timeline of the last hour. `↵` jumps to the agent, where you answer (invariant 4). It needs four small data steps first, each Go-tested: diff size per agent on the existing git pass, PR and CI per agent under the `pr` switch, a longer state log (about 200 lines), and `a` to mark an agent seen without visiting it. The Repos section's worktrees and land state come back here.
 
-**M7 — agents as panes**  ·  *planned 2026-10-21 with the author*
+**M7 — agents as panes**  ·  **done** — *planned 2026-10-21 with the author*
 
 An agent is a pane, not a window, as in herdr, Orca and cmux: kel keyed
 everything by window id, so two agents in one window shared one state file and
@@ -557,7 +557,7 @@ an agent could not be a split. Decided with the author:
    yellow, working cyan, throttled magenta, dead red, the rest grey: the
    sidebar's colours (§5d), where the window border keeps its orange.
 
-**M8 — cards**  ·  *built 2026-11-01*
+**M8 — cards**  ·  **done** — *built 2026-11-01*
 
 Agents report to you with `kel card`. The design is `spec.md` §10a. Each step
 is a change the suite can prove; nothing here touches an agent.

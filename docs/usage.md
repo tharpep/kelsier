@@ -438,7 +438,9 @@ a window (`kel new --split`). A pane selected in the sidebar has:
 over the inspector for the selected agent's or pane's window, else the
 sidebar's own: a small picture of each named layout that fits its number of
 panes, its words and its key. `1`–`9` or `enter` apply one, `u` puts the
-layout before the last one back, esc closes. Agents go first, an editor
+layout before the last one back, esc closes. A click on a picture applies
+it; the last line's `↵ apply`, `u undo` (there while an undo is kept) and
+`esc` are clicks too, and a click outside closes the menu. Agents go first, an editor
 (nvim, vim, hx…) last: *agent + shell* (the first pane over the rest, 65%),
 *agent + editor* (the editor right, 40%), *side by side* (two panes),
 *main + stack* (the first pane left, 60%, three or more), *grid* (four),
