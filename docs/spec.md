@@ -490,7 +490,24 @@ in any terminal:
   the shown sidebar's reload had taken a folded-away selection back to its
   heading). A click on a board heading folds nothing, and a filter that
   hides the selected tile moves the selection to the first tile shown, and
-  says itself on the last line.
+  says itself on the last line. *2026-11-19, mouse first like the sidebar:*
+  a click selects a tile or a worktree row, a click on the selected one (or
+  a double-click) goes there, and the wheel moves a whole row as `j` / `k`
+  do. Every footer chip, each face name, the header's tabs and its `esc` are
+  clicks, and so is each choice of a question on the last line (`y yes · n
+  no` after `x` or `s`, `enter ok · esc cancel` after `d`): `x` could be
+  started with the mouse and never answered, since a click anywhere else
+  cancels a question. Kill still asks (invariant 1). Right-click on a tile
+  opens its entry menu inside the board, its foot on the last line and the
+  tiles to its right still drawn: the sidebar's menu without zoom, own
+  window, move, swap and layout, which change the window under the board,
+  and without rename, plus `a` Mark seen. A worktree's has lazygit, shell
+  and sweep. The tile under the pointer takes the sidebar's hover fill. A
+  kel popup's hosted session sets `mouse on` for itself, so the board and
+  every popup's `✕ close` take clicks whatever the server's option says.
+  Driven in the rig with real SGR mouse sequences, the transport was never
+  at fault: tmux forwarded clicks, wheel and double-clicks into the popup
+  and its peek; the gaps were the board's own.
 - **The view tabs** (*2026-11-18*, round 7): one row, `Agents · Board · PRs
   · Trees`, under `kel` in the sidebar and leading the board's header. They
   are views of the one surface (invariant 6), not tabs of tmux windows,

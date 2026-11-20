@@ -123,7 +123,7 @@ func TestBoardSeenAsksKel(t *testing.T) {
 	}
 }
 
-// The board answers its own keys and the four it shares; the sidebar's other
+// The board answers its own keys and those it shares; the sidebar's other
 // verbs (new, quit kel, zoom…) do nothing on it, and esc closes it.
 func TestBoardIgnoresTheSidebarsOtherKeys(t *testing.T) {
 	m := boardModel(t)

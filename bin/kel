@@ -2989,6 +2989,8 @@ banner_apply() {
 # again, and `prefix q` (kel.conf) detaches, which closes the popup whatever is
 # running. The name starts with `_`, so no kel filter (`kel` or `kel/<group>`)
 # ever counts it: not the sidebar, the fleet, a snapshot or a restore.
+# Its mouse is on whatever the server's says: the board and the ✕ close are
+# clicks.
 #
 # KEL_POPUP_KEEP=1: reuse the session if the tool is still running, so lazygit
 # and yazi reopen where you left them; the tool's own quit ends it. Views of
@@ -3026,6 +3028,7 @@ popup() {
          set-option -t "=$name:" window-status-format "" \; \
          set-option -t "=$name:" window-status-current-format "" \; \
          set-option -w -t "=$name:" pane-border-status off \; \
+         set-option -t "=$name:" mouse on \; \
          set-option -t "=$name:" @kel-popup 1 >/dev/null 2>&1 \
       || die "could not start $tool"
   fi

@@ -401,7 +401,13 @@ with worktrees apart: `↑1`, `↓2 · 3 worktrees`, `↓3 worktrees`.
 | `/` | filter by name; the last line says the filter while it holds · `esc` clears |
 | `tab` / `shift-tab` | the next / previous view tab. PRs opens gh dash over the board; Agents or Trees closes the board on that view of the sidebar |
 | `esc` / `q` | close the board |
-| click | select a tile; click the selected one again (or double-click) to go there |
+| click | select a tile or a worktree row; click the selected one again (or double-click) to go there |
+| wheel | down or up a row of tiles, as `j` / `k` |
+| right-click | a tile's menu, drawn on the board: go, peek, mark seen, diff, files, edit, plan, history, cards, kill (relaunch on a dead one). A worktree's: lazygit, shell, sweep. The menu's keys work on the board too (`f` `e` `p` `i` `R`; `g` `t` on a worktree), except history, which is `h` only in the menu |
+
+Every key on the last line is a click, as are the face names beside them,
+the header's tabs and its `esc`, and each answer to a question there (`y
+yes · n no`, `enter ok · esc cancel`). A tile lights under the pointer.
 
 ## Groups
 

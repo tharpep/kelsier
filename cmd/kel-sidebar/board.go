@@ -5,9 +5,11 @@ import (
 	"math"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/tharpep/kelsier/internal/fleet"
 )
@@ -49,6 +51,7 @@ type boardOpts struct {
 	face  face
 	loc   *time.Location // clock times in the timeline; UTC in the fixtures
 	pulse bool           // the half second a working tile's dot reads ◉
+	hover string         // the tile or worktree row under the pointer
 }
 
 // pulseDot is the one motion on the board: a working tile's dot alternates
@@ -242,7 +245,73 @@ func renderBoard(v sbView, w, h int, now int64, o boardOpts) (string, []lineRef)
 	if h > 0 && len(all) > h {
 		all = all[:h]
 	}
+	if v.menu != nil {
+		overlayMenu(all, menuLines(*v.menu, w), len(head))
+	}
 	return joinLines(all, w)
+}
+
+// overlayMenu draws an entry's menu at the left, its foot on the footer, over
+// what is there: the tiles to its right stay drawn. A click right of the box
+// is outside it (boardMenuW).
+func overlayMenu(all, box []line, top int) {
+	y := max(top, len(all)-len(box))
+	for i, b := range box {
+		if y+i >= len(all) {
+			return
+		}
+		mw := visWidth(b.s)
+		all[y+i] = line{b.s + reset + cutFrom(all[y+i].s, mw), b.ref}
+	}
+}
+
+// boardMenu is a tile's right-click menu: the sidebar's entry menu, less
+// the verbs that rearrange the window beneath the board (zoom, own window,
+// move, swap, layout) and rename, which the board leaves to the sidebar
+// (pinned by TestBoardIgnoresTheSidebarsOtherKeys), and with the board's
+// `a`. A worktree has no Go to it here, as enter on its row does nothing.
+func boardMenu(v sbView) []sbAct {
+	var out []sbAct
+	for _, it := range entryMenu(v) {
+		switch {
+		case slices.Contains([]string{"z", "m", "M", "S", "L", "r"}, it.key):
+			continue
+		case it.key == "enter" && strings.HasPrefix(v.sel, "w:"):
+			continue
+		}
+		out = append(out, it)
+		if it.key == "space" && strings.HasPrefix(v.sel, "a:") {
+			out = append(out, sbAct{"a", "Mark seen"})
+		}
+	}
+	return out
+}
+
+// boardMenuW is the columns an entry's menu covers on the board.
+func boardMenuW(w int) int { return min(w-2, 30) + 1 }
+
+var ansiAt = regexp.MustCompile("^" + ansiRE.String())
+
+// cutFrom is s from column n on, with every colour set before n kept, so
+// the rest draws as it did.
+func cutFrom(s string, n int) string {
+	var b strings.Builder
+	col := 0
+	for i := 0; i < len(s); {
+		if loc := ansiAt.FindStringIndex(s[i:]); loc != nil {
+			b.WriteString(s[i : i+loc[1]])
+			i += loc[1]
+			continue
+		}
+		if col >= n {
+			b.WriteString(s[i:])
+			break
+		}
+		_, sz := utf8.DecodeRuneInString(s[i:])
+		col++
+		i += sz
+	}
+	return b.String()
 }
 
 // unseen is what the wall scrolled out of sight, in the units it scrolls
@@ -288,14 +357,14 @@ func (b boardBlock) lines(v sbView, w, tw int, now int64, o boardOpts) []line {
 	}
 	if t := b.tiles[0]; t.wt != nil {
 		row := wtRow(*t.wt, w-2)
-		if t.id == v.sel {
-			row = fill(row, w-2, raised)
+		if bg := tileBg(v, t.id, o); bg != "" {
+			row = fill(row, w-2, bg)
 		}
 		return append(out, line{" " + row, lineRef{kind: "worktree", hits: []hit{{1, w - 1, "sel:" + t.id}}}})
 	}
 	drawn := make([][]string, len(b.tiles))
 	for i, t := range b.tiles {
-		drawn[i] = t.draw(v, tw, now, o, t.id == v.sel)
+		drawn[i] = t.draw(v, tw, now, o, tileBg(v, t.id, o))
 	}
 	for r := 0; r < tileH; r++ {
 		var s strings.Builder
@@ -422,8 +491,20 @@ func landWord(w fleet.Worktree) string {
 
 // ---------------------------------------------------------------- a tile
 
-// draw is the tile as tileH strings of exactly tw columns.
-func (t boardTile) draw(v sbView, tw int, now int64, o boardOpts, selected bool) []string {
+// tileBg is a tile's inside: the raised surface when selected, the
+// sidebar's hover fill under the pointer, else none.
+func tileBg(v sbView, id string, o boardOpts) string {
+	switch id {
+	case v.sel:
+		return raised
+	case o.hover:
+		return lifted.mix(baseBg, 0.25).bg()
+	}
+	return ""
+}
+
+// draw is the tile as tileH strings of exactly tw columns, its inside on bg.
+func (t boardTile) draw(v sbView, tw int, now int64, o boardOpts, bg string) []string {
 	n := tw - 4
 	var tl, tr, bl, br, border string
 	var rows []string
@@ -471,8 +552,8 @@ func (t boardTile) draw(v sbView, tw int, now int64, o boardOpts, selected bool)
 			s = rows[i]
 		}
 		cell := " " + fit(s, n) + " "
-		if selected {
-			cell = fill(cell, max(0, tw-2), raised)
+		if bg != "" {
+			cell = fill(cell, max(0, tw-2), bg)
 		}
 		if tw < 2 {
 			out = append(out, fit("", tw))
@@ -1019,7 +1100,12 @@ func boardHeader(v sbView, ts []boardTile, w int, now int64) line {
 			}
 			r := strings.Join(right[:k], "    ")
 			if visWidth(left)+2+visWidth(r) <= w-1 {
-				return line{spread(left, r, w), ref}
+				s := spread(left, r, w)
+				if k == len(right) {
+					x := visWidth(s)
+					ref.hits = append(slices.Clip(ref.hits), hit{x - 3, x, "esc"})
+				}
+				return line{s, ref}
 			}
 		}
 	}
@@ -1039,10 +1125,20 @@ func boardFooter(v sbView, w int, f face, above, below unseen) line {
 		if v.input != "" {
 			s += "  " + v.input
 		}
+		var hits []hit
 		if v.hint2 != "" {
-			s += "   " + dim + v.hint2 + reset
+			s += "   "
+			x := visWidth(s)
+			for _, seg := range strings.Split(v.hint2, " · ") {
+				n := len([]rune(seg))
+				if x+n <= w-1 {
+					hits = append(hits, hit{x, x + n, "hint:" + seg})
+				}
+				x += n + 3
+			}
+			s += dim + v.hint2 + reset
 		}
-		return line{truncateStyled(s, w-1), lineRef{kind: "foot"}}
+		return line{truncateStyled(s, w-1), lineRef{kind: "foot", hits: hits}}
 	}
 	if v.footer != "" {
 		c := v.footerColour
@@ -1084,5 +1180,13 @@ func boardFooter(v sbView, w int, f face, above, below unseen) line {
 			hits = append(hits, hit{h.x0 + 1, h.x1 + 1, h.key})
 		}
 	}
-	return line{irowString(keys, w), lineRef{kind: "foot", hits: hits}}
+	s := irowString(keys, w)
+	if plain := stripANSI(s); strings.HasSuffix(plain, strings.Join(faceNames, " · ")) {
+		x := len([]rune(plain)) - visWidth(strings.Join(faceNames, " · "))
+		for i, n := range faceNames {
+			hits = append(hits, hit{x, x + len(n), fmt.Sprintf("face:%d", i)})
+			x += len(n) + 3
+		}
+	}
+	return line{s, lineRef{kind: "foot", hits: hits}}
 }

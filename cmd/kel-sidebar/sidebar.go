@@ -615,6 +615,7 @@ func (m sbModel) view() sbView {
 		// the first tile shown, never to a heading: enter on the board must
 		// act on a tile it draws
 		ts := boardTiles(v)
+		v.trees = treeRows(v.repos, m.ui.filter)
 		if len(ts) > 0 {
 			v.sel = ts[0].id
 		}
@@ -1047,8 +1048,8 @@ func (m sbModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 	// an entry's menu goes with its entry: gone, or its verbs changed
 	if _, ok := msg.(sbLoaded); ok {
-		v := buildView(s.doc, s.ui)
-		if v.sel != s.menu.entry || !slices.Equal(entryMenu(v), s.menu.items) {
+		v := s.view()
+		if v.sel != s.menu.entry || !slices.Equal(s.menuItems(v), s.menu.items) {
 			s.menu = nil
 		}
 	}
@@ -1063,7 +1064,7 @@ func (m *sbModel) openMenu() {
 	}
 	v := m.view()
 	what, name, _ := selActions(v)
-	if items := entryMenu(v); len(items) > 0 {
+	if items := m.menuItems(v); len(items) > 0 {
 		m.ui.sel = v.sel
 		m.menu = &sbMenu{title: what + " " + name, items: items, entry: v.sel}
 	}
@@ -1235,8 +1236,17 @@ func (m sbModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.menu != nil {
 			// an item is its key, pressed; anywhere else closes the menu
 			m.menu = nil
-			if k := strings.TrimPrefix(hit.id, "mi:"); k != hit.id && msg.Button == tea.MouseLeft {
-				return m.press(k)
+			inBox := !m.board || msg.X < boardMenuW(m.width)
+			if k := strings.TrimPrefix(hit.id, "mi:"); k != hit.id && msg.Button == tea.MouseLeft && inBox {
+				return m.choose(k)
+			}
+			return m, nil
+		}
+		if m.board && msg.Button == tea.MouseRight {
+			if id, ok := strings.CutPrefix(hit.hitAt(msg.X), "sel:"); ok && m.mode == modeNormal {
+				m.ui.sel = id
+				m.saveShared()
+				m.openMenu()
 			}
 			return m, nil
 		}
@@ -1263,11 +1273,23 @@ func (m sbModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		case strings.HasPrefix(k, "sel:"):
 			id := strings.TrimPrefix(k, "sel:")
-			if m.board && id == m.view().sel {
+			if m.mode == modeFilter {
+				m.mode, m.input = modeNormal, ""
+			} else if m.mode != modeNormal {
+				m.cancel()
+			} else if m.board && id == m.view().sel {
 				return m.press("enter") // a click on the selected tile, or a double-click
 			}
 			m.ui.sel = id
 			m.saveShared()
+			return m, nil
+		case strings.HasPrefix(k, "hint:"):
+			return m.key(hintKey(strings.TrimPrefix(k, "hint:"), 0))
+		case strings.HasPrefix(k, "face:"):
+			if f, err := strconv.Atoi(strings.TrimPrefix(k, "face:")); err == nil {
+				m.ui.face = face(f)
+				m.saveShared()
+			}
 			return m, nil
 		case strings.HasPrefix(k, "tab:"):
 			return m.setTab(strings.TrimPrefix(k, "tab:"))
@@ -1375,6 +1397,23 @@ func (m *sbModel) adoptSel() {
 	}
 }
 
+// choose runs a menu item. On the board h moves left, so the menu's History
+// is asked for by name.
+func (m sbModel) choose(k string) (tea.Model, tea.Cmd) {
+	if m.board && k == "h" && strings.HasPrefix(m.view().sel, "a:") {
+		return m.panel("history")
+	}
+	return m.press(k)
+}
+
+// menuItems is the selection's entry menu: the board's lacks what it cannot do.
+func (m sbModel) menuItems(v sbView) []sbAct {
+	if m.board {
+		return boardMenu(v)
+	}
+	return entryMenu(v)
+}
+
 // press is a key pressed by name, as a menu item or a click presses it.
 func (m sbModel) press(k string) (tea.Model, tea.Cmd) {
 	switch k {
@@ -1410,7 +1449,7 @@ func (m sbModel) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		case "enter":
 			it := m.menu.items[m.menu.sel]
 			m.menu = nil
-			return m.press(it.key)
+			return m.choose(it.key)
 		}
 		if m.menu.entry != "" && k != "esc" && k != "left" {
 			// an entry's menu takes the keys it lists and ignores the rest,
@@ -1418,7 +1457,7 @@ func (m sbModel) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			for _, it := range m.menu.items {
 				if it.key == k {
 					m.menu = nil
-					return m.press(k)
+					return m.choose(k)
 				}
 			}
 			return m, nil
@@ -1900,12 +1939,18 @@ func (m sbModel) clickRefs() []lineRef {
 }
 
 func (m sbModel) boardOpts() boardOpts {
-	return boardOpts{face: m.ui.face, loc: time.Local, pulse: m.pulse}
+	o := boardOpts{face: m.ui.face, loc: time.Local, pulse: m.pulse}
+	if m.menu == nil && m.frame != nil && m.ui.hover > 0 && m.ui.hover <= len(*m.frame) {
+		if id, ok := strings.CutPrefix((*m.frame)[m.ui.hover-1].hitAt(m.ui.hoverX), "sel:"); ok {
+			o.hover = id
+		}
+	}
+	return o
 }
 
 // boardKey is a key the board answers itself; ok false hands it to the
-// sidebar's own handling, for the keys the two share (space, d, x, /).
-// Every other key does nothing on the board.
+// sidebar's own handling, for the keys the two share: space, d, x, / and
+// the verbs a tile's menu lists. Every other key does nothing on the board.
 func (m sbModel) boardKey(k string) (tea.Model, tea.Cmd, bool) {
 	if strings.HasPrefix(m.view().sel, "w:") {
 		switch k {
@@ -1965,7 +2010,7 @@ func (m sbModel) boardKey(k string) (tea.Model, tea.Cmd, bool) {
 			return m, nil, true
 		}
 		return m, tea.Quit, true
-	case "space", "d", "x", "/":
+	case "space", "d", "x", "/", "f", "e", "p", "i", "R", "shift+r", "g", "t":
 		return m, nil, false
 	}
 	return m, nil, true
