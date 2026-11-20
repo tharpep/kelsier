@@ -2973,8 +2973,9 @@ unset KEL_POPUP_TRACE
 # the board is clicked: its hosted session takes the mouse though this
 # server, started without kel.conf, has it off
 ( KEL_TEST_TMUX_LOG="$WORK/board-pop.log" KEL_POPUP_NODRAW=1 TMUX="$TMUX_TMPDIR/tmux-$(id -u)/default,1,0" TMUX_PANE="$BP" "$KEL" board ) >/dev/null 2>&1
-ok "  ...in a hosted session with the mouse on"        '[ "$(tmux show-options -gv mouse)" = off ] && grep "^new-session -d -s _kelpop_" "$WORK/board-pop.log" | grep -- "--board" | grep -q "mouse on"'
-grep -q "mouse on" "$WORK/board-pop.log" 2>/dev/null || echo "       (server mouse=$(tmux show-options -gv mouse); board popup log: $(cut -c1-200 "$WORK/board-pop.log" 2>&1 | tr '\n' '|'))"
+bmouse() { grep -- "--board" "$WORK/board-pop.log" 2>/dev/null | grep -q "set-option -t =_kelpop_[0-9]*: mouse on"; }
+ok "  ...in a hosted session with the mouse on"        'bmouse'
+bmouse || echo "       (server mouse=$(tmux show-options -gv mouse); board popup log: $(cut -c1-200 "$WORK/board-pop.log" 2>&1 | tr '\n' '|'))"
 tmux kill-session -t "=$(grep -o '_kelpop_[0-9]*' "$WORK/board-pop.log" 2>/dev/null | head -1)" 2>/dev/null
 echo 1 > "$STATE/$BW.seen"
 hook "$BP" Stop
