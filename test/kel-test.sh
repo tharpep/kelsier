@@ -2972,9 +2972,8 @@ ok "  ...prefix B runs it, showing its errors"        'grep -q "^bind-key B run-
 unset KEL_POPUP_TRACE
 # the board is clicked: its hosted session takes the mouse though this
 # server, started without kel.conf, has it off
-( KEL_POPUP_NODRAW=1 TMUX="$TMUX_TMPDIR/tmux-$(id -u)/default,1,0" TMUX_PANE="$BP" "$KEL" board ) >/dev/null 2>&1
-BPOP="$(tmux list-panes -a -F '#{session_name} #{pane_start_command}' | awk '/^_kelpop_/ && /--board/ {print $1; exit}')"
-ok "  ...in a hosted session with the mouse on"        '[ -n "$BPOP" ] && [ "$(tmux show-options -gv mouse)" = off ] && [ "$(tmux show-options -v -t "=$BPOP:" mouse)" = on ]'
+( KEL_TEST_TMUX_LOG="$WORK/board-pop.log" KEL_POPUP_NODRAW=1 TMUX="$TMUX_TMPDIR/tmux-$(id -u)/default,1,0" TMUX_PANE="$BP" "$KEL" board ) >/dev/null 2>&1
+ok "  ...in a hosted session with the mouse on"        '[ "$(tmux show-options -gv mouse)" = off ] && grep "^new-session -d -s _kelpop_" "$WORK/board-pop.log" | grep -- "--board" | grep -q "mouse on"'
 [ -n "$BPOP" ] && tmux kill-session -t "=$BPOP" 2>/dev/null
 echo 1 > "$STATE/$BW.seen"
 hook "$BP" Stop
