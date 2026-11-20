@@ -82,7 +82,10 @@ kel restore [<n>]      bring back a previous workspace — windows, splits,
                        transcript titled with the agent's name, else the
                        session id kel recorded, else the name
                        (--no-resume: start each agent fresh)
-kel restore --list     the last five saved workspaces, newest first
+kel restore --list     the saved workspaces: 0 the last one's snapshot.json
+                       while no server runs, then 1.. the archive (the last
+                       five, newest first). A number names the same workspace
+                       whether or not a server is up; no number takes 0, else 1
 kel prune [-f]         discard dead agent records (and their worktrees)
 kel doctor             check the machine; every failure prints its fix; counts kept popup sessions
 kel config             edit config.toml (seeded from the example, once)
@@ -506,7 +509,9 @@ window, split and directory, and each agent's conversation — by the session
 id a hook recorded, or by the name `kel new` gave it, never "the newest in this
 directory", which two agents sharing one would both have taken. **`kel restore
 --list`** shows the saved workspaces and **`kel restore 2`** picks an older
-one. Restoring into a running workspace only adds what is missing, and closes
+one. The archive is numbered from 1, newest first. A `snapshot.json` that no
+server has replaced is `0`, so the archive keeps its numbers when the server
+goes. Restoring into a running workspace only adds what is missing, and closes
 the empty shell a fresh `kel` opened if you never used it.
 
 ## Isolation
