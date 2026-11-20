@@ -1149,7 +1149,12 @@ what it was asking and were just trying to move on. So:
 - **`kel` always just opens.** No prompt, ever.
 - **`kel restore`** rebuilds the most recent previous workspace, resuming
   conversations by default (resuming is why you restore; the old `-c` becomes
-  the default). **`kel restore --list`** picks an earlier one.
+  the default). **`kel restore --list`** picks an earlier one. The archive
+  is numbered 1.., newest first; `snapshot.json` is `0`, offered only while
+  no server runs. *2026-11-20:* it used to be numbered 1 then, so every
+  archive's number shifted when the server went. `kel restore 1` restored a
+  stray session's `snapshot.json` twice when the archive the author wanted
+  had been listed as 1.
 - **A passive hint, not a question:** when an unrestored workspace exists, the
   startup text says so once — `previous workspace: 3 windows · kel restore` —
   and later the sidebar footer can carry it.

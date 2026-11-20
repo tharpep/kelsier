@@ -1902,12 +1902,26 @@ archived_snapshots() {
   done | awk -F/ '{n=$NF; sub(/\.json$/,"",n); print n"\t"$0}' | sort -t"$(printf '\t')" -k1,1nr | cut -f2-
 }
 
-# what `kel restore` can bring back, newest first: the last workspace's own
-# snapshot.json while no kel session is running (nothing has replaced it
-# yet), then the archive
-restore_candidates() {
+# the last workspace's own snapshot.json, while no kel session is running
+# (nothing has replaced it yet).  It is `kel restore 0`, never numbered among
+# the archive: it comes and goes with the server, so counting it shifted every
+# archive's number between a `--list` and the restore that followed, and
+# `kel restore 1` brought back a stray session instead of the one listed.
+restore_current() {
   [ -f "$SNAPSHOT" ] && [ -z "$(kel_sessions)" ] && printf '%s\n' "$SNAPSHOT"
-  archived_snapshots
+}
+
+# what `kel restore` with no number brings back: the current one, else the
+# newest archived
+restore_default() {
+  local f; f="$(restore_current)"
+  [ -n "$f" ] && { printf '%s\n' "$f"; return; }
+  archived_snapshots | head -1
+}
+
+# `kel restore <n>`: 0 the current one, 1.. the archive, newest first
+restore_pick() { # n
+  if [ "$1" = 0 ]; then restore_current; else archived_snapshots | sed -n "$1p"; fi
 }
 
 # window count and names of a v1 or v2 snapshot, tab-separated
@@ -1918,20 +1932,21 @@ snapshot_summary() { # file
 }
 
 restore_list() {
-  local i=0 f n names ep age now; now="$(date +%s)"
+  local i=0 shown=0 label f n names ep age now; now="$(date +%s)"
   while read -r f; do
     [ -n "$f" ] || continue
-    i=$((i + 1))
+    shown=$((shown + 1))
+    if [ "$f" = "$SNAPSHOT" ]; then label=0; else i=$((i + 1)); label="$i"; fi
     IFS=$'\t' read -r n names < <(snapshot_summary "$f")
     ep="$(jq -r '.saved_epoch // empty' "$f" 2>/dev/null)"
     case "$ep" in
       ''|*[!0-9]*) age="$(jq -r '.saved_at // "?"' "$f" 2>/dev/null)" ;;
       *)           age="$(humanize_secs $((now - ep))) ago" ;;
     esac
-    printf '  %d  %-10s %2s window(s)  %s\n' "$i" "$age" "${n:-?}" "${names:-}"
-  done < <(restore_candidates)
-  [ "$i" -gt 0 ] || { say "no saved workspace to restore"; return 0; }
-  echo "  kel restore [<n>]   bring one back (newest is 1)"
+    printf '  %d  %-10s %2s window(s)  %s\n' "$label" "$age" "${n:-?}" "${names:-}"
+  done < <(restore_current; archived_snapshots)
+  [ "$shown" -gt 0 ] || { say "no saved workspace to restore"; return 0; }
+  echo "  kel restore [<n>]   bring one back (0 is the last workspace, 1.. the archive; none: the newest)"
 }
 
 # Close the shell a fresh `kel` opened, if it was never used — otherwise every
@@ -2089,14 +2104,16 @@ cmd_restore() {
       --no-resume)  resume=0 ;;
       --list|-l)    list=1 ;;
       ''|*[!0-9]*)  die "kel restore: unknown arg $1   (kel restore [--list] [<n>] [--no-resume])" ;;
-      *)            pick="$1" ;;
+      *)            pick="$((10#$1))" ;;
     esac
     shift
   done
   [ "$list" = 1 ] && { restore_list; return; }
 
   local src
-  src="$(restore_candidates | sed -n "${pick:-1}p")"
+  if [ -n "$pick" ]; then src="$(restore_pick "$pick")"; else src="$(restore_default)"; fi
+  [ "$pick" = 0 ] && [ -z "$src" ] && [ -f "$SNAPSHOT" ] \
+    && die "#0 is the running workspace's own snapshot — see kel restore --list"
   if [ -n "$src" ]; then
     restore_from_snapshot "$src" "$resume" || return 1
     # an archived workspace that is live again is not "previous" any more;

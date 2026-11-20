@@ -1009,6 +1009,35 @@ ok "the archive keeps the newest five"   '[ "$(ls "$STATE/snapshots" | grep -c .
 ok "kel restore 2 picks the second newest" '[ -n "$(window_of old w106)" ] && [ -z "$(window_of old w105)" ]'
 ok "a number past the end is refused"    '! "$KEL" restore 9 >/dev/null 2>&1'
 
+# A number names the same workspace whether or not a server is up.  snapshot.json
+# used to be numbered 1 only while no server ran, so `kel restore 1` after the
+# server died brought back the stray session's snapshot.json, not the archive
+# `--list` had shown as 1 (2026-11-20).
+reset
+mkdir -p "$STATE/snapshots"
+for t in 201 202; do
+  printf '{"version":2,"saved_epoch":%s,"last":-1,"windows":[{"name":"w%s","group":"old","layout":"","panes":[{"cwd":"%s","cmd":"bash"}]}]}' \
+    "$t" "$t" "$WORK" > "$STATE/snapshots/$t.json"
+done
+NEW api-gw stray
+"$KEL" snapshot >/dev/null 2>&1
+up_list="$("$KEL" restore --list 2>&1)"
+ok "--list with a session up numbers the archive from 1" '[[ "$(printf "%s\n" "$up_list" | awk "\$1 == 1")" == *w202* ]]'
+ok "  ...and has no 0 while snapshot.json is the running one's" '[ -z "$(printf "%s\n" "$up_list" | awk "\$1 == 0")" ]'
+ok "  ...and refuses kel restore 0 then"  '! "$KEL" restore 0 >/dev/null 2>&1'
+tmux kill-server 2>/dev/null; sleep 0.6
+down_list="$("$KEL" restore --list 2>&1)"
+ok "with the server gone the archive keeps its numbers" '[[ "$(printf "%s\n" "$down_list" | awk "\$1 == 1")" == *w202* ]]'
+ok "  ...and snapshot.json is listed as 0" '[[ "$(printf "%s\n" "$down_list" | awk "\$1 == 0")" == *stray* ]]'
+"$KEL" restore 1 >/dev/null 2>&1
+wait_until '[ -n "$(window_of old w202)" ]'
+ok "kel restore 1 brings back the archive listed as 1" '[ -n "$(window_of old w202)" ] && [ -z "$(window_of api-gw stray)" ]'
+ok "  ...and uses it up"                    '[ ! -e "$STATE/snapshots/202.json" ] && [ -e "$STATE/snapshots/201.json" ]'
+tmux kill-server 2>/dev/null; sleep 0.6   # snapshot.json is now the w202 workspace restore recorded
+"$KEL" restore >/dev/null 2>&1
+wait_until '[ -n "$(window_of old w202)" ]'
+ok "kel restore with no number still takes snapshot.json first" '[ -n "$(window_of old w202)" ] && [ -z "$(window_of old w201)" ]'
+
 # a v0.9 snapshot keyed windows by group, one session each; it must come back
 # into the one session, each window keeping its group
 reset
