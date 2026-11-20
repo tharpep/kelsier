@@ -154,8 +154,11 @@ state_of() { "$KEL" ls 2>/dev/null | awk -v n="$1" '$2==n {print $3}'; }
 # process before asserting on state.  v0.6 made the fleet read 3x faster, which
 # is what first lost this race.
 # the sidebar runs kel-sidebar, a non-shell, so it is excluded — else this would
-# report the agent up before it has started
-agent_up() { wait_until "tmux list-panes -t '$1' -F '#{@kel-sidebar}|#{pane_current_command}' 2>/dev/null | awk -F'|' '\$1==\"\"{print \$2}' | grep -qvxE 'bash|zsh|fish|sh|dash|tmux'"; }
+# report the agent up before it has started.  Every fake agent ends in sleep,
+# and that is what this waits for: "anything but a shell" also matched a
+# prompt hook's foreground command (zoxide add, from a developer's .bashrc),
+# so under load the agent read up, then dead, before sleep ever ran.
+agent_up() { wait_until "tmux list-panes -t '$1' -F '#{@kel-sidebar}|#{pane_current_command}' 2>/dev/null | awk -F'|' '\$1==\"\"{print \$2}' | grep -qx sleep"; }
 NEW() { K "$1" new "$2" --agent 'sleep 9999' >/dev/null 2>&1; agent_up "$(window_of "$1" "$2")"; }
 # By group AND name: since v0.10 every window shares one session, so two
 # repos' `docs` agents are two windows in it, told apart by @kel-group.
@@ -784,7 +787,10 @@ ok "_fleet reports both groups"          '[ "$("$KEL" _fleet | jq -r "[.agents[]
 # a hand-made window has no record and no @kel-group: kel-fleet finds its
 # repo from the pane's directory, with no git fork (the bar's hot path)
 tmux new-window -d -t '=keltest:' -n handmade -c "$WORK/repos/coppermind"
-wait_until '[ "$(wins)" = 3 ]'
+# tmux has no pane_current_path for a pane until its shell owns the tty, so a
+# read just after new-window found no repo; wait for the pane to stand there
+HMDIR="$(cd "$WORK/repos/coppermind" && pwd -P)"
+wait_until '[ "$(tmux list-panes -a -F "#{window_name} #{pane_current_path}" | awk "\$1==\"handmade\"{print \$2}")" = "$HMDIR" ]'
 ok "a hand-made window gets its repo's group" '[ "$("$KEL" _fleet | jq -r ".agents[] | select(.name==\"handmade\") | .group")" = coppermind ]'
 # a session that is not kel's is not read: v0.9's `kel/<group>` ones included,
 # whose readers went once every machine ran v0.10
@@ -1601,8 +1607,11 @@ wait_until 'sbtext "$SW2" | grep -q "^ new agent in "'
 tmux send-keys -t "$SW2" Enter
 wait_until 'sbtext "$SW2" | grep -q "^ new agent where?"'
 tmux send-keys -t "$SW2" '|'
-wait_until '[ -f "$SESSIONS/api-gw/api-gw-2.json" ]' 80
-ok "  ...and n, enter, | splits the pane you were in" '[ "$(jq -r .window_id "$SESSIONS/api-gw/api-gw-2.json")" = "$SPW" ] && [ "$(tmux list-panes -t "$SPW" -F "#{@kel-agent}" | grep -cx "api-gw/api-gw-[12]")" = 2 ]'
+# kel new writes the record before it stamps the pane's @kel-agent, so wait
+# for the stamp too: waiting on the record alone raced it under load
+SPLIT='[ "$(jq -r .window_id "$SESSIONS/api-gw/api-gw-2.json" 2>/dev/null)" = "$SPW" ] && [ "$(tmux list-panes -t "$SPW" -F "#{@kel-agent}" | grep -cx "api-gw/api-gw-[12]")" = 2 ]'
+wait_until "$SPLIT" 80
+ok "  ...and n, enter, | splits the pane you were in" "$SPLIT"
 sbdiag "$SW" "$f0"
 
 # prefix Space is `kel _sidebar focus`; esc goes back. kel new ends by
