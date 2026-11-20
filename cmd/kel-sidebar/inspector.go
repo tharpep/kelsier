@@ -339,7 +339,14 @@ func chips(acts []sbAct) irow {
 			n += 1 + len([]rune(a.label))
 		}
 		r.left += t
-		r.hits = append(r.hits, hit{x, x + n, a.key})
+		h := hit{x, x + n, a.key}
+		if a.label == "" {
+			// a lone glyph takes a column either side, into the gaps
+			// round it: one column was too narrow to hit (pinned by
+			// TestBareChipIsWideEnoughToClick)
+			h = hit{max(x-1, 0), x + n + 1, a.key}
+		}
+		r.hits = append(r.hits, h)
 		x += n
 	}
 	return r

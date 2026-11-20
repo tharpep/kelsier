@@ -313,3 +313,26 @@ func TestInnerPaneSelectsFromTheInspector(t *testing.T) {
 		t.Errorf("j from an inner pane went to %q", got.ui.sel)
 	}
 }
+
+// The inspector's ⋯ is one glyph; a click a column either side of it, as a
+// real pointer lands, still opens the menu, and the chip before it keeps
+// its own columns.
+func TestBareChipIsWideEnoughToClick(t *testing.T) {
+	m := atModel(t, "a:@1")
+	s, refs := renderView(m.view(), m.width, m.height, 0)
+	_, y := inspectorHit(t, m, "menu")
+	col := strings.Index(plain(strings.Split(s, "\n")[y]), "⋯")
+	if col < 0 {
+		t.Fatal("no ⋯ on the inspector's keys row")
+	}
+	col = len([]rune(plain(strings.Split(s, "\n")[y])[:col]))
+	for _, x := range []int{col - 1, col, col + 1} {
+		nm, _ := m.Update(tea.MouseClickMsg{X: x, Y: y, Button: tea.MouseLeft})
+		if got := nm.(sbModel); got.menu == nil {
+			t.Errorf("a click at column %d (⋯ at %d) opened no menu", x, col)
+		}
+	}
+	if k := refs[y].hitAt(col - 3); k != "space" {
+		t.Errorf("peek's last letter hits %q", k)
+	}
+}
